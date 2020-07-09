@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 use bytes::Buf;
 use http::{HeaderMap, Request, Response};
 
-use crate::quic;
+use crate::{codec::Framed, quic};
 
 /// An HTTP/3 server connection.
 pub struct Connection<T, B> {
@@ -39,7 +39,7 @@ pub struct RequestStream<T, B> {
 
 pub async fn handshake<T, B>(transport: T) -> Result<Connection<T, B>, crate::Error>
 where
-    T: quic::Connection<B>,
+    T: quic::Connection<Framed<B>>,
     B: Buf,
 {
     Builder::new().handshake(transport).await
@@ -52,7 +52,7 @@ impl Builder {
 
     pub async fn handshake<T, B>(&self, mut transport: T) -> Result<Connection<T, B>, crate::Error>
     where
-        T: quic::Connection<B>,
+        T: quic::Connection<Framed<B>>,
         B: Buf,
     {
         // 3.3 Connection Establishment
@@ -63,7 +63,7 @@ impl Builder {
 
 
         // Send *our* SETTINGS.
-        let settings_frame = (|| -> B {
+        let settings_frame = (|| -> Framed<B> {
             todo!("encode settings frame");
         })();
         quic::send_data(&mut control_tx, settings_frame).await.unwrap_or_else(|_| panic!());
@@ -85,7 +85,7 @@ impl Builder {
 
 impl<T, B> Connection<T, B>
 where
-    T: quic::Connection<B>,
+    T: quic::Connection<Framed<B>>,
     B: Buf,
 {
     /// Accept new requests sent on this connection.
@@ -116,7 +116,7 @@ where
 
 impl<T, B> RequestStream<T, B>
 where
-    T: quic::SendStream<B>,
+    T: quic::SendStream<Framed<B>>,
     B: Buf,
 {
     /// Send a `Response` for the received `Request`.
@@ -137,7 +137,7 @@ where
 
 impl<T, B> RequestStream<T, B>
 where
-    T: quic::BidiStream<B>,
+    T: quic::BidiStream<Framed<B>>,
     B: Buf,
 {
     //pub fn split(self) -> (RequestStream<T::RecvStream, B>, SendResponse<T::SendStream, B>) {
