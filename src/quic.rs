@@ -42,7 +42,9 @@ pub trait SendStream<B: Buf> {
 
     fn try_send_data(&mut self, data: B) -> Result<(), Self::Error>;
 
-    fn reset(&mut self, reset_code: u64) -> Result<(), Self::Error>;
+    fn poll_finish(&mut self) -> Poll<Result<(), Self::Error>>;
+
+    fn reset(&mut self, reset_code: u64);
 }
 
 pub trait RecvStream {
@@ -59,9 +61,8 @@ pub trait RecvStream {
 pub trait BidiStream<B: Buf>: SendStream<B> + RecvStream {
     type SendStream: SendStream<B>;
     type RecvStream: RecvStream;
-    /*
-    fn split(self) -> 
-    */
+
+    fn split(self) -> (Self::SendStream, Self::RecvStream);
 }
 
 // Ext
