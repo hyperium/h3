@@ -12,7 +12,7 @@ What would be the goals of this effort, and what wouldn’t be.
     - We have the `h3` crate name already reserved, as one option.
     - It shouldn’t decide on synchronization or runtime needs.
 - Allow users to provide their own QUIC implementation.
-    - There are several QUIC implmentations already, and new ones could appear in kernels instead of user-space. 
+    - There are several QUIC implementations already, and new ones could appear in kernels instead of user-space. 
     - Implementing QUIC also requires picking a TLS implementation. Various adopters may have different requirements for which TLS library they use.
 - Simple, optional integration in the `hyper` crate.
 - Performance and correctness are paramount.
