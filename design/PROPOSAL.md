@@ -73,7 +73,6 @@ HTTP/3 is a new networking protocol that defines HTTP semantics specifically ove
 
 ### Non-goals
 
-- **Prioritization**: Stream priorities were defined in HTTP/2, and are especially useful for browsers to improve page load speeds. However, they are not specifically defined in QUIC or HTTP/3.
 - **Synchronization**: As much as possible, synchronization should not be an internal feature.
     - We’ve learned from building the `h2` crate, which includes a `Mutex` around the stream store and buffer, and many different stream handles. This adds contention, and makes it increasingly difficult to realize when a stream is no longer reachable.
 - **Runtime integration**: There shouldn’t be a dependency on any runtime. By not being opinionated about the runtime, a core library like an HTTP/3 state machine can see more adoption.
@@ -83,6 +82,9 @@ HTTP/3 is a new networking protocol that defines HTTP semantics specifically ove
 - **QPACK dynamic table**: the dynamic table is a performance optimization, but has the potential to block streams waiting on dynamic table updates. To reduce initial complexity, and to not require figuring out the correct heuristic, we can delay integrating the dynamic table till later. HTTP/3 even defaults to expecting zero space in the dynamic table unless the peer opts-in.
 - **Server Push**
 - **HTTP CONNECT** to tunnel over a single QUIC stream
+- **Prioritization**: Stream priorities were defined in HTTP/2, and are especially useful for browsers to improve page load speeds. However, they are not specifically defined in QUIC or HTTP/3. There is a [different proposal][http-prio] that we should consider once stabilized.
+
+[http-prio]: https://tools.ietf.org/html/draft-ietf-httpbis-priority-01
 
 
 ## 4. Public API
