@@ -16,7 +16,7 @@ What would be the goals of this effort, and what wouldn’t be.
     - Implementing QUIC also requires picking a TLS implementation. Various adopters may have different requirements for which TLS library they use.
 - Simple, optional integration in the `hyper` crate.
 - Performance and correctness are paramount.
-    - We should have a good way to frequently measure peformance.
+    - We should have a good way to frequently measure performance.
 - Collaborative with the community.
     - All current HTTP/3 Rust implementations have hard dependencies on their QUIC implementations. By making `h3` generic over any QUIC-like interface, we allow people to plug in to existing stacks. Meanwhile, `h3` providing the HTTP/3-level details can focus effort and attention.
     - The hyper brand has recognition as an open source HTTP project.
@@ -345,4 +345,3 @@ The performance of HTTP/3 is also critical. We need to setup both unit benchmark
     - Does this “feel” better to the Quinn developers?
     - However, by starting fresh, we can ask the Quinn developers for any “lessons learned” or “how would you start over”.
     - After analyzing quinn-h3, many design patterns would need to be changed to work with the above requirements, it may be easier to just rewrite.
-
