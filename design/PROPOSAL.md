@@ -32,29 +32,29 @@ HTTP/3 is a new networking protocol that defines HTTP semantics specifically ove
 ### The Proposed Stack
 
 ```text
-				+--------------------------------+
-				|                                |
-				|                                |
-				|        hyper::proto::h3        |
-				|                                |
-				|                                |
-				+--------------------------------+
+                +--------------------------------+
+                |                                |
+                |                                |
+                |        hyper::proto::h3        |
+                |                                |
+                |                                |
+                +--------------------------------+
 
-				+--------------------------------+
-				|                                |
-				|                                |
-			->	|               h3               |  <-
-				|                                |
-				|                                |
-				+--------------------------------+
+                +--------------------------------+
+                |                                |
+                |                                |
+            ->  |               h3               |  <-
+                |                                |
+                |                                |
+                +--------------------------------+
 
-				+--------------------------------+
-				|                                |
-				|                                |
-				|              QUIC              |
-				|                                |
-				|                                |
-				+--------------------------------+
+                +--------------------------------+
+                |                                |
+                |                                |
+                |              QUIC              |
+                |                                |
+                |                                |
+                +--------------------------------+
 
 ```
 
@@ -343,7 +343,6 @@ The performance of HTTP/3 is also critical. We need to setup both unit benchmark
     - neqo and quiche are designed to be ignorant of IO, and are simple state machines. While this provides maximum flexibility, it still requires significant complexity for each user to plug into their application.
     - All 3 of them have hard dependencies on their QUIC implementations, which conflicts with one of our main goals to allow users to bring their own QUIC implementation.
 - **Fork an existing Rust HTTP/3 library, probably quinn-h3.**
-    - This is a definite possibility.
-    - Does this “feel” better to the Quinn developers?
-    - However, by starting fresh, we can ask the Quinn developers for any “lessons learned” or “how would you start over”.
-    - After analyzing quinn-h3, many design patterns would need to be changed to work with the above requirements, it may be easier to just rewrite.
+    - This can skip the need to get consensus with others, but also is somewhat "hostile".
+    - This would still require changing the code a fair amount to cover the requirements in this document.
+    - It would reduce the amount of overall contributors, and does the opposite of "earning trust" in the OSS community.
