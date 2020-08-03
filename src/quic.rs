@@ -68,7 +68,7 @@ pub trait SendStream<B: Buf> {
     fn send_data(&mut self, data: B) -> Result<(), Self::Error>;
 
     /// Poll to finish the sending side of the stream.
-    fn poll_finish(&mut self) -> Poll<Result<(), Self::Error>>;
+    fn poll_finish(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>>;
 
     /// Send a QUIC reset code.
     fn reset(&mut self, reset_code: u64);
