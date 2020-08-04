@@ -1,0 +1,12 @@
+[package]
+name = "h3-quinn"
+version = "0.0.0"
+authors = ["Jean-Christophe BEGUE <jc.begue@pm.me>"]
+edition = "2018"
+
+[dependencies]
+h3 = { path = "../h3" }
+bytes = "0.5"
+quinn = "0.6"
+quinn-proto = "0.6"
+futures = "0.3"
