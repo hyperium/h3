@@ -1,8 +1,2 @@
-[package]
-name = "h3"
-version = "0.0.0"
-authors = ["Sean McArthur <sean@seanmonstar.com>"]
-edition = "2018"
-
-[dependencies]
-bytes = "0.5"
+[workspace]
+members = ["h3"]
