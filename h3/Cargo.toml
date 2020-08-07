@@ -6,3 +6,4 @@ edition = "2018"
 
 [dependencies]
 bytes = "0.5"
+tracing = "0.1.18"
