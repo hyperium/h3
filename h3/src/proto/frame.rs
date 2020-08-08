@@ -23,11 +23,11 @@ pub enum Error {
 
 #[derive(Debug, PartialEq)]
 pub enum Frame {
-    Data(DataFrame<Bytes>),
-    Headers(HeadersFrame),
+    Data(Data<Bytes>),
+    Headers(Headers),
     CancelPush(u64),
-    Settings(SettingsFrame),
-    PushPromise(PushPromiseFrame),
+    Settings(Settings),
+    PushPromise(PushPromise),
     Goaway(u64),
     MaxPushId(u64),
     DuplicatePush(u64),
@@ -65,14 +65,14 @@ impl Frame {
 
         let mut payload = buf.take(len as usize);
         let frame = match ty {
-            FrameType::DATA => Ok(Frame::Data(DataFrame {
+            FrameType::DATA => Ok(Frame::Data(Data {
                 payload: payload.to_bytes(),
             })),
-            FrameType::HEADERS => Ok(Frame::Headers(HeadersFrame::decode(&mut payload)?)),
-            FrameType::SETTINGS => Ok(Frame::Settings(SettingsFrame::decode(&mut payload)?)),
+            FrameType::HEADERS => Ok(Frame::Headers(Headers::decode(&mut payload)?)),
+            FrameType::SETTINGS => Ok(Frame::Settings(Settings::decode(&mut payload)?)),
             FrameType::CANCEL_PUSH => Ok(Frame::CancelPush(payload.get_var()?)),
             FrameType::PUSH_PROMISE => {
-                Ok(Frame::PushPromise(PushPromiseFrame::decode(&mut payload)?))
+                Ok(Frame::PushPromise(PushPromise::decode(&mut payload)?))
             }
             FrameType::GOAWAY => Ok(Frame::Goaway(payload.get_var()?)),
             FrameType::MAX_PUSH_ID => Ok(Frame::MaxPushId(payload.get_var()?)),
@@ -166,11 +166,11 @@ pub(crate) trait IntoPayload {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct DataFrame<P> {
+pub struct Data<P> {
     pub payload: P,
 }
 
-impl<P> DataFrame<P>
+impl<P> Data<P>
 where
     P: Buf,
 {
@@ -180,7 +180,7 @@ where
     }
 }
 
-impl<P> FrameHeader for DataFrame<P>
+impl<P> FrameHeader for Data<P>
 where
     P: Buf,
 {
@@ -190,7 +190,7 @@ where
     }
 }
 
-impl<P> IntoPayload for DataFrame<P>
+impl<P> IntoPayload for Data<P>
 where
     P: Buf,
 {
@@ -204,7 +204,7 @@ pub struct PartialData {
 }
 
 impl PartialData {
-    pub fn decode<B: Buf>(buf: &mut B) -> Result<(Self, DataFrame<Bytes>), Error> {
+    pub fn decode<B: Buf>(buf: &mut B) -> Result<(Self, Data<Bytes>), Error> {
         if FrameType::DATA != FrameType::decode(buf)? {
             panic!("can only decode Data frames");
         }
@@ -216,14 +216,14 @@ impl PartialData {
             Self {
                 remaining: len - payload.len(),
             },
-            DataFrame { payload },
+            Data { payload },
         ))
     }
 
-    pub fn decode_data<B: Buf>(&mut self, buf: &mut B) -> DataFrame<Bytes> {
+    pub fn decode_data<B: Buf>(&mut self, buf: &mut B) -> Data<Bytes> {
         let payload = buf.take(self.remaining).to_bytes();
         self.remaining -= payload.len();
-        DataFrame { payload }
+        Data { payload }
     }
 
     pub fn remaining(&self) -> usize {
@@ -232,20 +232,20 @@ impl PartialData {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct HeadersFrame {
+pub struct Headers {
     pub encoded: Bytes,
 }
 
-impl FrameHeader for HeadersFrame {
+impl FrameHeader for Headers {
     const TYPE: FrameType = FrameType::HEADERS;
     fn len(&self) -> usize {
         self.encoded.as_ref().len()
     }
 }
 
-impl HeadersFrame {
+impl Headers {
     fn decode<B: Buf>(buf: &mut B) -> Result<Self, UnexpectedEnd> {
-        Ok(HeadersFrame {
+        Ok(Headers {
             encoded: buf.to_bytes(),
         })
     }
@@ -256,28 +256,28 @@ impl HeadersFrame {
     }
 }
 
-impl IntoPayload for HeadersFrame {
+impl IntoPayload for Headers {
     fn into_payload(&mut self) -> &mut dyn Buf {
         &mut self.encoded
     }
 }
 
 #[derive(Debug, PartialEq)]
-pub struct PushPromiseFrame {
+pub struct PushPromise {
     id: u64,
     encoded: Bytes,
 }
 
-impl FrameHeader for PushPromiseFrame {
+impl FrameHeader for PushPromise {
     const TYPE: FrameType = FrameType::PUSH_PROMISE;
     fn len(&self) -> usize {
         VarInt::from_u64(self.id).unwrap().size() + self.encoded.as_ref().len()
     }
 }
 
-impl PushPromiseFrame {
+impl PushPromise {
     fn decode<B: Buf>(buf: &mut B) -> Result<Self, UnexpectedEnd> {
-        Ok(PushPromiseFrame {
+        Ok(PushPromise {
             id: buf.get_var()?,
             encoded: buf.to_bytes(),
         })
@@ -334,12 +334,12 @@ setting_identifiers! {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct SettingsFrame {
+pub struct Settings {
     entries: [(SettingId, u64); 3],
     len: usize,
 }
 
-impl Default for SettingsFrame {
+impl Default for Settings {
     fn default() -> Self {
         Self {
             entries: [(SettingId::NONE, 0); 3],
@@ -348,7 +348,7 @@ impl Default for SettingsFrame {
     }
 }
 
-impl FrameHeader for SettingsFrame {
+impl FrameHeader for Settings {
     const TYPE: FrameType = FrameType::SETTINGS;
     fn len(&self) -> usize {
         self.entries[..self.len].iter().fold(0, |len, (id, val)| {
@@ -357,7 +357,7 @@ impl FrameHeader for SettingsFrame {
     }
 }
 
-impl SettingsFrame {
+impl Settings {
     fn insert(&mut self, id: SettingId, value: u64) -> Result<(), SettingsError> {
         if self.len >= self.entries.len() {
             return Err(SettingsError::Exceeded);
@@ -384,8 +384,8 @@ impl SettingsFrame {
         }
     }
 
-    pub(super) fn decode<T: Buf>(buf: &mut T) -> Result<SettingsFrame, SettingsError> {
-        let mut settings = SettingsFrame::default();
+    pub(super) fn decode<T: Buf>(buf: &mut T) -> Result<Settings, SettingsError> {
+        let mut settings = Settings::default();
         while buf.has_remaining() {
             if buf.remaining() < 2 {
                 // remains less than 2 * minimum-size varint
@@ -477,7 +477,7 @@ mod tests {
     #[test]
     fn settings_frame() {
         codec_frame_check(
-            Frame::Settings(SettingsFrame {
+            Frame::Settings(Settings {
                 entries: [
                     (SettingId::MAX_HEADER_LIST_SIZE, 0xfad1),
                     (SettingId::QPACK_MAX_TABLE_CAPACITY, 0xfad2),
@@ -493,13 +493,13 @@ mod tests {
 
     #[test]
     fn settings_frame_emtpy() {
-        codec_frame_check(Frame::Settings(SettingsFrame::default()), &[4, 0]);
+        codec_frame_check(Frame::Settings(Settings::default()), &[4, 0]);
     }
 
     #[test]
     fn data_frame() {
         codec_frame_check(
-            Frame::Data(DataFrame {
+            Frame::Data(Data {
                 payload: Bytes::from("foo bar"),
             }),
             &[0, 7, 102, 111, 111, 32, 98, 97, 114],
@@ -517,13 +517,13 @@ mod tests {
     #[test]
     fn headers_frames() {
         codec_frame_check(
-            Frame::Headers(HeadersFrame {
+            Frame::Headers(Headers {
                 encoded: Bytes::from("TODO QPACK"),
             }),
             &[1, 10, 84, 79, 68, 79, 32, 81, 80, 65, 67, 75],
         );
         codec_frame_check(
-            Frame::PushPromise(PushPromiseFrame {
+            Frame::PushPromise(PushPromise {
                 id: 134,
                 encoded: Bytes::from("TODO QPACK"),
             }),
