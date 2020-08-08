@@ -24,6 +24,24 @@ impl<T: Buf> BufList<T> {
     pub(crate) fn bufs_cnt(&self) -> usize {
         self.bufs.len()
     }
+
+    pub fn cursor(&self) -> Cursor<T> {
+        Cursor {
+            buf: &self,
+            pos_total: 0,
+            index: 0,
+            pos_front: 0,
+        }
+    }
+}
+
+#[cfg(test)]
+impl<T: Buf> From<T> for BufList<T> {
+    fn from(b: T) -> Self {
+        let mut buf = Self::new();
+        buf.push(b);
+        buf
+    }
 }
 
 impl<T: Buf> Buf for BufList<T> {
@@ -68,5 +86,72 @@ impl<T: Buf> Buf for BufList<T> {
             }
         }
         vecs
+    }
+}
+
+pub struct Cursor<'a, B> {
+    buf: &'a BufList<B>,
+    pos_total: usize, // position amongst all bytes
+    pos_front: usize, // position in the current front buffer
+    index: usize,     // current front buffer index
+}
+
+impl<'a, B: Buf> Cursor<'a, B> {
+    pub fn position(&self) -> usize {
+        self.pos_total
+    }
+}
+
+impl<'a, B: Buf> Buf for Cursor<'a, B> {
+    #[inline]
+    fn remaining(&self) -> usize {
+        self.buf.remaining() - self.pos_total
+    }
+
+    #[inline]
+    fn bytes(&self) -> &[u8] {
+        &self.buf.bufs[self.index].bytes()[self.pos_front..]
+    }
+
+    #[inline]
+    fn advance(&mut self, mut cnt: usize) {
+        assert!(cnt <= self.buf.remaining() - self.pos_total);
+        while cnt > 0 {
+            {
+                let front = &self.buf.bufs[self.index];
+                let rem = front.remaining() - self.pos_front;
+                if rem > cnt {
+                    self.pos_total += cnt;
+                    self.pos_front += cnt;
+                    return;
+                } else {
+                    self.pos_total += rem;
+                    self.pos_front = 0;
+                    cnt -= rem;
+                }
+            }
+            self.index += 1;
+        }
+    }
+
+    #[inline]
+    fn bytes_vectored<'t>(&'t self, dst: &mut [IoSlice<'t>]) -> usize {
+        self.buf.bytes_vectored(dst)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::Bytes;
+
+    #[test]
+    fn cursor_advance() {
+        let buf = BufList::from(Bytes::from_static(&[1u8, 2, 3, 4]));
+        let mut cur = buf.cursor();
+        cur.advance(2);
+        assert_eq!(cur.remaining(), 2);
+        cur.advance(2);
+        assert_eq!(cur.remaining(), 0);
     }
 }
