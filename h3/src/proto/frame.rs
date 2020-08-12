@@ -16,13 +16,12 @@ pub enum Error {
     SettingRepeated(SettingId),
     SettingsExceeded,
     Incomplete(usize),
-    IncompleteData,
     Settings(String),
 }
 
 #[derive(Debug, PartialEq)]
 pub enum Frame {
-    Data(Data<Bytes>),
+    Data { len: u64 },
     Headers(Headers),
     CancelPush(u64),
     Settings(Settings),
@@ -36,7 +35,10 @@ pub enum Frame {
 impl Frame {
     pub fn encode<T: BufMut>(&self, buf: &mut T) {
         match self {
-            Frame::Data(f) => f.encode(buf),
+            Frame::Data { len } => {
+                FrameType::DATA.encode(buf);
+                buf.write_var(*len);
+            }
             Frame::Headers(f) => f.encode(buf),
             Frame::Settings(f) => f.encode(buf),
             Frame::CancelPush(id) => simple_frame_encode(FrameType::CANCEL_PUSH, *id, buf),
@@ -55,24 +57,20 @@ impl Frame {
             .get_var()
             .map_err(|_| Error::Incomplete(remaining + 1 as usize))?;
 
+        if ty == FrameType::DATA {
+            return Ok(Frame::Data { len });
+        }
+
         if buf.remaining() < len as usize {
-            if ty == FrameType::DATA {
-                return Err(Error::IncompleteData);
-            }
             return Err(Error::Incomplete(2 + len as usize));
         }
 
         let mut payload = buf.take(len as usize);
         let frame = match ty {
-            FrameType::DATA => Ok(Frame::Data(Data {
-                payload: payload.to_bytes(),
-            })),
             FrameType::HEADERS => Ok(Frame::Headers(Headers::decode(&mut payload)?)),
             FrameType::SETTINGS => Ok(Frame::Settings(Settings::decode(&mut payload)?)),
             FrameType::CANCEL_PUSH => Ok(Frame::CancelPush(payload.get_var()?)),
-            FrameType::PUSH_PROMISE => {
-                Ok(Frame::PushPromise(PushPromise::decode(&mut payload)?))
-            }
+            FrameType::PUSH_PROMISE => Ok(Frame::PushPromise(PushPromise::decode(&mut payload)?)),
             FrameType::GOAWAY => Ok(Frame::Goaway(payload.get_var()?)),
             FrameType::MAX_PUSH_ID => Ok(Frame::MaxPushId(payload.get_var()?)),
             FrameType::DUPLICATE_PUSH => Ok(Frame::DuplicatePush(payload.get_var()?)),
@@ -104,7 +102,7 @@ impl Frame {
 impl fmt::Display for Frame {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Frame::Data(frame) => write!(f, "Data({} bytes)", frame.len()),
+            Frame::Data { len } => write!(f, "Data({} bytes)", len),
             Frame::Headers(frame) => write!(f, "Headers({} entries)", frame.len()),
             Frame::Settings(_) => write!(f, "Settings"),
             Frame::CancelPush(id) => write!(f, "CancelPush({})", id),
@@ -162,72 +160,6 @@ pub(crate) trait FrameHeader {
 
 pub(crate) trait IntoPayload {
     fn into_payload(&mut self) -> &mut dyn Buf;
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Data<P> {
-    pub payload: P,
-}
-
-impl<P> Data<P>
-where
-    P: Buf,
-{
-    pub fn encode<B: BufMut>(&self, buf: &mut B) {
-        self.encode_header(buf);
-        buf.put(self.payload.bytes());
-    }
-}
-
-impl<P> FrameHeader for Data<P>
-where
-    P: Buf,
-{
-    const TYPE: FrameType = FrameType::DATA;
-    fn len(&self) -> usize {
-        self.payload.remaining()
-    }
-}
-
-impl<P> IntoPayload for Data<P>
-where
-    P: Buf,
-{
-    fn into_payload(&mut self) -> &mut dyn Buf {
-        &mut self.payload
-    }
-}
-
-pub struct PartialData {
-    remaining: usize,
-}
-
-impl PartialData {
-    pub fn decode<B: Buf>(buf: &mut B) -> Result<(Self, Data<Bytes>), Error> {
-        if FrameType::DATA != FrameType::decode(buf)? {
-            panic!("can only decode Data frames");
-        }
-
-        let len = buf.get_var()? as usize;
-        let payload = buf.to_bytes();
-
-        Ok((
-            Self {
-                remaining: len - payload.len(),
-            },
-            Data { payload },
-        ))
-    }
-
-    pub fn decode_data<B: Buf>(&mut self, buf: &mut B) -> Data<Bytes> {
-        let payload = buf.take(self.remaining).to_bytes();
-        self.remaining -= payload.len();
-        Data { payload }
-    }
-
-    pub fn remaining(&self) -> usize {
-        self.remaining
-    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -497,12 +429,7 @@ mod tests {
 
     #[test]
     fn data_frame() {
-        codec_frame_check(
-            Frame::Data(Data {
-                payload: Bytes::from("foo bar"),
-            }),
-            &[0, 7, 102, 111, 111, 32, 98, 97, 114],
-        );
+        codec_frame_check(Frame::Data { len: 7 }, &[0, 7]);
     }
 
     #[test]
