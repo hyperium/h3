@@ -124,12 +124,12 @@ pub struct VarIntBoundsExceeded;
 
 /// Error returned when decoding a VarInt that is not complete
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct UnexpectedEnd;
+pub struct UnexpectedEnd(pub(crate) usize);
 
 impl VarInt {
     pub fn decode<B: Buf>(r: &mut B) -> Result<Self, UnexpectedEnd> {
         if !r.has_remaining() {
-            return Err(UnexpectedEnd);
+            return Err(UnexpectedEnd(1));
         }
         let mut buf = [0; 8];
         buf[0] = r.get_u8();
@@ -139,21 +139,21 @@ impl VarInt {
             0b00 => u64::from(buf[0]),
             0b01 => {
                 if r.remaining() < 1 {
-                    return Err(UnexpectedEnd);
+                    return Err(UnexpectedEnd(1));
                 }
                 r.copy_to_slice(&mut buf[1..2]);
                 u64::from(u16::from_be_bytes(buf[..2].try_into().unwrap()))
             }
             0b10 => {
                 if r.remaining() < 3 {
-                    return Err(UnexpectedEnd);
+                    return Err(UnexpectedEnd(2));
                 }
                 r.copy_to_slice(&mut buf[1..4]);
                 u64::from(u32::from_be_bytes(buf[..4].try_into().unwrap()))
             }
             0b11 => {
                 if r.remaining() < 7 {
-                    return Err(UnexpectedEnd);
+                    return Err(UnexpectedEnd(3));
                 }
                 r.copy_to_slice(&mut buf[1..8]);
                 u64::from_be_bytes(buf)

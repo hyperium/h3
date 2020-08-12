@@ -10,7 +10,6 @@ pub enum Error {
     Malformed,
     UnsupportedFrame(u64), // Known frames that should generate an error
     UnknownFrame(u64),     // Unknown frames that should be ignored
-    UnexpectedEnd,
     InvalidFrameValue,
     InvalidSettingId(u64),
     InvalidSettingValue(SettingId, u64),
@@ -425,8 +424,8 @@ impl From<SettingsError> for Error {
 }
 
 impl From<UnexpectedEnd> for Error {
-    fn from(_: UnexpectedEnd) -> Self {
-        Error::UnexpectedEnd
+    fn from(e: UnexpectedEnd) -> Self {
+        Error::Incomplete(e.0)
     }
 }
 
