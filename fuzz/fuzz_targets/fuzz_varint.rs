@@ -1,6 +1,10 @@
 #![no_main]
+
+#[path = "../../h3/src/proto/varint.rs"]
+mod varint;
+
 use libfuzzer_sys::fuzz_target;
-use h3::proto::varint::VarInt;
+use varint::VarInt;
 use bytes::Bytes;
 
 fuzz_target!(|data: &[u8]| {

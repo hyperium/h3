@@ -2,4 +2,4 @@
 pub mod quic;
 
 mod frame;
-pub mod proto;
+mod proto;
