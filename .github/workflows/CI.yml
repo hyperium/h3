@@ -79,3 +79,36 @@ jobs:
         with:
           command: rustdoc
           args: -p h3 -- -D intra-doc-link-resolution-failure
+
+  fuzz:
+    name: Fuzz test
+    needs: [style, test]
+    strategy:
+      matrix:
+        rust:
+          - nightly
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v1
+
+      - name: Install Rust (${{ matrix.rust }})
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ matrix.rust }}
+          override: true
+
+      - name: install cargo-fuzz
+        uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: cargo-fuzz
+
+      - name: Fuzz
+        uses: actions-rs/cargo@v1
+        with:
+          command: +nightly
+          args: fuzz run fuzz_varint -- -runs=1
