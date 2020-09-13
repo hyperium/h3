@@ -2,7 +2,6 @@ mod buf;
 
 use std::{
     cmp,
-    io::{self, ErrorKind},
     task::{Context, Poll},
 };
 
@@ -60,7 +59,7 @@ where
                         if self.bufs.has_remaining() {
                             // Reached the end of recieve stream, but there is still some data:
                             // The frame is incomplete.
-                            Poll::Ready(Err(Error::Io(ErrorKind::UnexpectedEof.into())))
+                            Poll::Ready(Err(Error::UnexpectedEnd))
                         } else {
                             Poll::Ready(Ok(None))
                         }
@@ -93,7 +92,7 @@ where
             (0, true) => return Poll::Ready(Ok(None)),
             (0, false) => return Poll::Pending,
             (x, true) if (x as u64) < self.remaining_data => {
-                return Poll::Ready(Err(Error::Io(ErrorKind::UnexpectedEof.into())));
+                return Poll::Ready(Err(Error::UnexpectedEnd));
             }
             (x, _) => self.remaining_data -= x as u64,
         };
@@ -107,7 +106,7 @@ where
 
     fn try_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<bool, Error>> {
         match self.recv.poll_data(cx) {
-            Poll::Ready(Err(e)) => return Poll::Ready(Err(e.into().into())),
+            Poll::Ready(Err(e)) => return Poll::Ready(Err(Error::Quic(e.into()))),
             Poll::Pending => Poll::Pending,
             Poll::Ready(Ok(None)) => Poll::Ready(Ok(true)),
             Poll::Ready(Ok(Some(d))) => {
@@ -168,16 +167,18 @@ impl FrameDecoder {
 #[derive(Debug)]
 pub enum Error {
     Proto(frame::Error),
-    Io(io::Error),
+    Quic(Box<dyn std::error::Error + Send + Sync>),
+    UnexpectedEnd,
 }
 
 impl Error {
     pub fn code(&self) -> ErrorCode {
         match self {
-            Error::Io(_) => ErrorCode::GENERAL_PROTOCOL_ERROR,
+            Error::Quic(_) => ErrorCode::GENERAL_PROTOCOL_ERROR,
             Error::Proto(frame::Error::Settings(_)) => ErrorCode::SETTINGS_ERROR,
             Error::Proto(frame::Error::UnsupportedFrame(_)) => ErrorCode::FRAME_UNEXPECTED,
             Error::Proto(_) => ErrorCode::FRAME_ERROR,
+            Error::UnexpectedEnd => ErrorCode::GENERAL_PROTOCOL_ERROR,
         }
     }
 }
@@ -185,12 +186,6 @@ impl Error {
 impl From<frame::Error> for Error {
     fn from(err: frame::Error) -> Self {
         Error::Proto(err)
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Self {
-        Error::Io(err)
     }
 }
 
@@ -363,7 +358,7 @@ mod tests {
 
         assert_poll_matches!(
             |mut cx| stream.poll_next(&mut cx),
-            Err(Error::Io(e)) if e.kind() == ErrorKind::UnexpectedEof
+            Err(Error::UnexpectedEnd)
         );
     }
 
@@ -428,7 +423,7 @@ mod tests {
         );
         assert_poll_matches!(
             |mut cx| stream.poll_data(&mut cx),
-            Err(Error::Io(e)) if e.kind() == ErrorKind::UnexpectedEof
+            Err(Error::UnexpectedEnd)
         );
     }
 
@@ -448,7 +443,7 @@ mod tests {
 
     impl RecvStream for FakeRecv {
         type Buf = Bytes;
-        type Error = io::Error;
+        type Error = Box<dyn std::error::Error + Send + Sync>;
 
         fn poll_data(
             &mut self,

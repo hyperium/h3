@@ -3,10 +3,7 @@
 //! This module includes traits and types meant to allow being generic over any
 //! QUIC implementation.
 
-use std::{
-    io,
-    task::{self, Poll},
-};
+use std::task::{self, Poll};
 
 use bytes::Buf;
 
@@ -82,7 +79,7 @@ pub trait RecvStream {
     /// The type of `Buf` for data received on this stream.
     type Buf: Buf;
     /// The error type that can occur when receiving data.
-    type Error: Into<io::Error>;
+    type Error: Into<Box<dyn std::error::Error + Send + Sync>>;
 
     /// Poll the stream for more data.
     ///
