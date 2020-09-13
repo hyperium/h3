@@ -3,6 +3,8 @@
 //! This module implements QUIC traits with Quinn.
 use std::{
     collections::BTreeMap,
+    error::Error,
+    fmt::Display,
     task::{self, Poll},
 };
 
@@ -11,7 +13,7 @@ use futures::{ready, FutureExt, StreamExt};
 use bytes::{Buf, Bytes};
 use quinn::{
     generic::{IncomingBiStreams, IncomingUniStreams, NewConnection, OpenBi, OpenUni},
-    ConnectionError, ReadError, VarInt, WriteError,
+    ConnectionError, VarInt, WriteError,
 };
 use quinn_proto::crypto::Session;
 
@@ -235,6 +237,30 @@ impl<S: Session> quic::RecvStream for RecvStream<S> {
         let _ = self
             .stream
             .stop(VarInt::from_u64(error_code).expect("invalid error_code"));
+    }
+}
+
+#[derive(Debug)]
+pub struct ReadError {
+    cause: quinn::ReadError,
+}
+
+impl Display for ReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.cause.fmt(f)
+    }
+}
+
+impl Error for ReadError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        // TODO: implement std::error::Error for quinn::ReadError
+        None
+    }
+}
+
+impl From<quinn::ReadError> for ReadError {
+    fn from(e: quinn::ReadError) -> Self {
+        Self { cause: e }
     }
 }
 
