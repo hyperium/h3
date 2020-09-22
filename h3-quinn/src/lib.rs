@@ -127,7 +127,7 @@ where
     type RecvStream = RecvStream<S>;
 
     fn split(self) -> (Self::SendStream, Self::RecvStream) {
-        return (self.send, self.recv);
+        (self.send, self.recv)
     }
 }
 
@@ -202,7 +202,7 @@ impl<S: Session> quic::RecvStream for RecvStream<S> {
         let ret = match self.stream.read_unordered().poll_unpin(cx) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Ok(None)) => Poll::Ready(Ok(None)),
-            Poll::Ready(Err(e)) => return Poll::Ready(Err(e.into())),
+            Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
             // If we get the chunk we're looking for, return it right away
             Poll::Ready(Ok(Some((mut chunk, offset)))) if offset <= self.offset => {
                 chunk.advance((self.offset - offset) as usize); // XXX overflow
@@ -222,7 +222,7 @@ impl<S: Session> quic::RecvStream for RecvStream<S> {
             .keys()
             .take_while(|x| **x <= self.offset)
             .next()
-            .map(|x| *x);
+            .copied();
         if let Some(offset) = chunk_key {
             let mut chunk = self.chunks.remove(&offset).unwrap();
             chunk.advance((self.offset - offset) as usize); // XXX overflow

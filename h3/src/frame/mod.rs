@@ -106,7 +106,7 @@ where
 
     fn try_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<bool, Error>> {
         match self.recv.poll_data(cx) {
-            Poll::Ready(Err(e)) => return Poll::Ready(Err(Error::Quic(e.into()))),
+            Poll::Ready(Err(e)) => Poll::Ready(Err(Error::Quic(e.into()))),
             Poll::Pending => Poll::Pending,
             Poll::Ready(Ok(None)) => Poll::Ready(Ok(true)),
             Poll::Ready(Ok(Some(d))) => {
