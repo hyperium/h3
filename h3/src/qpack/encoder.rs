@@ -30,164 +30,191 @@ pub enum Error {
     UnknownPrefix,
 }
 
-pub fn encode<W, T, H>(
-    table: &mut DynamicTableEncoder,
-    block: &mut W,
-    encoder: &mut W,
-    fields: T,
-) -> Result<usize, Error>
-where
-    W: BufMut,
-    T: IntoIterator<Item = H>,
-    H: AsRef<HeaderField>,
-{
-    let mut required_ref = 0;
-    let mut block_buf = Vec::new();
-
-    for field in fields {
-        if let Some(reference) = encode_field(table, &mut block_buf, encoder, field.as_ref())? {
-            required_ref = cmp::max(required_ref, reference);
-        }
-    }
-
-    HeaderPrefix::new(
-        required_ref,
-        table.base(),
-        table.total_inserted(),
-        table.max_size(),
-    )
-    .encode(block);
-    block.put(block_buf.as_slice());
-
-    table.commit(required_ref);
-
-    Ok(required_ref)
+pub struct Encoder {
+    table: DynamicTable,
 }
 
-fn encode_field<W: BufMut>(
-    table: &mut DynamicTableEncoder,
-    block: &mut Vec<u8>,
-    encoder: &mut W,
-    field: &HeaderField,
-) -> Result<Option<usize>, Error> {
-    if let Some(index) = StaticTable::find(field) {
-        Indexed::Static(index).encode(block);
-        return Ok(None);
+impl Encoder {
+    pub fn new() -> Self {
+        Self {
+            table: DynamicTable::new(),
+        }
     }
 
-    if let DynamicLookupResult::Relative { index, absolute } = table.find(field) {
-        Indexed::Dynamic(index).encode(block);
-        return Ok(Some(absolute));
+    pub fn encode<W, T, H>(
+        &mut self,
+        stream_id: u64,
+        block: &mut W,
+        encoder_buf: &mut W,
+        fields: T,
+    ) -> Result<usize, Error>
+    where
+        W: BufMut,
+        T: IntoIterator<Item = H>,
+        H: AsRef<HeaderField>,
+    {
+        let mut required_ref = 0;
+        let mut block_buf = Vec::new();
+        let mut encoder = self.table.encoder(stream_id);
+
+        for field in fields {
+            if let Some(reference) =
+                Self::encode_field(&mut encoder, &mut block_buf, encoder_buf, field.as_ref())?
+            {
+                required_ref = cmp::max(required_ref, reference);
+            }
+        }
+
+        HeaderPrefix::new(
+            required_ref,
+            encoder.base(),
+            encoder.total_inserted(),
+            encoder.max_size(),
+        )
+        .encode(block);
+        block.put(block_buf.as_slice());
+
+        encoder.commit(required_ref);
+
+        Ok(required_ref)
     }
 
-    let reference = match table.insert(field)? {
-        DynamicInsertionResult::Duplicated {
-            relative,
-            postbase,
-            absolute,
-        } => {
-            Duplicate(relative).encode(encoder);
-            IndexedWithPostBase(postbase).encode(block);
-            Some(absolute)
-        }
-        DynamicInsertionResult::Inserted { postbase, absolute } => {
-            InsertWithoutNameRef::new(field.name.clone(), field.value.clone()).encode(encoder)?;
-            IndexedWithPostBase(postbase).encode(block);
-            Some(absolute)
-        }
-        DynamicInsertionResult::InsertedWithStaticNameRef {
-            postbase,
-            index,
-            absolute,
-        } => {
-            InsertWithNameRef::new_static(index, field.value.clone()).encode(encoder)?;
-            IndexedWithPostBase(postbase).encode(block);
-            Some(absolute)
-        }
-        DynamicInsertionResult::InsertedWithNameRef {
-            postbase,
-            relative,
-            absolute,
-        } => {
-            InsertWithNameRef::new_dynamic(relative, field.value.clone()).encode(encoder)?;
-            IndexedWithPostBase(postbase).encode(block);
-            Some(absolute)
-        }
-        DynamicInsertionResult::NotInserted(lookup_result) => match lookup_result {
-            DynamicLookupResult::Static(index) => {
-                LiteralWithNameRef::new_static(index, field.value.clone()).encode(block)?;
-                None
-            }
-            DynamicLookupResult::Relative { index, absolute } => {
-                LiteralWithNameRef::new_dynamic(index, field.value.clone()).encode(block)?;
-                Some(absolute)
-            }
-            DynamicLookupResult::PostBase { index, absolute } => {
-                LiteralWithPostBaseNameRef::new(index, field.value.clone()).encode(block)?;
-                Some(absolute)
-            }
-            DynamicLookupResult::NotFound => {
-                Literal::new(field.name.clone(), field.value.clone()).encode(block)?;
-                None
-            }
-        },
-    };
-    Ok(reference)
-}
-
-pub fn on_decoder_recv<R: Buf>(table: &mut DynamicTable, read: &mut R) -> Result<(), Error> {
-    while let Some(instruction) = parse_instruction(read)? {
-        match instruction {
-            Instruction::Untrack(stream_id) => table.untrack_block(stream_id)?,
-            Instruction::StreamCancel(stream_id) => {
-                // Untrack block twice, as this stream might have a trailer in addition to
-                // the header. Failures are ignored as blocks might have been acked before
-                // cancellation.
-                if table.untrack_block(stream_id).is_ok() {
-                    let _ = table.untrack_block(stream_id);
+    pub fn on_decoder_recv<R: Buf>(&mut self, read: &mut R) -> Result<(), Error> {
+        while let Some(instruction) = Action::parse(read)? {
+            match instruction {
+                Action::Untrack(stream_id) => self.table.untrack_block(stream_id)?,
+                Action::StreamCancel(stream_id) => {
+                    // Untrack block twice, as this stream might have a trailer in addition to
+                    // the header. Failures are ignored as blocks might have been acked before
+                    // cancellation.
+                    if self.table.untrack_block(stream_id).is_ok() {
+                        let _ = self.table.untrack_block(stream_id);
+                    }
+                }
+                Action::ReceivedRefIncrement(increment) => {
+                    self.table.update_largest_received(increment)
                 }
             }
-            Instruction::ReceivedRefIncrement(increment) => {
-                table.update_largest_received(increment)
+        }
+        Ok(())
+    }
+
+    fn encode_field<W: BufMut>(
+        table: &mut DynamicTableEncoder,
+        block: &mut Vec<u8>,
+        encoder: &mut W,
+        field: &HeaderField,
+    ) -> Result<Option<usize>, Error> {
+        if let Some(index) = StaticTable::find(field) {
+            Indexed::Static(index).encode(block);
+            return Ok(None);
+        }
+
+        if let DynamicLookupResult::Relative { index, absolute } = table.find(field) {
+            Indexed::Dynamic(index).encode(block);
+            return Ok(Some(absolute));
+        }
+
+        let reference = match table.insert(field)? {
+            DynamicInsertionResult::Duplicated {
+                relative,
+                postbase,
+                absolute,
+            } => {
+                Duplicate(relative).encode(encoder);
+                IndexedWithPostBase(postbase).encode(block);
+                Some(absolute)
             }
-        }
+            DynamicInsertionResult::Inserted { postbase, absolute } => {
+                InsertWithoutNameRef::new(field.name.clone(), field.value.clone())
+                    .encode(encoder)?;
+                IndexedWithPostBase(postbase).encode(block);
+                Some(absolute)
+            }
+            DynamicInsertionResult::InsertedWithStaticNameRef {
+                postbase,
+                index,
+                absolute,
+            } => {
+                InsertWithNameRef::new_static(index, field.value.clone()).encode(encoder)?;
+                IndexedWithPostBase(postbase).encode(block);
+                Some(absolute)
+            }
+            DynamicInsertionResult::InsertedWithNameRef {
+                postbase,
+                relative,
+                absolute,
+            } => {
+                InsertWithNameRef::new_dynamic(relative, field.value.clone()).encode(encoder)?;
+                IndexedWithPostBase(postbase).encode(block);
+                Some(absolute)
+            }
+            DynamicInsertionResult::NotInserted(lookup_result) => match lookup_result {
+                DynamicLookupResult::Static(index) => {
+                    LiteralWithNameRef::new_static(index, field.value.clone()).encode(block)?;
+                    None
+                }
+                DynamicLookupResult::Relative { index, absolute } => {
+                    LiteralWithNameRef::new_dynamic(index, field.value.clone()).encode(block)?;
+                    Some(absolute)
+                }
+                DynamicLookupResult::PostBase { index, absolute } => {
+                    LiteralWithPostBaseNameRef::new(index, field.value.clone()).encode(block)?;
+                    Some(absolute)
+                }
+                DynamicLookupResult::NotFound => {
+                    Literal::new(field.name.clone(), field.value.clone()).encode(block)?;
+                    None
+                }
+            },
+        };
+        Ok(reference)
     }
-    Ok(())
 }
 
-fn parse_instruction<R: Buf>(read: &mut R) -> Result<Option<Instruction>, Error> {
-    if read.remaining() < 1 {
-        return Ok(None);
+#[cfg(test)]
+impl From<DynamicTable> for Encoder {
+    fn from(table: DynamicTable) -> Encoder {
+        Encoder { table }
     }
-
-    let mut buf = Cursor::new(read.bytes());
-    let first = buf.bytes()[0];
-    let instruction = match DecoderInstruction::decode(first) {
-        DecoderInstruction::Unknown => return Err(Error::UnknownPrefix),
-        DecoderInstruction::InsertCountIncrement => {
-            InsertCountIncrement::decode(&mut buf)?.map(|x| Instruction::ReceivedRefIncrement(x.0))
-        }
-        DecoderInstruction::HeaderAck => {
-            HeaderAck::decode(&mut buf)?.map(|x| Instruction::Untrack(x.0))
-        }
-        DecoderInstruction::StreamCancel => {
-            StreamCancel::decode(&mut buf)?.map(|x| Instruction::StreamCancel(x.0))
-        }
-    };
-
-    if instruction.is_some() {
-        let pos = buf.position();
-        read.advance(pos as usize);
-    }
-
-    Ok(instruction)
 }
 
+// Action to apply to the encoder table, given an instruction received from the decoder.
 #[derive(Debug, PartialEq)]
-enum Instruction {
+enum Action {
     ReceivedRefIncrement(usize),
     Untrack(u64),
     StreamCancel(u64),
+}
+
+impl Action {
+    fn parse<R: Buf>(read: &mut R) -> Result<Option<Action>, Error> {
+        if read.remaining() < 1 {
+            return Ok(None);
+        }
+
+        let mut buf = Cursor::new(read.bytes());
+        let first = buf.bytes()[0];
+        let instruction = match DecoderInstruction::decode(first) {
+            DecoderInstruction::Unknown => return Err(Error::UnknownPrefix),
+            DecoderInstruction::InsertCountIncrement => {
+                InsertCountIncrement::decode(&mut buf)?.map(|x| Action::ReceivedRefIncrement(x.0))
+            }
+            DecoderInstruction::HeaderAck => {
+                HeaderAck::decode(&mut buf)?.map(|x| Action::Untrack(x.0))
+            }
+            DecoderInstruction::StreamCancel => {
+                StreamCancel::decode(&mut buf)?.map(|x| Action::StreamCancel(x.0))
+            }
+        };
+
+        if instruction.is_some() {
+            let pos = buf.position();
+            read.advance(pos as usize);
+        }
+
+        Ok(instruction)
+    }
 }
 
 pub fn set_dynamic_table_size<W: BufMut>(
@@ -255,7 +282,7 @@ mod tests {
         let mut enc_table = table.encoder(stream_id);
 
         for field in field {
-            encode_field(&mut enc_table, &mut block, &mut encoder, field).unwrap();
+            Encoder::encode_field(&mut enc_table, &mut block, &mut encoder, field).unwrap();
         }
 
         enc_table.commit(field.len());
@@ -411,8 +438,9 @@ mod tests {
                 .unwrap();
         }
 
-        let mut encoder = Vec::new();
+        let mut encoder_buf = Vec::new();
         let mut block = Vec::new();
+        let mut encoder = Encoder::from(table);
 
         let fields = vec![
             HeaderField::new(":method", "GET"),
@@ -424,12 +452,12 @@ mod tests {
         .into_iter();
 
         assert_eq!(
-            encode(&mut table.encoder(1), &mut block, &mut encoder, fields),
+            encoder.encode(1, &mut block, &mut encoder_buf, fields),
             Ok(7)
         );
 
         let mut read_block = Cursor::new(&mut block);
-        let mut read_encoder = Cursor::new(&mut encoder);
+        let mut read_encoder = Cursor::new(&mut encoder_buf);
 
         assert_eq!(
             InsertWithNameRef::decode(&mut read_encoder),
@@ -484,20 +512,18 @@ mod tests {
         );
 
         let mut buf = vec![];
+        let mut encoder = Encoder::from(table);
 
         HeaderAck(2).encode(&mut buf);
         let mut cur = Cursor::new(&buf);
-        assert_eq!(
-            parse_instruction(&mut cur),
-            Ok(Some(Instruction::Untrack(2)))
-        );
+        assert_eq!(Action::parse(&mut cur), Ok(Some(Action::Untrack(2))));
 
         let mut cur = Cursor::new(&buf);
-        assert_eq!(on_decoder_recv(&mut table, &mut cur), Ok(()),);
+        assert_eq!(encoder.on_decoder_recv(&mut cur), Ok(()),);
 
         let mut cur = Cursor::new(&buf);
         assert_eq!(
-            on_decoder_recv(&mut table, &mut cur),
+            encoder.on_decoder_recv(&mut cur),
             Err(Error::Insertion(DynamicTableError::UnknownStreamId(2)))
         );
     }
@@ -519,10 +545,7 @@ mod tests {
 
         StreamCancel(2).encode(&mut buf);
         let mut cur = Cursor::new(&buf);
-        assert_eq!(
-            parse_instruction(&mut cur),
-            Ok(Some(Instruction::StreamCancel(2)))
-        );
+        assert_eq!(Action::parse(&mut cur), Ok(Some(Action::StreamCancel(2))));
     }
 
     #[test]
@@ -531,12 +554,12 @@ mod tests {
         StreamCancel(2321).encode(&mut buf);
 
         let mut cur = Cursor::new(&buf[..2]); // trucated prefix_int
-        assert_eq!(parse_instruction(&mut cur), Ok(None));
+        assert_eq!(Action::parse(&mut cur), Ok(None));
 
         let mut cur = Cursor::new(&buf);
         assert_eq!(
-            parse_instruction(&mut cur),
-            Ok(Some(Instruction::StreamCancel(2321)))
+            Action::parse(&mut cur),
+            Ok(Some(Action::StreamCancel(2321)))
         );
     }
 
@@ -551,13 +574,14 @@ mod tests {
             2,
             &|_, _| {},
         );
+        let mut encoder = Encoder::from(table);
 
         let mut buf = vec![];
         HeaderAck(4).encode(&mut buf);
 
         let mut cur = Cursor::new(&buf);
         assert_eq!(
-            on_decoder_recv(&mut table, &mut cur),
+            encoder.on_decoder_recv(&mut cur),
             Err(Error::Insertion(DynamicTableError::UnknownStreamId(4)))
         );
     }
@@ -569,11 +593,15 @@ mod tests {
 
         let mut cur = Cursor::new(&buf);
         assert_eq!(
-            parse_instruction(&mut cur),
-            Ok(Some(Instruction::ReceivedRefIncrement(4)))
+            Action::parse(&mut cur),
+            Ok(Some(Action::ReceivedRefIncrement(4)))
         );
 
+        let mut encoder = Encoder {
+            table: build_table(),
+        };
+
         let mut cur = Cursor::new(&buf);
-        assert_eq!(on_decoder_recv(&mut build_table(), &mut cur), Ok(()));
+        assert_eq!(encoder.on_decoder_recv(&mut cur), Ok(()));
     }
 }

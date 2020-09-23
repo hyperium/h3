@@ -4,7 +4,7 @@ pub use self::{
         DynamicTable, DynamicTableDecoder, DynamicTableEncoder, DynamicTableInserter,
         Error as DynamicTableError,
     },
-    encoder::{encode, on_decoder_recv, set_dynamic_table_size, Error as EncoderError},
+    encoder::Encoder,
     field::HeaderField,
 };
 
