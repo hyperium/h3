@@ -1,0 +1,55 @@
+use bytes::{Buf, BufMut};
+
+use super::varint::VarInt;
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct UnexpectedEnd(pub usize);
+
+pub type Result<T> = ::std::result::Result<T, UnexpectedEnd>;
+
+pub trait Codec: Sized {
+    fn decode<B: Buf>(buf: &mut B) -> Result<Self>;
+    fn encode<B: BufMut>(&self, buf: &mut B);
+}
+
+impl Codec for u8 {
+    fn decode<B: Buf>(buf: &mut B) -> Result<u8> {
+        if buf.remaining() < 1 {
+            return Err(UnexpectedEnd(1));
+        }
+        Ok(buf.get_u8())
+    }
+    fn encode<B: BufMut>(&self, buf: &mut B) {
+        buf.put_u8(*self);
+    }
+}
+
+pub trait BufExt {
+    fn get<T: Codec>(&mut self) -> Result<T>;
+    fn get_var(&mut self) -> Result<u64>;
+}
+
+impl<T: Buf> BufExt for T {
+    fn get<U: Codec>(&mut self) -> Result<U> {
+        U::decode(self)
+    }
+
+    fn get_var(&mut self) -> Result<u64> {
+        Ok(VarInt::decode(self)?.into_inner())
+    }
+}
+
+pub trait BufMutExt {
+    fn write<T: Codec>(&mut self, x: T);
+    fn write_var(&mut self, x: u64);
+}
+
+impl<T: BufMut> BufMutExt for T {
+    fn write<U: Codec>(&mut self, x: U) {
+        x.encode(self);
+    }
+
+    fn write_var(&mut self, x: u64) {
+        VarInt::from_u64(x).unwrap().encode(self);
+    }
+}
