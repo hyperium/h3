@@ -4,8 +4,10 @@ use std::{fmt, io::Cursor};
 use tracing::trace;
 
 use super::{
+    dynamic::{DynamicTable, DynamicTableDecoder, Error as DynamicTableError},
+    field::HeaderField,
     static_::{Error as StaticError, StaticTable},
-    vas, DynamicTable, DynamicTableDecoder, DynamicTableError, HeaderField,
+    vas,
 };
 
 use super::{
@@ -43,126 +45,135 @@ pub fn stream_canceled<W: BufMut>(stream_id: u64, decoder: &mut W) {
     StreamCancel(stream_id).encode(decoder);
 }
 
-// Decode a header bloc received on Request of Push stream. (draft: 4.5)
-pub fn decode_header<T: Buf>(
-    table: &DynamicTable,
-    buf: &mut T,
-) -> Result<(Vec<HeaderField>, bool), Error> {
-    let (required_ref, base) =
-        HeaderPrefix::decode(buf)?.get(table.total_inserted(), table.max_mem_size())?;
-
-    if required_ref > table.total_inserted() {
-        return Err(Error::MissingRefs(required_ref));
-    }
-
-    let decoder_table = table.decoder(base);
-
-    let mut fields = Vec::new();
-    while buf.has_remaining() {
-        fields.push(parse_header_field(&decoder_table, buf)?);
-    }
-
-    Ok((fields, required_ref > 0))
+pub struct Decoder {
+    table: DynamicTable,
 }
 
-fn parse_header_field<R: Buf>(
-    table: &DynamicTableDecoder,
-    buf: &mut R,
-) -> Result<HeaderField, Error> {
-    let first = buf.bytes()[0];
-    let field = match HeaderBlockField::decode(first) {
-        HeaderBlockField::Indexed => match Indexed::decode(buf)? {
-            Indexed::Static(index) => StaticTable::get(index)?.clone(),
-            Indexed::Dynamic(index) => table.get_relative(index)?.clone(),
-        },
-        HeaderBlockField::IndexedWithPostBase => {
-            let index = IndexedWithPostBase::decode(buf)?.0;
-            table.get_postbase(index)?.clone()
+impl Decoder {
+    // Decode a header bloc received on Request of Push stream. (draft: 4.5)
+    pub fn decode_header<T: Buf>(&self, buf: &mut T) -> Result<(Vec<HeaderField>, bool), Error> {
+        let (required_ref, base) = HeaderPrefix::decode(buf)?
+            .get(self.table.total_inserted(), self.table.max_mem_size())?;
+
+        if required_ref > self.table.total_inserted() {
+            return Err(Error::MissingRefs(required_ref));
         }
-        HeaderBlockField::LiteralWithNameRef => match LiteralWithNameRef::decode(buf)? {
-            LiteralWithNameRef::Static { index, value } => {
-                StaticTable::get(index)?.with_value(value)
+
+        let decoder_table = self.table.decoder(base);
+
+        let mut fields = Vec::new();
+        while buf.has_remaining() {
+            fields.push(Self::parse_header_field(&decoder_table, buf)?);
+        }
+
+        Ok((fields, required_ref > 0))
+    }
+
+    // The receiving side of encoder stream
+    pub fn on_encoder_recv<R: Buf, W: BufMut>(
+        &mut self,
+        read: &mut R,
+        write: &mut W,
+    ) -> Result<usize, Error> {
+        let inserted_on_start = self.table.total_inserted();
+
+        while let Some(instruction) = self.parse_instruction(read)? {
+            trace!("instruction {:?}", instruction);
+            match instruction {
+                Instruction::Insert(field) => self.table.put(field)?,
+                Instruction::TableSizeUpdate(size) => {
+                    self.table.set_max_size(size)?;
+                }
             }
-            LiteralWithNameRef::Dynamic { index, value } => {
-                table.get_relative(index)?.with_value(value)
+        }
+
+        if self.table.total_inserted() != inserted_on_start {
+            InsertCountIncrement(self.table.total_inserted() - inserted_on_start).encode(write);
+        }
+
+        Ok(self.table.total_inserted())
+    }
+
+    fn parse_instruction<R: Buf>(&self, read: &mut R) -> Result<Option<Instruction>, Error> {
+        if read.remaining() < 1 {
+            return Ok(None);
+        }
+
+        let mut buf = Cursor::new(read.bytes());
+        let first = buf.bytes()[0];
+        let instruction = match EncoderInstruction::decode(first) {
+            EncoderInstruction::Unknown => return Err(Error::UnknownPrefix),
+            EncoderInstruction::DynamicTableSizeUpdate => {
+                DynamicTableSizeUpdate::decode(&mut buf)?.map(|x| Instruction::TableSizeUpdate(x.0))
             }
-        },
-        HeaderBlockField::LiteralWithPostBaseNameRef => {
-            let literal = LiteralWithPostBaseNameRef::decode(buf)?;
-            table.get_postbase(literal.index)?.with_value(literal.value)
+            EncoderInstruction::InsertWithoutNameRef => InsertWithoutNameRef::decode(&mut buf)?
+                .map(|x| Instruction::Insert(HeaderField::new(x.name, x.value))),
+            EncoderInstruction::Duplicate => match Duplicate::decode(&mut buf)? {
+                Some(Duplicate(index)) => {
+                    Some(Instruction::Insert(self.table.get_relative(index)?.clone()))
+                }
+                None => None,
+            },
+            EncoderInstruction::InsertWithNameRef => match InsertWithNameRef::decode(&mut buf)? {
+                Some(InsertWithNameRef::Static { index, value }) => Some(Instruction::Insert(
+                    StaticTable::get(index)?.with_value(value),
+                )),
+                Some(InsertWithNameRef::Dynamic { index, value }) => Some(Instruction::Insert(
+                    self.table.get_relative(index)?.with_value(value),
+                )),
+                None => None,
+            },
+        };
+
+        if instruction.is_some() {
+            let pos = buf.position();
+            read.advance(pos as usize);
         }
-        HeaderBlockField::Literal => {
-            let literal = Literal::decode(buf)?;
-            HeaderField::new(literal.name, literal.value)
-        }
-        _ => return Err(Error::UnknownPrefix),
-    };
-    Ok(field)
+
+        Ok(instruction)
+    }
+
+    fn parse_header_field<R: Buf>(
+        table: &DynamicTableDecoder,
+        buf: &mut R,
+    ) -> Result<HeaderField, Error> {
+        let first = buf.bytes()[0];
+        let field = match HeaderBlockField::decode(first) {
+            HeaderBlockField::Indexed => match Indexed::decode(buf)? {
+                Indexed::Static(index) => StaticTable::get(index)?.clone(),
+                Indexed::Dynamic(index) => table.get_relative(index)?.clone(),
+            },
+            HeaderBlockField::IndexedWithPostBase => {
+                let index = IndexedWithPostBase::decode(buf)?.0;
+                table.get_postbase(index)?.clone()
+            }
+            HeaderBlockField::LiteralWithNameRef => match LiteralWithNameRef::decode(buf)? {
+                LiteralWithNameRef::Static { index, value } => {
+                    StaticTable::get(index)?.with_value(value)
+                }
+                LiteralWithNameRef::Dynamic { index, value } => {
+                    table.get_relative(index)?.with_value(value)
+                }
+            },
+            HeaderBlockField::LiteralWithPostBaseNameRef => {
+                let literal = LiteralWithPostBaseNameRef::decode(buf)?;
+                table.get_postbase(literal.index)?.with_value(literal.value)
+            }
+            HeaderBlockField::Literal => {
+                let literal = Literal::decode(buf)?;
+                HeaderField::new(literal.name, literal.value)
+            }
+            _ => return Err(Error::UnknownPrefix),
+        };
+        Ok(field)
+    }
 }
 
-// The receiving side of encoder stream
-pub fn on_encoder_recv<R: Buf, W: BufMut>(
-    table: &mut DynamicTable,
-    read: &mut R,
-    write: &mut W,
-) -> Result<usize, Error> {
-    let inserted_on_start = table.total_inserted();
-
-    while let Some(instruction) = parse_instruction(&table, read)? {
-        trace!("instruction {:?}", instruction);
-        match instruction {
-            Instruction::Insert(field) => table.put(field)?,
-            Instruction::TableSizeUpdate(size) => {
-                table.set_max_size(size)?;
-            }
-        }
+#[cfg(test)]
+impl From<DynamicTable> for Decoder {
+    fn from(table: DynamicTable) -> Self {
+        Self { table }
     }
-
-    if table.total_inserted() != inserted_on_start {
-        InsertCountIncrement(table.total_inserted() - inserted_on_start).encode(write);
-    }
-
-    Ok(table.total_inserted())
-}
-
-fn parse_instruction<R: Buf>(
-    table: &DynamicTable,
-    read: &mut R,
-) -> Result<Option<Instruction>, Error> {
-    if read.remaining() < 1 {
-        return Ok(None);
-    }
-
-    let mut buf = Cursor::new(read.bytes());
-    let first = buf.bytes()[0];
-    let instruction = match EncoderInstruction::decode(first) {
-        EncoderInstruction::Unknown => return Err(Error::UnknownPrefix),
-        EncoderInstruction::DynamicTableSizeUpdate => {
-            DynamicTableSizeUpdate::decode(&mut buf)?.map(|x| Instruction::TableSizeUpdate(x.0))
-        }
-        EncoderInstruction::InsertWithoutNameRef => InsertWithoutNameRef::decode(&mut buf)?
-            .map(|x| Instruction::Insert(HeaderField::new(x.name, x.value))),
-        EncoderInstruction::Duplicate => match Duplicate::decode(&mut buf)? {
-            Some(Duplicate(index)) => Some(Instruction::Insert(table.get_relative(index)?.clone())),
-            None => None,
-        },
-        EncoderInstruction::InsertWithNameRef => match InsertWithNameRef::decode(&mut buf)? {
-            Some(InsertWithNameRef::Static { index, value }) => Some(Instruction::Insert(
-                StaticTable::get(index)?.with_value(value),
-            )),
-            Some(InsertWithNameRef::Dynamic { index, value }) => Some(Instruction::Insert(
-                table.get_relative(index)?.with_value(value),
-            )),
-            None => None,
-        },
-    };
-
-    if instruction.is_some() {
-        let pos = buf.position();
-        read.advance(pos as usize);
-    }
-
-    Ok(instruction)
 }
 
 #[derive(PartialEq)]
@@ -246,13 +257,13 @@ mod tests {
         InsertWithNameRef::new_static(1, "serial value")
             .encode(&mut buf)
             .unwrap();
-        let mut table = build_table_with_size(0);
+        let mut decoder = Decoder::from(build_table_with_size(0));
         let mut enc = Cursor::new(&buf);
         let mut dec = vec![];
-        assert!(on_encoder_recv(&mut table, &mut enc, &mut dec).is_ok());
+        assert!(decoder.on_encoder_recv(&mut enc, &mut dec).is_ok());
 
         assert_eq!(
-            table.decoder(1).get_relative(0),
+            decoder.table.decoder(1).get_relative(0),
             Ok(&StaticTable::get(1).unwrap().with_value("serial value"))
         );
 
@@ -274,8 +285,8 @@ mod tests {
             .encode(&mut buf)
             .unwrap();
         let mut enc = Cursor::new(&buf);
-        let mut table = build_table_with_size(0);
-        let res = on_encoder_recv(&mut table, &mut enc, &mut vec![]);
+        let mut decoder = Decoder::from(build_table_with_size(0));
+        let res = decoder.on_encoder_recv(&mut enc, &mut vec![]);
         assert_eq!(res, Err(Error::InvalidStaticIndex(3000)));
     }
 
@@ -291,8 +302,8 @@ mod tests {
             .unwrap();
         let mut enc = Cursor::new(&buf);
         let mut dec = vec![];
-        let mut table = build_table_with_size(0);
-        let res = on_encoder_recv(&mut table, &mut enc, &mut dec);
+        let mut decoder = Decoder::from(build_table_with_size(0));
+        let res = decoder.on_encoder_recv(&mut enc, &mut dec);
         assert_eq!(
             res,
             Err(Error::DynamicTableError(
@@ -314,13 +325,13 @@ mod tests {
             .encode(&mut buf)
             .unwrap();
 
-        let mut table = build_table_with_size(0);
+        let mut decoder = Decoder::from(build_table_with_size(0));
         let mut enc = Cursor::new(&buf);
         let mut dec = vec![];
-        assert!(on_encoder_recv(&mut table, &mut enc, &mut dec).is_ok());
+        assert!(decoder.on_encoder_recv(&mut enc, &mut dec).is_ok());
 
         assert_eq!(
-            table.decoder(1).get_relative(0),
+            decoder.table.decoder(1).get_relative(0),
             Ok(&HeaderField::new("key", "value"))
         );
 
@@ -349,13 +360,14 @@ mod tests {
             &mut table,
             vec![HeaderField::new("", ""), HeaderField::new("", "")],
         );
+        let mut decoder = Decoder::from(table);
 
         let mut buf = vec![];
         Duplicate(1).encode(&mut buf);
 
         let mut enc = Cursor::new(&buf);
         let mut dec = vec![];
-        let res = on_encoder_recv(&mut table, &mut enc, &mut dec);
+        let res = decoder.on_encoder_recv(&mut enc, &mut dec);
         assert_eq!(res, Ok(3));
 
         let mut dec_cursor = Cursor::new(&dec);
@@ -376,28 +388,27 @@ mod tests {
 
         let mut enc = Cursor::new(&buf);
         let mut dec = vec![];
-        let mut table = build_table_with_size(0);
-        let res = on_encoder_recv(&mut table, &mut enc, &mut dec);
+        let mut decoder = Decoder::from(build_table_with_size(0));
+        let res = decoder.on_encoder_recv(&mut enc, &mut dec);
         assert_eq!(res, Ok(0));
 
-        let actual_max_size = table.max_mem_size();
+        let actual_max_size = decoder.table.max_mem_size();
         assert_eq!(actual_max_size, 25);
         assert!(dec.is_empty());
     }
 
     #[test]
     fn enc_recv_buf_too_short() {
-        let table = build_table_with_size(0);
-        let inserting = table;
+        let decoder = Decoder::from(build_table_with_size(0));
         let mut buf = vec![];
         {
             let mut enc = Cursor::new(&buf);
-            assert_eq!(parse_instruction(&inserting, &mut enc), Ok(None));
+            assert_eq!(decoder.parse_instruction(&mut enc), Ok(None));
         }
 
         buf.push(0b1000_0000);
         let mut enc = Cursor::new(&buf);
-        assert_eq!(parse_instruction(&inserting, &mut enc), Ok(None));
+        assert_eq!(decoder.parse_instruction(&mut enc), Ok(None));
     }
 
     #[test]
@@ -407,17 +418,17 @@ mod tests {
             .encode(&mut buf)
             .unwrap();
 
-        let mut table = build_table_with_size(0);
+        let mut decoder = Decoder::from(build_table_with_size(0));
         // cut in middle of the first int
         let mut enc = Cursor::new(&buf[..2]);
         let mut dec = vec![];
-        assert!(on_encoder_recv(&mut table, &mut enc, &mut dec).is_ok());
+        assert!(decoder.on_encoder_recv(&mut enc, &mut dec).is_ok());
         assert_eq!(enc.position(), 0);
 
         // cut the last byte of the 2nd string
         let mut enc = Cursor::new(&buf[..buf.len() - 1]);
         let mut dec = vec![];
-        assert!(on_encoder_recv(&mut table, &mut enc, &mut dec).is_ok());
+        assert!(decoder.on_encoder_recv(&mut enc, &mut dec).is_ok());
         assert_eq!(enc.position(), 0);
 
         InsertWithoutNameRef::new("keyfoobarbaz2", "value")
@@ -427,7 +438,7 @@ mod tests {
         // the first valid field is inserted and buf is left at the first byte of incomplete string
         let mut enc = Cursor::new(&buf[..buf.len() - 1]);
         let mut dec = vec![];
-        assert!(on_encoder_recv(&mut table, &mut enc, &mut dec).is_ok());
+        assert!(decoder.on_encoder_recv(&mut enc, &mut dec).is_ok());
         assert_eq!(enc.position(), 15);
 
         let mut dec_cursor = Cursor::new(&dec);
@@ -439,12 +450,12 @@ mod tests {
 
     #[test]
     fn largest_ref_too_big() {
-        let table = build_table_with_size(0);
+        let decoder = Decoder::from(build_table_with_size(0));
         let mut buf = vec![];
         HeaderPrefix::new(8, 8, 10, TABLE_SIZE).encode(&mut buf);
 
         let mut read = Cursor::new(&buf);
-        assert_eq!(decode_header(&table, &mut read), Err(Error::MissingRefs(8)));
+        assert_eq!(decoder.decode_header(&mut read), Err(Error::MissingRefs(8)));
     }
 
     fn field(n: usize) -> HeaderField {
@@ -470,7 +481,8 @@ mod tests {
         Indexed::Static(18).encode(&mut buf);
 
         let mut read = Cursor::new(&buf);
-        let (headers, had_refs) = decode_header(&build_table_with_size(2), &mut read).unwrap();
+        let decoder = Decoder::from(build_table_with_size(2));
+        let (headers, had_refs) = decoder.decode_header(&mut read).unwrap();
         assert!(had_refs);
         assert_eq!(
             headers,
@@ -499,7 +511,8 @@ mod tests {
         IndexedWithPostBase(1).encode(&mut buf);
 
         let mut read = Cursor::new(&buf);
-        let (headers, had_refs) = decode_header(&build_table_with_size(4), &mut read).unwrap();
+        let decoder = Decoder::from(build_table_with_size(4));
+        let (headers, had_refs) = decoder.decode_header(&mut read).unwrap();
         assert!(had_refs);
         assert_eq!(headers, &[field(2), field(3), field(4)])
     }
@@ -516,7 +529,8 @@ mod tests {
             .unwrap();
 
         let mut read = Cursor::new(&buf);
-        let (headers, had_refs) = decode_header(&build_table_with_size(4), &mut read).unwrap();
+        let decoder = Decoder::from(build_table_with_size(4));
+        let (headers, had_refs) = decoder.decode_header(&mut read).unwrap();
         assert!(had_refs);
         assert_eq!(
             headers,
@@ -536,7 +550,8 @@ mod tests {
             .unwrap();
 
         let mut read = Cursor::new(&buf);
-        let (headers, _) = decode_header(&build_table_with_size(4), &mut read).unwrap();
+        let decoder = Decoder::from(build_table_with_size(4));
+        let (headers, _) = decoder.decode_header(&mut read).unwrap();
         assert_eq!(headers, &[field(3).with_value("new bar3")]);
     }
 
@@ -547,8 +562,8 @@ mod tests {
         Literal::new("foo", "bar").encode(&mut buf).unwrap();
 
         let mut read = Cursor::new(&buf);
-        let table = build_table_with_size(0);
-        let (headers, _) = decode_header(&table, &mut read).unwrap();
+        let decoder = Decoder::from(build_table_with_size(0));
+        let (headers, _) = decoder.decode_header(&mut read).unwrap();
         assert_eq!(
             headers,
             &[HeaderField::new(b"foo".to_vec(), b"bar".to_vec())]
@@ -577,7 +592,8 @@ mod tests {
         IndexedWithPostBase(3).encode(&mut buf);
 
         let mut read = Cursor::new(&buf);
-        let (headers, _) = decode_header(&build_table_with_size(4), &mut read).unwrap();
+        let decoder = Decoder::from(build_table_with_size(4));
+        let (headers, _) = decoder.decode_header(&mut read).unwrap();
         assert_eq!(headers, &[field(1), field(2), field(3), field(4)]);
     }
 
@@ -599,8 +615,8 @@ mod tests {
         Indexed::Dynamic(10).encode(&mut buf);
 
         let mut read = Cursor::new(&buf);
-        let (headers, _) =
-            decode_header(&build_table_with_size(max_entries + 10), &mut read).expect("decode");
+        let decoder = Decoder::from(build_table_with_size(max_entries + 10));
+        let (headers, _) = decoder.decode_header(&mut read).expect("decode");
         assert_eq!(headers, &[field(max_entries - 5)]);
 
         let mut buf = vec![];
@@ -617,7 +633,8 @@ mod tests {
         IndexedWithPostBase(4).encode(&mut buf);
 
         let mut read = Cursor::new(&buf);
-        let (headers, _) = decode_header(&table, &mut read).unwrap();
+        let decoder = Decoder::from(table);
+        let (headers, _) = decoder.decode_header(&mut read).unwrap();
         assert_eq!(headers, &[field(max_entries + 6), field(max_entries + 10)]);
     }
 }

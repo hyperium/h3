@@ -1,10 +1,8 @@
-use crate::qpack::{
-    decode_header, on_encoder_recv, DecoderError, DynamicTable, Encoder, HeaderField,
-};
+use crate::qpack::{dynamic::DynamicTable, Decoder, DecoderError, Encoder, HeaderField};
 use std::io::Cursor;
 
 pub mod helpers {
-    use crate::qpack::{DynamicTable, HeaderField};
+    use crate::qpack::{dynamic::DynamicTable, HeaderField};
 
     pub const TABLE_SIZE: usize = 4096;
 
@@ -33,7 +31,7 @@ pub mod helpers {
 #[test]
 fn codec_basic_get() {
     let mut encoder = Encoder::new();
-    let mut dec_table = DynamicTable::new();
+    let mut decoder = Decoder::from(DynamicTable::new());
 
     let mut block_buf = vec![];
     let mut enc_buf = vec![];
@@ -50,10 +48,10 @@ fn codec_basic_get() {
         .unwrap();
 
     let mut enc_cur = Cursor::new(&mut enc_buf);
-    on_encoder_recv(&mut dec_table, &mut enc_cur, &mut dec_buf).unwrap();
+    decoder.on_encoder_recv(&mut enc_cur, &mut dec_buf).unwrap();
 
     let mut block_cur = Cursor::new(&mut block_buf);
-    let (decoded, _) = decode_header(&dec_table, &mut block_cur).unwrap();
+    let (decoded, _) = decoder.decode_header(&mut block_cur).unwrap();
     assert_eq!(decoded, header);
 
     let mut dec_cur = Cursor::new(&mut dec_buf);
@@ -70,6 +68,7 @@ fn blocked_header() {
     let mut dec_table = DynamicTable::new();
     dec_table.set_max_size(TABLE_SIZE).unwrap();
     dec_table.set_max_blocked(100).unwrap();
+    let decoder = Decoder::from(dec_table);
 
     let mut block_buf = vec![];
     let mut enc_buf = vec![];
@@ -85,7 +84,7 @@ fn blocked_header() {
 
     let mut block_cur = Cursor::new(&mut block_buf);
     assert_eq!(
-        decode_header(&dec_table, &mut block_cur),
+        decoder.decode_header(&mut block_cur),
         Err(DecoderError::MissingRefs(1))
     );
 }
@@ -109,16 +108,17 @@ fn codec_table_size_0() {
     enc_table.set_max_size(0).unwrap();
 
     let mut encoder = Encoder::from(enc_table);
+    let mut decoder = Decoder::from(dec_table);
 
     encoder
         .encode(42, &mut block_buf, &mut enc_buf, header.clone().into_iter())
         .unwrap();
 
     let mut enc_cur = Cursor::new(&mut enc_buf);
-    on_encoder_recv(&mut dec_table, &mut enc_cur, &mut dec_buf).unwrap();
+    decoder.on_encoder_recv(&mut enc_cur, &mut dec_buf).unwrap();
 
     let mut block_cur = Cursor::new(&mut block_buf);
-    let (decoded, _) = decode_header(&dec_table, &mut block_cur).unwrap();
+    let (decoded, _) = decoder.decode_header(&mut block_cur).unwrap();
     assert_eq!(decoded, header);
 
     let mut dec_cur = Cursor::new(&mut dec_buf);
@@ -143,6 +143,7 @@ fn codec_table_full() {
     enc_table.set_max_size(42).unwrap();
 
     let mut encoder = Encoder::from(enc_table);
+    let mut decoder = Decoder::from(dec_table);
 
     encoder
         .encode(42, &mut block_buf, &mut enc_buf, header.clone().into_iter())
@@ -151,8 +152,8 @@ fn codec_table_full() {
     let mut enc_cur = Cursor::new(&mut enc_buf);
     let mut block_cur = Cursor::new(&mut block_buf);
 
-    on_encoder_recv(&mut dec_table, &mut enc_cur, &mut dec_buf).unwrap();
-    let (decoded, _) = decode_header(&dec_table, &mut block_cur).unwrap();
+    decoder.on_encoder_recv(&mut enc_cur, &mut dec_buf).unwrap();
+    let (decoded, _) = decoder.decode_header(&mut block_cur).unwrap();
     assert_eq!(decoded, header);
 
     let mut dec_cur = Cursor::new(&mut dec_buf);
