@@ -20,10 +20,9 @@ pub mod helpers {
         table.set_max_size(TABLE_SIZE).unwrap();
         table.set_max_blocked(100).unwrap();
 
-        let mut inserter = table.inserter();
         for i in 0..n_field {
-            inserter
-                .put_field(HeaderField::new(format!("foo{}", i + 1), "bar"))
+            table
+                .put(HeaderField::new(format!("foo{}", i + 1), "bar"))
                 .unwrap();
         }
 
@@ -51,7 +50,7 @@ fn codec_basic_get() {
         .unwrap();
 
     let mut enc_cur = Cursor::new(&mut enc_buf);
-    on_encoder_recv(&mut dec_table.inserter(), &mut enc_cur, &mut dec_buf).unwrap();
+    on_encoder_recv(&mut dec_table, &mut enc_cur, &mut dec_buf).unwrap();
 
     let mut block_cur = Cursor::new(&mut block_buf);
     let (decoded, _) = decode_header(&dec_table, &mut block_cur).unwrap();
@@ -116,7 +115,7 @@ fn codec_table_size_0() {
         .unwrap();
 
     let mut enc_cur = Cursor::new(&mut enc_buf);
-    on_encoder_recv(&mut dec_table.inserter(), &mut enc_cur, &mut dec_buf).unwrap();
+    on_encoder_recv(&mut dec_table, &mut enc_cur, &mut dec_buf).unwrap();
 
     let mut block_cur = Cursor::new(&mut block_buf);
     let (decoded, _) = decode_header(&dec_table, &mut block_cur).unwrap();
@@ -152,7 +151,7 @@ fn codec_table_full() {
     let mut enc_cur = Cursor::new(&mut enc_buf);
     let mut block_cur = Cursor::new(&mut block_buf);
 
-    on_encoder_recv(&mut dec_table.inserter(), &mut enc_cur, &mut dec_buf).unwrap();
+    on_encoder_recv(&mut dec_table, &mut enc_cur, &mut dec_buf).unwrap();
     let (decoded, _) = decode_header(&dec_table, &mut block_cur).unwrap();
     assert_eq!(decoded, header);
 

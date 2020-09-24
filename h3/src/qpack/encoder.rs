@@ -274,7 +274,7 @@ mod tests {
         check: &dyn Fn(&mut Cursor<&mut Vec<u8>>, &mut Cursor<&mut Vec<u8>>),
     ) {
         for field in init_fields {
-            table.inserter().put_field(field.clone()).unwrap();
+            table.put(field.clone()).unwrap();
         }
 
         let mut encoder = Vec::new();
@@ -430,8 +430,7 @@ mod tests {
 
         for idx in 1..5 {
             table
-                .inserter()
-                .put_field(HeaderField::new(
+                .put(HeaderField::new(
                     format!("foo{}", idx),
                     format!("bar{}", idx),
                 ))

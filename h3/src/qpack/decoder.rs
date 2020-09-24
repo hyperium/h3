@@ -5,7 +5,7 @@ use tracing::trace;
 
 use super::{
     static_::{Error as StaticError, StaticTable},
-    vas, DynamicTable, DynamicTableDecoder, DynamicTableError, DynamicTableInserter, HeaderField,
+    vas, DynamicTable, DynamicTableDecoder, DynamicTableError, HeaderField,
 };
 
 use super::{
@@ -102,7 +102,7 @@ fn parse_header_field<R: Buf>(
 
 // The receiving side of encoder stream
 pub fn on_encoder_recv<R: Buf, W: BufMut>(
-    table: &mut DynamicTableInserter,
+    table: &mut DynamicTable,
     read: &mut R,
     write: &mut W,
 ) -> Result<usize, Error> {
@@ -111,7 +111,7 @@ pub fn on_encoder_recv<R: Buf, W: BufMut>(
     while let Some(instruction) = parse_instruction(&table, read)? {
         trace!("instruction {:?}", instruction);
         match instruction {
-            Instruction::Insert(field) => table.put_field(field)?,
+            Instruction::Insert(field) => table.put(field)?,
             Instruction::TableSizeUpdate(size) => {
                 table.set_max_size(size)?;
             }
@@ -126,7 +126,7 @@ pub fn on_encoder_recv<R: Buf, W: BufMut>(
 }
 
 fn parse_instruction<R: Buf>(
-    table: &DynamicTableInserter,
+    table: &DynamicTable,
     read: &mut R,
 ) -> Result<Option<Instruction>, Error> {
     if read.remaining() < 1 {
@@ -249,7 +249,7 @@ mod tests {
         let mut table = build_table_with_size(0);
         let mut enc = Cursor::new(&buf);
         let mut dec = vec![];
-        assert!(on_encoder_recv(&mut table.inserter(), &mut enc, &mut dec).is_ok());
+        assert!(on_encoder_recv(&mut table, &mut enc, &mut dec).is_ok());
 
         assert_eq!(
             table.decoder(1).get_relative(0),
@@ -275,7 +275,7 @@ mod tests {
             .unwrap();
         let mut enc = Cursor::new(&buf);
         let mut table = build_table_with_size(0);
-        let res = on_encoder_recv(&mut table.inserter(), &mut enc, &mut vec![]);
+        let res = on_encoder_recv(&mut table, &mut enc, &mut vec![]);
         assert_eq!(res, Err(Error::InvalidStaticIndex(3000)));
     }
 
@@ -292,7 +292,7 @@ mod tests {
         let mut enc = Cursor::new(&buf);
         let mut dec = vec![];
         let mut table = build_table_with_size(0);
-        let res = on_encoder_recv(&mut table.inserter(), &mut enc, &mut dec);
+        let res = on_encoder_recv(&mut table, &mut enc, &mut dec);
         assert_eq!(
             res,
             Err(Error::DynamicTableError(
@@ -317,7 +317,7 @@ mod tests {
         let mut table = build_table_with_size(0);
         let mut enc = Cursor::new(&buf);
         let mut dec = vec![];
-        assert!(on_encoder_recv(&mut table.inserter(), &mut enc, &mut dec).is_ok());
+        assert!(on_encoder_recv(&mut table, &mut enc, &mut dec).is_ok());
 
         assert_eq!(
             table.decoder(1).get_relative(0),
@@ -332,9 +332,8 @@ mod tests {
     }
 
     fn insert_fields(table: &mut DynamicTable, fields: Vec<HeaderField>) {
-        let mut inserter = table.inserter();
         for field in fields {
-            inserter.put_field(field).unwrap();
+            table.put(field).unwrap();
         }
     }
 
@@ -356,7 +355,7 @@ mod tests {
 
         let mut enc = Cursor::new(&buf);
         let mut dec = vec![];
-        let res = on_encoder_recv(&mut table.inserter(), &mut enc, &mut dec);
+        let res = on_encoder_recv(&mut table, &mut enc, &mut dec);
         assert_eq!(res, Ok(3));
 
         let mut dec_cursor = Cursor::new(&dec);
@@ -378,7 +377,7 @@ mod tests {
         let mut enc = Cursor::new(&buf);
         let mut dec = vec![];
         let mut table = build_table_with_size(0);
-        let res = on_encoder_recv(&mut table.inserter(), &mut enc, &mut dec);
+        let res = on_encoder_recv(&mut table, &mut enc, &mut dec);
         assert_eq!(res, Ok(0));
 
         let actual_max_size = table.max_mem_size();
@@ -388,8 +387,8 @@ mod tests {
 
     #[test]
     fn enc_recv_buf_too_short() {
-        let mut table = build_table_with_size(0);
-        let inserting = table.inserter();
+        let table = build_table_with_size(0);
+        let inserting = table;
         let mut buf = vec![];
         {
             let mut enc = Cursor::new(&buf);
@@ -412,13 +411,13 @@ mod tests {
         // cut in middle of the first int
         let mut enc = Cursor::new(&buf[..2]);
         let mut dec = vec![];
-        assert!(on_encoder_recv(&mut table.inserter(), &mut enc, &mut dec).is_ok());
+        assert!(on_encoder_recv(&mut table, &mut enc, &mut dec).is_ok());
         assert_eq!(enc.position(), 0);
 
         // cut the last byte of the 2nd string
         let mut enc = Cursor::new(&buf[..buf.len() - 1]);
         let mut dec = vec![];
-        assert!(on_encoder_recv(&mut table.inserter(), &mut enc, &mut dec).is_ok());
+        assert!(on_encoder_recv(&mut table, &mut enc, &mut dec).is_ok());
         assert_eq!(enc.position(), 0);
 
         InsertWithoutNameRef::new("keyfoobarbaz2", "value")
@@ -428,7 +427,7 @@ mod tests {
         // the first valid field is inserted and buf is left at the first byte of incomplete string
         let mut enc = Cursor::new(&buf[..buf.len() - 1]);
         let mut dec = vec![];
-        assert!(on_encoder_recv(&mut table.inserter(), &mut enc, &mut dec).is_ok());
+        assert!(on_encoder_recv(&mut table, &mut enc, &mut dec).is_ok());
         assert_eq!(enc.position(), 15);
 
         let mut dec_cursor = Cursor::new(&dec);
