@@ -6,11 +6,49 @@ use super::{
     prefix_string::{self, Error as StringError},
 };
 
+// 4.3. Encoder Instructions
 pub enum EncoderInstruction {
-    InsertWithNameRef,
-    InsertWithoutNameRef,
-    Duplicate,
+    // 4.3.1. Set Dynamic Table Capacity
+    // An encoder informs the decoder of a change to the dynamic table capacity.
+    //   0   1   2   3   4   5   6   7
+    // +---+---+---+---+---+---+---+---+
+    // | 0 | 0 | 1 |   Capacity (5+)   |
+    // +---+---+---+-------------------+
     DynamicTableSizeUpdate,
+    // 4.3.2. Insert With Name Reference
+    // An encoder adds an entry to the dynamic table where the field name
+    // matches the field name of an entry stored in the static or the dynamic
+    // table.
+    //   0   1   2   3   4   5   6   7
+    // +---+---+---+---+---+---+---+---+
+    // | 1 | T |    Name Index (6+)    |
+    // +---+---+-----------------------+
+    // | H |     Value Length (7+)     |
+    // +---+---------------------------+
+    // |  Value String (Length bytes)  |
+    // +-------------------------------+
+    InsertWithNameRef,
+    // 4.3.3. Insert With Literal Name
+    // An encoder adds an entry to the dynamic table where both the field name
+    // and the field value are represented as string literals.
+    //   0   1   2   3   4   5   6   7
+    // +---+---+---+---+---+---+---+---+
+    // | 0 | 1 | H | Name Length (5+)  |
+    // +---+---+---+-------------------+
+    // |  Name String (Length bytes)   |
+    // +---+---------------------------+
+    // | H |     Value Length (7+)     |
+    // +---+---------------------------+
+    // |  Value String (Length bytes)  |
+    // +-------------------------------+
+    InsertWithoutNameRef,
+    // 4.3.4. Duplicate
+    // An encoder duplicates an existing entry in the dynamic table.
+    //   0   1   2   3   4   5   6   7
+    // +---+---+---+---+---+---+---+---+
+    // | 0 | 0 | 0 |    Index (5+)     |
+    // +---+---+---+-------------------+
+    Duplicate,
     Unknown,
 }
 
@@ -160,11 +198,35 @@ impl DynamicTableSizeUpdate {
     }
 }
 
+// 4.4. Decoder Instructions
+// A decoder sends decoder instructions on the decoder stream to inform the encoder
+// about the processing of field sections and table updates to ensure consistency
+// of the dynamic table.
 #[derive(Debug, PartialEq)]
 pub enum DecoderInstruction {
-    InsertCountIncrement,
+    // 4.4.1. Section Acknowledgement
+    // Acknowledge processing of an encoded field section whose declared Required
+    // Insert Count is not zero.
+    //   0   1   2   3   4   5   6   7
+    // +---+---+---+---+---+---+---+---+
+    // | 1 |      Stream ID (7+)       |
+    // +---+---------------------------+
     HeaderAck,
+    // 4.4.2. Stream Cancellation
+    // When a stream is reset or reading is abandoned.
+    //   0   1   2   3   4   5   6   7
+    // +---+---+---+---+---+---+---+---+
+    // | 0 | 1 |     Stream ID (6+)    |
+    // +---+---+-----------------------+
     StreamCancel,
+    //  4.4.3. Insert Count Increment
+    //  Increases the Known Received Count to the total number of dynamic table
+    //  insertions and duplications processed so far.
+    //   0   1   2   3   4   5   6   7
+    // +---+---+---+---+---+---+---+---+
+    // | 0 | 0 |     Increment (6+)    |
+    // +---+---+-----------------------+
+    InsertCountIncrement,
     Unknown,
 }
 

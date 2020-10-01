@@ -2,16 +2,68 @@ use bytes::{Buf, BufMut};
 
 use super::{parse_error::ParseError, prefix_int, prefix_string};
 
+// 4.5. Field Line Representations
+// Single header field line. These representations reference the static table or
+// the dynamic table in a particular state, but do not modify that state.
 pub enum HeaderBlockField {
+    // 4.5.2. Indexed Field Line
+    // Entry in the static table, or in the dynamic table with an absolute index
+    // less than the value of the Base.
+    //   0   1   2   3   4   5   6   7
+    // +---+---+---+---+---+---+---+---+
+    // | 1 | T |      Index (6+)       |
+    // +---+---+-----------------------+
     Indexed,
+    // 4.5.3. Indexed Field Line With Post-Base Index
+    // Entry in the dynamic table with an absolute index greater than or equal
+    // to the value of the Base.
+    //   0   1   2   3   4   5   6   7
+    // +---+---+---+---+---+---+---+---+
+    // | 0 | 0 | 0 | 1 |  Index (4+)   |
+    // +---+---+---+---+---------------+
     IndexedWithPostBase,
+    // 4.5.4. Literal Field Line With Name Reference
+    // Entry in the dynamic table with an absolute index greater than or equal
+    // to the value of the Base.
+    //   0   1   2   3   4   5   6   7
+    // +---+---+---+---+---+---+---+---+
+    // | 0 | 1 | N | T |Name Index (4+)|
+    // +---+---+---+---+---------------+
+    // | H |     Value Length (7+)     |
+    // +---+---------------------------+
+    // |  Value String (Length bytes)  |
+    // +-------------------------------+
     LiteralWithNameRef,
+    // 4.5.5. Literal Field Line With Post-Base Name Reference
+    // The field name matches a name of an entry in the static table, or in the
+    // dynamic table with an absolute index less than the value of the Base.
+    //   0   1   2   3   4   5   6   7
+    // +---+---+---+---+---+---+---+---+
+    // | 0 | 0 | 0 | 0 | N |NameIdx(3+)|
+    // +---+---+---+---+---+-----------+
+    // | H |     Value Length (7+)     |
+    // +---+---------------------------+
+    // |  Value String (Length bytes)  |
+    // +-------------------------------+
     LiteralWithPostBaseNameRef,
+    // 4.5.6. Literal Field Line With Literal Name
+    // Field name and field value are encoded as string literals.
+    //   0   1   2   3   4   5   6   7
+    // +---+---+---+---+---+---+---+---+
+    // | 0 | 0 | 1 | N | H |NameLen(3+)|
+    // +---+---+---+---+---+-----------+
+    // |  Name String (Length bytes)   |
+    // +---+---------------------------+
+    // | H |     Value Length (7+)     |
+    // +---+---------------------------+
+    // |  Value String (Length bytes)  |
+    // +-------------------------------+
     Literal,
     Unknown,
 }
 
 impl HeaderBlockField {
+    // Check how the next field is encoded according its first byte
     pub fn decode(first: u8) -> Self {
         if first & 0b1000_0000 != 0 {
             HeaderBlockField::Indexed
@@ -29,6 +81,7 @@ impl HeaderBlockField {
     }
 }
 
+// 4.5.1. Encoded Field Section Prefix
 #[derive(Debug, PartialEq)]
 pub struct HeaderPrefix {
     encoded_insert_count: usize,
@@ -79,6 +132,7 @@ impl HeaderPrefix {
             return Ok((0, 0));
         }
 
+        // 4.5.1.1. Required Insert Count
         let required = if self.encoded_insert_count == 0 {
             0
         } else {
@@ -111,6 +165,15 @@ impl HeaderPrefix {
         Ok((required, base))
     }
 
+    // 4.5.1. Encoded Field Section Prefix
+    //   0   1   2   3   4   5   6   7
+    // +---+---+---+---+---+---+---+---+
+    // |   Required Insert Count (8+)  |
+    // +---+---------------------------+
+    // | S |      Delta Base (7+)      |
+    // +---+---------------------------+
+    // |      Encoded Field Lines    ...
+    // +-------------------------------+
     pub fn decode<R: Buf>(buf: &mut R) -> Result<Self, ParseError> {
         let (_, encoded_insert_count) = prefix_int::decode(8, buf)?;
         let (sign_negative, delta_base) = prefix_int::decode(7, buf)?;
