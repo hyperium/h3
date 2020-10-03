@@ -1,6 +1,4 @@
 use std::{
-    borrow::Cow,
-    collections::HashMap,
     convert::TryFrom,
     iter::{IntoIterator, Iterator},
     str::FromStr,
@@ -11,7 +9,6 @@ use http::{
     uri::{self, Authority, Parts, PathAndQuery, Scheme, Uri},
     HeaderMap, Method, StatusCode,
 };
-use lazy_static::lazy_static;
 
 use crate::qpack::HeaderField;
 
@@ -210,23 +207,19 @@ impl Field {
             )));
         }
 
-        let pseudo = match PSEUDO_MAP.get(name) {
-            Some(pseudo) => pseudo,
-            None => return Err(Error::invalid_name(name)),
-        };
-
-        Ok(match pseudo {
-            PseudoType::SCHEME => Field::Scheme(try_value(name, value)?),
-            PseudoType::AUTHORITY => Field::Authority(try_value(name, value)?),
-            PseudoType::PATH => Field::Path(try_value(name, value)?),
-            PseudoType::METHOD => Field::Method(
+        Ok(match name {
+            b":scheme" => Field::Scheme(try_value(name, value)?),
+            b":authority" => Field::Authority(try_value(name, value)?),
+            b":path" => Field::Path(try_value(name, value)?),
+            b":method" => Field::Method(
                 Method::from_bytes(value.as_ref())
                     .or_else(|_| Err(Error::invalid_value(name, value)))?,
             ),
-            PseudoType::STATUS => Field::Status(
+            b":status" => Field::Status(
                 StatusCode::from_bytes(value.as_ref())
                     .or_else(|_| Err(Error::invalid_value(name, value)))?,
             ),
+            _ => return Err(Error::invalid_name(name)),
         })
     }
 }
@@ -310,31 +303,6 @@ impl Pseudo {
         self.len
     }
 }
-
-macro_rules! pseudo_type {
-    (
-        $(
-            ($name:ident, $val:expr),
-        )+
-    ) => {
-        #[derive(Clone)]
-        enum PseudoType { $($name,)* }
-
-        lazy_static! {
-            static ref PSEUDO_MAP: HashMap<Cow<'static, [u8]>, PseudoType> = [
-                $((Cow::Borrowed(&$val[..]), PseudoType::$name),)+
-            ].iter().map(|(n, v)| (n.clone(), v.clone())).collect();
-        }
-    }
-}
-
-pseudo_type![
-    (METHOD, b":method"),
-    (SCHEME, b":scheme"),
-    (AUTHORITY, b":authority"),
-    (PATH, b":path"),
-    (STATUS, b":status"),
-];
 
 #[derive(Debug)]
 pub enum Error {

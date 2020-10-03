@@ -1,6 +1,4 @@
-use std::{borrow::Cow, collections::HashMap};
-
-use lazy_static::lazy_static;
+use std::borrow::Cow;
 
 use super::field::HeaderField;
 
@@ -20,11 +18,171 @@ impl StaticTable {
     }
 
     pub fn find(field: &HeaderField) -> Option<usize> {
-        PREDEFINED_HEADERS_MAP.get(field).cloned()
+        match (&field.name[..], &field.value[..]) {
+            (b":authority", b"") => Some(0),
+            (b":path", b"/") => Some(1),
+            (b"age", b"0") => Some(2),
+            (b"content-disposition", b"") => Some(3),
+            (b"content-length", b"0") => Some(4),
+            (b"cookie", b"") => Some(5),
+            (b"date", b"") => Some(6),
+            (b"etag", b"") => Some(7),
+            (b"if-modified-since", b"") => Some(8),
+            (b"if-none-match", b"") => Some(9),
+            (b"last-modified", b"") => Some(10),
+            (b"link", b"") => Some(11),
+            (b"location", b"") => Some(12),
+            (b"referer", b"") => Some(13),
+            (b"set-cookie", b"") => Some(14),
+            (b":method", b"CONNECT") => Some(15),
+            (b":method", b"DELETE") => Some(16),
+            (b":method", b"GET") => Some(17),
+            (b":method", b"HEAD") => Some(18),
+            (b":method", b"OPTIONS") => Some(19),
+            (b":method", b"POST") => Some(20),
+            (b":method", b"PUT") => Some(21),
+            (b":scheme", b"http") => Some(22),
+            (b":scheme", b"https") => Some(23),
+            (b":status", b"103") => Some(24),
+            (b":status", b"200") => Some(25),
+            (b":status", b"304") => Some(26),
+            (b":status", b"404") => Some(27),
+            (b":status", b"503") => Some(28),
+            (b"accept", b"*/*") => Some(29),
+            (b"accept", b"application/dns-message") => Some(30),
+            (b"accept-encoding", b"gzip, deflate, br") => Some(31),
+            (b"accept-ranges", b"bytes") => Some(32),
+            (b"access-control-allow-headers", b"cache-control") => Some(33),
+            (b"access-control-allow-headers", b"content-type") => Some(34),
+            (b"access-control-allow-origin", b"*") => Some(35),
+            (b"cache-control", b"max-age=0") => Some(36),
+            (b"cache-control", b"max-age=2592000") => Some(37),
+            (b"cache-control", b"max-age=604800") => Some(38),
+            (b"cache-control", b"no-cache") => Some(39),
+            (b"cache-control", b"no-store") => Some(40),
+            (b"cache-control", b"public, max-age=31536000") => Some(41),
+            (b"content-encoding", b"br") => Some(42),
+            (b"content-encoding", b"gzip") => Some(43),
+            (b"content-type", b"application/dns-message") => Some(44),
+            (b"content-type", b"application/javascript") => Some(45),
+            (b"content-type", b"application/json") => Some(46),
+            (b"content-type", b"application/x-www-form-urlencoded") => Some(47),
+            (b"content-type", b"image/gif") => Some(48),
+            (b"content-type", b"image/jpeg") => Some(49),
+            (b"content-type", b"image/png") => Some(50),
+            (b"content-type", b"text/css") => Some(51),
+            (b"content-type", b"text/html; charset=utf-8") => Some(52),
+            (b"content-type", b"text/plain") => Some(53),
+            (b"content-type", b"text/plain;charset=utf-8") => Some(54),
+            (b"range", b"bytes=0-") => Some(55),
+            (b"strict-transport-security", b"max-age=31536000") => Some(56),
+            (b"strict-transport-security", b"max-age=31536000; includesubdomains") => Some(57),
+            (b"strict-transport-security", b"max-age=31536000; includesubdomains; preload") => {
+                Some(58)
+            }
+            (b"vary", b"accept-encoding") => Some(59),
+            (b"vary", b"origin") => Some(60),
+            (b"x-content-type-options", b"nosniff") => Some(61),
+            (b"x-xss-protection", b"1; mode=block") => Some(62),
+            (b":status", b"100") => Some(63),
+            (b":status", b"204") => Some(64),
+            (b":status", b"206") => Some(65),
+            (b":status", b"302") => Some(66),
+            (b":status", b"400") => Some(67),
+            (b":status", b"403") => Some(68),
+            (b":status", b"421") => Some(69),
+            (b":status", b"425") => Some(70),
+            (b":status", b"500") => Some(71),
+            (b"accept-language", b"") => Some(72),
+            (b"access-control-allow-credentials", b"FALSE") => Some(73),
+            (b"access-control-allow-credentials", b"TRUE") => Some(74),
+            (b"access-control-allow-headers", b"*") => Some(75),
+            (b"access-control-allow-methods", b"get") => Some(76),
+            (b"access-control-allow-methods", b"get, post, options") => Some(77),
+            (b"access-control-allow-methods", b"options") => Some(78),
+            (b"access-control-expose-headers", b"content-length") => Some(79),
+            (b"access-control-request-headers", b"content-type") => Some(80),
+            (b"access-control-request-method", b"get") => Some(81),
+            (b"access-control-request-method", b"post") => Some(82),
+            (b"alt-svc", b"clear") => Some(83),
+            (b"authorization", b"") => Some(84),
+            (
+                b"content-security-policy",
+                b"script-src 'none'; object-src 'none'; base-uri 'none'",
+            ) => Some(85),
+            (b"early-data", b"1") => Some(86),
+            (b"expect-ct", b"") => Some(87),
+            (b"forwarded", b"") => Some(88),
+            (b"if-range", b"") => Some(89),
+            (b"origin", b"") => Some(90),
+            (b"purpose", b"prefetch") => Some(91),
+            (b"server", b"") => Some(92),
+            (b"timing-allow-origin", b"*") => Some(93),
+            (b"upgrade-insecure-requests", b"1") => Some(94),
+            (b"user-agent", b"") => Some(95),
+            (b"x-forwarded-for", b"") => Some(96),
+            (b"x-frame-options", b"deny") => Some(97),
+            (b"x-frame-options", b"sameorigin") => Some(98),
+            _ => None,
+        }
     }
 
     pub fn find_name(name: &[u8]) -> Option<usize> {
-        PREDEFINED_HEADERS_NAME_MAP.get(name).cloned()
+        match name {
+            b":authority" => Some(0),
+            b":path" => Some(1),
+            b"age" => Some(2),
+            b"content-disposition" => Some(3),
+            b"content-length" => Some(4),
+            b"cookie" => Some(5),
+            b"date" => Some(6),
+            b"etag" => Some(7),
+            b"if-modified-since" => Some(8),
+            b"if-none-match" => Some(9),
+            b"last-modified" => Some(10),
+            b"link" => Some(11),
+            b"location" => Some(12),
+            b"referer" => Some(13),
+            b"set-cookie" => Some(14),
+            b":method" => Some(15),
+            b":scheme" => Some(22),
+            b":status" => Some(24),
+            b"accept" => Some(29),
+            b"accept-encoding" => Some(31),
+            b"accept-ranges" => Some(32),
+            b"access-control-allow-headers" => Some(33),
+            b"access-control-allow-origin" => Some(35),
+            b"cache-control" => Some(36),
+            b"content-encoding" => Some(42),
+            b"content-type" => Some(44),
+            b"range" => Some(55),
+            b"strict-transport-security" => Some(56),
+            b"vary" => Some(59),
+            b"x-content-type-options" => Some(61),
+            b"x-xss-protection" => Some(62),
+            b"accept-language" => Some(72),
+            b"access-control-allow-credentials" => Some(73),
+            b"access-control-allow-methods" => Some(76),
+            b"access-control-expose-headers" => Some(79),
+            b"access-control-request-headers" => Some(80),
+            b"access-control-request-method" => Some(81),
+            b"alt-svc" => Some(83),
+            b"authorization" => Some(84),
+            b"content-security-policy" => Some(85),
+            b"early-data" => Some(86),
+            b"expect-ct" => Some(87),
+            b"forwarded" => Some(88),
+            b"if-range" => Some(89),
+            b"origin" => Some(90),
+            b"purpose" => Some(91),
+            b"server" => Some(92),
+            b"timing-allow-origin" => Some(93),
+            b"upgrade-insecure-requests" => Some(94),
+            b"user-agent" => Some(95),
+            b"x-forwarded-for" => Some(96),
+            b"x-frame-options" => Some(97),
+            _ => None,
+        }
     }
 }
 
@@ -150,19 +308,6 @@ const PREDEFINED_HEADERS: [HeaderField; 99] = decl_fields![
     (b"x-frame-options", b"deny"),
     (b"x-frame-options", b"sameorigin")
 ];
-
-lazy_static! {
-    static ref PREDEFINED_HEADERS_NAME_MAP: HashMap<Cow<'static, [u8]>, usize> = PREDEFINED_HEADERS
-        .iter()
-        .enumerate()
-        .map(|(idx, field)| (field.name.clone(), idx))
-        .collect();
-    static ref PREDEFINED_HEADERS_MAP: HashMap<&'static HeaderField, usize> = PREDEFINED_HEADERS
-        .iter()
-        .enumerate()
-        .map(|(idx, field)| (field, idx))
-        .collect();
-}
 
 #[cfg(test)]
 mod tests {

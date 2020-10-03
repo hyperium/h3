@@ -911,7 +911,7 @@ mod tests {
         let field = HeaderField::new(":method", "Value-A");
         table.insert(field.clone()).unwrap();
 
-        assert_eq!(StaticTable::find_name(&field.name), Some(21));
+        assert_eq!(StaticTable::find_name(&field.name), Some(15));
         let mut encoder = table.encoder(STREAM_ID);
         assert_eq!(
             encoder.insert(&field),
@@ -925,7 +925,7 @@ mod tests {
             encoder.insert(&field.with_value("Value-B")),
             Ok(DynamicInsertionResult::InsertedWithStaticNameRef {
                 postbase: 1,
-                index: 21,
+                index: 15,
                 absolute: 3
             })
         );
