@@ -5,3 +5,5 @@ pub mod quic;
 #[allow(dead_code)]
 mod frame;
 mod proto;
+#[allow(dead_code)]
+mod qpack;

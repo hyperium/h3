@@ -2,6 +2,8 @@ use std::{convert::TryInto, fmt};
 
 use bytes::{Buf, BufMut};
 
+pub use super::coding::UnexpectedEnd;
+
 /// An integer less than 2^62
 ///
 /// Values of this type are suitable for encoding as QUIC variable-length integer.
@@ -64,6 +66,57 @@ impl VarInt {
     pub fn encoded_size(first: u8) -> usize {
         2usize.pow((first >> 6) as u32)
     }
+
+    pub fn decode<B: Buf>(r: &mut B) -> Result<Self, UnexpectedEnd> {
+        if !r.has_remaining() {
+            return Err(UnexpectedEnd(0));
+        }
+        let mut buf = [0; 8];
+        buf[0] = r.get_u8();
+        let tag = buf[0] >> 6;
+        buf[0] &= 0b0011_1111;
+        let x = match tag {
+            0b00 => u64::from(buf[0]),
+            0b01 => {
+                if r.remaining() < 1 {
+                    return Err(UnexpectedEnd(1));
+                }
+                r.copy_to_slice(&mut buf[1..2]);
+                u64::from(u16::from_be_bytes(buf[..2].try_into().unwrap()))
+            }
+            0b10 => {
+                if r.remaining() < 3 {
+                    return Err(UnexpectedEnd(2));
+                }
+                r.copy_to_slice(&mut buf[1..4]);
+                u64::from(u32::from_be_bytes(buf[..4].try_into().unwrap()))
+            }
+            0b11 => {
+                if r.remaining() < 7 {
+                    return Err(UnexpectedEnd(3));
+                }
+                r.copy_to_slice(&mut buf[1..8]);
+                u64::from_be_bytes(buf)
+            }
+            _ => unreachable!(),
+        };
+        Ok(VarInt(x))
+    }
+
+    pub fn encode<B: BufMut>(&self, w: &mut B) {
+        let x = self.0;
+        if x < 2u64.pow(6) {
+            w.put_u8(x as u8);
+        } else if x < 2u64.pow(14) {
+            w.put_u16(0b01 << 14 | x as u16);
+        } else if x < 2u64.pow(30) {
+            w.put_u32(0b10 << 30 | x as u32);
+        } else if x < 2u64.pow(62) {
+            w.put_u64(0b11 << 62 | x);
+        } else {
+            unreachable!("malformed VarInt")
+        }
+    }
 }
 
 impl From<VarInt> for u64 {
@@ -118,67 +171,6 @@ impl fmt::Display for VarInt {
     }
 }
 
-/// Error returned when constructing a `VarInt` from a value >= 2^62
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct VarIntBoundsExceeded;
-
-/// Error returned when decoding a VarInt that is not complete
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct UnexpectedEnd(pub(crate) usize);
-
-impl VarInt {
-    pub fn decode<B: Buf>(r: &mut B) -> Result<Self, UnexpectedEnd> {
-        if !r.has_remaining() {
-            return Err(UnexpectedEnd(1));
-        }
-        let mut buf = [0; 8];
-        buf[0] = r.get_u8();
-        let tag = buf[0] >> 6;
-        buf[0] &= 0b0011_1111;
-        let x = match tag {
-            0b00 => u64::from(buf[0]),
-            0b01 => {
-                if r.remaining() < 1 {
-                    return Err(UnexpectedEnd(1));
-                }
-                r.copy_to_slice(&mut buf[1..2]);
-                u64::from(u16::from_be_bytes(buf[..2].try_into().unwrap()))
-            }
-            0b10 => {
-                if r.remaining() < 3 {
-                    return Err(UnexpectedEnd(2));
-                }
-                r.copy_to_slice(&mut buf[1..4]);
-                u64::from(u32::from_be_bytes(buf[..4].try_into().unwrap()))
-            }
-            0b11 => {
-                if r.remaining() < 7 {
-                    return Err(UnexpectedEnd(3));
-                }
-                r.copy_to_slice(&mut buf[1..8]);
-                u64::from_be_bytes(buf)
-            }
-            _ => unreachable!(),
-        };
-        Ok(VarInt(x))
-    }
-
-    pub fn encode<B: BufMut>(&self, w: &mut B) {
-        let x = self.0;
-        if x < 2u64.pow(6) {
-            w.put_u8(x as u8);
-        } else if x < 2u64.pow(14) {
-            w.put_u16(0b01 << 14 | x as u16);
-        } else if x < 2u64.pow(30) {
-            w.put_u32(0b10 << 30 | x as u32);
-        } else if x < 2u64.pow(62) {
-            w.put_u64(0b11 << 62 | x);
-        } else {
-            unreachable!("malformed VarInt")
-        }
-    }
-}
-
 pub trait BufExt {
     fn get_var(&mut self) -> Result<u64, UnexpectedEnd>;
 }
@@ -198,3 +190,6 @@ impl<T: BufMut> BufMutExt for T {
         VarInt::from_u64(x).unwrap().encode(self);
     }
 }
+/// Error returned when constructing a `VarInt` from a value >= 2^62
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct VarIntBoundsExceeded;
