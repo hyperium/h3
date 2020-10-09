@@ -203,7 +203,7 @@ impl Field {
             return Ok(Field::Header((
                 HeaderName::from_bytes(name).map_err(|_| Error::invalid_name(name))?,
                 HeaderValue::from_bytes(value.as_ref())
-                    .or_else(|_| Err(Error::invalid_value(name, value)))?,
+                    .map_err(|_| Error::invalid_value(name, value))?,
             )));
         }
 
@@ -213,11 +213,11 @@ impl Field {
             b":path" => Field::Path(try_value(name, value)?),
             b":method" => Field::Method(
                 Method::from_bytes(value.as_ref())
-                    .or_else(|_| Err(Error::invalid_value(name, value)))?,
+                    .map_err(|_| Error::invalid_value(name, value))?,
             ),
             b":status" => Field::Status(
                 StatusCode::from_bytes(value.as_ref())
-                    .or_else(|_| Err(Error::invalid_value(name, value)))?,
+                    .map_err(|_| Error::invalid_value(name, value))?,
             ),
             _ => return Err(Error::invalid_name(name)),
         })
