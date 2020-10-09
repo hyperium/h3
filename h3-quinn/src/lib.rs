@@ -335,3 +335,71 @@ impl From<WriteError> for SendStreamError {
         Self::Write(e)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use h3::{client, server};
+    use quinn::{
+        Certificate, CertificateChain, ClientConfigBuilder, Endpoint, PrivateKey,
+        ServerConfigBuilder,
+    };
+    use rcgen;
+    use tokio;
+
+    #[tokio::test]
+    async fn connect() {
+        let (cert_chain, cert, key) = build_certs();
+        // Build client
+        let mut client_config = ClientConfigBuilder::default();
+        client_config.protocols(&[b"h3"]);
+        client_config.add_certificate_authority(cert).unwrap();
+
+        let mut client_endpoint_builder = Endpoint::builder();
+        client_endpoint_builder.default_client_config(client_config.build());
+        let (client_endpoint, _) = client_endpoint_builder
+            .bind(&"[::]:0".parse().unwrap())
+            .unwrap();
+
+        let client = async {
+            let conn = client_endpoint
+                .connect(&"[::1]:4433".parse().unwrap(), "localhost")
+                .unwrap()
+                .await
+                .unwrap();
+            client::Connection::new(Connection::new(conn))
+                .await
+                .unwrap();
+        };
+
+        // Build server
+        let mut server_config = ServerConfigBuilder::default();
+        server_config.protocols(&[b"h3"]);
+        server_config.certificate(cert_chain, key).unwrap();
+
+        let mut server_endpoint_builder = Endpoint::builder();
+        server_endpoint_builder.listen(server_config.build());
+
+        let (_, mut incoming) = server_endpoint_builder
+            .bind(&"[::]:4433".parse().unwrap())
+            .unwrap();
+
+        let server = async {
+            let conn = incoming.next().await.unwrap().await.unwrap();
+            server::Connection::builder()
+                .max_field_section_size(10 * 1024)
+                .build(Connection::new(conn))
+                .await
+                .unwrap();
+        };
+
+        tokio::join!(server, client);
+    }
+
+    pub fn build_certs() -> (CertificateChain, Certificate, PrivateKey) {
+        let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+        let key = PrivateKey::from_der(&cert.serialize_private_key_der()).unwrap();
+        let cert = Certificate::from_der(&cert.serialize_der().unwrap()).unwrap();
+        (CertificateChain::from_certs(vec![cert.clone()]), cert, key)
+    }
+}

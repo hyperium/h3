@@ -10,3 +10,7 @@ bytes = "0.5"
 quinn = "0.6"
 quinn-proto = "0.6"
 futures = "0.3"
+
+[dev-dependencies]
+tokio = { version = "0.2", features = ["rt-threaded", "macros"]}
+rcgen = "0.7.0"
