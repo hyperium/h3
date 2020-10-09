@@ -21,7 +21,7 @@ pub trait Connection<B: Buf> {
     /// stream.
     type BidiStream: SendStream<B> + RecvStream;
     /// The error type that can be returned when accepting or opening a stream.
-    type Error;
+    type Error: Into<Box<dyn std::error::Error + Send + Sync>>;
 
     // Accepting streams
 
@@ -59,7 +59,7 @@ pub trait Connection<B: Buf> {
 /// A trait describing the "send" actions of a QUIC stream.
 pub trait SendStream<B: Buf> {
     /// The error type returned by fallible send methods.
-    type Error; // bounds?
+    type Error: Into<Box<dyn std::error::Error + Send + Sync>>;
 
     /// Polls if the stream can send more data.
     fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>>;

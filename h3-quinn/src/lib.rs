@@ -316,10 +316,18 @@ where
     }
 }
 
-// TODO bound to stdError ?
+#[derive(Debug)]
 pub enum SendStreamError {
     Write(WriteError),
     NotReady,
+}
+
+impl std::error::Error for SendStreamError {}
+
+impl Display for SendStreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 impl From<WriteError> for SendStreamError {
