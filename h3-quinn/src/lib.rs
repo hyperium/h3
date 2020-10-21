@@ -17,7 +17,7 @@ use quinn::{
 };
 use quinn_proto::crypto::Session;
 
-use h3::quic;
+use h3::quic::{self, SendStream as _};
 
 pub struct Connection<S: Session> {
     conn: quinn::generic::Connection<S>,
@@ -129,6 +129,10 @@ where
     fn split(self) -> (Self::SendStream, Self::RecvStream) {
         (self.send, self.recv)
     }
+
+    fn id(&self) -> u64 {
+        self.send.id()
+    }
 }
 
 impl<B, S> quic::RecvStream for BidiStream<B, S>
@@ -172,6 +176,10 @@ where
 
     fn send_data(&mut self, data: B) -> Result<(), Self::Error> {
         self.send.send_data(data)
+    }
+
+    fn id(&self) -> u64 {
+        self.send.id()
     }
 }
 
@@ -313,6 +321,10 @@ where
         }
         self.writing = Some(data);
         Ok(())
+    }
+
+    fn id(&self) -> u64 {
+        self.stream.id().0
     }
 }
 
