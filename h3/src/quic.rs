@@ -72,6 +72,9 @@ pub trait SendStream<B: Buf> {
 
     /// Send a QUIC reset code.
     fn reset(&mut self, reset_code: u64);
+
+    /// Get QUIC send stream id
+    fn id(&self) -> u64;
 }
 
 /// A trait describing the "receive" actions of a QUIC stream.
@@ -103,4 +106,7 @@ pub trait BidiStream<B: Buf>: SendStream<B> + RecvStream {
 
     /// Split this stream into two halves.
     fn split(self) -> (Self::SendStream, Self::RecvStream);
+
+    /// Get QUIC send stream id
+    fn id(&self) -> u64;
 }
