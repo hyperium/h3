@@ -17,4 +17,11 @@ mod qpack;
 #[derive(Debug)]
 pub enum Error {
     Io(Box<dyn std::error::Error + Send + Sync>),
+    Qpack(qpack::Error),
+}
+
+impl From<qpack::EncoderError> for Error {
+    fn from(e: qpack::EncoderError) -> Self {
+        Error::Qpack(qpack::Error::Encoder(e))
+    }
 }
