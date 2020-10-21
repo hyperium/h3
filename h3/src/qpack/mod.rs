@@ -1,7 +1,7 @@
 pub use self::{
     decoder::{ack_header, stream_canceled, Decoder, Error as DecoderError},
     dynamic::Error as DynamicTableError,
-    encoder::Encoder,
+    encoder::{Encoder, Error as EncoderError},
     field::HeaderField,
 };
 
@@ -21,3 +21,9 @@ mod prefix_string;
 
 #[cfg(test)]
 mod tests;
+
+#[derive(Debug)]
+pub enum Error {
+    Encoder(EncoderError),
+    Decoder(DecoderError),
+}
