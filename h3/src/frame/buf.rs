@@ -20,11 +20,6 @@ impl<T: Buf> BufList<T> {
         self.bufs.push_back(buf);
     }
 
-    #[inline]
-    pub(crate) fn bufs_cnt(&self) -> usize {
-        self.bufs.len()
-    }
-
     pub fn cursor(&self) -> Cursor<T> {
         Cursor {
             buf: &self,
