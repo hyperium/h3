@@ -172,6 +172,27 @@ impl Encoder {
     }
 }
 
+pub fn encode_stateless<W, T, H>(block: &mut W, fields: T) -> Result<(), Error>
+where
+    W: BufMut,
+    T: IntoIterator<Item = H>,
+    H: AsRef<HeaderField>,
+{
+    HeaderPrefix::new(0, 0, 0, 0).encode(block);
+    for field in fields {
+        let field = field.as_ref();
+
+        if let Some(index) = StaticTable::find(field) {
+            Indexed::Static(index).encode(block);
+        } else if let Some(index) = StaticTable::find_name(&field.name) {
+            LiteralWithNameRef::new_static(index, field.value.clone()).encode(block)?;
+        } else {
+            Literal::new(field.name.clone(), field.value.clone()).encode(block)?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 impl From<DynamicTable> for Encoder {
     fn from(table: DynamicTable) -> Encoder {

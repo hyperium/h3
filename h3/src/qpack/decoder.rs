@@ -169,6 +169,41 @@ impl Decoder {
     }
 }
 
+// Decode a header bloc received on Request or Push stream. (draft: 4.5)
+pub fn decode_stateless<T: Buf>(buf: &mut T) -> Result<Vec<HeaderField>, Error> {
+    let (required_ref, _base) = HeaderPrefix::decode(buf)?.get(0, 0)?;
+
+    if required_ref > 0 {
+        return Err(Error::MissingRefs(required_ref));
+    }
+
+    let mut fields = Vec::new();
+    while buf.has_remaining() {
+        let field = match HeaderBlockField::decode(buf.bytes()[0]) {
+            HeaderBlockField::IndexedWithPostBase => return Err(Error::MissingRefs(0)),
+            HeaderBlockField::LiteralWithPostBaseNameRef => return Err(Error::MissingRefs(0)),
+            HeaderBlockField::Indexed => match Indexed::decode(buf)? {
+                Indexed::Static(index) => StaticTable::get(index)?.clone(),
+                Indexed::Dynamic(_) => return Err(Error::MissingRefs(0)),
+            },
+            HeaderBlockField::LiteralWithNameRef => match LiteralWithNameRef::decode(buf)? {
+                LiteralWithNameRef::Dynamic { .. } => return Err(Error::MissingRefs(0)),
+                LiteralWithNameRef::Static { index, value } => {
+                    StaticTable::get(index)?.with_value(value)
+                }
+            },
+            HeaderBlockField::Literal => {
+                let literal = Literal::decode(buf)?;
+                HeaderField::new(literal.name, literal.value)
+            }
+            _ => return Err(Error::UnknownPrefix),
+        };
+        fields.push(field);
+    }
+
+    Ok(fields)
+}
+
 #[cfg(test)]
 impl From<DynamicTable> for Decoder {
     fn from(table: DynamicTable) -> Self {
