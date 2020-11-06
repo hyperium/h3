@@ -21,10 +21,14 @@ pub struct Header {
 
 #[allow(clippy::len_without_is_empty)]
 impl Header {
-    pub fn request(method: Method, uri: Uri, fields: HeaderMap) -> Self {
-        Self {
-            pseudo: Pseudo::request(method, uri),
-            fields,
+    pub fn request(method: Method, uri: Uri, fields: HeaderMap) -> Result<Self, Error> {
+        match (uri.authority(), fields.get("host")) {
+            (None, None) => Err(Error::MissingAuthority),
+            (Some(a), Some(h)) if a.as_str() != h => Err(Error::ContradictedAuthority),
+            _ => Ok(Self {
+                pseudo: Pseudo::request(method, uri),
+                fields,
+            }),
         }
     }
 
