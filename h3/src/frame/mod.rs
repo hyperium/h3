@@ -6,30 +6,31 @@ use std::{
 };
 
 use bytes::{Buf, Bytes, BytesMut};
+use futures::future;
 
 use crate::{
     proto::{
         frame::{self, Frame},
         ErrorCode,
     },
-    quic::RecvStream,
+    quic::{BidiStream, RecvStream, SendStream},
 };
 use buf::BufList;
 
-pub struct FrameStream<R: RecvStream> {
-    recv: R,
-    bufs: BufList<Bytes>,
+pub struct FrameStream<S>
+where
+    S: RecvStream,
+{
+    stream: S,
+    bufs: BufList<S::Buf>,
     decoder: FrameDecoder,
     remaining_data: u64,
 }
 
-impl<R> FrameStream<R>
-where
-    R: RecvStream<Buf = Bytes>,
-{
-    pub fn new(recv: R) -> Self {
+impl<S: RecvStream> FrameStream<S> {
+    pub fn new(stream: S) -> Self {
         Self {
-            recv,
+            stream,
             bufs: BufList::new(),
             decoder: FrameDecoder::default(),
             remaining_data: 0,
@@ -101,11 +102,11 @@ where
     }
 
     pub fn reset(&mut self, error_code: ErrorCode) {
-        let _ = self.recv.stop_sending(error_code.0.into());
+        let _ = self.stream.stop_sending(error_code.0.into());
     }
 
     fn try_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<bool, Error>> {
-        match self.recv.poll_data(cx) {
+        match self.stream.poll_data(cx) {
             Poll::Ready(Err(e)) => Poll::Ready(Err(Error::Quic(e.into()))),
             Poll::Pending => Poll::Pending,
             Poll::Ready(Ok(None)) => Poll::Ready(Ok(true)),
@@ -114,6 +115,53 @@ where
                 Poll::Ready(Ok(false))
             }
         }
+    }
+}
+
+// TODO make this a method?
+pub(crate) async fn write<S>(stream: &mut S, frame: Frame) -> Result<(), crate::Error>
+where
+    S: SendStream<Bytes>,
+{
+    let mut buf = BytesMut::new();
+    frame.encode(&mut buf);
+
+    stream
+        .send_data(buf.freeze())
+        .map_err(|e| crate::Error::Io(e.into()))?;
+
+    future::poll_fn(|cx| stream.poll_ready(cx))
+        .await
+        .map_err(|e| crate::Error::Io(e.into()))?;
+
+    Ok(())
+}
+
+impl<T, B> SendStream<B> for FrameStream<T>
+where
+    T: BidiStream<B>,
+    B: Buf,
+{
+    type Error = <T as SendStream<B>>::Error;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.stream.poll_ready(cx)
+    }
+
+    fn send_data(&mut self, data: B) -> Result<(), Self::Error> {
+        self.stream.send_data(data)
+    }
+
+    fn poll_finish(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.stream.poll_finish(cx)
+    }
+
+    fn reset(&mut self, reset_code: u64) {
+        self.stream.reset(reset_code)
+    }
+
+    fn id(&self) -> u64 {
+        BidiStream::id(&self.stream)
     }
 }
 
