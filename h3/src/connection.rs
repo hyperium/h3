@@ -6,7 +6,7 @@ use futures::future;
 use crate::{quic, Error};
 
 pub struct ConnectionInner<C: quic::Connection<Bytes>> {
-    quic: C,
+    pub(super) quic: C,
     max_field_section_size: u64,
     control_send: C::SendStream,
 }
