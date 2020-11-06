@@ -192,10 +192,8 @@ impl From<frame::Error> for Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::proto::frame;
 
     use std::collections::VecDeque;
-
     use assert_matches::assert_matches;
     use bytes::BufMut;
     use futures::future::poll_fn;
@@ -205,9 +203,7 @@ mod tests {
 
     #[test]
     fn one_frame() {
-        let frame = frame::Headers {
-            encoded: b"salut"[..].into(),
-        };
+        let frame = Frame::Headers(b"salut"[..].into());
 
         let mut buf = BytesMut::with_capacity(16);
         frame.encode(&mut buf);
@@ -219,9 +215,7 @@ mod tests {
 
     #[test]
     fn incomplete_frame() {
-        let frame = frame::Headers {
-            encoded: b"salut"[..].into(),
-        };
+        let frame = Frame::Headers(b"salut"[..].into());
 
         let mut buf = BytesMut::with_capacity(16);
         frame.encode(&mut buf);
@@ -234,9 +228,7 @@ mod tests {
 
     #[test]
     fn header_spread_multiple_buf() {
-        let frame = frame::Headers {
-            encoded: b"salut"[..].into(),
-        };
+        let frame = Frame::Headers(b"salut"[..].into());
 
         let mut buf = BytesMut::with_capacity(16);
         frame.encode(&mut buf);
@@ -252,9 +244,7 @@ mod tests {
     #[test]
     fn varint_spread_multiple_buf() {
         let payload = "salut".repeat(1024);
-        let frame = frame::Headers {
-            encoded: payload.into(),
-        };
+        let frame = Frame::Headers(payload.into());
 
         let mut buf = BytesMut::with_capacity(16);
         frame.encode(&mut buf);
@@ -270,16 +260,10 @@ mod tests {
     #[test]
     fn two_frames_then_incomplete() {
         let mut buf = BytesMut::with_capacity(64);
-        Frame::Headers(frame::Headers {
-            encoded: b"header"[..].into(),
-        })
-        .encode(&mut buf);
+        Frame::Headers(b"header"[..].into()).encode(&mut buf);
         Frame::Data { len: 4 }.encode(&mut buf);
         buf.put_slice(&b"body"[..]);
-        Frame::Headers(frame::Headers {
-            encoded: b"trailer"[..].into(),
-        })
-        .encode(&mut buf);
+        Frame::Headers(b"trailer"[..].into()).encode(&mut buf);
 
         buf.truncate(buf.len() - 1);
         let mut buf = BufList::from(buf);
@@ -312,16 +296,10 @@ mod tests {
         let mut recv = FakeRecv::default();
         let mut buf = BytesMut::with_capacity(64);
 
-        Frame::Headers(frame::Headers {
-            encoded: b"header"[..].into(),
-        })
-        .encode(&mut buf);
+        Frame::Headers(b"header"[..].into()).encode(&mut buf);
         Frame::Data { len: 4 }.encode(&mut buf);
         buf.put_slice(&b"body"[..]);
-        Frame::Headers(frame::Headers {
-            encoded: b"trailer"[..].into(),
-        })
-        .encode(&mut buf);
+        Frame::Headers(b"trailer"[..].into()).encode(&mut buf);
         recv.chunk(buf.freeze());
         let mut stream = FrameStream::new(recv);
 
@@ -348,10 +326,7 @@ mod tests {
         let mut recv = FakeRecv::default();
         let mut buf = BytesMut::with_capacity(64);
 
-        Frame::Headers(frame::Headers {
-            encoded: b"header"[..].into(),
-        })
-        .encode(&mut buf);
+        Frame::Headers(b"header"[..].into()).encode(&mut buf);
         let mut buf = buf.freeze();
         recv.chunk(buf.split_to(buf.len() - 1));
         let mut stream = FrameStream::new(recv);

@@ -22,7 +22,7 @@ pub enum Error {
 #[derive(Debug, PartialEq)]
 pub enum Frame {
     Data { len: u64 },
-    Headers(Headers),
+    Headers(Bytes),
     CancelPush(u64),
     Settings(Settings),
     PushPromise(PushPromise),
@@ -39,7 +39,11 @@ impl Frame {
                 FrameType::DATA.encode(buf);
                 buf.write_var(*len);
             }
-            Frame::Headers(f) => f.encode(buf),
+            Frame::Headers(f) => {
+                FrameType::HEADERS.encode(buf);
+                buf.write_var(f.len() as u64);
+                buf.put(f.bytes())
+            }
             Frame::Settings(f) => f.encode(buf),
             Frame::CancelPush(id) => simple_frame_encode(FrameType::CANCEL_PUSH, *id, buf),
             Frame::PushPromise(f) => f.encode(buf),
@@ -67,7 +71,7 @@ impl Frame {
 
         let mut payload = buf.take(len as usize);
         let frame = match ty {
-            FrameType::HEADERS => Ok(Frame::Headers(Headers::decode(&mut payload)?)),
+            FrameType::HEADERS => Ok(Frame::Headers(payload.to_bytes())),
             FrameType::SETTINGS => Ok(Frame::Settings(Settings::decode(&mut payload)?)),
             FrameType::CANCEL_PUSH => Ok(Frame::CancelPush(payload.get_var()?)),
             FrameType::PUSH_PROMISE => Ok(Frame::PushPromise(PushPromise::decode(&mut payload)?)),
@@ -155,41 +159,6 @@ pub(crate) trait FrameHeader {
     fn encode_header<T: BufMut>(&self, buf: &mut T) {
         Self::TYPE.encode(buf);
         buf.write_var(self.len() as u64);
-    }
-}
-
-pub(crate) trait IntoPayload {
-    fn into_payload(&mut self) -> &mut dyn Buf;
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Headers {
-    pub encoded: Bytes,
-}
-
-impl FrameHeader for Headers {
-    const TYPE: FrameType = FrameType::HEADERS;
-    fn len(&self) -> usize {
-        self.encoded.as_ref().len()
-    }
-}
-
-impl Headers {
-    fn decode<B: Buf>(buf: &mut B) -> Result<Self, UnexpectedEnd> {
-        Ok(Headers {
-            encoded: buf.to_bytes(),
-        })
-    }
-
-    pub fn encode<B: BufMut>(&self, buf: &mut B) {
-        self.encode_header(buf);
-        buf.put(self.encoded.clone());
-    }
-}
-
-impl IntoPayload for Headers {
-    fn into_payload(&mut self) -> &mut dyn Buf {
-        &mut self.encoded
     }
 }
 
@@ -443,9 +412,7 @@ mod tests {
     #[test]
     fn headers_frames() {
         codec_frame_check(
-            Frame::Headers(Headers {
-                encoded: Bytes::from("TODO QPACK"),
-            }),
+            Frame::Headers(Bytes::from("TODO QPACK")),
             &[1, 10, 84, 79, 68, 79, 32, 81, 80, 65, 67, 75],
         );
         codec_frame_check(
