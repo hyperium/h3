@@ -1,2 +1,2 @@
 [workspace]
-members = ["h3", "h3-quinn"]
+members = ["h3", "h3-quinn", "tests/h3-tests"]
