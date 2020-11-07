@@ -1,0 +1,17 @@
+[package]
+name = "h3-tests"
+version = "0.0.1"
+authors = [ "Jean-Christophe BEGUE <jc.begue@pm.me>" ]
+publish = false
+edition = "2018"
+
+[dependencies]
+h3 = { path = "../../h3" }
+h3-quinn = { path = "../../h3-quinn" }
+rcgen = { version = "0.7.0" }
+bytes = "0.5.6"
+futures = "0.3"
+http = "0.2.1"
+
+[dev-dependencies]
+tokio = { version = "0.2", features = ["rt-threaded", "macros"]}
