@@ -111,7 +111,21 @@ where
 
     /// Send some data on the response body.
     pub async fn send_data(&mut self, buf: Bytes) -> Result<(), Error> {
-        self.stream.send_data(buf).map_err(|e| Error::Io(e.into()))
+        frame::write(
+            &mut self.stream,
+            Frame::Data {
+                len: buf.len() as u64,
+            },
+        )
+        .await?;
+        self.stream
+            .send_data(buf)
+            .map_err(|e| Error::Io(e.into()))?;
+        future::poll_fn(|cx| self.stream.poll_ready(cx))
+            .await
+            .map_err(|e| Error::Io(e.into()))?;
+
+        Ok(())
     }
 
     /// Send a set of trailers to end the response.
@@ -126,6 +140,9 @@ where
 
     // Wait for all data to be sent and close the stream
     pub async fn finish(&mut self) -> Result<(), Error> {
+        future::poll_fn(|cx| self.stream.poll_ready(cx))
+            .await
+            .map_err(|e| Error::Io(e.into()))?;
         future::poll_fn(|cx| self.stream.poll_finish(cx))
             .await
             .map_err(|e| Error::Io(e.into()))
