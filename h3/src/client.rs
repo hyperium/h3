@@ -1,10 +1,9 @@
-use std::convert::TryFrom;
-use std::marker::PhantomData;
-
 use bytes::{Bytes, BytesMut};
 use futures::future;
-use http::{request, HeaderMap, Response};
+use http::{request, Response};
+use std::convert::TryFrom;
 
+use crate::connection::RequestStream;
 use crate::{
     connection::{Builder, ConnectionInner},
     frame::{self, FrameStream},
@@ -31,7 +30,7 @@ where
     pub async fn send_request(
         &mut self,
         req: http::Request<()>,
-    ) -> Result<RequestStream<FrameStream<C::BidiStream>, Bytes>, Error> {
+    ) -> Result<RequestStream<FrameStream<C::BidiStream>, Bytes, Connection<C>>, Error> {
         let (parts, _) = req.into_parts();
         let request::Parts {
             method,
@@ -50,11 +49,7 @@ where
 
         frame::write(&mut stream, Frame::Headers(block.freeze())).await?;
 
-        Ok(RequestStream {
-            stream: FrameStream::new(stream),
-            trailers: None,
-            _phantom: PhantomData,
-        })
+        Ok(RequestStream::new(FrameStream::new(stream)))
     }
 }
 
@@ -69,15 +64,10 @@ where
     }
 }
 
-pub struct RequestStream<S, B> {
-    stream: S,
-    trailers: Option<Bytes>,
-    _phantom: PhantomData<B>,
-}
-
-impl<S> RequestStream<FrameStream<S>, Bytes>
+impl<S, C> RequestStream<FrameStream<S>, Bytes, Connection<C>>
 where
     S: quic::RecvStream,
+    C: quic::Connection<Bytes>,
 {
     /// Receive response headers
     pub async fn recv_response(&mut self) -> Result<Response<()>, Error> {
@@ -96,80 +86,5 @@ where
         resp.headers_mut().replace(&mut fields);
 
         Ok(resp.body(()).map_err(|_| Error::Peer("invalid headers"))?)
-    }
-
-    /// Receive some of the request body.
-    pub async fn recv_data(&mut self) -> Result<Option<Bytes>, Error> {
-        match future::poll_fn(|cx| self.stream.poll_next(cx)).await? {
-            Some(Frame::Data { .. }) => (),
-            Some(Frame::Headers(encoded)) => {
-                self.trailers = Some(encoded);
-                return Ok(None);
-            }
-            Some(_) => return Err(Error::Peer("Unexpected frame type on request stream")),
-            None => return Ok(None),
-        }
-
-        Ok(future::poll_fn(|cx| self.stream.poll_data(cx)).await?)
-    }
-
-    /// Receive trailers
-    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
-        let mut trailers = if let Some(encoded) = self.trailers.take() {
-            encoded
-        } else {
-            match future::poll_fn(|cx| self.stream.poll_next(cx)).await? {
-                Some(Frame::Headers(encoded)) => encoded,
-                Some(_) => return Err(Error::Peer("Unexpected frame type on request stream")),
-                None => return Ok(None),
-            }
-        };
-
-        Ok(Some(
-            Header::try_from(qpack::decode_stateless(&mut trailers)?)?.into_fields(),
-        ))
-    }
-}
-
-impl<S> RequestStream<S, Bytes>
-where
-    S: quic::SendStream<Bytes>,
-{
-    /// Send some data on the response body.
-    pub async fn send_data(&mut self, buf: Bytes) -> Result<(), Error> {
-        frame::write(
-            &mut self.stream,
-            Frame::Data {
-                len: buf.len() as u64,
-            },
-        )
-        .await?;
-        self.stream
-            .send_data(buf)
-            .map_err(|e| Error::Io(e.into()))?;
-        future::poll_fn(|cx| self.stream.poll_ready(cx))
-            .await
-            .map_err(|e| Error::Io(e.into()))?;
-
-        Ok(())
-    }
-
-    /// Send a set of trailers to end the request.
-    pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
-        let mut block = BytesMut::new();
-        qpack::encode_stateless(&mut block, Header::trailer(trailers))?;
-
-        frame::write(&mut self.stream, Frame::Headers(block.freeze())).await?;
-
-        Ok(())
-    }
-
-    pub async fn finish(&mut self) -> Result<(), Error> {
-        future::poll_fn(|cx| self.stream.poll_ready(cx))
-            .await
-            .map_err(|e| Error::Io(e.into()))?;
-        future::poll_fn(|cx| self.stream.poll_finish(cx))
-            .await
-            .map_err(|e| Error::Io(e.into()))
     }
 }
