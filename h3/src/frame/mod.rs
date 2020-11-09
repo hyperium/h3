@@ -241,10 +241,10 @@ impl From<frame::Error> for Error {
 mod tests {
     use super::*;
 
-    use std::collections::VecDeque;
     use assert_matches::assert_matches;
     use bytes::BufMut;
     use futures::future::poll_fn;
+    use std::collections::VecDeque;
     use tokio;
 
     // Decoder
