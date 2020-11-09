@@ -67,6 +67,7 @@ where
                 .map_err(|_| Error::Peer("invalid headers"))?,
             RequestStream {
                 stream,
+                trailers: None,
                 _phantom: PhantomData,
             },
         )))
@@ -86,6 +87,7 @@ where
 
 pub struct RequestStream<S, B> {
     stream: S,
+    trailers: Option<Bytes>,
     _phantom: PhantomData<B>,
 }
 
@@ -155,6 +157,16 @@ where
 {
     /// Receive some of the request body.
     pub async fn recv_data(&mut self) -> Result<Option<Bytes>, Error> {
+        match future::poll_fn(|cx| self.stream.poll_next(cx)).await? {
+            Some(Frame::Data { .. }) => (),
+            Some(Frame::Headers(encoded)) => {
+                self.trailers = Some(encoded);
+                return Ok(None);
+            }
+            Some(_) => return Err(Error::Peer("Unexpected frame type on request stream")),
+            None => return Ok(None),
+        }
+
         Ok(future::poll_fn(|cx| self.stream.poll_data(cx)).await?)
     }
 

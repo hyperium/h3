@@ -52,6 +52,7 @@ where
 
         Ok(RequestStream {
             stream: FrameStream::new(stream),
+            trailers: None,
             _phantom: PhantomData,
         })
     }
@@ -70,6 +71,7 @@ where
 
 pub struct RequestStream<S, B> {
     stream: S,
+    trailers: Option<Bytes>,
     _phantom: PhantomData<B>,
 }
 
@@ -98,7 +100,34 @@ where
 
     /// Receive some of the request body.
     pub async fn recv_data(&mut self) -> Result<Option<Bytes>, Error> {
+        match future::poll_fn(|cx| self.stream.poll_next(cx)).await? {
+            Some(Frame::Data { .. }) => (),
+            Some(Frame::Headers(encoded)) => {
+                self.trailers = Some(encoded);
+                return Ok(None);
+            }
+            Some(_) => return Err(Error::Peer("Unexpected frame type on request stream")),
+            None => return Ok(None),
+        }
+
         Ok(future::poll_fn(|cx| self.stream.poll_data(cx)).await?)
+    }
+
+    /// Receive trailers
+    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
+        let mut trailers = if let Some(encoded) = self.trailers.take() {
+            encoded
+        } else {
+            match future::poll_fn(|cx| self.stream.poll_next(cx)).await? {
+                Some(Frame::Headers(encoded)) => encoded,
+                Some(_) => return Err(Error::Peer("Unexpected frame type on request stream")),
+                None => return Ok(None),
+            }
+        };
+
+        Ok(Some(
+            Header::try_from(qpack::decode_stateless(&mut trailers)?)?.into_fields(),
+        ))
     }
 }
 
@@ -136,6 +165,9 @@ where
     }
 
     pub async fn finish(&mut self) -> Result<(), Error> {
+        future::poll_fn(|cx| self.stream.poll_ready(cx))
+            .await
+            .map_err(|e| Error::Io(e.into()))?;
         future::poll_fn(|cx| self.stream.poll_finish(cx))
             .await
             .map_err(|e| Error::Io(e.into()))
