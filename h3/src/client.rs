@@ -108,10 +108,24 @@ where
 {
     /// Send some data on the response body.
     pub async fn send_data(&mut self, buf: Bytes) -> Result<(), Error> {
-        self.stream.send_data(buf).map_err(|e| Error::Io(e.into()))
+        frame::write(
+            &mut self.stream,
+            Frame::Data {
+                len: buf.len() as u64,
+            },
+        )
+        .await?;
+        self.stream
+            .send_data(buf)
+            .map_err(|e| Error::Io(e.into()))?;
+        future::poll_fn(|cx| self.stream.poll_ready(cx))
+            .await
+            .map_err(|e| Error::Io(e.into()))?;
+
+        Ok(())
     }
 
-    /// Send a set of trailers to end the response.
+    /// Send a set of trailers to end the request.
     pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
         let mut block = BytesMut::new();
         qpack::encode_stateless(&mut block, Header::trailer(trailers))?;
