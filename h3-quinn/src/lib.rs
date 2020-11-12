@@ -11,7 +11,7 @@ use std::{
 use futures::{ready, FutureExt, StreamExt};
 
 use bytes::{Buf, Bytes};
-use h3::quic::{self, SendStream as _};
+use h3::quic;
 pub use quinn;
 use quinn::{
     generic::{IncomingBiStreams, IncomingUniStreams, NewConnection, OpenBi, OpenUni},
@@ -128,10 +128,6 @@ where
 
     fn split(self) -> (Self::SendStream, Self::RecvStream) {
         (self.send, self.recv)
-    }
-
-    fn id(&self) -> u64 {
-        self.send.id()
     }
 }
 

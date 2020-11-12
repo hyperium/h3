@@ -106,7 +106,4 @@ pub trait BidiStream<B: Buf>: SendStream<B> + RecvStream {
 
     /// Split this stream into two halves.
     fn split(self) -> (Self::SendStream, Self::RecvStream);
-
-    /// Get QUIC send stream id
-    fn id(&self) -> u64;
 }
