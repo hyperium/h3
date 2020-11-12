@@ -161,7 +161,7 @@ where
     }
 
     fn id(&self) -> u64 {
-        BidiStream::id(&self.stream)
+        self.stream.id()
     }
 }
 
