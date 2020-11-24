@@ -2,6 +2,7 @@
 name = "h3"
 version = "0.0.0"
 authors = ["Sean McArthur <sean@seanmonstar.com>", "Jean-Christophe BEGUE <jc.begue@pm.me>"]
+license = "MIT"
 edition = "2018"
 
 [dependencies]
