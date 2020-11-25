@@ -10,3 +10,7 @@ bytes = "0.5"
 quinn = "0.6"
 quinn-proto = "0.6"
 futures = "0.3"
+
+[dev-dependencies]
+http = "0.2"
+tokio = { version = "0.2", features = ["full"] }
