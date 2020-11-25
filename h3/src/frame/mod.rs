@@ -7,6 +7,7 @@ use std::{
 
 use bytes::{Buf, Bytes, BytesMut};
 use futures::future;
+use tracing::trace;
 
 use crate::{
     proto::{
@@ -193,7 +194,8 @@ impl FrameDecoder {
         let (pos, decoded) = decode!(src, |cur| Frame::decode(cur));
 
         match decoded {
-            Err(frame::Error::UnknownFrame(_)) => {
+            Err(frame::Error::UnknownFrame(ty)) => {
+                trace!("ignore unknown frame {:?}", ty);
                 src.advance(pos);
                 self.expected = None;
                 Ok(None)

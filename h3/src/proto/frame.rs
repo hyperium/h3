@@ -29,7 +29,6 @@ pub enum Frame {
     Goaway(u64),
     MaxPushId(u64),
     DuplicatePush(u64),
-    Reserved,
 }
 
 impl Frame {
@@ -50,7 +49,6 @@ impl Frame {
             Frame::Goaway(id) => simple_frame_encode(FrameType::GOAWAY, *id, buf),
             Frame::MaxPushId(id) => simple_frame_encode(FrameType::MAX_PUSH_ID, *id, buf),
             Frame::DuplicatePush(id) => simple_frame_encode(FrameType::DUPLICATE_PUSH, *id, buf),
-            Frame::Reserved => (),
         }
     }
 
@@ -82,10 +80,6 @@ impl Frame {
             | FrameType::H2_PING
             | FrameType::H2_WINDOW_UPDATE
             | FrameType::H2_CONTINUATION => Err(Error::UnsupportedFrame(ty.0)),
-            t if t.0 > 0x21 && (t.0 - 0x21) % 0x1f == 0 => {
-                buf.advance(len as usize);
-                Ok(Frame::Reserved)
-            }
             _ => {
                 buf.advance(len as usize);
                 Err(Error::UnknownFrame(ty.0))
@@ -114,7 +108,6 @@ impl fmt::Display for Frame {
             Frame::Goaway(id) => write!(f, "GoAway({})", id),
             Frame::MaxPushId(id) => write!(f, "MaxPushId({})", id),
             Frame::DuplicatePush(id) => write!(f, "DuplicatePush({})", id),
-            Frame::Reserved => write!(f, "Reserved"),
         }
     }
 }
@@ -431,6 +424,6 @@ mod tests {
         raw.extend(&[6, 0, 255, 128, 0, 250, 218]);
         let mut buf = Cursor::new(&raw);
         let decoded = Frame::decode(&mut buf);
-        assert_eq!(decoded, Ok(Frame::Reserved));
+        assert_eq!(decoded, Err(Error::UnknownFrame(95)));
     }
 }
