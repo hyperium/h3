@@ -55,17 +55,15 @@ where
         };
 
         let fields = qpack::decode_stateless(&mut encoded)?;
-        let (method, uri, mut headers) = Header::try_from(fields)?.into_request_parts()?;
+        let (method, uri, headers) = Header::try_from(fields)?.into_request_parts()?;
 
-        let mut request_builder = http::Request::builder().method(method).uri(uri);
-        request_builder.headers_mut().replace(&mut headers);
+        let mut req = http::Request::new(());
+        *req.method_mut() = method;
+        *req.uri_mut() = uri;
+        *req.headers_mut() = headers;
+        *req.version_mut() = http::Version::HTTP_3;
 
-        Ok(Some((
-            request_builder
-                .body(())
-                .map_err(|_| Error::Peer("invalid headers"))?,
-            RequestStream::new(stream),
-        )))
+        Ok(Some((req, RequestStream::new(stream))))
     }
 }
 
