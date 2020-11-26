@@ -81,10 +81,12 @@ where
             return Err(Error::Peer("First response frame is not headers"));
         };
 
-        let (status, mut fields) = Header::try_from(fields)?.into_response_parts()?;
-        let mut resp = Response::builder().status(status);
-        resp.headers_mut().replace(&mut fields);
+        let (status, headers) = Header::try_from(fields)?.into_response_parts()?;
+        let mut resp = Response::new(());
+        *resp.status_mut() = status;
+        *resp.headers_mut() = headers;
+        *resp.version_mut() = http::Version::HTTP_3;
 
-        Ok(resp.body(()).map_err(|_| Error::Peer("invalid headers"))?)
+        Ok(resp)
     }
 }
