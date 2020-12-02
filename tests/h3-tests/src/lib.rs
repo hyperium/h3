@@ -11,6 +11,14 @@ use h3_quinn::{
     Connection,
 };
 
+pub fn init_tracing() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_span_events(tracing_subscriber::fmt::format::FmtSpan::FULL)
+        .with_test_writer()
+        .try_init();
+}
+
 #[derive(Clone)]
 pub struct Pair {
     port: u16,

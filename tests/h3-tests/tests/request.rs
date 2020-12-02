@@ -5,6 +5,7 @@ use h3_tests::Pair;
 
 #[tokio::test]
 async fn get() {
+    h3_tests::init_tracing();
     let mut pair = Pair::new();
     let mut server = pair.server();
 
@@ -54,6 +55,7 @@ async fn get() {
 
 #[tokio::test]
 async fn get_with_trailers_unknown_content_type() {
+    h3_tests::init_tracing();
     let mut pair = Pair::new();
     let mut server = pair.server();
 
@@ -113,6 +115,7 @@ async fn get_with_trailers_unknown_content_type() {
 
 #[tokio::test]
 async fn get_with_trailers_known_content_type() {
+    h3_tests::init_tracing();
     let mut pair = Pair::new();
     let mut server = pair.server();
 
@@ -172,6 +175,7 @@ async fn get_with_trailers_known_content_type() {
 
 #[tokio::test]
 async fn post() {
+    h3_tests::init_tracing();
     let mut pair = Pair::new();
     let mut server = pair.server();
 
