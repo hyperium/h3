@@ -1,11 +1,8 @@
 mod buf;
 
-use std::{
-    cmp,
-    task::{Context, Poll},
-};
+use std::task::{Context, Poll};
 
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{buf::BufExt, Buf, Bytes, BytesMut};
 use futures::future;
 use tracing::trace;
 
@@ -81,14 +78,12 @@ impl<S: RecvStream> FrameStream<S> {
             Poll::Ready(end) => end,
         };
 
-        let read_size = cmp::min(self.remaining_data as usize, self.bufs.remaining());
-        let mut data = BytesMut::with_capacity(read_size);
-        while data.len() < read_size {
-            let chunk = self.bufs.bytes();
-            let chunk_len = cmp::min(read_size, chunk.remaining());
-            data.extend_from_slice(&chunk[..chunk_len]);
-            self.bufs.advance(chunk_len);
-        }
+        // TODO: This to_bytes() makes a copy in most cases, but should be easily
+        // fixable with bytes 0.6.
+        let data = (&mut self.bufs)
+            .take(self.remaining_data as usize)
+            .to_bytes();
+        eprintln!("poll_data; data.len = {}", data.len());
 
         match (data.len(), end) {
             (0, true) => return Poll::Ready(Ok(None)),
@@ -99,11 +94,15 @@ impl<S: RecvStream> FrameStream<S> {
             (x, _) => self.remaining_data -= x as u64,
         };
 
-        Poll::Ready(Ok(Some(Bytes::from(data))))
+        Poll::Ready(Ok(Some(data)))
     }
 
     pub fn reset(&mut self, error_code: ErrorCode) {
         let _ = self.stream.stop_sending(error_code.0.into());
+    }
+
+    pub(crate) fn has_data(&self) -> bool {
+        self.remaining_data != 0
     }
 
     fn try_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<bool, Error>> {

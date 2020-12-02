@@ -2,7 +2,6 @@
 //!
 //! This module implements QUIC traits with Quinn.
 use std::{
-    collections::BTreeMap,
     error::Error,
     fmt::Display,
     task::{self, Poll},
@@ -10,7 +9,7 @@ use std::{
 
 use futures::{ready, FutureExt, StreamExt};
 
-use bytes::{Buf, Bytes};
+use bytes::{Buf, Bytes, BytesMut};
 use h3::quic;
 pub use quinn;
 use quinn::{
@@ -180,20 +179,20 @@ where
 }
 
 pub struct RecvStream<S: Session> {
+    buf: BytesMut,
     stream: quinn::generic::RecvStream<S>,
-    offset: u64,
-    chunks: BTreeMap<u64, Bytes>,
 }
 
 impl<S: Session> RecvStream<S> {
     fn new(stream: quinn::generic::RecvStream<S>) -> Self {
         Self {
+            buf: BytesMut::new(),
             stream,
-            offset: 0,
-            chunks: BTreeMap::new(),
         }
     }
 }
+
+const READ_BUF_SIZE: usize = 1024 * 4;
 
 impl<S: Session> quic::RecvStream for RecvStream<S> {
     type Buf = Bytes;
@@ -203,38 +202,17 @@ impl<S: Session> quic::RecvStream for RecvStream<S> {
         &mut self,
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Option<Self::Buf>, Self::Error>> {
-        let ret = match self.stream.read_unordered().poll_unpin(cx) {
-            Poll::Pending => Poll::Pending,
+        self.buf.resize(READ_BUF_SIZE, 0);
+
+        match self.stream.read(&mut self.buf).poll_unpin(cx) {
+            Poll::Ready(Ok(Some(n))) => {
+                let buf = self.buf.split_to(n).freeze();
+                Poll::Ready(Ok(Some(buf)))
+            }
             Poll::Ready(Ok(None)) => Poll::Ready(Ok(None)),
-            Poll::Ready(Err(e)) => return Poll::Ready(Err(e.into())),
-            // If we get the chunk we're looking for, return it right away
-            Poll::Ready(Ok(Some((mut chunk, offset)))) if offset <= self.offset => {
-                chunk.advance((self.offset - offset) as usize); // XXX overflow
-                self.offset += chunk.len() as u64;
-                return Poll::Ready(Ok(Some(chunk)));
-            }
-            // A chunk beyond current offset gets saved
-            Poll::Ready(Ok(Some((data, offset)))) => {
-                self.chunks.insert(offset, data);
-                Poll::Pending
-            }
-        };
-
-        // Nothing we've read can be yeilded, but we could have some chunk corresponding to `offset`
-        let chunk_key = self
-            .chunks
-            .keys()
-            .take_while(|x| **x <= self.offset)
-            .next()
-            .copied();
-        if let Some(offset) = chunk_key {
-            let mut chunk = self.chunks.remove(&offset).unwrap();
-            chunk.advance((self.offset - offset) as usize); // XXX overflow
-            self.offset += chunk.len() as u64;
-            return Poll::Ready(Ok(Some(chunk)));
-        };
-
-        ret
+            Poll::Ready(Err(e)) => Poll::Ready(Err(e.into())),
+            Poll::Pending => Poll::Pending,
+        }
     }
 
     fn stop_sending(&mut self, error_code: u64) {
