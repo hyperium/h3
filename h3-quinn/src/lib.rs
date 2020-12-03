@@ -206,11 +206,18 @@ impl<S: Session> quic::RecvStream for RecvStream<S> {
 
         match self.stream.read(&mut self.buf).poll_unpin(cx) {
             Poll::Ready(Ok(Some(n))) => {
+                eprintln!("stream read: {}", n);
                 let buf = self.buf.split_to(n).freeze();
                 Poll::Ready(Ok(Some(buf)))
             }
-            Poll::Ready(Ok(None)) => Poll::Ready(Ok(None)),
-            Poll::Ready(Err(e)) => Poll::Ready(Err(e.into())),
+            Poll::Ready(Ok(None)) => {
+                eprintln!("stream read: None");
+                Poll::Ready(Ok(None))
+            }
+            Poll::Ready(Err(e)) => {
+                eprintln!("stream read error: {:?}", e);
+                Poll::Ready(Err(e.into()))
+            }
             Poll::Pending => Poll::Pending,
         }
     }
