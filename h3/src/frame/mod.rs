@@ -23,6 +23,8 @@ where
     bufs: BufList<S::Buf>,
     decoder: FrameDecoder,
     remaining_data: u64,
+    /// Set to true when `stream` reaches the end.
+    is_eos: bool,
 }
 
 impl<S: RecvStream> FrameStream<S> {
@@ -32,6 +34,7 @@ impl<S: RecvStream> FrameStream<S> {
             bufs: BufList::new(),
             decoder: FrameDecoder::default(),
             remaining_data: 0,
+            is_eos: false,
         }
     }
 
@@ -83,7 +86,6 @@ impl<S: RecvStream> FrameStream<S> {
         let data = (&mut self.bufs)
             .take(self.remaining_data as usize)
             .to_bytes();
-        eprintln!("poll_data; data.len = {}", data.len());
 
         match (data.len(), end) {
             (0, true) => return Poll::Ready(Ok(None)),
@@ -106,10 +108,16 @@ impl<S: RecvStream> FrameStream<S> {
     }
 
     fn try_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<bool, Error>> {
+        if self.is_eos {
+            return Poll::Ready(Ok(true));
+        }
         match self.stream.poll_data(cx) {
             Poll::Ready(Err(e)) => Poll::Ready(Err(Error::Quic(e.into()))),
             Poll::Pending => Poll::Pending,
-            Poll::Ready(Ok(None)) => Poll::Ready(Ok(true)),
+            Poll::Ready(Ok(None)) => {
+                self.is_eos = true;
+                Poll::Ready(Ok(true))
+            }
             Poll::Ready(Ok(Some(d))) => {
                 self.bufs.push(d);
                 Poll::Ready(Ok(false))
