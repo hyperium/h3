@@ -11,7 +11,7 @@ use crate::{
         frame::{self, Frame},
         ErrorCode,
     },
-    quic::{BidiStream, RecvStream, SendStream},
+    quic::{RecvStream, SendStream},
 };
 use buf::BufList;
 
@@ -147,7 +147,7 @@ where
 
 impl<T, B> SendStream<B> for FrameStream<T>
 where
-    T: BidiStream<B>,
+    T: SendStream<B> + RecvStream,
     B: Buf,
 {
     type Error = <T as SendStream<B>>::Error;
