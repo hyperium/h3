@@ -19,7 +19,10 @@ pub trait Connection<B: Buf> {
     type RecvStream: RecvStream;
     /// The stream type returned when accepting or opening a bidirectional
     /// stream.
-    type BidiStream: BidiStream<B> + SendStream<B> + RecvStream;
+    ///
+    /// This type doesn't *have* to implement `BidiStream`, but if the
+    /// implementation is able to provide a cheap split, it can opt-in.
+    type BidiStream: SendStream<B> + RecvStream;
     /// The error type that can be returned when accepting or opening a stream.
     type Error: Into<Box<dyn std::error::Error + Send + Sync>>;
 
