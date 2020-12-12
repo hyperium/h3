@@ -188,34 +188,38 @@ macro_rules! decode {
 
 impl FrameDecoder {
     fn decode<B: Buf>(&mut self, src: &mut BufList<B>) -> Result<Option<Frame>, Error> {
-        if !src.has_remaining() {
-            return Ok(None);
-        }
-
-        if let Some(min) = self.expected {
-            if src.remaining() < min {
+        // Decode in a loop since we ignore unknown frames, and there may be
+        // other frames already in our BufList.
+        loop {
+            if !src.has_remaining() {
                 return Ok(None);
             }
-        }
 
-        let (pos, decoded) = decode!(src, |cur| Frame::decode(cur));
+            if let Some(min) = self.expected {
+                if src.remaining() < min {
+                    return Ok(None);
+                }
+            }
 
-        match decoded {
-            Err(frame::Error::UnknownFrame(ty)) => {
-                trace!("ignore unknown frame {:?}", ty);
-                src.advance(pos);
-                self.expected = None;
-                Ok(None)
-            }
-            Err(frame::Error::Incomplete(min)) => {
-                self.expected = Some(min);
-                Ok(None)
-            }
-            Err(e) => Err(e.into()),
-            Ok(frame) => {
-                src.advance(pos);
-                self.expected = None;
-                Ok(Some(frame))
+            let (pos, decoded) = decode!(src, |cur| Frame::decode(cur));
+
+            match decoded {
+                Err(frame::Error::UnknownFrame(ty)) => {
+                    trace!("ignore unknown frame type {:#x}", ty);
+                    src.advance(pos);
+                    self.expected = None;
+                    continue;
+                }
+                Err(frame::Error::Incomplete(min)) => {
+                    self.expected = Some(min);
+                    return Ok(None);
+                }
+                Err(e) => return Err(e.into()),
+                Ok(frame) => {
+                    src.advance(pos);
+                    self.expected = None;
+                    return Ok(Some(frame));
+                }
             }
         }
     }
@@ -456,6 +460,38 @@ mod tests {
         assert_poll_matches!(
             |mut cx| stream.poll_data(&mut cx),
             Err(Error::UnexpectedEnd)
+        );
+    }
+
+    #[tokio::test]
+    async fn poll_data_ignores_unknown_frames() {
+        use crate::proto::varint::BufMutExt as _;
+
+        let mut recv = FakeRecv::default();
+        let mut buf = BytesMut::with_capacity(64);
+
+        // grease a lil
+        crate::proto::frame::FrameType::RESERVED.encode(&mut buf);
+        buf.write_var(0);
+
+        // grease with some data
+        crate::proto::frame::FrameType::RESERVED.encode(&mut buf);
+        buf.write_var(6);
+        buf.put_slice(b"grease");
+
+        // Body
+        Frame::Data { len: 4 }.encode(&mut buf);
+        buf.put_slice(b"body");
+        recv.chunk(buf.freeze());
+        let mut stream = FrameStream::new(recv);
+
+        assert_poll_matches!(
+            |mut cx| stream.poll_next(&mut cx),
+            Ok(Some(Frame::Data { len: 4 }))
+        );
+        assert_poll_matches!(
+            |mut cx| stream.poll_data(&mut cx),
+            Ok(Some(b)) if &*b == b"body"
         );
     }
 
