@@ -138,10 +138,15 @@ frame_types! {
 pub(crate) struct FrameType(u64);
 
 impl FrameType {
+    #[cfg(test)]
+    pub(crate) const RESERVED: FrameType = FrameType(0x1f * 1337 + 0x21);
+}
+
+impl FrameType {
     fn decode<B: Buf>(buf: &mut B) -> Result<Self, UnexpectedEnd> {
         Ok(FrameType(buf.get_var()?))
     }
-    fn encode<B: BufMut>(&self, buf: &mut B) {
+    pub(crate) fn encode<B: BufMut>(&self, buf: &mut B) {
         buf.write_var(self.0);
     }
 }
