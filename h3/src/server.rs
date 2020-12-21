@@ -7,9 +7,10 @@ use crate::connection::RequestStream;
 use crate::frame;
 use crate::{
     connection::{Builder, ConnectionInner},
+    error::{Code, Error},
     frame::FrameStream,
     proto::{frame::Frame, headers::Header},
-    qpack, quic, Error,
+    qpack, quic,
 };
 
 pub struct Connection<C: quic::Connection<Bytes>> {
@@ -39,7 +40,7 @@ where
     > {
         let stream = future::poll_fn(|cx| self.inner.quic.poll_accept_bidi_stream(cx))
             .await
-            .map_err(|e| Error::Io(e.into()))?;
+            .map_err(|e| Error::transport(e))?;
 
         let mut stream = match stream {
             None => return Ok(None),
@@ -50,8 +51,16 @@ where
 
         let mut encoded = match frame {
             Some(Frame::Headers(h)) => h,
-            None => return Err(Error::Peer("request stream closed before headers")),
-            Some(_) => return Err(Error::Peer("first request frame is not headers")),
+            None => {
+                return Err(
+                    Code::H3_REQUEST_INCOMPLETE.with_reason("request stream closed before headers")
+                )
+            }
+            Some(_) => {
+                return Err(
+                    Code::H3_FRAME_UNEXPECTED.with_reason("first request frame is not headers")
+                )
+            }
         };
 
         let fields = qpack::decode_stateless(&mut encoded)?;

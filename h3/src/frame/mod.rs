@@ -7,10 +7,7 @@ use futures::future;
 use tracing::trace;
 
 use crate::{
-    proto::{
-        frame::{self, Frame},
-        ErrorCode,
-    },
+    proto::frame::{self, Frame},
     quic::{RecvStream, SendStream},
 };
 use buf::BufList;
@@ -99,8 +96,8 @@ impl<S: RecvStream> FrameStream<S> {
         Poll::Ready(Ok(Some(data)))
     }
 
-    pub fn reset(&mut self, error_code: ErrorCode) {
-        let _ = self.stream.stop_sending(error_code.0.into());
+    pub(crate) fn reset(&mut self, error_code: crate::error::Code) {
+        let _ = self.stream.stop_sending(error_code.into());
     }
 
     pub(crate) fn has_data(&self) -> bool {
@@ -127,7 +124,7 @@ impl<S: RecvStream> FrameStream<S> {
 }
 
 // TODO make this a method?
-pub(crate) async fn write<S>(stream: &mut S, frame: Frame) -> Result<(), crate::Error>
+pub(crate) async fn write<S>(stream: &mut S, frame: Frame) -> Result<(), Error>
 where
     S: SendStream<Bytes>,
 {
@@ -136,11 +133,11 @@ where
 
     stream
         .send_data(buf.freeze())
-        .map_err(|e| crate::Error::Io(e.into()))?;
+        .map_err(|e| Error::Quic(e.into()))?;
 
     future::poll_fn(|cx| stream.poll_ready(cx))
         .await
-        .map_err(|e| crate::Error::Io(e.into()))?;
+        .map_err(|e| Error::Quic(e.into()))?;
 
     Ok(())
 }
@@ -230,18 +227,6 @@ pub enum Error {
     Proto(frame::Error),
     Quic(Box<dyn std::error::Error + Send + Sync>),
     UnexpectedEnd,
-}
-
-impl Error {
-    pub fn code(&self) -> ErrorCode {
-        match self {
-            Error::Quic(_) => ErrorCode::GENERAL_PROTOCOL_ERROR,
-            Error::Proto(frame::Error::Settings(_)) => ErrorCode::SETTINGS_ERROR,
-            Error::Proto(frame::Error::UnsupportedFrame(_)) => ErrorCode::FRAME_UNEXPECTED,
-            Error::Proto(_) => ErrorCode::FRAME_ERROR,
-            Error::UnexpectedEnd => ErrorCode::GENERAL_PROTOCOL_ERROR,
-        }
-    }
 }
 
 impl From<frame::Error> for Error {
