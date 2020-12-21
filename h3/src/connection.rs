@@ -5,10 +5,11 @@ use futures::future;
 use http::HeaderMap;
 
 use crate::{
+    error::{Code, Error},
     frame::{self, FrameStream},
     proto::frame::Frame,
     proto::headers::Header,
-    qpack, quic, Error,
+    qpack, quic,
 };
 
 pub struct ConnectionInner<C: quic::Connection<Bytes>> {
@@ -24,7 +25,7 @@ where
     pub async fn new(mut quic: C, max_field_section_size: u64) -> Result<Self, Error> {
         let control_send = future::poll_fn(|mut cx| quic.poll_open_send_stream(&mut cx))
             .await
-            .map_err(|e| Error::Io(e.into()))?;
+            .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_cause(e))?;
 
         Ok(Self {
             quic,
@@ -84,7 +85,7 @@ where
                     self.trailers = Some(encoded);
                     return Ok(None);
                 }
-                Some(_) => return Err(Error::Peer("Unexpected frame type on request stream")),
+                Some(_) => return Err(Code::H3_FRAME_UNEXPECTED.into()),
                 None => return Ok(None),
             }
         }
@@ -99,7 +100,7 @@ where
         } else {
             match future::poll_fn(|cx| self.stream.poll_next(cx)).await? {
                 Some(Frame::Headers(encoded)) => encoded,
-                Some(_) => return Err(Error::Peer("Unexpected frame type on request stream")),
+                Some(_) => return Err(Code::H3_FRAME_UNEXPECTED.into()),
                 None => return Ok(None),
             }
         };
@@ -125,10 +126,10 @@ where
         .await?;
         self.stream
             .send_data(buf)
-            .map_err(|e| Error::Io(e.into()))?;
+            .map_err(|e| Code::H3_GENERAL_PROTOCOL_ERROR.with_cause(e))?;
         future::poll_fn(|cx| self.stream.poll_ready(cx))
             .await
-            .map_err(|e| Error::Io(e.into()))?;
+            .map_err(|e| Code::H3_GENERAL_PROTOCOL_ERROR.with_cause(e))?;
 
         Ok(())
     }
@@ -146,9 +147,9 @@ where
     pub async fn finish(&mut self) -> Result<(), Error> {
         future::poll_fn(|cx| self.stream.poll_ready(cx))
             .await
-            .map_err(|e| Error::Io(e.into()))?;
+            .map_err(|e| Code::H3_GENERAL_PROTOCOL_ERROR.with_cause(e))?;
         future::poll_fn(|cx| self.stream.poll_finish(cx))
             .await
-            .map_err(|e| Error::Io(e.into()))
+            .map_err(|e| Code::H3_GENERAL_PROTOCOL_ERROR.with_cause(e))
     }
 }

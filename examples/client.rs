@@ -43,36 +43,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .bind(&"[::]:0".parse().unwrap())
         .unwrap();
 
-    let quinn_conn = h3_quinn::Connection::new(
-        client_endpoint
-            .connect(&addr, auth.host())
-            .unwrap()
-            .await
-            .unwrap(),
-    );
+    let quinn_conn = h3_quinn::Connection::new(client_endpoint.connect(&addr, auth.host())?.await?);
 
     eprintln!("QUIC connected ...");
 
     // generic h3
-    let mut conn = h3::client::Connection::new(quinn_conn).await.unwrap();
+    let mut conn = h3::client::Connection::new(quinn_conn).await?;
 
     eprintln!("Sending request ...");
 
     // send a request!
     let req = http::Request::builder().uri(dest).body(())?;
-    let mut stream = conn.send_request(req).await.unwrap();
+    let mut stream = conn.send_request(req).await?;
 
     // no req body!
-    stream.finish().await.unwrap();
+    stream.finish().await?;
 
     eprintln!("Receiving response ...");
 
-    let resp = stream.recv_response().await.unwrap();
+    let resp = stream.recv_response().await?;
 
     eprintln!("Response: {:?} {}", resp.version(), resp.status());
     eprintln!("Headers: {:#?}", resp.headers());
 
-    while let Some(chunk) = stream.recv_data().await.unwrap() {
+    while let Some(chunk) = stream.recv_data().await? {
         let mut out = tokio::io::stdout();
         out.write_all(&chunk).await?;
         out.flush().await?;

@@ -6,9 +6,10 @@ use std::convert::TryFrom;
 use crate::connection::RequestStream;
 use crate::{
     connection::{Builder, ConnectionInner},
+    error::{Code, Error},
     frame::{self, FrameStream},
     proto::{frame::Frame, headers::Header},
-    qpack, quic, Error,
+    qpack, quic,
 };
 
 pub struct Connection<C: quic::Connection<Bytes>> {
@@ -42,7 +43,7 @@ where
 
         let mut stream = future::poll_fn(|mut cx| self.inner.quic.poll_open_bidi_stream(&mut cx))
             .await
-            .map_err(|e| Error::Io(e.into()))?;
+            .map_err(|e| Error::transport(e))?;
 
         let mut block = BytesMut::new();
         qpack::encode_stateless(&mut block, headers)?;
@@ -73,12 +74,16 @@ where
     pub async fn recv_response(&mut self) -> Result<Response<()>, Error> {
         let mut frame = future::poll_fn(|cx| self.stream.poll_next(cx))
             .await?
-            .ok_or(Error::Peer("Did not receive response headers"))?;
+            .ok_or_else(|| {
+                Code::H3_GENERAL_PROTOCOL_ERROR.with_reason("Did not receive response headers")
+            })?;
 
         let fields = if let Frame::Headers(ref mut encoded) = frame {
             qpack::decode_stateless(encoded)?
         } else {
-            return Err(Error::Peer("First response frame is not headers"));
+            return Err(
+                Code::H3_FRAME_UNEXPECTED.with_reason("First response frame is not headers")
+            );
         };
 
         let (status, headers) = Header::try_from(fields)?.into_response_parts()?;
