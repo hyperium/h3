@@ -96,7 +96,7 @@ impl<S: RecvStream> FrameStream<S> {
         Poll::Ready(Ok(Some(data)))
     }
 
-    pub(crate) fn reset(&mut self, error_code: crate::error::Code) {
+    pub(crate) fn stop_sending(&mut self, error_code: crate::error::Code) {
         let _ = self.stream.stop_sending(error_code.into());
     }
 
