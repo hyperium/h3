@@ -100,6 +100,10 @@ where
     pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
         self.inner.recv_trailers().await
     }
+
+    pub fn stop_sending(&mut self, error_code: crate::error::Code) {
+        self.inner.stream.stop_sending(error_code)
+    }
 }
 
 impl<S> RequestStream<S>
