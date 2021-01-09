@@ -1,11 +1,10 @@
 use bytes::{Bytes, BytesMut};
 use futures::future;
-use http::{request, Response};
+use http::{request, HeaderMap, Response};
 use std::convert::TryFrom;
 
-use crate::connection::RequestStream;
 use crate::{
-    connection::{Builder, ConnectionInner},
+    connection::{self, Builder, ConnectionInner},
     error::{Code, Error},
     frame::{self, FrameStream},
     proto::{frame::Frame, headers::Header},
@@ -31,7 +30,7 @@ where
     pub async fn send_request(
         &mut self,
         req: http::Request<()>,
-    ) -> Result<RequestStream<FrameStream<C::BidiStream>, Bytes, Connection<C>>, Error> {
+    ) -> Result<RequestStream<FrameStream<C::BidiStream>>, Error> {
         let (parts, _) = req.into_parts();
         let request::Parts {
             method,
@@ -50,7 +49,9 @@ where
 
         frame::write(&mut stream, Frame::Headers(block.freeze())).await?;
 
-        Ok(RequestStream::new(FrameStream::new(stream)))
+        Ok(RequestStream {
+            inner: connection::RequestStream::new(FrameStream::new(stream)),
+        })
     }
 }
 
@@ -65,14 +66,16 @@ where
     }
 }
 
-impl<S, C> RequestStream<FrameStream<S>, Bytes, Connection<C>>
+pub struct RequestStream<S> {
+    inner: connection::RequestStream<S, Bytes>,
+}
+
+impl<S> RequestStream<FrameStream<S>>
 where
     S: quic::RecvStream,
-    C: quic::Connection<Bytes>,
 {
-    /// Receive response headers
     pub async fn recv_response(&mut self) -> Result<Response<()>, Error> {
-        let mut frame = future::poll_fn(|cx| self.stream.poll_next(cx))
+        let mut frame = future::poll_fn(|cx| self.inner.stream.poll_next(cx))
             .await?
             .ok_or_else(|| {
                 Code::H3_GENERAL_PROTOCOL_ERROR.with_reason("Did not receive response headers")
@@ -93,5 +96,30 @@ where
         *resp.version_mut() = http::Version::HTTP_3;
 
         Ok(resp)
+    }
+
+    pub async fn recv_data(&mut self) -> Result<Option<Bytes>, Error> {
+        self.inner.recv_data().await
+    }
+
+    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
+        self.inner.recv_trailers().await
+    }
+}
+
+impl<S> RequestStream<S>
+where
+    S: quic::SendStream<Bytes>,
+{
+    pub async fn send_data(&mut self, buf: Bytes) -> Result<(), Error> {
+        self.inner.send_data(buf).await
+    }
+
+    pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
+        self.inner.send_trailers(trailers).await
+    }
+
+    pub async fn finish(&mut self) -> Result<(), Error> {
+        self.inner.finish().await
     }
 }

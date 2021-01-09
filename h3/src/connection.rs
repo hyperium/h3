@@ -54,25 +54,23 @@ impl<T> Builder<T> {
     }
 }
 
-pub struct RequestStream<S, B, T> {
+pub struct RequestStream<S, B> {
     pub(super) stream: S,
     pub(super) trailers: Option<Bytes>,
     _phantom_buffer: PhantomData<B>,
-    _phantom_side: PhantomData<T>,
 }
 
-impl<S, B, T> RequestStream<S, B, T> {
+impl<S, B> RequestStream<S, B> {
     pub fn new(stream: S) -> Self {
         Self {
             stream,
             trailers: None,
             _phantom_buffer: PhantomData,
-            _phantom_side: PhantomData,
         }
     }
 }
 
-impl<S, T> RequestStream<FrameStream<S>, Bytes, T>
+impl<S> RequestStream<FrameStream<S>, Bytes>
 where
     S: quic::RecvStream,
 {
@@ -111,7 +109,7 @@ where
     }
 }
 
-impl<S, T> RequestStream<S, Bytes, T>
+impl<S> RequestStream<S, Bytes>
 where
     S: quic::SendStream<Bytes>,
 {
