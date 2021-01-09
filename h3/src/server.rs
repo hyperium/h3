@@ -1,12 +1,11 @@
 use bytes::{Bytes, BytesMut};
 use futures::future;
-use http::{response, Request, Response};
+use http::{response, HeaderMap, Request, Response};
 use std::convert::TryFrom;
 
-use crate::connection::RequestStream;
 use crate::frame;
 use crate::{
-    connection::{Builder, ConnectionInner},
+    connection::{self, Builder, ConnectionInner},
     error::{Code, Error},
     frame::FrameStream,
     proto::{frame::Frame, headers::Header},
@@ -31,13 +30,7 @@ where
 
     pub async fn accept(
         &mut self,
-    ) -> Result<
-        Option<(
-            Request<()>,
-            RequestStream<FrameStream<C::BidiStream>, Bytes, Connection<C>>,
-        )>,
-        Error,
-    > {
+    ) -> Result<Option<(Request<()>, RequestStream<FrameStream<C::BidiStream>>)>, Error> {
         let stream = future::poll_fn(|cx| self.inner.quic.poll_accept_bidi_stream(cx))
             .await
             .map_err(|e| Error::transport(e))?;
@@ -72,7 +65,12 @@ where
         *req.headers_mut() = headers;
         *req.version_mut() = http::Version::HTTP_3;
 
-        Ok(Some((req, RequestStream::new(stream))))
+        Ok(Some((
+            req,
+            RequestStream {
+                inner: connection::RequestStream::new(stream),
+            },
+        )))
     }
 }
 
@@ -87,12 +85,27 @@ where
     }
 }
 
-impl<S, C> RequestStream<S, Bytes, Connection<C>>
+pub struct RequestStream<S> {
+    inner: connection::RequestStream<S, Bytes>,
+}
+
+impl<S> RequestStream<FrameStream<S>>
+where
+    S: quic::RecvStream,
+{
+    pub async fn recv_data(&mut self) -> Result<Option<Bytes>, Error> {
+        self.inner.recv_data().await
+    }
+
+    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
+        self.inner.recv_trailers().await
+    }
+}
+
+impl<S> RequestStream<S>
 where
     S: quic::SendStream<Bytes>,
-    C: quic::Connection<Bytes>,
 {
-    /// Send response headers
     pub async fn send_response(&mut self, resp: Response<()>) -> Result<(), Error> {
         let (parts, _) = resp.into_parts();
         let response::Parts {
@@ -103,8 +116,20 @@ where
         let mut block = BytesMut::new();
         qpack::encode_stateless(&mut block, headers)?;
 
-        frame::write(&mut self.stream, Frame::Headers(block.freeze())).await?;
+        frame::write(&mut self.inner.stream, Frame::Headers(block.freeze())).await?;
 
         Ok(())
+    }
+
+    pub async fn send_data(&mut self, buf: Bytes) -> Result<(), Error> {
+        self.inner.send_data(buf).await
+    }
+
+    pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
+        self.inner.send_trailers(trailers).await
+    }
+
+    pub async fn finish(&mut self) -> Result<(), Error> {
+        self.inner.finish().await
     }
 }
