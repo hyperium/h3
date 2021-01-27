@@ -6,11 +6,10 @@ edition = "2018"
 
 [dependencies]
 h3 = { path = "../h3" }
-bytes = "0.5"
-quinn = "0.6"
-quinn-proto = "0.6"
+bytes = "1"
+quinn = { git = "https://github.com/quinn-rs/quinn", branch = "main" }
 futures = "0.3"
 
 [dev-dependencies]
 http = "0.2"
-tokio = { version = "0.2", features = ["full"] }
+tokio = { version = "1", features = ["full"] }

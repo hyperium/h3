@@ -1,9 +1,9 @@
+use futures::StreamExt;
 use h3_quinn::quinn::{Certificate, CertificateChain, PrivateKey};
 use std::path::PathBuf;
 use structopt::StructOpt;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
-use tokio::stream::StreamExt;
 use tracing::{debug, error, info, trace, trace_span, warn};
 
 // Configs for two server modes

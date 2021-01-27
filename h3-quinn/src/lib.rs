@@ -13,10 +13,10 @@ use bytes::{Buf, Bytes, BytesMut};
 use h3::quic;
 pub use quinn;
 use quinn::{
+    crypto::Session,
     generic::{IncomingBiStreams, IncomingUniStreams, NewConnection, OpenBi, OpenUni},
     ConnectionError, VarInt, WriteError,
 };
-use quinn_proto::crypto::Session;
 
 pub struct Connection<S: Session> {
     conn: quinn::generic::Connection<S>,
@@ -273,7 +273,7 @@ where
 
     fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         if let Some(ref mut data) = self.writing {
-            ready!(self.stream.write_all(data.bytes()).poll_unpin(cx))?;
+            ready!(self.stream.write_all(data.chunk()).poll_unpin(cx))?;
         }
         self.writing = None;
         Poll::Ready(Ok(()))

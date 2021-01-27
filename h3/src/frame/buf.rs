@@ -46,8 +46,8 @@ impl<T: Buf> Buf for BufList<T> {
     }
 
     #[inline]
-    fn bytes(&self) -> &[u8] {
-        self.bufs.front().map(Buf::bytes).unwrap_or_default()
+    fn chunk(&self) -> &[u8] {
+        self.bufs.front().map(Buf::chunk).unwrap_or_default()
     }
 
     #[inline]
@@ -69,13 +69,13 @@ impl<T: Buf> Buf for BufList<T> {
     }
 
     #[inline]
-    fn bytes_vectored<'t>(&'t self, dst: &mut [IoSlice<'t>]) -> usize {
+    fn chunks_vectored<'t>(&'t self, dst: &mut [IoSlice<'t>]) -> usize {
         if dst.is_empty() {
             return 0;
         }
         let mut vecs = 0;
         for buf in &self.bufs {
-            vecs += buf.bytes_vectored(&mut dst[vecs..]);
+            vecs += buf.chunks_vectored(&mut dst[vecs..]);
             if vecs == dst.len() {
                 break;
             }
@@ -104,8 +104,8 @@ impl<'a, B: Buf> Buf for Cursor<'a, B> {
     }
 
     #[inline]
-    fn bytes(&self) -> &[u8] {
-        &self.buf.bufs[self.index].bytes()[self.pos_front..]
+    fn chunk(&self) -> &[u8] {
+        &self.buf.bufs[self.index].chunk()[self.pos_front..]
     }
 
     #[inline]
@@ -130,8 +130,8 @@ impl<'a, B: Buf> Buf for Cursor<'a, B> {
     }
 
     #[inline]
-    fn bytes_vectored<'t>(&'t self, dst: &mut [IoSlice<'t>]) -> usize {
-        self.buf.bytes_vectored(dst)
+    fn chunks_vectored<'t>(&'t self, dst: &mut [IoSlice<'t>]) -> usize {
+        self.buf.chunks_vectored(dst)
     }
 }
 
