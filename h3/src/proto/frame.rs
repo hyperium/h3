@@ -1,6 +1,6 @@
 use std::fmt;
 
-use bytes::{buf::ext::BufExt as _, Buf, BufMut, Bytes};
+use bytes::{Buf, BufMut, Bytes};
 use tracing::trace;
 
 use super::varint::{BufExt, BufMutExt, UnexpectedEnd, VarInt};
@@ -41,7 +41,7 @@ impl Frame {
             Frame::Headers(f) => {
                 FrameType::HEADERS.encode(buf);
                 buf.write_var(f.len() as u64);
-                buf.put(f.bytes())
+                buf.put_slice(f);
             }
             Frame::Settings(f) => f.encode(buf),
             Frame::CancelPush(id) => simple_frame_encode(FrameType::CANCEL_PUSH, *id, buf),
@@ -69,7 +69,7 @@ impl Frame {
 
         let mut payload = buf.take(len as usize);
         let frame = match ty {
-            FrameType::HEADERS => Ok(Frame::Headers(payload.to_bytes())),
+            FrameType::HEADERS => Ok(Frame::Headers(payload.copy_to_bytes(len as usize))),
             FrameType::SETTINGS => Ok(Frame::Settings(Settings::decode(&mut payload)?)),
             FrameType::CANCEL_PUSH => Ok(Frame::CancelPush(payload.get_var()?)),
             FrameType::PUSH_PROMISE => Ok(Frame::PushPromise(PushPromise::decode(&mut payload)?)),
@@ -177,7 +177,7 @@ impl PushPromise {
     fn decode<B: Buf>(buf: &mut B) -> Result<Self, UnexpectedEnd> {
         Ok(PushPromise {
             id: buf.get_var()?,
-            encoded: buf.to_bytes(),
+            encoded: buf.copy_to_bytes(buf.remaining()),
         })
     }
     fn encode<B: BufMut>(&self, buf: &mut B) {

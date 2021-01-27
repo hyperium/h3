@@ -99,8 +99,8 @@ impl Decoder {
             return Ok(None);
         }
 
-        let mut buf = Cursor::new(read.bytes());
-        let first = buf.bytes()[0];
+        let mut buf = Cursor::new(read.chunk());
+        let first = buf.chunk()[0];
         let instruction = match EncoderInstruction::decode(first) {
             EncoderInstruction::Unknown => return Err(Error::UnknownPrefix),
             EncoderInstruction::DynamicTableSizeUpdate => {
@@ -137,7 +137,7 @@ impl Decoder {
         table: &DynamicTableDecoder,
         buf: &mut R,
     ) -> Result<HeaderField, Error> {
-        let first = buf.bytes()[0];
+        let first = buf.chunk()[0];
         let field = match HeaderBlockField::decode(first) {
             HeaderBlockField::Indexed => match Indexed::decode(buf)? {
                 Indexed::Static(index) => StaticTable::get(index)?.clone(),
@@ -179,7 +179,7 @@ pub fn decode_stateless<T: Buf>(buf: &mut T) -> Result<Vec<HeaderField>, Error> 
 
     let mut fields = Vec::new();
     while buf.has_remaining() {
-        let field = match HeaderBlockField::decode(buf.bytes()[0]) {
+        let field = match HeaderBlockField::decode(buf.chunk()[0]) {
             HeaderBlockField::IndexedWithPostBase => return Err(Error::MissingRefs(0)),
             HeaderBlockField::LiteralWithPostBaseNameRef => return Err(Error::MissingRefs(0)),
             HeaderBlockField::Indexed => match Indexed::decode(buf)? {

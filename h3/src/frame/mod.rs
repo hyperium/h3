@@ -2,7 +2,7 @@ mod buf;
 
 use std::task::{Context, Poll};
 
-use bytes::{buf::BufExt, Buf, Bytes, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 use futures::future;
 use tracing::trace;
 
@@ -78,11 +78,13 @@ impl<S: RecvStream> FrameStream<S> {
             Poll::Ready(end) => end,
         };
 
-        // TODO: This to_bytes() makes a copy in most cases, but should be easily
-        // fixable with bytes 0.6.
-        let data = (&mut self.bufs)
-            .take(self.remaining_data as usize)
-            .to_bytes();
+        let bufs_len = self.bufs.remaining();
+
+        let data = if (bufs_len as u64) <= self.remaining_data {
+            self.bufs.copy_to_bytes(bufs_len)
+        } else {
+            self.bufs.copy_to_bytes(self.remaining_data as usize)
+        };
 
         match (data.len(), end) {
             (0, true) => return Poll::Ready(Ok(None)),

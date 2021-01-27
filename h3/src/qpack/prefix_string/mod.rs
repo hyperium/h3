@@ -2,7 +2,7 @@ mod bitwin;
 mod decode;
 mod encode;
 
-use bytes::{buf::ext::BufExt, Buf, BufMut};
+use bytes::{Buf, BufMut};
 
 pub use self::bitwin::BitWindow;
 
@@ -28,7 +28,7 @@ pub fn decode<B: Buf>(size: u8, buf: &mut B) -> Result<Vec<u8>, Error> {
         return Err(Error::UnexpectedEnd);
     }
 
-    let payload = buf.take(len).to_bytes();
+    let payload = buf.copy_to_bytes(len);
     let value = if flags & 1 == 0 {
         payload.into_iter().collect()
     } else {

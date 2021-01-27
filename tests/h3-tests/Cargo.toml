@@ -9,10 +9,10 @@ edition = "2018"
 h3 = { path = "../../h3" }
 h3-quinn = { path = "../../h3-quinn" }
 rcgen = { version = "0.7.0" }
-bytes = "0.5.6"
+bytes = "1"
 futures = "0.3"
 http = "0.2.1"
 tracing-subscriber = { version = "0.2.7", default-features = false, features = ["fmt", "ansi", "env-filter", "chrono", "tracing-log"] }
 
 [dev-dependencies]
-tokio = { version = "0.2", features = ["rt-threaded", "macros"]}
+tokio = { version = "1", features = ["rt-multi-thread", "macros"]}
