@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // quinn setup
     let mut client_config = h3_quinn::quinn::ClientConfigBuilder::default();
-    client_config.protocols(&[b"h3-27"]);
+    client_config.protocols(&[b"h3-29"]);
 
     let mut client_endpoint_builder = h3_quinn::quinn::Endpoint::builder();
     client_endpoint_builder.default_client_config(client_config.build());
