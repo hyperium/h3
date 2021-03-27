@@ -1,5 +1,6 @@
 use std::{
     convert::TryFrom,
+    fmt,
     iter::{IntoIterator, Iterator},
     str::FromStr,
 };
@@ -337,6 +338,24 @@ impl Error {
             String::from_utf8_lossy(name.as_ref()),
             value.as_ref()
         ))
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::InvalidHeaderName(h) => write!(f, "invalid header name: {}", h),
+            Error::InvalidHeaderValue(v) => write!(f, "invalid header value: {}", v),
+            Error::InvalidRequest(r) => write!(f, "invalid request: {}", r),
+            Error::MissingMethod => write!(f, "missing method in request headers"),
+            Error::MissingStatus => write!(f, "missing status in response headers"),
+            Error::MissingAuthority => write!(f, "missing authority"),
+            Error::ContradictedAuthority => {
+                write!(f, "uri and authority field are in contradiction")
+            }
+        }
     }
 }
 

@@ -231,31 +231,40 @@ impl From<Code> for Error {
 }
 
 impl From<qpack::EncoderError> for Error {
-    fn from(_e: qpack::EncoderError) -> Self {
-        Code::QPACK_ENCODER_STREAM_ERROR.into() //.with_cause(e)
+    fn from(e: qpack::EncoderError) -> Self {
+        Self::from(Code::QPACK_ENCODER_STREAM_ERROR).with_cause(e)
     }
 }
 
 impl From<qpack::DecoderError> for Error {
-    fn from(_e: qpack::DecoderError) -> Self {
-        Code::QPACK_DECODER_STREAM_ERROR.into() //.with_cause(e)
+    fn from(e: qpack::DecoderError) -> Self {
+        Self::from(Code::QPACK_DECODER_STREAM_ERROR).with_cause(e)
     }
 }
 
 impl From<proto::headers::Error> for Error {
-    fn from(_e: proto::headers::Error) -> Self {
-        Code::H3_MESSAGE_ERROR.into() //.with_cause(e)
+    fn from(e: proto::headers::Error) -> Self {
+        Self::from(Code::H3_MESSAGE_ERROR).with_cause(e)
     }
 }
 
 impl From<frame::Error> for Error {
     fn from(e: frame::Error) -> Self {
         match e {
-            frame::Error::Quic(_e) => todo!(),
-            frame::Error::Proto(_e) => Code::H3_FRAME_ERROR.into(),
+            frame::Error::Quic(e) => Code::H3_GENERAL_PROTOCOL_ERROR.with_cause(e),
             frame::Error::UnexpectedEnd => {
                 Code::H3_FRAME_ERROR.with_reason("received incomplete frame")
             }
+            frame::Error::Proto(e) => match e {
+                proto::frame::Error::Settings(_) => Code::H3_SETTINGS_ERROR,
+                proto::frame::Error::UnsupportedFrame(_) | proto::frame::Error::UnknownFrame(_) => {
+                    Code::H3_FRAME_UNEXPECTED
+                }
+                proto::frame::Error::Incomplete(_)
+                | proto::frame::Error::InvalidFrameValue
+                | proto::frame::Error::Malformed => Code::H3_FRAME_ERROR,
+            }
+            .with_cause(e),
         }
     }
 }

@@ -11,12 +11,23 @@ pub enum Error {
     UnsupportedFrame(u64), // Known frames that should generate an error
     UnknownFrame(u64),     // Unknown frames that should be ignored
     InvalidFrameValue,
-    InvalidSettingId(u64),
-    InvalidSettingValue(SettingId, u64),
-    SettingRepeated(SettingId),
-    SettingsExceeded,
     Incomplete(usize),
-    Settings(String),
+    Settings(SettingsError),
+}
+
+impl std::error::Error for Error {}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::Malformed => write!(f, "frame is malformed"),
+            Error::UnsupportedFrame(c) => write!(f, "frame 0x{:x} is not allowed h3", c),
+            Error::UnknownFrame(c) => write!(f, "frame 0x{:x} ignored", c),
+            Error::InvalidFrameValue => write!(f, "frame value is invalid"),
+            Error::Incomplete(_) => write!(f, ""),
+            Error::Settings(_) => write!(f, ""),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -301,8 +312,8 @@ impl Settings {
     }
 }
 
-#[derive(Debug)]
-pub(crate) enum SettingsError {
+#[derive(Debug, PartialEq)]
+pub enum SettingsError {
     Exceeded,
     Malformed,
     Repeated(SettingId),
@@ -310,15 +321,28 @@ pub(crate) enum SettingsError {
     InvalidSettingValue(SettingId, u64),
 }
 
+impl std::error::Error for SettingsError {}
+
+impl fmt::Display for SettingsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SettingsError::Exceeded => write!(
+                f,
+                "max settings number exeeded, check for duplicate entries"
+            ),
+            SettingsError::Malformed => write!(f, "malformed settings frame"),
+            SettingsError::Repeated(id) => write!(f, "got setting 0x{:x} twice", id.0),
+            SettingsError::InvalidSettingId(id) => write!(f, "setting id 0x{:x} is invalid", id),
+            SettingsError::InvalidSettingValue(id, val) => {
+                write!(f, "setting 0x{:x} has invalid value {}", id.0, val)
+            }
+        }
+    }
+}
+
 impl From<SettingsError> for Error {
     fn from(e: SettingsError) -> Self {
-        match e {
-            SettingsError::Exceeded => Error::SettingsExceeded,
-            SettingsError::Malformed => Error::Malformed,
-            SettingsError::Repeated(i) => Error::SettingRepeated(i),
-            SettingsError::InvalidSettingId(i) => Error::InvalidSettingId(i),
-            SettingsError::InvalidSettingValue(i, v) => Error::InvalidSettingValue(i, v),
-        }
+        Self::Settings(e)
     }
 }
 

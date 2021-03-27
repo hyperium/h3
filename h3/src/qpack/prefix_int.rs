@@ -1,3 +1,5 @@
+use std::fmt;
+
 use bytes::{Buf, BufMut};
 
 use crate::proto::coding::{self, BufExt, BufMutExt};
@@ -6,6 +8,15 @@ use crate::proto::coding::{self, BufExt, BufMutExt};
 pub enum Error {
     Overflow,
     UnexpectedEnd,
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::Overflow => write!(f, "value overflow"),
+            Error::UnexpectedEnd => write!(f, "unexpected end"),
+        }
+    }
 }
 
 pub fn decode<B: Buf>(size: u8, buf: &mut B) -> Result<(u8, usize), Error> {

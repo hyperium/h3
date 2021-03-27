@@ -2,6 +2,8 @@ mod bitwin;
 mod decode;
 mod encode;
 
+use std::fmt;
+
 use bytes::{Buf, BufMut};
 
 pub use self::bitwin::BitWindow;
@@ -20,6 +22,17 @@ pub enum Error {
     Integer(IntegerError),
     HuffmanDecoding(HuffmanDecodingError),
     HuffmanEncoding(HuffmanEncodingError),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::UnexpectedEnd => write!(f, "unexpected end"),
+            Error::Integer(e) => write!(f, "could not parse integer: {}", e),
+            Error::HuffmanDecoding(e) => write!(f, "Huffman decode failed: {:?}", e),
+            Error::HuffmanEncoding(e) => write!(f, "Huffman encode failed: {:?}", e),
+        }
+    }
 }
 
 pub fn decode<B: Buf>(size: u8, buf: &mut B) -> Result<Vec<u8>, Error> {
