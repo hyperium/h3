@@ -9,7 +9,7 @@ use std::{
 
 use futures::{ready, FutureExt, StreamExt};
 
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Buf, Bytes};
 use h3::quic;
 pub use quinn;
 use quinn::{
@@ -179,20 +179,14 @@ where
 }
 
 pub struct RecvStream<S: Session> {
-    buf: BytesMut,
     stream: quinn::generic::RecvStream<S>,
 }
 
 impl<S: Session> RecvStream<S> {
     fn new(stream: quinn::generic::RecvStream<S>) -> Self {
-        Self {
-            buf: BytesMut::new(),
-            stream,
-        }
+        Self { stream }
     }
 }
-
-const READ_BUF_SIZE: usize = 1024 * 4;
 
 impl<S: Session> quic::RecvStream for RecvStream<S> {
     type Buf = Bytes;
@@ -202,17 +196,11 @@ impl<S: Session> quic::RecvStream for RecvStream<S> {
         &mut self,
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Option<Self::Buf>, Self::Error>> {
-        self.buf.resize(READ_BUF_SIZE, 0);
-
-        match self.stream.read(&mut self.buf).poll_unpin(cx) {
-            Poll::Ready(Ok(Some(n))) => {
-                let buf = self.buf.split_to(n).freeze();
-                Poll::Ready(Ok(Some(buf)))
-            }
-            Poll::Ready(Ok(None)) => Poll::Ready(Ok(None)),
-            Poll::Ready(Err(e)) => Poll::Ready(Err(e.into())),
-            Poll::Pending => Poll::Pending,
-        }
+        Poll::Ready(Ok(ready!(self
+            .stream
+            .read_chunk(usize::MAX, true)
+            .poll_unpin(cx))?
+        .map(|c| (c.bytes))))
     }
 
     fn stop_sending(&mut self, error_code: u64) {
