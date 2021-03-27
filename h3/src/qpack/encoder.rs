@@ -27,7 +27,22 @@ pub enum Error {
     Insertion(DynamicTableError),
     InvalidString(StringError),
     InvalidInteger(IntError),
-    UnknownPrefix,
+    UnknownDecoderInstruction(u8),
+}
+
+impl std::error::Error for Error {}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::Insertion(e) => write!(f, "dynamic table insertion: {:?}", e),
+            Error::InvalidString(e) => write!(f, "could not parse string: {}", e),
+            Error::InvalidInteger(e) => write!(f, "could not parse integer: {}", e),
+            Error::UnknownDecoderInstruction(e) => {
+                write!(f, "got unkown decoder instruction: {}", e)
+            }
+        }
+    }
 }
 
 pub struct Encoder {
@@ -217,7 +232,7 @@ impl Action {
         let mut buf = Cursor::new(read.chunk());
         let first = buf.chunk()[0];
         let instruction = match DecoderInstruction::decode(first) {
-            DecoderInstruction::Unknown => return Err(Error::UnknownPrefix),
+            DecoderInstruction::Unknown => return Err(Error::UnknownDecoderInstruction(first)),
             DecoderInstruction::InsertCountIncrement => {
                 InsertCountIncrement::decode(&mut buf)?.map(|x| Action::ReceivedRefIncrement(x.0))
             }
@@ -265,7 +280,7 @@ impl From<ParseError> for Error {
         match e {
             ParseError::InvalidInteger(x) => Error::InvalidInteger(x),
             ParseError::InvalidString(x) => Error::InvalidString(x),
-            ParseError::InvalidPrefix(_) => Error::UnknownPrefix,
+            ParseError::InvalidPrefix(x) => Error::UnknownDecoderInstruction(x),
             _ => unreachable!(),
         }
     }

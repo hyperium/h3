@@ -31,10 +31,28 @@ pub enum Error {
     InvalidIndex(vas::Error),
     DynamicTableError(DynamicTableError),
     InvalidStaticIndex(usize),
-    UnknownPrefix,
+    UnknownPrefix(u8),
     MissingRefs(usize),
     BadBaseIndex(isize),
     UnexpectedEnd,
+}
+
+impl std::error::Error for Error {}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::InvalidInteger(e) => write!(f, "invalid integer: {}", e),
+            Error::InvalidString(e) => write!(f, "invalid string: {:?}", e),
+            Error::InvalidIndex(e) => write!(f, "invalid dynamic index: {:?}", e),
+            Error::DynamicTableError(e) => write!(f, "dynamic table error: {:?}", e),
+            Error::InvalidStaticIndex(i) => write!(f, "unknown static index: {}", i),
+            Error::UnknownPrefix(p) => write!(f, "unknown instruction code: 0x{}", p),
+            Error::MissingRefs(n) => write!(f, "missing {} refs to decode bloc", n),
+            Error::BadBaseIndex(i) => write!(f, "out of bounds base index: {}", i),
+            Error::UnexpectedEnd => write!(f, "unexpected end"),
+        }
+    }
 }
 
 pub fn ack_header<W: BufMut>(stream_id: u64, decoder: &mut W) {
@@ -102,7 +120,7 @@ impl Decoder {
         let mut buf = Cursor::new(read.chunk());
         let first = buf.chunk()[0];
         let instruction = match EncoderInstruction::decode(first) {
-            EncoderInstruction::Unknown => return Err(Error::UnknownPrefix),
+            EncoderInstruction::Unknown => return Err(Error::UnknownPrefix(first)),
             EncoderInstruction::DynamicTableSizeUpdate => {
                 DynamicTableSizeUpdate::decode(&mut buf)?.map(|x| Instruction::TableSizeUpdate(x.0))
             }
@@ -163,7 +181,7 @@ impl Decoder {
                 let literal = Literal::decode(buf)?;
                 HeaderField::new(literal.name, literal.value)
             }
-            _ => return Err(Error::UnknownPrefix),
+            _ => return Err(Error::UnknownPrefix(first)),
         };
         Ok(field)
     }
@@ -196,7 +214,7 @@ pub fn decode_stateless<T: Buf>(buf: &mut T) -> Result<Vec<HeaderField>, Error> 
                 let literal = Literal::decode(buf)?;
                 HeaderField::new(literal.name, literal.value)
             }
-            _ => return Err(Error::UnknownPrefix),
+            _ => return Err(Error::UnknownPrefix(buf.chunk()[0])),
         };
         fields.push(field);
     }
@@ -271,7 +289,7 @@ impl From<ParseError> for Error {
         match e {
             ParseError::InvalidInteger(x) => Error::InvalidInteger(x),
             ParseError::InvalidString(x) => Error::InvalidString(x),
-            ParseError::InvalidPrefix(_) => Error::UnknownPrefix,
+            ParseError::InvalidPrefix(p) => Error::UnknownPrefix(p),
             ParseError::InvalidBase(b) => Error::BadBaseIndex(b),
         }
     }
