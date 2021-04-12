@@ -1,15 +1,19 @@
 use bytes::{Bytes, BytesMut};
 use futures::future;
 use http::{request, HeaderMap, Response};
-use std::convert::TryFrom;
+use std::{
+    convert::TryFrom,
+    task::{Context, Poll},
+};
 
 use crate::{
     connection::{self, Builder, ConnectionInner},
     error::{Code, Error},
-    frame::{self, FrameStream},
+    frame::FrameStream,
     proto::{frame::Frame, headers::Header},
-    qpack, quic,
+    qpack, quic, stream,
 };
+use tracing::{trace, warn};
 
 pub struct Connection<C: quic::Connection<Bytes>> {
     inner: ConnectionInner<C>,
@@ -40,18 +44,40 @@ where
         } = parts;
         let headers = Header::request(method, uri, headers)?;
 
-        let mut stream = future::poll_fn(|mut cx| self.inner.quic.poll_open_bidi_stream(&mut cx))
-            .await
-            .map_err(|e| Error::transport(e))?;
+        let mut stream = future::poll_fn(|cx| self.poll_open(cx)).await?;
 
         let mut block = BytesMut::new();
         qpack::encode_stateless(&mut block, headers)?;
 
-        frame::write(&mut stream, Frame::Headers(block.freeze())).await?;
+        stream::write(&mut stream, Frame::Headers(block.freeze())).await?;
 
         Ok(RequestStream {
             inner: connection::RequestStream::new(FrameStream::new(stream)),
         })
+    }
+
+    fn poll_open(&mut self, cx: &mut Context<'_>) -> Poll<Result<C::BidiStream, Error>> {
+        let _ = self.poll_control(cx)?;
+        self.inner
+            .quic
+            .poll_open_bidi_stream(cx)
+            .map_err(|e| Error::transport(e))
+    }
+
+    fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+        while let Poll::Ready(frame) = self.inner.poll_control(cx)? {
+            match frame {
+                Frame::Settings(_) => trace!("Got settings"),
+                f @ Frame::Goaway(_) => {
+                    warn!("Control frame ignored {:?}", f);
+                }
+                frame => {
+                    return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED
+                        .with_reason(format!("on client control stream: {:?}", frame))))
+                }
+            }
+        }
+        Poll::Pending
     }
 }
 
