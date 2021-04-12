@@ -1,16 +1,19 @@
 use bytes::{Bytes, BytesMut};
 use futures::future;
 use http::{response, HeaderMap, Request, Response};
-use std::convert::TryFrom;
+use std::{
+    convert::TryFrom,
+    task::{Context, Poll},
+};
 
-use crate::frame;
 use crate::{
     connection::{self, Builder, ConnectionInner},
     error::{Code, Error},
     frame::FrameStream,
     proto::{frame::Frame, headers::Header},
-    qpack, quic,
+    qpack, quic, stream,
 };
+use tracing::{trace, warn};
 
 pub struct Connection<C: quic::Connection<Bytes>> {
     inner: ConnectionInner<C>,
@@ -31,9 +34,7 @@ where
     pub async fn accept(
         &mut self,
     ) -> Result<Option<(Request<()>, RequestStream<FrameStream<C::BidiStream>>)>, Error> {
-        let stream = future::poll_fn(|cx| self.inner.quic.poll_accept_bidi_stream(cx))
-            .await
-            .map_err(|e| Error::transport(e))?;
+        let stream = future::poll_fn(|cx| self.poll_accept(cx)).await?;
 
         let mut stream = match stream {
             None => return Ok(None),
@@ -71,6 +72,30 @@ where
                 inner: connection::RequestStream::new(stream),
             },
         )))
+    }
+
+    fn poll_accept(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<C::BidiStream>, Error>> {
+        let _ = self.poll_control(cx)?;
+        self.inner
+            .quic
+            .poll_accept_bidi_stream(cx)
+            .map_err(|e| Error::transport(e))
+    }
+
+    fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+        while let Poll::Ready(frame) = self.inner.poll_control(cx)? {
+            match frame {
+                Frame::Settings(_) => trace!("Got settings"),
+                f @ Frame::Goaway(_) | f @ Frame::MaxPushId(_) | f @ Frame::CancelPush(_) => {
+                    warn!("Control frame ignored {:?}", f);
+                }
+                frame => {
+                    return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED
+                        .with_reason(format!("on server control stream: {:?}", frame))))
+                }
+            }
+        }
+        Poll::Pending
     }
 }
 
@@ -120,7 +145,7 @@ where
         let mut block = BytesMut::new();
         qpack::encode_stateless(&mut block, headers)?;
 
-        frame::write(&mut self.inner.stream, Frame::Headers(block.freeze())).await?;
+        stream::write(&mut self.inner.stream, Frame::Headers(block.freeze())).await?;
 
         Ok(())
     }
