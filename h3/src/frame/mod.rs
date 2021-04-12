@@ -2,8 +2,8 @@ mod buf;
 
 use std::task::{Context, Poll};
 
-use bytes::{Buf, Bytes, BytesMut};
-use futures::future;
+use bytes::{Buf, Bytes};
+
 use tracing::trace;
 
 use crate::{
@@ -125,25 +125,6 @@ impl<S: RecvStream> FrameStream<S> {
     }
 }
 
-// TODO make this a method?
-pub(crate) async fn write<S>(stream: &mut S, frame: Frame) -> Result<(), Error>
-where
-    S: SendStream<Bytes>,
-{
-    let mut buf = BytesMut::new();
-    frame.encode(&mut buf);
-
-    stream
-        .send_data(buf.freeze())
-        .map_err(|e| Error::Quic(e.into()))?;
-
-    future::poll_fn(|cx| stream.poll_ready(cx))
-        .await
-        .map_err(|e| Error::Quic(e.into()))?;
-
-    Ok(())
-}
-
 impl<T, B> SendStream<B> for FrameStream<T>
 where
     T: SendStream<B> + RecvStream,
@@ -242,10 +223,12 @@ mod tests {
     use super::*;
 
     use assert_matches::assert_matches;
-    use bytes::BufMut;
+    use bytes::{BufMut, BytesMut};
     use futures::future::poll_fn;
     use std::collections::VecDeque;
     use tokio;
+
+    use crate::proto::coding::Encode;
 
     // Decoder
 

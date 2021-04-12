@@ -272,7 +272,7 @@ impl FrameHeader for Settings {
 }
 
 impl Settings {
-    fn insert(&mut self, id: SettingId, value: u64) -> Result<(), SettingsError> {
+    pub fn insert(&mut self, id: SettingId, value: u64) -> Result<(), SettingsError> {
         if self.len >= self.entries.len() {
             return Err(SettingsError::Exceeded);
         }
@@ -288,6 +288,15 @@ impl Settings {
         self.entries[self.len] = (id, value);
         self.len += 1;
         Ok(())
+    }
+
+    pub fn get(&self, id: SettingId) -> Option<u64> {
+        for (entry_id, value) in self.entries.iter() {
+            if id == *entry_id {
+                return Some(*value);
+            }
+        }
+        None
     }
 
     pub(super) fn encode<T: BufMut>(&self, buf: &mut T) {
