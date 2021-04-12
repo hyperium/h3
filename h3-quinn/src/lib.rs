@@ -145,6 +145,14 @@ where
         self.recv.poll_data(cx)
     }
 
+    fn poll_read(
+        &mut self,
+        buf: &mut [u8],
+        cx: &mut task::Context<'_>,
+    ) -> Poll<Result<Option<usize>, Self::Error>> {
+        self.recv.poll_read(buf, cx)
+    }
+
     fn stop_sending(&mut self, error_code: u64) {
         self.recv.stop_sending(error_code)
     }
@@ -201,6 +209,14 @@ impl<S: Session> quic::RecvStream for RecvStream<S> {
             .read_chunk(usize::MAX, true)
             .poll_unpin(cx))?
         .map(|c| (c.bytes))))
+    }
+
+    fn poll_read(
+        &mut self,
+        buf: &mut [u8],
+        cx: &mut task::Context<'_>,
+    ) -> Poll<Result<Option<usize>, Self::Error>> {
+        Poll::Ready(Ok(ready!(self.stream.read(buf).poll_unpin(cx))?))
     }
 
     fn stop_sending(&mut self, error_code: u64) {
