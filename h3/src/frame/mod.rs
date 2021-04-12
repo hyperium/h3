@@ -507,6 +507,14 @@ mod tests {
             Poll::Ready(Ok(self.chunks.pop_front()))
         }
 
+        fn poll_read(
+            &mut self,
+            _buf: &mut [u8],
+            _cx: &mut Context<'_>,
+        ) -> Poll<Result<Option<usize>, Self::Error>> {
+            todo!();
+        }
+
         fn stop_sending(&mut self, _: u64) {
             unimplemented!()
         }

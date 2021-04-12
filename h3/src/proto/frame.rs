@@ -3,7 +3,10 @@ use std::fmt;
 use bytes::{Buf, BufMut, Bytes};
 use tracing::trace;
 
-use super::varint::{BufExt, BufMutExt, UnexpectedEnd, VarInt};
+use super::{
+    coding::Encode,
+    varint::{BufExt, BufMutExt, UnexpectedEnd, VarInt},
+};
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
@@ -43,26 +46,6 @@ pub enum Frame {
 }
 
 impl Frame {
-    pub fn encode<T: BufMut>(&self, buf: &mut T) {
-        match self {
-            Frame::Data { len } => {
-                FrameType::DATA.encode(buf);
-                buf.write_var(*len);
-            }
-            Frame::Headers(f) => {
-                FrameType::HEADERS.encode(buf);
-                buf.write_var(f.len() as u64);
-                buf.put_slice(f);
-            }
-            Frame::Settings(f) => f.encode(buf),
-            Frame::CancelPush(id) => simple_frame_encode(FrameType::CANCEL_PUSH, *id, buf),
-            Frame::PushPromise(f) => f.encode(buf),
-            Frame::Goaway(id) => simple_frame_encode(FrameType::GOAWAY, *id, buf),
-            Frame::MaxPushId(id) => simple_frame_encode(FrameType::MAX_PUSH_ID, *id, buf),
-            Frame::DuplicatePush(id) => simple_frame_encode(FrameType::DUPLICATE_PUSH, *id, buf),
-        }
-    }
-
     pub fn decode<T: Buf>(buf: &mut T) -> Result<Self, Error> {
         let remaining = buf.remaining();
         let ty = FrameType::decode(buf).map_err(|_| Error::Incomplete(remaining + 1 as usize))?;
@@ -105,6 +88,28 @@ impl Frame {
             );
         }
         frame
+    }
+}
+
+impl Encode for Frame {
+    fn encode<T: BufMut>(&self, buf: &mut T) {
+        match self {
+            Frame::Data { len } => {
+                FrameType::DATA.encode(buf);
+                buf.write_var(*len);
+            }
+            Frame::Headers(f) => {
+                FrameType::HEADERS.encode(buf);
+                buf.write_var(f.len() as u64);
+                buf.put_slice(f);
+            }
+            Frame::Settings(f) => f.encode(buf),
+            Frame::CancelPush(id) => simple_frame_encode(FrameType::CANCEL_PUSH, *id, buf),
+            Frame::PushPromise(f) => f.encode(buf),
+            Frame::Goaway(id) => simple_frame_encode(FrameType::GOAWAY, *id, buf),
+            Frame::MaxPushId(id) => simple_frame_encode(FrameType::MAX_PUSH_ID, *id, buf),
+            Frame::DuplicatePush(id) => simple_frame_encode(FrameType::DUPLICATE_PUSH, *id, buf),
+        }
     }
 }
 

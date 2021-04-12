@@ -11,30 +11,37 @@ pub type Result<T> = ::std::result::Result<T, UnexpectedEnd>;
 // example: `buf.decode::<u16>()?`.
 // This enables to return `UnexpectedEnd` instead of panicking as the `Buf`
 // impls do when ther is not enough bytes.
-pub trait Codec: Sized {
-    fn decode<B: Buf>(buf: &mut B) -> Result<Self>;
+
+pub trait Encode {
     fn encode<B: BufMut>(&self, buf: &mut B);
 }
 
-impl Codec for u8 {
+pub trait Decode: Sized {
+    fn decode<B: Buf>(buf: &mut B) -> Result<Self>;
+}
+
+impl Encode for u8 {
+    fn encode<B: BufMut>(&self, buf: &mut B) {
+        buf.put_u8(*self);
+    }
+}
+
+impl Decode for u8 {
     fn decode<B: Buf>(buf: &mut B) -> Result<u8> {
         if buf.remaining() < 1 {
             return Err(UnexpectedEnd(1));
         }
         Ok(buf.get_u8())
     }
-    fn encode<B: BufMut>(&self, buf: &mut B) {
-        buf.put_u8(*self);
-    }
 }
 
 pub trait BufExt {
-    fn get<T: Codec>(&mut self) -> Result<T>;
+    fn get<T: Decode>(&mut self) -> Result<T>;
     fn get_var(&mut self) -> Result<u64>;
 }
 
 impl<T: Buf> BufExt for T {
-    fn get<U: Codec>(&mut self) -> Result<U> {
+    fn get<U: Decode>(&mut self) -> Result<U> {
         U::decode(self)
     }
 
@@ -44,12 +51,12 @@ impl<T: Buf> BufExt for T {
 }
 
 pub trait BufMutExt {
-    fn write<T: Codec>(&mut self, x: T);
+    fn write<T: Encode>(&mut self, x: T);
     fn write_var(&mut self, x: u64);
 }
 
 impl<T: BufMut> BufMutExt for T {
-    fn write<U: Codec>(&mut self, x: U) {
+    fn write<U: Encode>(&mut self, x: U) {
         x.encode(self);
     }
 
