@@ -10,5 +10,6 @@ mod frame;
 mod proto;
 #[allow(dead_code)]
 mod qpack;
+mod stream;
 
 pub use error::Error;
