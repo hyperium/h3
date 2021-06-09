@@ -20,8 +20,11 @@ use crate::{
     stream::{AcceptRecvStream, AcceptedRecvStream},
 };
 
-pub struct ConnectionInner<C: quic::Connection<Bytes>> {
-    pub(super) quic: C,
+pub(super) struct ConnectionInner<C>
+where
+    C: quic::Connection<Bytes>,
+{
+    conn: C,
     max_field_section_size: u64,
     peer_max_field_section_size: u64,
     control_send: C::SendStream,
@@ -34,8 +37,8 @@ impl<C> ConnectionInner<C>
 where
     C: quic::Connection<Bytes>,
 {
-    pub async fn new(mut quic: C, max_field_section_size: u64) -> Result<Self, Error> {
-        let mut control_send = future::poll_fn(|mut cx| quic.poll_open_send_stream(&mut cx))
+    pub async fn new(mut conn: C, max_field_section_size: u64) -> Result<Self, Error> {
+        let mut control_send = future::poll_fn(|mut cx| conn.poll_open_send(&mut cx))
             .await
             .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_cause(e))?;
 
@@ -48,7 +51,7 @@ where
         stream::write(&mut control_send, Frame::Settings(settings)).await?;
 
         Ok(Self {
-            quic,
+            conn,
             control_send,
             max_field_section_size,
             peer_max_field_section_size: VarInt::MAX.0,
@@ -58,13 +61,16 @@ where
         })
     }
 
-    pub(crate) fn poll_accept_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+    pub fn poll_accept_request(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<C::BidiStream>, Error>> {
+        self.conn.poll_accept_bidi(cx).map_err(Error::transport)
+    }
+
+    pub fn poll_accept_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         loop {
-            match self
-                .quic
-                .poll_accept_recv_stream(cx)
-                .map_err(|e| Error::transport(e))?
-            {
+            match self.conn.poll_accept_recv(cx).map_err(Error::transport)? {
                 Poll::Ready(Some(stream)) => self
                     .pending_recv_streams
                     .push(AcceptRecvStream::new(stream)),

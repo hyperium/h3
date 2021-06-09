@@ -7,6 +7,7 @@ edition = "2018"
 # If you copy one of the examples into a new project, you should be using
 # [dependencies] instead.
 [dev-dependencies]
+bytes = "1"
 futures = "0.3"
 http = "0.2"
 h3 = { path = "../h3" }
