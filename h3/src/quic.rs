@@ -13,47 +13,68 @@ use bytes::Buf;
 
 /// Trait representing a QUIC connection.
 pub trait Connection<B: Buf> {
-    /// The stream type returned when opening a unidirectional send stream.
-    type SendStream: SendStream<B>;
-    /// The stream type returned when accepting a unidirectional receive stream.
-    type RecvStream: RecvStream;
-    /// The stream type returned when accepting or opening a bidirectional
-    /// stream.
-    ///
-    /// This type doesn't *have* to implement `BidiStream`, but if the
-    /// implementation is able to provide a cheap split, it can opt-in.
+    /// The type produced by `poll_accept_bidi()`
     type BidiStream: SendStream<B> + RecvStream;
-    /// The error type that can be returned when accepting or opening a stream.
+    /// The type of the sending part of `BidiStream`
+    type SendStream: SendStream<B>;
+    /// The type produced by `poll_accept_recv()`
+    type RecvStream: RecvStream;
+    /// A producer of outgoing Unidirectional and Bidirectional streams.
+    type OpenStreams: OpenStreams<B>;
+    /// Error type yeilded by this trait methods
     type Error: Into<Box<dyn std::error::Error + Send + Sync>>;
 
-    // Accepting streams
-
-    /// Poll the connection for any received bidirectional streams.
+    /// Accept an incoming unidirecional stream
     ///
     /// Returning `None` implies the connection is closing or closed.
-    fn poll_accept_bidi_stream(
-        &mut self,
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::BidiStream>, Self::Error>>;
-
-    /// Poll the connection for any received unidirectional streams.
-    ///
-    /// Returning `None` implies the connection is closing or closed.
-    fn poll_accept_recv_stream(
+    fn poll_accept_recv(
         &mut self,
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Option<Self::RecvStream>, Self::Error>>;
 
-    // Opening streams
+    /// Accept an incoming bidirecional stream
+    ///
+    /// Returning `None` implies the connection is closing or closed.
+    fn poll_accept_bidi(
+        &mut self,
+        cx: &mut task::Context<'_>,
+    ) -> Poll<Result<Option<Self::BidiStream>, Self::Error>>;
 
     /// Poll the connection to create a new bidirectional stream.
-    fn poll_open_bidi_stream(
+    fn poll_open_bidi(
         &mut self,
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Self::BidiStream, Self::Error>>;
 
     /// Poll the connection to create a new unidirectional stream.
-    fn poll_open_send_stream(
+    fn poll_open_send(
+        &mut self,
+        cx: &mut task::Context<'_>,
+    ) -> Poll<Result<Self::SendStream, Self::Error>>;
+
+    /// Get an object to open outgoing streams.
+    fn opener(&self) -> Self::OpenStreams;
+}
+
+/// Trait for opening outgoing streams
+pub trait OpenStreams<B: Buf> {
+    /// The type produced by `poll_open_bidi()`
+    type BidiStream: SendStream<B> + RecvStream;
+    /// The type produced by `poll_open_send()`
+    type SendStream: SendStream<B>;
+    /// The type of the receiving part of `BidiStream`
+    type RecvStream: RecvStream;
+    /// Error type yeilded by this trait methods
+    type Error: Into<Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Poll the connection to create a new bidirectional stream.
+    fn poll_open_bidi(
+        &mut self,
+        cx: &mut task::Context<'_>,
+    ) -> Poll<Result<Self::BidiStream, Self::Error>>;
+
+    /// Poll the connection to create a new unidirectional stream.
+    fn poll_open_send(
         &mut self,
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Self::SendStream, Self::Error>>;
