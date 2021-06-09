@@ -15,7 +15,10 @@ use crate::{
 };
 use tracing::{trace, warn};
 
-pub struct Connection<C: quic::Connection<Bytes>> {
+pub struct Connection<C>
+where
+    C: quic::Connection<Bytes>,
+{
     inner: ConnectionInner<C>,
 }
 
@@ -34,7 +37,7 @@ where
     pub async fn accept(
         &mut self,
     ) -> Result<Option<(Request<()>, RequestStream<FrameStream<C::BidiStream>>)>, Error> {
-        let stream = future::poll_fn(|cx| self.poll_accept(cx)).await?;
+        let stream = future::poll_fn(|cx| self.poll_accept_request(cx)).await?;
 
         let mut stream = match stream {
             None => return Ok(None),
@@ -74,12 +77,12 @@ where
         )))
     }
 
-    fn poll_accept(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<C::BidiStream>, Error>> {
+    pub fn poll_accept_request(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<C::BidiStream>, Error>> {
         let _ = self.poll_control(cx)?;
-        self.inner
-            .quic
-            .poll_accept_bidi_stream(cx)
-            .map_err(|e| Error::transport(e))
+        self.inner.poll_accept_request(cx)
     }
 
     fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {

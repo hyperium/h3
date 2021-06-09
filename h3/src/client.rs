@@ -15,26 +15,26 @@ use crate::{
 };
 use tracing::{trace, warn};
 
-pub struct Connection<C: quic::Connection<Bytes>> {
-    inner: ConnectionInner<C>,
+pub async fn new<C, O>(conn: C) -> Result<(Connection<C>, SendRequest<C::OpenStreams>), Error>
+where
+    C: quic::Connection<Bytes, OpenStreams = O>,
+    O: quic::OpenStreams<Bytes>,
+{
+    Ok(Builder::new().build(conn).await?)
 }
 
-impl<C> Connection<C>
+pub struct SendRequest<T: quic::OpenStreams<Bytes>> {
+    open: T,
+}
+
+impl<T> SendRequest<T>
 where
-    C: quic::Connection<Bytes>,
+    T: quic::OpenStreams<Bytes>,
 {
-    pub async fn new(conn: C) -> Result<Self, Error> {
-        Ok(Self::builder().build(conn).await?)
-    }
-
-    pub fn builder() -> Builder<Connection<C>> {
-        Builder::new()
-    }
-
     pub async fn send_request(
         &mut self,
         req: http::Request<()>,
-    ) -> Result<RequestStream<FrameStream<C::BidiStream>>, Error> {
+    ) -> Result<RequestStream<FrameStream<T::BidiStream>>, Error> {
         let (parts, _) = req.into_parts();
         let request::Parts {
             method,
@@ -44,7 +44,8 @@ where
         } = parts;
         let headers = Header::request(method, uri, headers)?;
 
-        let mut stream = future::poll_fn(|cx| self.poll_open(cx)).await?;
+        let mut stream =
+            future::poll_fn(|cx| self.open.poll_open_bidi(cx).map_err(Error::transport)).await?;
 
         let mut block = BytesMut::new();
         qpack::encode_stateless(&mut block, headers)?;
@@ -55,16 +56,20 @@ where
             inner: connection::RequestStream::new(FrameStream::new(stream)),
         })
     }
+}
 
-    fn poll_open(&mut self, cx: &mut Context<'_>) -> Poll<Result<C::BidiStream, Error>> {
-        let _ = self.poll_control(cx)?;
-        self.inner
-            .quic
-            .poll_open_bidi_stream(cx)
-            .map_err(|e| Error::transport(e))
-    }
+pub struct Connection<C>
+where
+    C: quic::Connection<Bytes>,
+{
+    inner: ConnectionInner<C>,
+}
 
-    fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+impl<C> Connection<C>
+where
+    C: quic::Connection<Bytes>,
+{
+    pub fn poll_close(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         while let Poll::Ready(frame) = self.inner.poll_control(cx)? {
             match frame {
                 Frame::Settings(_) => trace!("Got settings"),
@@ -81,14 +86,19 @@ where
     }
 }
 
-impl<C> Builder<Connection<C>>
+impl<C, O> Builder<C>
 where
-    C: quic::Connection<Bytes>,
+    C: quic::Connection<Bytes, OpenStreams = O>,
+    O: quic::OpenStreams<Bytes>,
 {
-    pub async fn build(self, conn: C) -> Result<Connection<C>, Error> {
-        Ok(Connection {
-            inner: ConnectionInner::new(conn, self.max_field_section_size).await?,
-        })
+    pub async fn build(self, quic: C) -> Result<(Connection<C>, SendRequest<O>), Error> {
+        let open = quic.opener();
+        Ok((
+            Connection {
+                inner: ConnectionInner::new(quic, self.max_field_section_size).await?,
+            },
+            SendRequest { open },
+        ))
     }
 }
 

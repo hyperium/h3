@@ -52,9 +52,10 @@ where
     type SendStream = SendStream<B>;
     type RecvStream = RecvStream;
     type BidiStream = BidiStream<B>;
+    type OpenStreams = OpenStreams;
     type Error = ConnectionError;
 
-    fn poll_accept_bidi_stream(
+    fn poll_accept_bidi(
         &mut self,
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Option<Self::BidiStream>, Self::Error>> {
@@ -68,7 +69,18 @@ where
         })))
     }
 
-    fn poll_open_bidi_stream(
+    fn poll_accept_recv(
+        &mut self,
+        cx: &mut task::Context<'_>,
+    ) -> Poll<Result<Option<Self::RecvStream>, Self::Error>> {
+        let recv = match ready!(self.incoming_uni.poll_next_unpin(cx)) {
+            Some(x) => x?,
+            None => return Poll::Ready(Ok(None)),
+        };
+        Poll::Ready(Ok(Some(Self::RecvStream::new(recv))))
+    }
+
+    fn poll_open_bidi(
         &mut self,
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Self::BidiStream, Self::Error>> {
@@ -83,18 +95,58 @@ where
         }))
     }
 
-    fn poll_accept_recv_stream(
+    fn poll_open_send(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::RecvStream>, Self::Error>> {
-        let recv = match ready!(self.incoming_uni.poll_next_unpin(cx)) {
-            Some(x) => x?,
-            None => return Poll::Ready(Ok(None)),
-        };
-        Poll::Ready(Ok(Some(Self::RecvStream::new(recv))))
+    ) -> Poll<Result<Self::SendStream, Self::Error>> {
+        if self.opening_uni.is_none() {
+            self.opening_uni = Some(self.conn.open_uni());
+        }
+
+        let send = ready!(self.opening_uni.as_mut().unwrap().poll_unpin(cx))?;
+        Poll::Ready(Ok(Self::SendStream::new(send)))
     }
 
-    fn poll_open_send_stream(
+    fn opener(&self) -> Self::OpenStreams {
+        OpenStreams {
+            conn: self.conn.clone(),
+            opening_bi: None,
+            opening_uni: None,
+        }
+    }
+}
+
+pub struct OpenStreams {
+    conn: quinn::Connection,
+    opening_bi: Option<OpenBi>,
+    opening_uni: Option<OpenUni>,
+}
+
+impl<B> quic::OpenStreams<B> for OpenStreams
+where
+    B: Buf,
+{
+    type RecvStream = RecvStream;
+    type SendStream = SendStream<B>;
+    type BidiStream = BidiStream<B>;
+    type Error = ConnectionError;
+
+    fn poll_open_bidi(
+        &mut self,
+        cx: &mut task::Context<'_>,
+    ) -> Poll<Result<Self::BidiStream, Self::Error>> {
+        if self.opening_bi.is_none() {
+            self.opening_bi = Some(self.conn.open_bi());
+        }
+
+        let (send, recv) = ready!(self.opening_bi.as_mut().unwrap().poll_unpin(cx))?;
+        Poll::Ready(Ok(Self::BidiStream {
+            send: Self::SendStream::new(send),
+            recv: Self::RecvStream::new(recv),
+        }))
+    }
+
+    fn poll_open_send(
         &mut self,
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Self::SendStream, Self::Error>> {

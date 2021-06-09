@@ -1,15 +1,14 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use rustls;
-use rustls::client::ServerCertVerified;
+use futures::{future, FutureExt};
+use h3_quinn::quinn;
+use rustls::{self, client::ServerCertVerified};
 use rustls::{Certificate, ServerName};
 use structopt::StructOpt;
 use tokio::{self, io::AsyncWriteExt};
-use webpki;
 
-use h3_quinn::quinn;
-use h3_quinn::quinn::crypto::rustls::Error;
+use h3_quinn::{self, quinn::crypto::rustls::Error};
 
 static ALPN: &[u8] = b"h3";
 
@@ -92,28 +91,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("QUIC connected ...");
 
     // generic h3
-    let mut conn = h3::client::Connection::new(quinn_conn).await?;
+    let (mut driver, mut conn) = h3::client::new(quinn_conn).await?;
 
-    eprintln!("Sending request ...");
+    let drive = async move {
+        future::poll_fn(|cx| driver.poll_close(cx)).await?;
+        Ok::<(), Box<dyn std::error::Error>>(())
+    }
+    .fuse();
 
-    // send a request!
-    let req = http::Request::builder().uri(dest).body(())?;
-    let mut stream = conn.send_request(req).await?;
+    let request = async {
+        eprintln!("Sending request ...");
 
-    // no req body!
-    stream.finish().await?;
+        let req = http::Request::builder().uri(dest).body(())?;
 
-    eprintln!("Receiving response ...");
+        let mut stream = conn.send_request(req).await?;
+        stream.finish().await?;
 
-    let resp = stream.recv_response().await?;
+        eprintln!("Receiving response ...");
+        let resp = stream.recv_response().await?;
 
-    eprintln!("Response: {:?} {}", resp.version(), resp.status());
-    eprintln!("Headers: {:#?}", resp.headers());
+        eprintln!("Response: {:?} {}", resp.version(), resp.status());
+        eprintln!("Headers: {:#?}", resp.headers());
 
-    while let Some(chunk) = stream.recv_data().await? {
-        let mut out = tokio::io::stdout();
-        out.write_all(&chunk).await?;
-        out.flush().await?;
+        while let Some(chunk) = stream.recv_data().await? {
+            let mut out = tokio::io::stdout();
+            out.write_all(&chunk).await?;
+            out.flush().await?;
+        }
+        Ok::<(), Box<dyn std::error::Error>>(())
+    };
+
+    tokio::select! {
+        _ = request => {
+            println!("request completed");
+        }
+        _ = drive => {
+            println!("operation compleed");
+        }
     }
 
     Ok(())

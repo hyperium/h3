@@ -7,14 +7,12 @@ async fn connect() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let _client = client::Connection::new(pair.client().await)
-            .await
-            .expect("client init");
+        let _ = client::new(pair.client().await).await.expect("client init");
     };
 
     let server_fut = async {
         let conn = server.next().await;
-        let _incoming_req = server::Connection::new(conn).await.unwrap();
+        let _ = server::Connection::new(conn).await.unwrap();
     };
 
     tokio::join!(server_fut, client_fut);
