@@ -9,11 +9,10 @@ use std::{
 };
 
 use bytes::{Buf, Bytes};
-use futures::{ready, AsyncWrite, FutureExt, StreamExt};
-pub use quinn;
-use quinn::{
-    ConnectionError, IncomingBiStreams, IncomingUniStreams, NewConnection, OpenBi, OpenUni, VarInt,
-    WriteError,
+use futures::{ready, FutureExt as _, StreamExt as _, AsyncWrite as _ };
+pub use quinn::{
+    self, crypto::Session, ConnectionError, IncomingBiStreams, IncomingUniStreams, NewConnection,
+    OpenBi, OpenUni, VarInt, WriteError,
 };
 
 use h3::quic;

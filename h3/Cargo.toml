@@ -5,6 +5,9 @@ authors = ["Sean McArthur <sean@seanmonstar.com>", "Jean-Christophe BEGUE <jc.be
 license = "MIT"
 edition = "2018"
 
+[features]
+test_helpers = []
+
 [dependencies]
 bytes = "1"
 futures = "0.3"

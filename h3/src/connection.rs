@@ -1,6 +1,7 @@
 use std::{
     convert::TryFrom,
     marker::PhantomData,
+    sync::{Arc, RwLock},
     task::{Context, Poll},
 };
 
@@ -20,13 +21,30 @@ use crate::{
     stream::{AcceptRecvStream, AcceptedRecvStream},
 };
 
-pub(super) struct ConnectionInner<C>
+#[derive(Clone)]
+#[doc(hidden)]
+pub struct SharedState {
+    pub peer_max_field_section_size: u64, // maximum size for a header we send
+}
+
+#[derive(Clone)]
+#[doc(hidden)]
+pub struct SharedStateRef(pub Arc<RwLock<SharedState>>);
+
+impl Default for SharedStateRef {
+    fn default() -> Self {
+        Self(Arc::new(RwLock::new(SharedState {
+            peer_max_field_section_size: VarInt::MAX.0,
+        })))
+    }
+}
+
+pub struct ConnectionInner<C>
 where
     C: quic::Connection<Bytes>,
 {
+    pub(super) shared: SharedStateRef,
     conn: C,
-    max_field_section_size: u64,
-    peer_max_field_section_size: u64,
     control_send: C::SendStream,
     control_recv: Option<FrameStream<C::RecvStream>>,
     pending_recv_streams: Vec<AcceptRecvStream<C::RecvStream>>,
@@ -37,7 +55,11 @@ impl<C> ConnectionInner<C>
 where
     C: quic::Connection<Bytes>,
 {
-    pub async fn new(mut conn: C, max_field_section_size: u64) -> Result<Self, Error> {
+    pub async fn new(
+        mut conn: C,
+        max_field_section_size: u64,
+        shared: SharedStateRef,
+    ) -> Result<Self, Error> {
         let mut control_send = future::poll_fn(|mut cx| conn.poll_open_send(&mut cx))
             .await
             .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_cause(e))?;
@@ -51,10 +73,9 @@ where
         stream::write(&mut control_send, Frame::Settings(settings)).await?;
 
         Ok(Self {
+            shared,
             conn,
             control_send,
-            max_field_section_size,
-            peer_max_field_section_size: VarInt::MAX.0,
             control_recv: None,
             pending_recv_streams: Vec::with_capacity(3),
             got_peer_settings: false,
@@ -116,24 +137,21 @@ where
         let res = match recvd {
             None => Err(Code::H3_CLOSED_CRITICAL_STREAM.with_reason("control stream closed")),
             Some(frame) => match frame {
-                Frame::Settings(settings) => {
-                    if self.got_peer_settings {
-                        Err(Code::H3_FRAME_UNEXPECTED
-                            .with_reason("settings frame already received"))
-                    } else {
-                        self.got_peer_settings = true;
-                        self.peer_max_field_section_size = settings
-                            .get(SettingId::MAX_HEADER_LIST_SIZE)
-                            .unwrap_or(VarInt::MAX.0);
-                        Ok(Frame::Settings(settings))
-                    }
+                Frame::Settings(settings) if !self.got_peer_settings => {
+                    self.got_peer_settings = true;
+                    self.shared
+                        .0
+                        .write()
+                        .expect("connection settings write")
+                        .peer_max_field_section_size = settings
+                        .get(SettingId::MAX_HEADER_LIST_SIZE)
+                        .unwrap_or(VarInt::MAX.0);
+                    Ok(Frame::Settings(settings))
                 }
-                f @ Frame::CancelPush(_) | f @ Frame::Goaway(_) | f @ Frame::MaxPushId(_) => {
-                    if self.got_peer_settings {
-                        Ok(f)
-                    } else {
-                        Err(Code::H3_MISSING_SETTINGS.into())
-                    }
+                Frame::CancelPush(_) | Frame::MaxPushId(_) | Frame::Goaway(_)
+                    if !self.got_peer_settings =>
+                {
+                    Err(Code::H3_MISSING_SETTINGS.into())
                 }
                 frame => Err(Code::H3_FRAME_UNEXPECTED
                     .with_reason(format!("on control stream: {:?}", frame))),
@@ -143,35 +161,20 @@ where
     }
 }
 
-pub struct Builder<T> {
-    pub(super) max_field_section_size: u64,
-    phtantom: PhantomData<T>,
-}
-
-impl<T> Builder<T> {
-    pub(super) fn new() -> Self {
-        Builder {
-            max_field_section_size: 0, // Unlimited
-            phtantom: PhantomData,
-        }
-    }
-
-    pub fn max_field_section_size(&mut self, value: u64) -> &mut Self {
-        self.max_field_section_size = value;
-        self
-    }
-}
-
 pub struct RequestStream<S, B> {
     pub(super) stream: S,
     pub(super) trailers: Option<Bytes>,
+    pub(super) conn_state: SharedStateRef,
+    pub(super) max_field_section_size: u64,
     _phantom_buffer: PhantomData<B>,
 }
 
 impl<S, B> RequestStream<S, B> {
-    pub fn new(stream: S) -> Self {
+    pub fn new(stream: S, max_field_section_size: u64, conn_state: SharedStateRef) -> Self {
         Self {
             stream,
+            conn_state,
+            max_field_section_size,
             trailers: None,
             _phantom_buffer: PhantomData,
         }
@@ -211,9 +214,16 @@ where
             }
         };
 
-        Ok(Some(
-            Header::try_from(qpack::decode_stateless(&mut trailers)?)?.into_fields(),
-        ))
+        let (fields, mem_size) = qpack::decode_stateless(&mut trailers)?;
+        if mem_size > self.max_field_section_size {
+            return Err(Error::header_too_big(mem_size, self.max_field_section_size));
+        }
+
+        Ok(Some(Header::try_from(fields)?.into_fields()))
+    }
+
+    pub fn stop_sending(&mut self, err_code: Code) {
+        self.stream.stop_sending(err_code);
     }
 }
 
@@ -243,7 +253,16 @@ where
     /// Send a set of trailers to end the request.
     pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
         let mut block = BytesMut::new();
-        qpack::encode_stateless(&mut block, Header::trailer(trailers))?;
+        let mem_size = qpack::encode_stateless(&mut block, Header::trailer(trailers))?;
+        let max_mem_size = self
+            .conn_state
+            .0
+            .read()
+            .expect("send_trailers shared state read")
+            .peer_max_field_section_size;
+        if mem_size > max_mem_size {
+            return Err(Error::header_too_big(mem_size, max_mem_size));
+        }
 
         stream::write(&mut self.stream, Frame::Headers(block.freeze())).await?;
 

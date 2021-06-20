@@ -15,17 +15,28 @@ pub struct Error {
 #[derive(PartialEq, Eq, Hash, Clone, Copy)]
 pub struct Code(u64);
 
+impl PartialEq<u64> for Code {
+    fn eq(&self, other: &u64) -> bool {
+        *other == self.0
+    }
+}
+
 struct ErrorImpl {
     kind: Kind,
     cause: Option<Cause>,
 }
 
-enum Kind {
+#[derive(Clone, Debug)]
+pub enum Kind {
     Application {
         code: Code,
         reason: Option<Box<str>>,
     },
     Transport,
+    HeaderTooBig {
+        actual_size: u64,
+        max_size: u64,
+    },
 }
 
 // ===== impl Code =====
@@ -156,6 +167,10 @@ impl From<Code> for u64 {
 // ===== impl Error =====
 
 impl Error {
+    pub fn kind(&self) -> Kind {
+        self.inner.kind.clone()
+    }
+
     fn new(kind: Kind) -> Self {
         Error {
             inner: Box::new(ErrorImpl { kind, cause: None }),
@@ -164,6 +179,13 @@ impl Error {
 
     pub(crate) fn transport<E: Into<Cause>>(cause: E) -> Self {
         Error::transport_(cause.into())
+    }
+
+    pub(crate) fn header_too_big(actual_size: u64, max_size: u64) -> Self {
+        Error::new(Kind::HeaderTooBig {
+            actual_size,
+            max_size,
+        })
     }
 
     fn transport_(cause: Cause) -> Self {
@@ -193,6 +215,13 @@ impl fmt::Debug for Error {
 
                 builder.field("kind", &Transport);
             }
+            Kind::HeaderTooBig {
+                actual_size,
+                max_size,
+            } => {
+                builder.field("header_size", &actual_size);
+                builder.field("max_size", &max_size);
+            }
         }
 
         if let Some(ref cause) = self.inner.cause {
@@ -214,6 +243,14 @@ impl fmt::Display for Error {
                 }
             }
             Kind::Transport => f.write_str("quic transport error"),
+            Kind::HeaderTooBig {
+                actual_size,
+                max_size,
+            } => write!(
+                f,
+                "issued header size {} o is beyond peer's limit {} o",
+                actual_size, max_size
+            ),
         }
     }
 }

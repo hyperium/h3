@@ -187,12 +187,14 @@ impl Encoder {
     }
 }
 
-pub fn encode_stateless<W, T, H>(block: &mut W, fields: T) -> Result<(), Error>
+pub fn encode_stateless<W, T, H>(block: &mut W, fields: T) -> Result<u64, Error>
 where
     W: BufMut,
     T: IntoIterator<Item = H>,
     H: AsRef<HeaderField>,
 {
+    let mut size = 0;
+
     HeaderPrefix::new(0, 0, 0, 0).encode(block);
     for field in fields {
         let field = field.as_ref();
@@ -204,8 +206,10 @@ where
         } else {
             Literal::new(field.name.clone(), field.value.clone()).encode(block)?;
         }
+
+        size += field.mem_size() as u64;
     }
-    Ok(())
+    Ok(size)
 }
 
 #[cfg(test)]
