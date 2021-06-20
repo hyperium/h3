@@ -85,6 +85,10 @@ impl Header {
         self.pseudo.len() + self.fields.len()
     }
 
+    pub fn size(&self) -> usize {
+        self.pseudo.len() + self.fields.len()
+    }
+
     #[cfg(test)]
     pub(crate) fn authory_mut(&mut self) -> &mut Option<Authority> {
         &mut self.pseudo.authority

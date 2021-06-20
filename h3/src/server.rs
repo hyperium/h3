@@ -1,16 +1,17 @@
 use bytes::{Bytes, BytesMut};
 use futures::future;
-use http::{response, HeaderMap, Request, Response};
+use http::{response, HeaderMap, Request, Response, StatusCode};
 use std::{
     convert::TryFrom,
+    marker::PhantomData,
     task::{Context, Poll},
 };
 
 use crate::{
-    connection::{self, Builder, ConnectionInner},
-    error::{Code, Error},
+    connection::{self, ConnectionInner, SharedStateRef},
+    error::{self, Code, Error},
     frame::FrameStream,
-    proto::{frame::Frame, headers::Header},
+    proto::{frame::Frame, headers::Header, varint::VarInt},
     qpack, quic, stream,
 };
 use tracing::{trace, warn};
@@ -20,6 +21,7 @@ where
     C: quic::Connection<Bytes>,
 {
     inner: ConnectionInner<C>,
+    max_field_section_size: u64,
 }
 
 impl<C> Connection<C>
@@ -60,7 +62,27 @@ where
             }
         };
 
-        let fields = qpack::decode_stateless(&mut encoded)?;
+        let mut request_stream = RequestStream {
+            inner: connection::RequestStream::new(
+                stream,
+                self.max_field_section_size,
+                self.inner.shared.clone(),
+            ),
+        };
+
+        let (fields, mem_size) = qpack::decode_stateless(&mut encoded)?;
+        if mem_size > self.max_field_section_size {
+            request_stream
+                .send_response(
+                    http::Response::builder()
+                        .status(StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE)
+                        .body(())
+                        .expect("header too big response"),
+                )
+                .await?;
+            return Err(Error::header_too_big(mem_size, self.max_field_section_size));
+        }
+
         let (method, uri, headers) = Header::try_from(fields)?.into_request_parts()?;
 
         let mut req = http::Request::new(());
@@ -69,12 +91,7 @@ where
         *req.headers_mut() = headers;
         *req.version_mut() = http::Version::HTTP_3;
 
-        Ok(Some((
-            req,
-            RequestStream {
-                inner: connection::RequestStream::new(stream),
-            },
-        )))
+        Ok(Some((req, request_stream)))
     }
 
     pub fn poll_accept_request(
@@ -100,6 +117,30 @@ where
         }
         Poll::Pending
     }
+
+    #[cfg(feature = "test_helpers")]
+    pub fn state(&self) -> SharedStateRef {
+        self.inner.shared.clone()
+    }
+}
+
+pub struct Builder<C> {
+    pub(super) max_field_section_size: u64,
+    _conn: PhantomData<C>,
+}
+
+impl<C> Builder<C> {
+    pub(super) fn new() -> Self {
+        Builder {
+            max_field_section_size: VarInt::MAX.0,
+            _conn: PhantomData,
+        }
+    }
+
+    pub fn max_field_section_size(&mut self, value: u64) -> &mut Self {
+        self.max_field_section_size = value;
+        self
+    }
 }
 
 impl<C> Builder<Connection<C>>
@@ -108,7 +149,13 @@ where
 {
     pub async fn build(&self, conn: C) -> Result<Connection<C>, Error> {
         Ok(Connection {
-            inner: ConnectionInner::new(conn, self.max_field_section_size).await?,
+            inner: ConnectionInner::new(
+                conn,
+                self.max_field_section_size,
+                SharedStateRef::default(),
+            )
+            .await?,
+            max_field_section_size: self.max_field_section_size,
         })
     }
 }
@@ -123,10 +170,6 @@ where
 {
     pub async fn recv_data(&mut self) -> Result<Option<Bytes>, Error> {
         self.inner.recv_data().await
-    }
-
-    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
-        self.inner.recv_trailers().await
     }
 
     pub fn stop_sending(&mut self, error_code: crate::error::Code) {
@@ -146,7 +189,18 @@ where
         let headers = Header::response(status, headers);
 
         let mut block = BytesMut::new();
-        qpack::encode_stateless(&mut block, headers)?;
+        let mem_size = qpack::encode_stateless(&mut block, headers)?;
+
+        let max_mem_size = self
+            .inner
+            .conn_state
+            .0
+            .read()
+            .expect("send_response shared state read")
+            .peer_max_field_section_size;
+        if mem_size > max_mem_size {
+            return Err(Error::header_too_big(mem_size, max_mem_size));
+        }
 
         stream::write(&mut self.inner.stream, Frame::Headers(block.freeze())).await?;
 
@@ -163,5 +217,26 @@ where
 
     pub async fn finish(&mut self) -> Result<(), Error> {
         self.inner.finish().await
+    }
+}
+
+impl<S> RequestStream<FrameStream<S>>
+where
+    S: quic::RecvStream + quic::SendStream<Bytes>,
+{
+    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
+        let res = self.inner.recv_trailers().await;
+        if let Err(ref e) = res {
+            if let error::Kind::HeaderTooBig { .. } = e.kind() {
+                self.send_response(
+                    http::Response::builder()
+                        .status(StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE)
+                        .body(())
+                        .expect("header too big response"),
+                )
+                .await?;
+            }
+        }
+        res
     }
 }
