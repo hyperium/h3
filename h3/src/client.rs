@@ -3,17 +3,22 @@ use futures::future;
 use http::{request, HeaderMap, Response};
 use std::{
     convert::TryFrom,
+    marker::PhantomData,
     task::{Context, Poll},
 };
 
 use crate::{
-    connection::{self, Builder, ConnectionInner},
+    connection::{self, ConnectionInner, SharedStateRef},
     error::{Code, Error},
     frame::FrameStream,
-    proto::{frame::Frame, headers::Header},
+    proto::{frame::Frame, headers::Header, varint::VarInt},
     qpack, quic, stream,
 };
 use tracing::{trace, warn};
+
+pub fn builder<C: quic::Connection<Bytes>>() -> Builder<C> {
+    Builder::new()
+}
 
 pub async fn new<C, O>(conn: C) -> Result<(Connection<C>, SendRequest<C::OpenStreams>), Error>
 where
@@ -25,6 +30,8 @@ where
 
 pub struct SendRequest<T: quic::OpenStreams<Bytes>> {
     open: T,
+    conn_state: SharedStateRef,
+    max_field_section_size: u64, // maximum size for a header we receive
 }
 
 impl<T> SendRequest<T>
@@ -35,6 +42,11 @@ where
         &mut self,
         req: http::Request<()>,
     ) -> Result<RequestStream<FrameStream<T::BidiStream>>, Error> {
+        let peer_max_field_section_size = {
+            let state = self.conn_state.0.read().expect("send request lock state");
+            state.peer_max_field_section_size
+        };
+
         let (parts, _) = req.into_parts();
         let request::Parts {
             method,
@@ -48,13 +60,25 @@ where
             future::poll_fn(|cx| self.open.poll_open_bidi(cx).map_err(Error::transport)).await?;
 
         let mut block = BytesMut::new();
-        qpack::encode_stateless(&mut block, headers)?;
+        let mem_size = qpack::encode_stateless(&mut block, headers)?;
+        if mem_size > peer_max_field_section_size {
+            return Err(Error::header_too_big(mem_size, peer_max_field_section_size));
+        }
 
         stream::write(&mut stream, Frame::Headers(block.freeze())).await?;
 
         Ok(RequestStream {
-            inner: connection::RequestStream::new(FrameStream::new(stream)),
+            inner: connection::RequestStream::new(
+                FrameStream::new(stream),
+                self.max_field_section_size,
+                self.conn_state.clone(),
+            ),
         })
+    }
+
+    #[cfg(feature = "test_helpers")]
+    pub fn state(&self) -> SharedStateRef {
+        self.conn_state.clone()
     }
 }
 
@@ -86,18 +110,45 @@ where
     }
 }
 
+pub struct Builder<C>
+where
+    C: quic::Connection<Bytes>,
+{
+    pub(super) max_field_section_size: u64,
+    _conn: PhantomData<C>,
+}
+
 impl<C, O> Builder<C>
 where
     C: quic::Connection<Bytes, OpenStreams = O>,
     O: quic::OpenStreams<Bytes>,
 {
-    pub async fn build(self, quic: C) -> Result<(Connection<C>, SendRequest<O>), Error> {
+    pub(super) fn new() -> Self {
+        Builder {
+            max_field_section_size: VarInt::MAX.0,
+            _conn: PhantomData,
+        }
+    }
+
+    pub fn max_field_section_size(&mut self, value: u64) -> &mut Self {
+        self.max_field_section_size = value;
+        self
+    }
+
+    pub async fn build(&mut self, quic: C) -> Result<(Connection<C>, SendRequest<O>), Error> {
         let open = quic.opener();
+        let conn_state = SharedStateRef::default();
+
         Ok((
             Connection {
-                inner: ConnectionInner::new(quic, self.max_field_section_size).await?,
+                inner: ConnectionInner::new(quic, self.max_field_section_size, conn_state.clone())
+                    .await?,
             },
-            SendRequest { open },
+            SendRequest {
+                open,
+                conn_state,
+                max_field_section_size: self.max_field_section_size,
+            },
         ))
     }
 }
@@ -117,13 +168,21 @@ where
                 Code::H3_GENERAL_PROTOCOL_ERROR.with_reason("Did not receive response headers")
             })?;
 
-        let fields = if let Frame::Headers(ref mut encoded) = frame {
+        let (fields, mem_size) = if let Frame::Headers(ref mut encoded) = frame {
             qpack::decode_stateless(encoded)?
         } else {
             return Err(
                 Code::H3_FRAME_UNEXPECTED.with_reason("First response frame is not headers")
             );
         };
+
+        if mem_size > self.inner.max_field_section_size {
+            self.inner.stop_sending(Code::H3_REQUEST_REJECTED);
+            return Err(Error::header_too_big(
+                mem_size,
+                self.inner.max_field_section_size,
+            ));
+        }
 
         let (status, headers) = Header::try_from(fields)?.into_response_parts()?;
         let mut resp = Response::new(());
@@ -139,7 +198,13 @@ where
     }
 
     pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
-        self.inner.recv_trailers().await
+        let res = self.inner.recv_trailers().await;
+        if let Err(ref e) = res {
+            if let crate::error::Kind::HeaderTooBig { .. } = e.kind() {
+                self.inner.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
+            }
+        }
+        res
     }
 
     pub fn stop_sending(&mut self, error_code: crate::error::Code) {

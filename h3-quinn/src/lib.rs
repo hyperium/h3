@@ -11,8 +11,8 @@ use futures::{ready, FutureExt, StreamExt};
 
 use bytes::{Buf, Bytes};
 use h3::quic;
-pub use quinn;
-use quinn::{
+pub use quinn::{
+    self,
     crypto::Session,
     generic::{IncomingBiStreams, IncomingUniStreams, NewConnection, OpenBi, OpenUni},
     ConnectionError, VarInt, WriteError,

@@ -188,13 +188,14 @@ impl Decoder {
 }
 
 // Decode a header bloc received on Request or Push stream. (draft: 4.5)
-pub fn decode_stateless<T: Buf>(buf: &mut T) -> Result<Vec<HeaderField>, Error> {
+pub fn decode_stateless<T: Buf>(buf: &mut T) -> Result<(Vec<HeaderField>, u64), Error> {
     let (required_ref, _base) = HeaderPrefix::decode(buf)?.get(0, 0)?;
 
     if required_ref > 0 {
         return Err(Error::MissingRefs(required_ref));
     }
 
+    let mut size = 0;
     let mut fields = Vec::new();
     while buf.has_remaining() {
         let field = match HeaderBlockField::decode(buf.chunk()[0]) {
@@ -216,10 +217,11 @@ pub fn decode_stateless<T: Buf>(buf: &mut T) -> Result<Vec<HeaderField>, Error> 
             }
             _ => return Err(Error::UnknownPrefix(buf.chunk()[0])),
         };
+        size += field.mem_size() as u64;
         fields.push(field);
     }
 
-    Ok(fields)
+    Ok((fields, size))
 }
 
 #[cfg(test)]
