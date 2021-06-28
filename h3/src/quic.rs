@@ -54,6 +54,9 @@ pub trait Connection<B: Buf> {
 
     /// Get an object to open outgoing streams.
     fn opener(&self) -> Self::OpenStreams;
+
+    /// Close the connection immediately
+    fn close(&mut self, code: crate::error::Code, reason: &[u8]);
 }
 
 /// Trait for opening outgoing streams
@@ -78,6 +81,9 @@ pub trait OpenStreams<B: Buf> {
         &mut self,
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Self::SendStream, Self::Error>>;
+
+    /// Close the connection immediately
+    fn close(&mut self, code: crate::error::Code, reason: &[u8]);
 }
 
 /// A trait describing the "send" actions of a QUIC stream.

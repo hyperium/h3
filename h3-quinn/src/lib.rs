@@ -113,6 +113,13 @@ where
             opening_uni: None,
         }
     }
+
+    fn close(&mut self, code: h3::error::Code, reason: &[u8]) {
+        self.conn.close(
+            VarInt::from_u64(code.value()).expect("error code VarInt"),
+            reason,
+        );
+    }
 }
 
 pub struct OpenStreams {
@@ -155,6 +162,13 @@ where
 
         let send = ready!(self.opening_uni.as_mut().unwrap().poll_unpin(cx))?;
         Poll::Ready(Ok(Self::SendStream::new(send)))
+    }
+
+    fn close(&mut self, code: h3::error::Code, reason: &[u8]) {
+        self.conn.close(
+            VarInt::from_u64(code.value()).expect("error code VarInt"),
+            reason,
+        );
     }
 }
 

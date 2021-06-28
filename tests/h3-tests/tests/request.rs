@@ -6,7 +6,7 @@ use http::{HeaderMap, Request, Response, StatusCode};
 use h3::{
     client,
     error::{Code, Kind},
-    server,
+    server, ConnectionState,
 };
 use h3_tests::Pair;
 
@@ -337,10 +337,8 @@ async fn header_too_big_client_error() {
         let (_, mut client) = client::new(pair.client().await).await.expect("client init");
         // pretend client already received server's settings
         client
-            .state()
-            .0
-            .write()
-            .unwrap()
+            .shared_state()
+            .write("client")
             .peer_max_field_section_size = 12;
 
         let req = Request::get("http://localhost/salut").body(()).unwrap();
@@ -376,10 +374,8 @@ async fn header_too_big_client_error_trailer() {
         // Do not poll driver so client doesn't know about server's max_field_section_size setting
         let (_conn, mut client) = client::new(pair.client().await).await.expect("client init");
         client
-            .state()
-            .0
-            .write()
-            .unwrap()
+            .shared_state()
+            .write("client")
             .peer_max_field_section_size = 200;
 
         let mut request_stream = client
@@ -472,10 +468,8 @@ async fn header_too_big_discard_from_client() {
         let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
         // pretend server didn't receive settings
         incoming_req
-            .state()
-            .0
-            .write()
-            .unwrap()
+            .shared_state()
+            .write("client")
             .peer_max_field_section_size = u64::MAX;
         request_stream
             .send_response(
@@ -552,10 +546,8 @@ async fn header_too_big_discard_from_client_trailers() {
 
         // pretend server didn't receive settings
         incoming_req
-            .state()
-            .0
-            .write()
-            .unwrap()
+            .shared_state()
+            .write("server")
             .peer_max_field_section_size = u64::MAX;
 
         request_stream
@@ -612,10 +604,8 @@ async fn header_too_big_server_error() {
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
         // pretend the server already received client's settings
         incoming_req
-            .state()
-            .0
-            .write()
-            .unwrap()
+            .shared_state()
+            .write("server")
             .peer_max_field_section_size = 12;
 
         let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
@@ -668,10 +658,8 @@ async fn header_too_big_server_error_trailers() {
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
         // pretend the server already received client's settings
         incoming_req
-            .state()
-            .0
-            .write()
-            .unwrap()
+            .shared_state()
+            .write("write")
             .peer_max_field_section_size = 200;
 
         let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();

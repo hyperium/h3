@@ -1,12 +1,13 @@
 //! HTTP/3 Error types
 
-use std::fmt;
+use std::{fmt, sync::Arc};
 
 use crate::{frame, proto, qpack};
 
-type Cause = Box<dyn std::error::Error + Send + Sync>;
+pub type Cause = Box<dyn std::error::Error + Send + Sync>;
 
 /// A general error that can occur when handling the HTTP/3 protocol.
+#[derive(Clone)]
 pub struct Error {
     inner: Box<ErrorImpl>,
 }
@@ -15,15 +16,22 @@ pub struct Error {
 #[derive(PartialEq, Eq, Hash, Clone, Copy)]
 pub struct Code(u64);
 
+impl Code {
+    pub fn value(&self) -> u64 {
+        self.0
+    }
+}
+
 impl PartialEq<u64> for Code {
     fn eq(&self, other: &u64) -> bool {
         *other == self.0
     }
 }
 
+#[derive(Clone)]
 struct ErrorImpl {
     kind: Kind,
-    cause: Option<Cause>,
+    cause: Option<Arc<Cause>>,
 }
 
 #[derive(Clone, Debug)]
@@ -193,7 +201,7 @@ impl Error {
     }
 
     pub(crate) fn with_cause<E: Into<Cause>>(mut self, cause: E) -> Self {
-        self.inner.cause = Some(cause.into());
+        self.inner.cause = Some(Arc::new(cause.into()));
         self
     }
 }
@@ -257,7 +265,7 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.inner.cause.as_ref().map(|e| &**e as _)
+        self.inner.cause.as_ref().map(|e| &***e as _)
     }
 }
 

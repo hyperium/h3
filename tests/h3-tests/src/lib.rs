@@ -85,7 +85,7 @@ impl Pair {
 }
 
 pub struct Server {
-    incoming: Incoming,
+    pub incoming: Incoming,
 }
 
 impl Server {

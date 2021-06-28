@@ -13,3 +13,6 @@ mod qpack;
 mod stream;
 
 pub use error::Error;
+
+#[cfg(feature = "test_helpers")]
+pub use connection::ConnectionState;

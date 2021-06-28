@@ -1,7 +1,12 @@
-use futures::future;
-use h3::{client, server};
-use h3_tests::Pair;
 use std::time::Duration;
+
+use assert_matches::assert_matches;
+use futures::{future, StreamExt};
+use http::Request;
+
+use h3::{client, error::{Code, Kind}, server, ConnectionState};
+use h3_quinn::quinn;
+use h3_tests::Pair;
 
 #[tokio::test]
 async fn connect() {
@@ -30,7 +35,12 @@ async fn settings_exchange_client() {
         let (mut conn, client) = client::new(pair.client().await).await.expect("client init");
         let settings_change = async {
             for _ in 0..10 {
-                if client.state().0.read().unwrap().peer_max_field_section_size == 12 {
+                if client
+                    .shared_state()
+                    .read("client")
+                    .peer_max_field_section_size
+                    == 12
+                {
                     return;
                 }
                 tokio::time::sleep(Duration::from_millis(2)).await;
@@ -81,12 +91,12 @@ async fn settings_exchange_server() {
         let conn = server.next().await;
         let mut incoming = server::Connection::new(conn).await.unwrap();
 
-        let state = incoming.state().clone();
+        let state = incoming.shared_state().clone();
         let accept = async { incoming.accept().await.unwrap() };
 
         let settings_change = async {
             for _ in 0..10 {
-                if state.0.read().unwrap().peer_max_field_section_size == 12 {
+                if state.read("setting_change").peer_max_field_section_size == 12 {
                     return;
                 }
                 tokio::time::sleep(Duration::from_millis(2)).await;
@@ -97,4 +107,49 @@ async fn settings_exchange_server() {
     };
 
     tokio::select! { _ = server_fut => (), _ = client_fut => () };
+}
+
+#[tokio::test]
+async fn client_error_on_bidi_recv() {
+    let mut pair = Pair::new();
+    let mut server = pair.server();
+
+    macro_rules! check_err {
+        ($e:expr) => {
+            assert_matches!(
+                $e.map(|_| ()).unwrap_err().kind(),
+                Kind::Application { reason: Some(reason), code: Code::H3_STREAM_CREATION_ERROR }
+                if *reason == *"client received a bidirectionnal stream");
+        }
+    }
+
+    let client_fut = async {
+        let (mut conn, mut send) = client::new(pair.client().await).await.expect("client init");
+        let driver = future::poll_fn(|cx| conn.poll_close(cx));
+        check_err!(driver.await);
+        check_err!(
+            send.send_request(Request::get("http://no.way").body(()).unwrap())
+                .await
+        );
+    };
+
+    let server_fut = async {
+        let quinn::NewConnection { connection, .. } =
+            server.incoming.next().await.unwrap().await.unwrap();
+        let (mut send, _recv) = connection.open_bi().await.unwrap();
+        for _ in 0..100 {
+            match send.write(b"I'm not really a server").await {
+                Err(quinn::WriteError::ConnectionClosed(
+                    quinn::ConnectionError::ApplicationClosed(quinn::ApplicationClose {
+                        error_code,
+                        ..
+                    }),
+                )) if Code::H3_STREAM_CREATION_ERROR == error_code.into_inner() => break,
+                Err(e) => panic!("got err: {}", e),
+                Ok(_) => tokio::time::sleep(Duration::from_millis(1)).await,
+            }
+        }
+    };
+
+    tokio::join!(server_fut, client_fut);
 }
