@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-    connection::{self, ConnectionInner, SharedStateRef},
+    connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
     error::{Code, Error},
     frame::FrameStream,
     proto::{frame::Frame, headers::Header, varint::VarInt},
@@ -42,10 +42,10 @@ where
         &mut self,
         req: http::Request<()>,
     ) -> Result<RequestStream<FrameStream<T::BidiStream>>, Error> {
-        let peer_max_field_section_size = {
-            let state = self.conn_state.0.read().expect("send request lock state");
-            state.peer_max_field_section_size
-        };
+        let peer_max_field_section_size = self
+            .conn_state
+            .read("send request lock state")
+            .peer_max_field_section_size;
 
         let (parts, _) = req.into_parts();
         let request::Parts {
@@ -56,8 +56,9 @@ where
         } = parts;
         let headers = Header::request(method, uri, headers)?;
 
-        let mut stream =
-            future::poll_fn(|cx| self.open.poll_open_bidi(cx).map_err(Error::transport)).await?;
+        let mut stream = future::poll_fn(|cx| self.open.poll_open_bidi(cx))
+            .await
+            .map_err(|e| self.maybe_conn_err(Error::transport(e.into())))?;
 
         let mut block = BytesMut::new();
         let mem_size = qpack::encode_stateless(&mut block, headers)?;
@@ -65,7 +66,9 @@ where
             return Err(Error::header_too_big(mem_size, peer_max_field_section_size));
         }
 
-        stream::write(&mut stream, Frame::Headers(block.freeze())).await?;
+        stream::write(&mut stream, Frame::Headers(block.freeze()))
+            .await
+            .map_err(|e| self.maybe_conn_err(e))?;
 
         Ok(RequestStream {
             inner: connection::RequestStream::new(
@@ -75,10 +78,14 @@ where
             ),
         })
     }
+}
 
-    #[cfg(feature = "test_helpers")]
-    pub fn state(&self) -> SharedStateRef {
-        self.conn_state.clone()
+impl<T> ConnectionState for SendRequest<T>
+where
+    T: quic::OpenStreams<Bytes>,
+{
+    fn shared_state(&self) -> &SharedStateRef {
+        &self.conn_state
     }
 }
 
@@ -94,18 +101,30 @@ where
     C: quic::Connection<Bytes>,
 {
     pub fn poll_close(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
-        while let Poll::Ready(frame) = self.inner.poll_control(cx)? {
-            match frame {
-                Frame::Settings(_) => trace!("Got settings"),
-                f @ Frame::Goaway(_) => {
+        while let Poll::Ready(result) = self.inner.poll_control(cx) {
+            match result {
+                Ok(Frame::Settings(_)) => trace!("Got settings"),
+                Ok(f @ Frame::Goaway(_)) => {
                     warn!("Control frame ignored {:?}", f);
                 }
-                frame => {
+                Ok(frame) => {
                     return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED
                         .with_reason(format!("on client control stream: {:?}", frame))))
                 }
+                Err(e) => {
+                    self.inner.shared.write("poll_close error").error = e.clone().into();
+                    return Poll::Ready(Err(e));
+                }
             }
         }
+
+        if self.inner.poll_accept_request(cx).is_ready() {
+            return Poll::Ready(Err(self.inner.close(
+                Code::H3_STREAM_CREATION_ERROR,
+                "client received a bidirectionnal stream",
+            )));
+        }
+
         Poll::Pending
     }
 }
@@ -157,13 +176,20 @@ pub struct RequestStream<S> {
     inner: connection::RequestStream<S, Bytes>,
 }
 
+impl<S> ConnectionState for RequestStream<S> {
+    fn shared_state(&self) -> &SharedStateRef {
+        &self.inner.conn_state
+    }
+}
+
 impl<S> RequestStream<FrameStream<S>>
 where
     S: quic::RecvStream,
 {
     pub async fn recv_response(&mut self) -> Result<Response<()>, Error> {
         let mut frame = future::poll_fn(|cx| self.inner.stream.poll_next(cx))
-            .await?
+            .await
+            .map_err(|e| self.maybe_conn_err(e))?
             .ok_or_else(|| {
                 Code::H3_GENERAL_PROTOCOL_ERROR.with_reason("Did not receive response headers")
             })?;

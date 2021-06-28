@@ -27,13 +27,10 @@ where
     let mut buf = BytesMut::new();
     data.encode(&mut buf);
 
-    stream
-        .send_data(buf.freeze())
-        .map_err(|e| Error::transport(e.into()))?;
-
+    stream.send_data(buf.freeze()).map_err(Error::transport)?;
     future::poll_fn(|cx| stream.poll_ready(cx))
         .await
-        .map_err(|e| Error::transport(e.into()))?;
+        .map_err(Error::transport)?;
 
     Ok(())
 }

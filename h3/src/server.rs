@@ -12,7 +12,7 @@ use crate::{
     error::{self, Code, Error},
     frame::FrameStream,
     proto::{frame::Frame, headers::Header, varint::VarInt},
-    qpack, quic, stream,
+    qpack, quic, stream, ConnectionState,
 };
 use tracing::{trace, warn};
 
@@ -22,6 +22,15 @@ where
 {
     inner: ConnectionInner<C>,
     max_field_section_size: u64,
+}
+
+impl<C> ConnectionState for Connection<C>
+where
+    C: quic::Connection<Bytes>,
+{
+    fn shared_state(&self) -> &SharedStateRef {
+        &self.inner.shared
+    }
 }
 
 impl<C> Connection<C>
@@ -117,11 +126,6 @@ where
         }
         Poll::Pending
     }
-
-    #[cfg(feature = "test_helpers")]
-    pub fn state(&self) -> SharedStateRef {
-        self.inner.shared.clone()
-    }
 }
 
 pub struct Builder<C> {
@@ -164,6 +168,12 @@ pub struct RequestStream<S> {
     inner: connection::RequestStream<S, Bytes>,
 }
 
+impl<S> ConnectionState for RequestStream<S> {
+    fn shared_state(&self) -> &SharedStateRef {
+        &self.inner.conn_state
+    }
+}
+
 impl<S> RequestStream<FrameStream<S>>
 where
     S: quic::RecvStream,
@@ -194,15 +204,15 @@ where
         let max_mem_size = self
             .inner
             .conn_state
-            .0
-            .read()
-            .expect("send_response shared state read")
+            .read("send_response")
             .peer_max_field_section_size;
         if mem_size > max_mem_size {
             return Err(Error::header_too_big(mem_size, max_mem_size));
         }
 
-        stream::write(&mut self.inner.stream, Frame::Headers(block.freeze())).await?;
+        stream::write(&mut self.inner.stream, Frame::Headers(block.freeze()))
+            .await
+            .map_err(|e| self.maybe_conn_err(e))?;
 
         Ok(())
     }
