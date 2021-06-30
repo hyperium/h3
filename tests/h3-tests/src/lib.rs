@@ -6,7 +6,16 @@ use futures::StreamExt;
 use rustls::{Certificate, PrivateKey};
 
 use h3::quic;
-use h3_quinn::{quinn::Incoming, Connection};
+use h3_quinn::{quinn::Incoming, Connection, NewConnection};
+// =======
+// use h3_quinn::{
+//     quinn::{
+//         Certificate, CertificateChain, ClientConfigBuilder, Endpoint, Incoming,
+//         //         PrivateKey, ServerConfigBuilder,
+//     },
+//     Connection,
+// };
+// >>>>>>> d6343f6 (ControlStreams Errors)
 
 pub fn init_tracing() {
     let _ = tracing_subscriber::fmt()
@@ -50,7 +59,7 @@ impl Pair {
         Server { incoming }
     }
 
-    pub async fn client(&self) -> impl quic::Connection<Bytes> {
+    pub async fn client_inner(&self) -> NewConnection {
         let addr = (Ipv6Addr::LOCALHOST, self.port)
             .to_socket_addrs()
             .unwrap()
@@ -74,13 +83,15 @@ impl Pair {
         let mut client_endpoint =
             h3_quinn::quinn::Endpoint::client("[::]:0".parse().unwrap()).unwrap();
         client_endpoint.set_default_client_config(client_config);
-        Connection::new(
-            client_endpoint
-                .connect(addr, "localhost")
-                .unwrap()
-                .await
-                .unwrap(),
-        )
+        client_endpoint
+            .connect(addr, "localhost")
+            .unwrap()
+            .await
+            .unwrap()
+    }
+
+    pub async fn client(&self) -> impl quic::Connection<Bytes> {
+        Connection::new(self.client_inner().await)
     }
 }
 

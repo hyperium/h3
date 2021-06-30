@@ -111,10 +111,18 @@ where
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<C::BidiStream>, Error>> {
+        if let Some(ref e) = self.shared.read("poll_accept_request").error {
+            return Poll::Ready(Err(e.clone()));
+        }
+
         self.conn.poll_accept_bidi(cx).map_err(Error::transport)
     }
 
     pub fn poll_accept_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+        if let Some(ref e) = self.shared.read("poll_accept_request").error {
+            return Poll::Ready(Err(e.clone()));
+        }
+
         loop {
             match self.conn.poll_accept_recv(cx).map_err(Error::transport)? {
                 Poll::Ready(Some(stream)) => self
@@ -136,9 +144,18 @@ where
             }
         }
 
-        for index in resolved {
-            match self.pending_recv_streams.remove(index).into_stream()? {
+        for (removed, index) in resolved.into_iter().enumerate() {
+            let stream = self
+                .pending_recv_streams
+                .remove(index - removed)
+                .into_stream()?;
+            match stream {
                 AcceptedRecvStream::Control(s) => {
+                    if self.control_recv.is_some() {
+                        return Poll::Ready(Err(
+                            self.close(Code::H3_STREAM_CREATION_ERROR, "got two control streams")
+                        ));
+                    }
                     self.control_recv = Some(s);
                 }
                 _ => (),
@@ -149,6 +166,10 @@ where
     }
 
     pub fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<Frame, Error>> {
+        if let Some(ref e) = self.shared.read("poll_accept_request").error {
+            return Poll::Ready(Err(e.clone()));
+        }
+
         while self.control_recv.is_none() {
             ready!(self.poll_accept_recv(cx))?;
         }
@@ -160,7 +181,7 @@ where
             .poll_next(cx))?;
 
         let res = match recvd {
-            None => Err(Code::H3_CLOSED_CRITICAL_STREAM.with_reason("control stream closed")),
+            None => Err(self.close(Code::H3_CLOSED_CRITICAL_STREAM, "control stream closed")),
             Some(frame) => match frame {
                 Frame::Settings(settings) if !self.got_peer_settings => {
                     self.got_peer_settings = true;
@@ -174,19 +195,24 @@ where
                 Frame::CancelPush(_) | Frame::MaxPushId(_) | Frame::Goaway(_)
                     if !self.got_peer_settings =>
                 {
-                    Err(Code::H3_MISSING_SETTINGS.into())
+                    Err(self.close(
+                        Code::H3_MISSING_SETTINGS.into(),
+                        format!("received {:?} before settings on control stream", frame),
+                    ))
                 }
-                frame => Err(Code::H3_FRAME_UNEXPECTED
-                    .with_reason(format!("on control stream: {:?}", frame))),
+                frame => Err(self.close(
+                    Code::H3_FRAME_UNEXPECTED,
+                    format!("on control stream: {:?}", frame),
+                )),
             },
         };
         Poll::Ready(res)
     }
 
-    pub fn close(&mut self, code: Code, reason: &str) -> Error {
-        self.shared.0.write().expect("connection close err").error = Some(code.with_reason(reason));
-        self.conn.close(code, reason.as_bytes());
-        code.with_reason(reason)
+    pub fn close<T: AsRef<str>>(&mut self, code: Code, reason: T) -> Error {
+        self.shared.write("connection close err").error = Some(code.with_reason(reason.as_ref()));
+        self.conn.close(code, reason.as_ref().as_bytes());
+        code.with_reason(reason.as_ref())
     }
 }
 

@@ -6,8 +6,7 @@ pub mod server;
 
 #[allow(dead_code)]
 mod connection;
-pub mod frame;
-mod proto;
+mod frame;
 #[allow(dead_code)]
 mod qpack;
 mod stream;
@@ -16,3 +15,8 @@ pub use error::Error;
 
 #[cfg(feature = "test_helpers")]
 pub use connection::ConnectionState;
+
+#[cfg(not(feature = "test_helpers"))]
+mod proto;
+#[cfg(feature = "test_helpers")]
+pub mod proto;
