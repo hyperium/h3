@@ -1,10 +1,16 @@
 use std::time::Duration;
 
 use assert_matches::assert_matches;
+use bytes::BytesMut;
 use futures::{future, StreamExt};
 use http::Request;
 
-use h3::{client, error::{Code, Kind}, server, ConnectionState};
+use h3::{
+    client,
+    error::{Code, Kind},
+    proto::{coding::Encode as _, frame::Frame, stream::StreamType},
+    server, ConnectionState,
+};
 use h3_quinn::quinn;
 use h3_tests::Pair;
 
@@ -139,7 +145,7 @@ async fn client_error_on_bidi_recv() {
         let (mut send, _recv) = connection.open_bi().await.unwrap();
         for _ in 0..100 {
             match send.write(b"I'm not really a server").await {
-                Err(quinn::WriteError::ConnectionClosed(
+                Err(quinn::WriteError::ConnectionLost(
                     quinn::ConnectionError::ApplicationClosed(quinn::ApplicationClose {
                         error_code,
                         ..
@@ -152,4 +158,145 @@ async fn client_error_on_bidi_recv() {
     };
 
     tokio::join!(server_fut, client_fut);
+}
+
+#[tokio::test]
+async fn two_control_streams() {
+    h3_tests::init_tracing();
+    let mut pair = Pair::new();
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let new_connection = pair.client_inner().await;
+
+        for _ in 0..=1 {
+            let mut control_stream = new_connection.connection.open_uni().await.unwrap();
+            let mut buf = BytesMut::new();
+            StreamType::CONTROL.encode(&mut buf);
+            control_stream.write_all(&buf[..]).await.unwrap();
+        }
+
+        tokio::time::sleep(Duration::from_secs(10)).await;
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming = server::Connection::new(conn).await.unwrap();
+        assert_matches!(
+            incoming.accept().await.map(|_| ()).unwrap_err().kind(),
+            Kind::Application {
+                code: Code::H3_STREAM_CREATION_ERROR,
+                ..
+            }
+        );
+    };
+
+    tokio::select! { _ = server_fut => (), _ = client_fut => panic!("server resolved first") };
+}
+
+#[tokio::test]
+async fn control_close_send_error() {
+    h3_tests::init_tracing();
+    let mut pair = Pair::new();
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let new_connection = pair.client_inner().await;
+        let mut control_stream = new_connection.connection.open_uni().await.unwrap();
+
+        let mut buf = BytesMut::new();
+        StreamType::CONTROL.encode(&mut buf);
+        control_stream.write_all(&buf[..]).await.unwrap();
+        control_stream.finish().await.unwrap(); // close the client control stream immediately
+
+        let (mut driver, _) = client::new(h3_quinn::Connection::new(new_connection))
+            .await
+            .unwrap();
+
+        future::poll_fn(|cx| driver.poll_close(cx)).await
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming = server::Connection::new(conn).await.unwrap();
+        // Driver detects that the recieving side of the control stream has been closed
+        assert_matches!(
+        incoming.accept().await.map(|_| ()).unwrap_err().kind(),
+            Kind::Application { reason: Some(reason), code: Code::H3_CLOSED_CRITICAL_STREAM }
+            if *reason == *"control stream closed");
+        // Poll it once again returns the previously stored error
+        assert_matches!(
+            incoming.accept().await.map(|_| ()).unwrap_err().kind(),
+            Kind::Application { reason: Some(reason), code: Code::H3_CLOSED_CRITICAL_STREAM }
+            if *reason == *"control stream closed");
+    };
+
+    tokio::select! { _ = server_fut => (), _ = client_fut => panic!("server resolved first") };
+}
+
+#[tokio::test]
+async fn missing_settings() {
+    h3_tests::init_tracing();
+    let mut pair = Pair::new();
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let new_connection = pair.client_inner().await;
+        let mut control_stream = new_connection.connection.open_uni().await.unwrap();
+
+        let mut buf = BytesMut::new();
+        StreamType::CONTROL.encode(&mut buf);
+        // Send a non-settings frame before the mandatory Settings frame on control stream
+        Frame::CancelPush(0).encode(&mut buf);
+        control_stream.write_all(&buf[..]).await.unwrap();
+
+        tokio::time::sleep(Duration::from_secs(10)).await;
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming = server::Connection::new(conn).await.unwrap();
+        assert_matches!(
+            incoming.accept().await.map(|_| ()).unwrap_err().kind(),
+            Kind::Application {
+                code: Code::H3_MISSING_SETTINGS,
+                ..
+            }
+        );
+    };
+
+    tokio::select! { _ = server_fut => (), _ = client_fut => panic!("server resolved first") };
+}
+
+#[tokio::test]
+async fn control_stream_frame_unexpected() {
+    h3_tests::init_tracing();
+    let mut pair = Pair::new();
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let new_connection = pair.client_inner().await;
+        let mut control_stream = new_connection.connection.open_uni().await.unwrap();
+
+        let mut buf = BytesMut::new();
+        StreamType::CONTROL.encode(&mut buf);
+        Frame::Data { len: 0 }.encode(&mut buf);
+        control_stream.write_all(&buf[..]).await.unwrap();
+
+        tokio::time::sleep(Duration::from_secs(10)).await;
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming = server::Connection::new(conn).await.unwrap();
+        assert_matches!(
+            incoming.accept().await.map(|_| ()).unwrap_err().kind(),
+            Kind::Application {
+                code: Code::H3_FRAME_UNEXPECTED,
+                ..
+            }
+        );
+    };
+
+    tokio::select! { _ = server_fut => (), _ = client_fut => panic!("server resolved first") };
 }
