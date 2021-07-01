@@ -245,12 +245,12 @@ impl fmt::Display for Error {
         match self.inner.kind {
             Kind::Application { code, ref reason } => {
                 if let Some(reason) = reason {
-                    write!(f, "application error: {}", reason)
+                    write!(f, "application error: {}", reason)?
                 } else {
-                    write!(f, "application error {:?}", code)
+                    write!(f, "application error {:?}", code)?
                 }
             }
-            Kind::Transport => f.write_str("quic transport error"),
+            Kind::Transport => f.write_str("quic transport error")?,
             Kind::HeaderTooBig {
                 actual_size,
                 max_size,
@@ -258,8 +258,12 @@ impl fmt::Display for Error {
                 f,
                 "issued header size {} o is beyond peer's limit {} o",
                 actual_size, max_size
-            ),
+            )?,
+        };
+        if let Some(ref cause) = self.inner.cause {
+            write!(f, "cause: {}", cause)?
         }
+        Ok(())
     }
 }
 
