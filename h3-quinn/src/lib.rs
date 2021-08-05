@@ -4,10 +4,11 @@
 use std::{
     error::Error,
     fmt::Display,
+    pin::Pin,
     task::{self, Poll},
 };
 
-use futures::{ready, FutureExt, StreamExt};
+use futures::{ready, AsyncWrite, FutureExt, StreamExt};
 
 use bytes::{Buf, Bytes};
 use h3::quic;
@@ -261,7 +262,18 @@ where
 
     fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         if let Some(ref mut data) = self.writing {
-            ready!(self.stream.write_all(data.chunk()).poll_unpin(cx))?;
+            while data.has_remaining() {
+                match ready!(Pin::new(&mut self.stream).poll_write(cx, data.chunk())) {
+                    Ok(n) => data.advance(n),
+                    Err(err) => {
+                        if let Some(e) = err.into_inner() {
+                            return Poll::Ready(Err(SendStreamError::Write(e)));
+                        } else {
+                            return Poll::Ready(Err(SendStreamError::Unknown));
+                        }
+                    }
+                }
+            }
         }
         self.writing = None;
         Poll::Ready(Ok(()))
@@ -292,8 +304,9 @@ where
 
 #[derive(Debug)]
 pub enum SendStreamError {
-    Write(WriteError),
+    Write(Box<dyn std::error::Error + Send + Sync>),
     NotReady,
+    Unknown, // this should not happen unless quinn changes
 }
 
 impl std::error::Error for SendStreamError {}
@@ -306,6 +319,6 @@ impl Display for SendStreamError {
 
 impl From<WriteError> for SendStreamError {
     fn from(e: WriteError) -> Self {
-        Self::Write(e)
+        Self::Write(Box::new(e))
     }
 }
