@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // quinn setup
     let mut server_config = h3_quinn::quinn::ServerConfigBuilder::default();
-    server_config.protocols(&[b"h3-27"]);
+    server_config.protocols(&[b"h3-29"]);
 
     let (endpoint, mut incoming) = match opt.command {
         Command::SelfSigned(r) => {
