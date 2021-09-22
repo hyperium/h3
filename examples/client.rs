@@ -63,7 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tls_config.enable_early_data = true;
         tls_config
             .dangerous()
-            .set_certificate_verifier(Arc::new(YesVerifier(Arc::new(Mutex::new(())))));
+            .set_certificate_verifier(Arc::new(YesVerifier));
         tls_config.alpn_protocols = vec![ALPN.into()];
 
         let transport = quinn::TransportConfig::default();
@@ -109,7 +109,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-struct YesVerifier(Arc<Mutex<()>>);
+struct YesVerifier;
 impl rustls::ServerCertVerifier for YesVerifier {
     fn verify_server_cert(
         &self,
