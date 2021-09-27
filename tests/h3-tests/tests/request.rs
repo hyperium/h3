@@ -1,6 +1,7 @@
-use std::{error::Error as _, time::Duration};
+use std::time::Duration;
 
 use assert_matches::assert_matches;
+use futures::future;
 use http::{HeaderMap, Request, Response, StatusCode};
 
 use h3::{
@@ -490,17 +491,13 @@ async fn header_too_big_discard_from_client() {
             }
             tokio::time::sleep(Duration::from_millis(2)).await;
         }
-        assert_matches!(err.as_ref().unwrap().kind(), Kind::Transport);
-        assert_matches!(err, Some(e) => {
-            assert_matches!(
-                e.source()
-                    .unwrap()
-                    .downcast_ref::<h3_quinn::SendStreamError>()
-                    .unwrap(),
-                h3_quinn::SendStreamError::Write(h3_quinn::quinn::WriteError::Stopped(c))
-                    if Code::H3_REQUEST_REJECTED == c.into_inner()
-            );
-        });
+        assert_matches!(
+            err.as_ref().unwrap().kind(),
+            Kind::Application {
+                code: Code::H3_REQUEST_CANCELLED,
+                ..
+            }
+        );
         let _ = incoming_req.accept().await;
     };
 
@@ -690,6 +687,158 @@ async fn header_too_big_server_error_trailers() {
                 actual_size: 539,
                 max_size: 200,
             }
+        );
+    };
+
+    tokio::join!(server_fut, client_fut);
+}
+
+#[tokio::test]
+async fn get_timeout_client_recv_response() {
+    h3_tests::init_tracing();
+    let mut pair = Pair::new();
+    pair.with_timeout(Duration::from_millis(100));
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let (mut conn, mut client) = client::new(pair.client().await).await.expect("client init");
+        let request_fut = async {
+            let mut request_stream = client
+                .send_request(Request::get("http://localhost/salut").body(()).unwrap())
+                .await
+                .expect("request");
+
+            let response = request_stream.recv_response().await;
+            assert_matches!(response.unwrap_err().kind(), h3::error::Kind::Timeout);
+        };
+
+        let drive_fut = async move {
+            let result = future::poll_fn(|cx| conn.poll_close(cx)).await;
+            assert_matches!(result.unwrap_err().kind(), h3::error::Kind::Timeout);
+        };
+
+        tokio::join!(drive_fut, request_fut);
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming_req = server::Connection::new(conn).await.unwrap();
+
+        // _req must not be dropped, else the connection will be closed and the timeout
+        // wont be triggered
+        let _req = incoming_req.accept().await.expect("accept").unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    };
+
+    tokio::join!(server_fut, client_fut);
+}
+
+#[tokio::test]
+async fn get_timeout_client_recv_data() {
+    h3_tests::init_tracing();
+    let mut pair = Pair::new();
+    pair.with_timeout(Duration::from_millis(200));
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let (mut conn, mut client) = client::new(pair.client().await).await.expect("client init");
+        let request_fut = async {
+            let mut request_stream = client
+                .send_request(Request::get("http://localhost/salut").body(()).unwrap())
+                .await
+                .expect("request");
+
+            let _ = request_stream.recv_response().await.unwrap();
+            let data = request_stream.recv_data().await;
+            assert_matches!(data.unwrap_err().kind(), h3::error::Kind::Timeout);
+        };
+
+        let drive_fut = async move {
+            let result = future::poll_fn(|cx| conn.poll_close(cx)).await;
+            assert_matches!(result.unwrap_err().kind(), h3::error::Kind::Timeout);
+        };
+
+        tokio::join!(drive_fut, request_fut);
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming_req = server::Connection::new(conn).await.unwrap();
+
+        let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        request_stream
+            .send_response(
+                Response::builder()
+                    .status(200)
+                    .body(())
+                    .expect("build response"),
+            )
+            .await
+            .expect("send_response");
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    };
+
+    tokio::join!(server_fut, client_fut);
+}
+
+#[tokio::test]
+async fn get_timeout_server_accept() {
+    h3_tests::init_tracing();
+    let mut pair = Pair::new();
+    pair.with_timeout(Duration::from_millis(200));
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let (mut conn, _client) = client::new(pair.client().await).await.expect("client init");
+        let request_fut = async {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        };
+
+        let drive_fut = async move {
+            let result = future::poll_fn(|cx| conn.poll_close(cx)).await;
+            assert_matches!(result.unwrap_err().kind(), h3::error::Kind::Timeout);
+        };
+
+        tokio::join!(drive_fut, request_fut);
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming_req = server::Connection::new(conn).await.unwrap();
+
+        assert_matches!(
+            incoming_req.accept().await.map(|_| ()).unwrap_err().kind(),
+            h3::error::Kind::Timeout
+        );
+    };
+
+    tokio::join!(server_fut, client_fut);
+}
+
+#[tokio::test]
+async fn post_timeout_server_recv_data() {
+    h3_tests::init_tracing();
+    let mut pair = Pair::new();
+    pair.with_timeout(Duration::from_millis(200));
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let (_conn, mut client) = client::new(pair.client().await).await.expect("client init");
+        let _request_stream = client
+            .send_request(Request::post("http://localhost/salut").body(()).unwrap())
+            .await
+            .expect("request");
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming_req = server::Connection::new(conn).await.unwrap();
+
+        let (_, mut req_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        assert_matches!(
+            req_stream.recv_data().await.unwrap_err().kind(),
+            h3::error::Kind::Timeout
         );
     };
 

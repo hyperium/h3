@@ -27,10 +27,8 @@ where
     let mut buf = BytesMut::new();
     data.encode(&mut buf);
 
-    stream.send_data(buf.freeze()).map_err(Error::transport)?;
-    future::poll_fn(|cx| stream.poll_ready(cx))
-        .await
-        .map_err(Error::transport)?;
+    stream.send_data(buf.freeze())?;
+    future::poll_fn(|cx| stream.poll_ready(cx)).await?;
 
     Ok(())
 }
@@ -99,8 +97,7 @@ where
 
             match ready!(self
                 .stream
-                .poll_read(&mut self.buf[self.len..self.expected], cx))
-            .map_err(Error::transport)?
+                .poll_read(&mut self.buf[self.len..self.expected], cx))?
             {
                 Some(s) => self.len += s,
                 None => {

@@ -8,11 +8,11 @@ use std::{
 };
 
 use crate::{
-    connection::{self, ConnectionInner, SharedStateRef},
+    connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
     error::{self, Code, Error},
     frame::FrameStream,
     proto::{frame::Frame, headers::Header, varint::VarInt},
-    qpack, quic, stream, ConnectionState,
+    qpack, quic, stream,
 };
 use tracing::{trace, warn};
 

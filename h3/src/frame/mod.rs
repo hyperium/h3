@@ -7,6 +7,7 @@ use bytes::{Buf, Bytes};
 use tracing::trace;
 
 use crate::{
+    error::TransportError,
     proto::frame::{self, Frame},
     quic::{RecvStream, SendStream},
 };
@@ -208,7 +209,7 @@ impl FrameDecoder {
 #[derive(Debug)]
 pub enum Error {
     Proto(frame::Error),
-    Quic(Box<dyn std::error::Error + Send + Sync>),
+    Quic(TransportError),
     UnexpectedEnd,
 }
 
@@ -225,10 +226,11 @@ mod tests {
     use assert_matches::assert_matches;
     use bytes::{BufMut, BytesMut};
     use futures::future::poll_fn;
-    use std::collections::VecDeque;
+    use std::{collections::VecDeque, fmt, sync::Arc};
     use tokio;
 
     use crate::proto::coding::Encode;
+    use crate::quic::QuicError;
 
     // Decoder
 
@@ -481,7 +483,7 @@ mod tests {
 
     impl RecvStream for FakeRecv {
         type Buf = Bytes;
-        type Error = Box<dyn std::error::Error + Send + Sync>;
+        type Error = FakeError;
 
         fn poll_data(
             &mut self,
@@ -500,6 +502,32 @@ mod tests {
 
         fn stop_sending(&mut self, _: u64) {
             unimplemented!()
+        }
+    }
+
+    #[derive(Debug)]
+    struct FakeError;
+
+    impl QuicError for FakeError {
+        fn is_timeout(&self) -> bool {
+            unimplemented!()
+        }
+
+        fn err_code(&self) -> Option<u64> {
+            unimplemented!()
+        }
+    }
+
+    impl std::error::Error for FakeError {}
+    impl fmt::Display for FakeError {
+        fn fmt(&self, _: &mut fmt::Formatter<'_>) -> fmt::Result {
+            unimplemented!()
+        }
+    }
+
+    impl Into<Arc<dyn QuicError>> for FakeError {
+        fn into(self) -> Arc<dyn QuicError> {
+            todo!()
         }
     }
 }

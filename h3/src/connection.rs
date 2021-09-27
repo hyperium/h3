@@ -87,7 +87,7 @@ where
     ) -> Result<Self, Error> {
         let mut control_send = future::poll_fn(|mut cx| conn.poll_open_send(&mut cx))
             .await
-            .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_cause(e))?;
+            .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))?;
 
         let mut settings = Settings::default();
         settings
@@ -115,7 +115,9 @@ where
             return Poll::Ready(Err(e.clone()));
         }
 
-        self.conn.poll_accept_bidi(cx).map_err(Error::transport)
+        // .into().into() converts the impl QuicError into crate::error::Error.
+        // The `?` operator doesn't work here for some reason.
+        self.conn.poll_accept_bidi(cx).map_err(|e| e.into().into())
     }
 
     pub fn poll_accept_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
@@ -124,12 +126,14 @@ where
         }
 
         loop {
-            match self.conn.poll_accept_recv(cx).map_err(Error::transport)? {
+            match self.conn.poll_accept_recv(cx)? {
                 Poll::Ready(Some(stream)) => self
                     .pending_recv_streams
                     .push(AcceptRecvStream::new(stream)),
                 Poll::Ready(None) => {
-                    return Err(Error::transport("Connection closed unexpected")).into()
+                    return Poll::Ready(Err(
+                        Code::H3_GENERAL_PROTOCOL_ERROR.with_reason("Connection closed unexpected")
+                    ))
                 }
                 Poll::Pending => break,
             }
@@ -196,7 +200,7 @@ where
                     if !self.got_peer_settings =>
                 {
                     Err(self.close(
-                        Code::H3_MISSING_SETTINGS.into(),
+                        Code::H3_MISSING_SETTINGS,
                         format!("received {:?} before settings on control stream", frame),
                     ))
                 }
@@ -312,10 +316,10 @@ where
 
         self.stream
             .send_data(buf)
-            .map_err(|e| self.maybe_conn_err(Error::transport(e)))?;
+            .map_err(|e| self.maybe_conn_err(e))?;
         future::poll_fn(|cx| self.stream.poll_ready(cx))
             .await
-            .map_err(|e| self.maybe_conn_err(Error::transport(e)))?;
+            .map_err(|e| self.maybe_conn_err(e))?;
 
         Ok(())
     }
@@ -342,9 +346,9 @@ where
     pub async fn finish(&mut self) -> Result<(), Error> {
         future::poll_fn(|cx| self.stream.poll_ready(cx))
             .await
-            .map_err(|e| self.maybe_conn_err(Error::transport(e)))?;
+            .map_err(|e| self.maybe_conn_err(e))?;
         future::poll_fn(|cx| self.stream.poll_finish(cx))
             .await
-            .map_err(|e| self.maybe_conn_err(Error::transport(e)))
+            .map_err(|e| self.maybe_conn_err(e))
     }
 }
