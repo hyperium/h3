@@ -2,20 +2,20 @@
 //!
 //! This module implements QUIC traits with Quinn.
 use std::{
-    error::Error,
-    fmt::Display,
+    fmt::{self, Display},
     pin::Pin,
+    sync::Arc,
     task::{self, Poll},
 };
 
 use bytes::{Buf, Bytes};
 use futures::{ready, FutureExt as _, StreamExt as _, AsyncWrite as _ };
 pub use quinn::{
-    self, crypto::Session, ConnectionError, IncomingBiStreams, IncomingUniStreams, NewConnection,
+    self, crypto::Session, IncomingBiStreams, IncomingUniStreams, NewConnection,
     OpenBi, OpenUni, VarInt, WriteError,
 };
 
-use h3::quic;
+use h3::quic::{self, QuicError};
 
 pub struct Connection {
     conn: quinn::Connection,
@@ -41,6 +41,43 @@ impl Connection {
             incoming_uni: uni_streams,
             opening_uni: None,
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct ConnectionError(quinn::ConnectionError);
+
+impl std::error::Error for ConnectionError {}
+
+impl fmt::Display for ConnectionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl QuicError for ConnectionError {
+    fn is_timeout(&self) -> bool {
+        if let quinn::ConnectionError::TimedOut = self.0 {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn err_code(&self) -> Option<u64> {
+        match self.0 {
+            quinn::ConnectionError::ApplicationClosed(quinn_proto::ApplicationClose {
+                error_code,
+                ..
+            }) => Some(error_code.into_inner()),
+            _ => None,
+        }
+    }
+}
+
+impl From<quinn::ConnectionError> for ConnectionError {
+    fn from(e: quinn::ConnectionError) -> Self {
+        Self(e)
     }
 }
 
@@ -287,26 +324,43 @@ impl quic::RecvStream for RecvStream {
 }
 
 #[derive(Debug)]
-pub struct ReadError {
-    cause: quinn::ReadError,
-}
+pub struct ReadError(quinn::ReadError);
 
-impl Display for ReadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.cause.fmt(f)
+impl std::error::Error for ReadError {}
+
+impl fmt::Display for ReadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
     }
 }
 
-impl Error for ReadError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        // TODO: implement std::error::Error for quinn::ReadError
-        None
+impl Into<Arc<dyn QuicError>> for ReadError {
+    fn into(self) -> Arc<dyn QuicError> {
+        Arc::new(self)
     }
 }
 
 impl From<quinn::ReadError> for ReadError {
     fn from(e: quinn::ReadError) -> Self {
-        Self { cause: e }
+        Self(e)
+    }
+}
+
+impl QuicError for ReadError {
+    fn is_timeout(&self) -> bool {
+        match self.0 {
+            quinn::ReadError::ConnectionLost(quinn::ConnectionError::TimedOut) => true,
+            _ => false,
+        }
+    }
+
+    fn err_code(&self) -> Option<u64> {
+        match self.0 {
+            quinn::ReadError::ConnectionLost(quinn::ConnectionError::ApplicationClosed(
+                quinn_proto::ApplicationClose { error_code, .. },
+            )) => Some(error_code.into_inner()),
+            _ => None,
+        }
     }
 }
 
@@ -337,13 +391,23 @@ where
         if let Some(ref mut data) = self.writing {
             while data.has_remaining() {
                 match ready!(Pin::new(&mut self.stream).poll_write(cx, data.chunk())) {
-                    Ok(n) => data.advance(n),
+                    Ok(cnt) => data.advance(cnt),
                     Err(err) => {
-                        if let Some(e) = err.into_inner() {
-                            return Poll::Ready(Err(SendStreamError::Write(e)));
-                        } else {
-                            return Poll::Ready(Err(SendStreamError::Unknown));
-                        }
+                        // We are forced to use AsyncWrite for now because we cannot store
+                        // the result of a call to:
+                        // quinn::send_stream::write<'a>(&'a mut self, buf: &'a [u8]) -> Write<'a, S>.
+                        //
+                        // This is why we have to unpack the error from io::Error below. This should not
+                        // panic as long as quinn's AsyncWrite impl doesn't change.
+                        return Poll::Ready(Err(SendStreamError::Write(
+                            err.into_inner()
+                                .expect("write stream returned an empty error")
+                                .downcast_ref::<WriteError>()
+                                .expect(
+                                    "write stream returned an error which type is not WriteError",
+                                )
+                                .clone(),
+                        )));
                     }
                 }
             }
@@ -377,9 +441,8 @@ where
 
 #[derive(Debug)]
 pub enum SendStreamError {
-    Write(Box<dyn std::error::Error + Send + Sync>),
+    Write(WriteError),
     NotReady,
-    Unknown, // this should not happen unless quinn changes
 }
 
 impl std::error::Error for SendStreamError {}
@@ -392,6 +455,36 @@ impl Display for SendStreamError {
 
 impl From<WriteError> for SendStreamError {
     fn from(e: WriteError) -> Self {
-        Self::Write(Box::new(e))
+        Self::Write(e)
+    }
+}
+
+impl QuicError for SendStreamError {
+    fn is_timeout(&self) -> bool {
+        match self {
+            Self::Write(quinn::WriteError::ConnectionLost(quinn::ConnectionError::TimedOut)) => {
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn err_code(&self) -> Option<u64> {
+        match self {
+            Self::Write(quinn::WriteError::Stopped(error_code)) => Some(error_code.into_inner()),
+            Self::Write(quinn::WriteError::ConnectionLost(
+                quinn::ConnectionError::ApplicationClosed(quinn_proto::ApplicationClose {
+                    error_code,
+                    ..
+                }),
+            )) => Some(error_code.into_inner()),
+            _ => None,
+        }
+    }
+}
+
+impl Into<Arc<dyn QuicError>> for SendStreamError {
+    fn into(self) -> Arc<dyn QuicError> {
+        Arc::new(self)
     }
 }

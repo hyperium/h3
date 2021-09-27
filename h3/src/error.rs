@@ -2,9 +2,12 @@
 
 use std::{fmt, sync::Arc};
 
-use crate::{frame, proto, qpack};
+use crate::{frame, proto, qpack, quic::QuicError};
 
+/// Cause of an error thrown by our own h3 layer
 pub type Cause = Box<dyn std::error::Error + Send + Sync>;
+/// Error thrown by the underlying QUIC impl
+pub type TransportError = Box<dyn QuicError>;
 
 /// A general error that can occur when handling the HTTP/3 protocol.
 #[derive(Clone)]
@@ -40,11 +43,13 @@ pub enum Kind {
         code: Code,
         reason: Option<Box<str>>,
     },
-    Transport,
     HeaderTooBig {
         actual_size: u64,
         max_size: u64,
     },
+    // Error from QUIC layer
+    Transport(Arc<TransportError>),
+    Timeout,
 }
 
 // ===== impl Code =====
@@ -164,11 +169,21 @@ impl Code {
     pub(crate) fn with_cause<E: Into<Cause>>(self, cause: E) -> Error {
         Error::from(self).with_cause(cause)
     }
+
+    pub(crate) fn with_transport<E: Into<Box<dyn QuicError>>>(self, err: E) -> Error {
+        Error::new(Kind::Transport(Arc::new(err.into())))
+    }
 }
 
 impl From<Code> for u64 {
     fn from(code: Code) -> u64 {
         code.0
+    }
+}
+
+impl From<u64> for Code {
+    fn from(code: u64) -> Code {
+        Self(code)
     }
 }
 
@@ -185,19 +200,11 @@ impl Error {
         }
     }
 
-    pub(crate) fn transport<E: Into<Cause>>(cause: E) -> Self {
-        Error::transport_(cause.into())
-    }
-
     pub(crate) fn header_too_big(actual_size: u64, max_size: u64) -> Self {
         Error::new(Kind::HeaderTooBig {
             actual_size,
             max_size,
         })
-    }
-
-    fn transport_(cause: Cause) -> Self {
-        Error::new(Kind::Transport).with_cause(cause)
     }
 
     pub(crate) fn with_cause<E: Into<Cause>>(mut self, cause: E) -> Self {
@@ -211,17 +218,18 @@ impl fmt::Debug for Error {
         let mut builder = f.debug_struct("h3::Error");
 
         match self.inner.kind {
+            Kind::Timeout => {
+                builder.field("timeout", &true);
+            }
             Kind::Application { code, ref reason } => {
                 builder.field("code", &code);
                 if let Some(reason) = reason {
                     builder.field("reason", reason);
                 }
             }
-            Kind::Transport => {
-                #[derive(Debug)]
-                struct Transport;
-
-                builder.field("kind", &Transport);
+            Kind::Transport(ref e) => {
+                builder.field("kind", &e);
+                builder.field("code: ", &e.err_code());
             }
             Kind::HeaderTooBig {
                 actual_size,
@@ -243,6 +251,8 @@ impl fmt::Debug for Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.inner.kind {
+            Kind::Transport(ref e) => write!(f, "quic transport error: {}", e)?,
+            Kind::Timeout => write!(f, "timeout",)?,
             Kind::Application { code, ref reason } => {
                 if let Some(reason) = reason {
                     write!(f, "application error: {}", reason)?
@@ -250,7 +260,6 @@ impl fmt::Display for Error {
                     write!(f, "application error {:?}", code)?
                 }
             }
-            Kind::Transport => f.write_str("quic transport error")?,
             Kind::HeaderTooBig {
                 actual_size,
                 max_size,
@@ -300,7 +309,7 @@ impl From<proto::headers::Error> for Error {
 impl From<frame::Error> for Error {
     fn from(e: frame::Error) -> Self {
         match e {
-            frame::Error::Quic(e) => Code::H3_GENERAL_PROTOCOL_ERROR.with_cause(e),
+            frame::Error::Quic(e) => e.into(),
             frame::Error::UnexpectedEnd => {
                 Code::H3_FRAME_ERROR.with_reason("received incomplete frame")
             }
@@ -315,6 +324,26 @@ impl From<frame::Error> for Error {
             }
             .with_cause(e),
         }
+    }
+}
+
+impl<T> From<T> for Error
+where
+    T: Into<TransportError>,
+{
+    fn from(e: T) -> Self {
+        let quic_error: TransportError = e.into();
+        if quic_error.is_timeout() {
+            return Error::new(Kind::Timeout);
+        }
+
+        if let Some(c) = quic_error.err_code() {
+            return Error::new(Kind::Application {
+                code: c.into(),
+                reason: None,
+            });
+        }
+        Error::new(Kind::Transport(Arc::new(quic_error)))
     }
 }
 

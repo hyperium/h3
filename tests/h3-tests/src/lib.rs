@@ -1,21 +1,14 @@
-use std::net::{Ipv6Addr, ToSocketAddrs};
-use std::sync::Arc;
+use std::{convert::TryInto, net::{Ipv6Addr, ToSocketAddrs}, sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use futures::StreamExt;
 use rustls::{Certificate, PrivateKey};
 
 use h3::quic;
-use h3_quinn::{quinn::Incoming, Connection, NewConnection};
-// =======
-// use h3_quinn::{
-//     quinn::{
-//         Certificate, CertificateChain, ClientConfigBuilder, Endpoint, Incoming,
-//         //         PrivateKey, ServerConfigBuilder,
-//     },
-//     Connection,
-// };
-// >>>>>>> d6343f6 (ControlStreams Errors)
+use h3_quinn::{
+    quinn::{Incoming, NewConnection, TransportConfig},
+    Connection,
+};
 
 pub fn init_tracing() {
     let _ = tracing_subscriber::fmt()
@@ -30,12 +23,25 @@ pub struct Pair {
     port: u16,
     cert: Certificate,
     key: PrivateKey,
+    client_config: Arc<TransportConfig>,
 }
 
 impl Pair {
     pub fn new() -> Self {
         let (cert, key) = build_certs();
-        Self { port: 0, cert, key }
+        Self {
+            cert,
+            key,
+            port: 0,
+            client_config: Arc::new(TransportConfig::default()),
+        }
+    }
+
+    pub fn with_timeout(&mut self, duration: Duration) {
+        Arc::get_mut(&mut self.client_config)
+            .unwrap()
+            .max_idle_timeout(Some(duration.try_into().expect("idle timeout duration invalid")))
+            .initial_rtt(Duration::from_millis(10));
     }
 
     pub fn server(&mut self) -> Server {

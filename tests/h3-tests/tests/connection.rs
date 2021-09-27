@@ -300,3 +300,27 @@ async fn control_stream_frame_unexpected() {
 
     tokio::select! { _ = server_fut => (), _ = client_fut => panic!("server resolved first") };
 }
+
+#[tokio::test]
+async fn timeout_on_control_frame_read() {
+    h3_tests::init_tracing();
+    let mut pair = Pair::new();
+    let mut server = pair.server();
+
+    let client_fut = async {
+        pair.with_timeout(Duration::from_millis(1));
+        let (mut driver, _) = client::new(pair.client().await).await.unwrap();
+        let _ = future::poll_fn(|cx| driver.poll_close(cx)).await;
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming = server::Connection::new(conn).await.unwrap();
+        assert_matches!(
+            incoming.accept().await.map(|_| ()).unwrap_err().kind(),
+            Kind::Timeout
+        );
+    };
+
+    tokio::join!(server_fut, client_fut);
+}

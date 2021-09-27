@@ -58,7 +58,7 @@ where
 
         let mut stream = future::poll_fn(|cx| self.open.poll_open_bidi(cx))
             .await
-            .map_err(|e| self.maybe_conn_err(Error::transport(e.into())))?;
+            .map_err(|e| self.maybe_conn_err(e))?;
 
         let mut block = BytesMut::new();
         let mem_size = qpack::encode_stateless(&mut block, headers)?;
