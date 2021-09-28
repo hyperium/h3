@@ -209,6 +209,17 @@ where
     }
 }
 
+impl Clone for OpenStreams
+{
+    fn clone(&self) -> Self {
+        Self {
+            conn: self.conn.clone(),
+            opening_bi: None,
+            opening_uni: None,
+        }
+    }
+}
+
 pub struct BidiStream<B>
 where
     B: Buf,

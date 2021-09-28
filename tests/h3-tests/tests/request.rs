@@ -18,7 +18,7 @@ async fn get() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (_, mut client) = client::new(pair.client().await).await.expect("client init");
+        let (_conn, mut client) = client::new(pair.client().await).await.expect("client init");
         let mut request_stream = client
             .send_request(Request::get("http://localhost/salut").body(()).unwrap())
             .await

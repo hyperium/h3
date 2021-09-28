@@ -4,6 +4,7 @@ use http::{request, HeaderMap, Response};
 use std::{
     convert::TryFrom,
     marker::PhantomData,
+    sync::{atomic::AtomicUsize, Arc},
     task::{Context, Poll},
 };
 
@@ -32,6 +33,8 @@ pub struct SendRequest<T: quic::OpenStreams<Bytes>> {
     open: T,
     conn_state: SharedStateRef,
     max_field_section_size: u64, // maximum size for a header we receive
+    // counts instances of SendRequest to close the connection when the last is dropped.
+    sender_count: Arc<AtomicUsize>,
 }
 
 impl<T> SendRequest<T>
@@ -86,6 +89,39 @@ where
 {
     fn shared_state(&self) -> &SharedStateRef {
         &self.conn_state
+    }
+}
+
+impl<T> Clone for SendRequest<T>
+where
+    T: quic::OpenStreams<Bytes> + Clone,
+{
+    fn clone(&self) -> Self {
+        self.sender_count
+            .fetch_add(1, std::sync::atomic::Ordering::Release);
+
+        Self {
+            open: self.open.clone(),
+            conn_state: self.conn_state.clone(),
+            max_field_section_size: self.max_field_section_size,
+            sender_count: self.sender_count.clone(),
+        }
+    }
+}
+
+impl<T> Drop for SendRequest<T>
+where
+    T: quic::OpenStreams<Bytes>,
+{
+    fn drop(&mut self) {
+        if self
+            .sender_count
+            .fetch_sub(1, std::sync::atomic::Ordering::AcqRel)
+            == 1
+        {
+            self.shared_state().write("SendRequest drop").error = Some(Error::closed());
+            self.open.close(Code::H3_NO_ERROR, b"");
+        }
     }
 }
 
@@ -167,6 +203,7 @@ where
                 open,
                 conn_state,
                 max_field_section_size: self.max_field_section_size,
+                sender_count: Arc::new(AtomicUsize::new(1)),
             },
         ))
     }

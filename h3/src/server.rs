@@ -48,26 +48,37 @@ where
     pub async fn accept(
         &mut self,
     ) -> Result<Option<(Request<()>, RequestStream<FrameStream<C::BidiStream>>)>, Error> {
-        let stream = future::poll_fn(|cx| self.poll_accept_request(cx)).await?;
-
-        let mut stream = match stream {
-            None => return Ok(None),
-            Some(s) => FrameStream::new(s),
+        let mut stream = match future::poll_fn(|cx| self.poll_accept_request(cx)).await {
+            Ok(Some(s)) => FrameStream::new(s),
+            Ok(None) => return Ok(None),
+            Err(e) => {
+                if e.is_closed() {
+                    return Ok(None);
+                }
+                return Err(e);
+            }
         };
 
-        let frame = future::poll_fn(|cx| stream.poll_next(cx)).await?;
+        let frame = future::poll_fn(|cx| stream.poll_next(cx)).await;
 
         let mut encoded = match frame {
-            Some(Frame::Headers(h)) => h,
-            None => {
+            Ok(Some(Frame::Headers(h))) => h,
+            Ok(None) => {
                 return Err(
                     Code::H3_REQUEST_INCOMPLETE.with_reason("request stream closed before headers")
                 )
             }
-            Some(_) => {
+            Ok(Some(_)) => {
                 return Err(
                     Code::H3_FRAME_UNEXPECTED.with_reason("first request frame is not headers")
                 )
+            }
+            Err(e) => {
+                let err: Error = e.into();
+                if err.is_closed() {
+                    return Ok(None);
+                }
+                return Err(err);
             }
         };
 
@@ -125,6 +136,15 @@ where
             }
         }
         Poll::Pending
+    }
+}
+
+impl<C> Drop for Connection<C>
+where
+    C: quic::Connection<Bytes>,
+{
+    fn drop(&mut self) {
+        self.inner.close(Code::H3_NO_ERROR, "");
     }
 }
 
