@@ -32,6 +32,89 @@ async fn connect() {
 }
 
 #[tokio::test]
+async fn accept_request_end_on_client_close() {
+    let mut pair = Pair::new();
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let _ = client::new(pair.client().await).await.expect("client init");
+        // client is dropped, it will send H3_NO_ERROR
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming = server::Connection::new(conn).await.unwrap();
+        // Accept returns Ok(None)
+        assert!(incoming.accept().await.unwrap().is_none());
+    };
+
+    tokio::join!(server_fut, client_fut);
+}
+
+#[tokio::test]
+async fn server_drop_close() {
+    let mut pair = Pair::new();
+    let mut server = pair.server();
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let _ = server::Connection::new(conn).await.unwrap();
+    };
+
+    let client_fut = async {
+        let (mut conn, mut send) = client::new(pair.client().await).await.expect("client init");
+        let mut request_stream = send
+            .send_request(Request::get("http://no.way").body(()).unwrap())
+            .await
+            .unwrap();
+        let response = request_stream.recv_response().await;
+        assert_matches!(response.unwrap_err().kind(), Kind::Closed);
+
+        let drive = future::poll_fn(|cx| conn.poll_close(cx)).await;
+        assert_matches!(drive.map(|_| ()).unwrap_err().kind(), Kind::Closed);
+    };
+    tokio::join!(server_fut, client_fut);
+}
+
+#[tokio::test]
+async fn client_close_only_on_last_sender_drop() {
+    let mut pair = Pair::new();
+    let mut server = pair.server();
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming = server::Connection::new(conn).await.unwrap();
+        assert!(incoming.accept().await.unwrap().is_some());
+        assert!(incoming.accept().await.unwrap().is_some());
+        assert!(incoming.accept().await.unwrap().is_none());
+    };
+
+    let client_fut = async {
+        let (mut conn, mut send1) = client::new(pair.client().await).await.expect("client init");
+        let mut send2 = send1.clone();
+        let _ = send1
+            .send_request(Request::get("http://no.way").body(()).unwrap())
+            .await
+            .unwrap()
+            .finish()
+            .await;
+        let _ = send2
+            .send_request(Request::get("http://no.way").body(()).unwrap())
+            .await
+            .unwrap()
+            .finish()
+            .await;
+        drop(send1);
+        drop(send2);
+
+        let drive = future::poll_fn(|cx| conn.poll_close(cx)).await;
+        assert_matches!(drive.map(|_| ()).unwrap_err().kind(), Kind::Closed);
+    };
+
+    tokio::join!(server_fut, client_fut);
+}
+
+#[tokio::test]
 async fn settings_exchange_client() {
     h3_tests::init_tracing();
     let mut pair = Pair::new();
@@ -191,7 +274,7 @@ async fn two_control_streams() {
         );
     };
 
-    tokio::select! { _ = server_fut => (), _ = client_fut => panic!("server resolved first") };
+    tokio::select! { _ = server_fut => (), _ = client_fut => panic!("client resolved first") };
 }
 
 #[tokio::test]
@@ -209,7 +292,7 @@ async fn control_close_send_error() {
         control_stream.write_all(&buf[..]).await.unwrap();
         control_stream.finish().await.unwrap(); // close the client control stream immediately
 
-        let (mut driver, _) = client::new(h3_quinn::Connection::new(new_connection))
+        let (mut driver, _send) = client::new(h3_quinn::Connection::new(new_connection))
             .await
             .unwrap();
 
@@ -231,7 +314,7 @@ async fn control_close_send_error() {
             if *reason == *"control stream closed");
     };
 
-    tokio::select! { _ = server_fut => (), _ = client_fut => panic!("server resolved first") };
+    tokio::select! { _ = server_fut => (), _ = client_fut => panic!("client resolved first") };
 }
 
 #[tokio::test]
@@ -265,7 +348,7 @@ async fn missing_settings() {
         );
     };
 
-    tokio::select! { _ = server_fut => (), _ = client_fut => panic!("server resolved first") };
+    tokio::select! { _ = server_fut => (), _ = client_fut => panic!("client resolved first") };
 }
 
 #[tokio::test]
@@ -309,7 +392,7 @@ async fn timeout_on_control_frame_read() {
 
     let client_fut = async {
         pair.with_timeout(Duration::from_millis(1));
-        let (mut driver, _) = client::new(pair.client().await).await.unwrap();
+        let (mut driver, _send_request) = client::new(pair.client().await).await.unwrap();
         let _ = future::poll_fn(|cx| driver.poll_close(cx)).await;
     };
 

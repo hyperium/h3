@@ -49,6 +49,7 @@ pub enum Kind {
     },
     // Error from QUIC layer
     Transport(Arc<TransportError>),
+    Closed,
     Timeout,
 }
 
@@ -211,6 +212,17 @@ impl Error {
         self.inner.cause = Some(Arc::new(cause.into()));
         self
     }
+
+    pub(crate) fn closed() -> Self {
+        Self::new(Kind::Closed)
+    }
+
+    pub fn is_closed(&self) -> bool {
+        if let Kind::Closed = self.inner.kind {
+            return true;
+        }
+        false
+    }
 }
 
 impl fmt::Debug for Error {
@@ -218,6 +230,9 @@ impl fmt::Debug for Error {
         let mut builder = f.debug_struct("h3::Error");
 
         match self.inner.kind {
+            Kind::Closed => {
+                builder.field("connection closed", &true);
+            }
             Kind::Timeout => {
                 builder.field("timeout", &true);
             }
@@ -251,6 +266,7 @@ impl fmt::Debug for Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.inner.kind {
+            Kind::Closed => write!(f, "connection is closed")?,
             Kind::Transport(ref e) => write!(f, "quic transport error: {}", e)?,
             Kind::Timeout => write!(f, "timeout",)?,
             Kind::Application { code, ref reason } => {
@@ -337,13 +353,14 @@ where
             return Error::new(Kind::Timeout);
         }
 
-        if let Some(c) = quic_error.err_code() {
-            return Error::new(Kind::Application {
+        match quic_error.err_code() {
+            Some(c) if Code::H3_NO_ERROR == c => Error::new(Kind::Closed),
+            Some(c) => Error::new(Kind::Application {
                 code: c.into(),
                 reason: None,
-            });
+            }),
+            None => Error::new(Kind::Transport(Arc::new(quic_error))),
         }
-        Error::new(Kind::Transport(Arc::new(quic_error)))
     }
 }
 
