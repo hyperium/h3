@@ -107,6 +107,10 @@ impl<S: RecvStream> FrameStream<S> {
         self.remaining_data != 0
     }
 
+    pub(crate) fn is_eos(&self) -> bool {
+        self.is_eos && !self.bufs.has_remaining()
+    }
+
     fn try_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<bool, Error>> {
         if self.is_eos {
             return Poll::Ready(Ok(true));

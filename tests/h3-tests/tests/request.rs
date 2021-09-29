@@ -1,14 +1,22 @@
 use std::time::Duration;
 
 use assert_matches::assert_matches;
+use bytes::{BufMut, BytesMut};
 use futures::future;
-use http::{HeaderMap, Request, Response, StatusCode};
+use h3_quinn::ReadError;
+use http::{request, HeaderMap, Request, Response, StatusCode};
 
 use h3::{
     client,
     error::{Code, Kind},
-    server, ConnectionState,
+    proto::{
+        coding::Encode,
+        frame::{self, Frame},
+        headers::Header,
+    },
+    qpack, server, ConnectionState,
 };
+
 use h3_tests::Pair;
 
 #[tokio::test]
@@ -843,4 +851,475 @@ async fn post_timeout_server_recv_data() {
     };
 
     tokio::join!(server_fut, client_fut);
+}
+
+// 4.1. HTTP Message Exchanges
+
+// An HTTP message (request or response) consists of:
+// * the header section, sent as a single HEADERS frame (see Section 7.2.2),
+// * optionally, the content, if present, sent as a series of DATA frames (see Section 7.2.1),
+// * and optionally, the trailer section, if present, sent as a single HEADERS frame.
+
+#[tokio::test]
+async fn request_valid_one_header() {
+    request_sequence_ok(|mut buf| {
+        request_encode(
+            &mut buf,
+            Request::post("http://localhost/salut").body(()).unwrap(),
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn request_valid_header_data() {
+    request_sequence_ok(|mut buf| {
+        request_encode(
+            &mut buf,
+            Request::post("http://localhost/salut").body(()).unwrap(),
+        );
+        Frame::Data { len: 4 }.encode(&mut buf);
+        buf.put_slice(b"fada");
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn request_valid_header_data_trailer() {
+    request_sequence_ok(|mut buf| {
+        request_encode(
+            &mut buf,
+            Request::post("http://localhost/salut").body(()).unwrap(),
+        );
+        Frame::Data { len: 4 }.encode(&mut buf);
+        buf.put_slice(b"fada");
+        let mut trailers = HeaderMap::new();
+        trailers.insert("trailer", "value".parse().unwrap());
+        trailers_encode(buf, trailers);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn request_valid_header_multiple_data_trailer() {
+    request_sequence_ok(|mut buf| {
+        request_encode(
+            &mut buf,
+            Request::post("http://localhost/salut").body(()).unwrap(),
+        );
+        Frame::Data { len: 4 }.encode(&mut buf);
+        buf.put_slice(b"fada");
+        Frame::Data { len: 4 }.encode(&mut buf);
+        buf.put_slice(b"fada");
+        Frame::Data { len: 4 }.encode(&mut buf);
+        buf.put_slice(b"fada");
+        let mut trailers = HeaderMap::new();
+        trailers.insert("trailer", "value".parse().unwrap());
+        trailers_encode(buf, trailers);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn request_valid_header_trailer() {
+    request_sequence_ok(|mut buf| {
+        request_encode(
+            &mut buf,
+            Request::post("http://localhost/salut").body(()).unwrap(),
+        );
+        let mut trailers = HeaderMap::new();
+        trailers.insert("trailer", "value".parse().unwrap());
+        trailers_encode(buf, trailers);
+    })
+    .await;
+}
+
+// Frames of unknown types (Section 9), including reserved frames (Section
+// 7.2.8) MAY be sent on a request or push stream before, after, or interleaved
+// with other frames described in this section.
+
+#[tokio::test]
+async fn request_valid_unkown_frame_before() {
+    request_sequence_ok(|mut buf| {
+        unknown_frame_encode(buf);
+        request_encode(
+            &mut buf,
+            Request::post("http://localhost/salut").body(()).unwrap(),
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn request_valid_unkown_frame_after_one_header() {
+    request_sequence_ok(|mut buf| {
+        request_encode(
+            &mut buf,
+            Request::post("http://localhost/salut").body(()).unwrap(),
+        );
+        unknown_frame_encode(buf);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn request_valid_unkown_frame_interleaved_after_header() {
+    request_sequence_ok(|mut buf| {
+        request_encode(
+            &mut buf,
+            Request::post("http://localhost/salut").body(()).unwrap(),
+        );
+        unknown_frame_encode(buf);
+        Frame::Data { len: 4 }.encode(&mut buf);
+        buf.put_slice(b"fada");
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn request_valid_unkown_frame_interleaved_between_data() {
+    request_sequence_ok(|mut buf| {
+        request_encode(
+            &mut buf,
+            Request::post("http://localhost/salut").body(()).unwrap(),
+        );
+        Frame::Data { len: 4 }.encode(&mut buf);
+        buf.put_slice(b"fada");
+        unknown_frame_encode(buf);
+        Frame::Data { len: 4 }.encode(&mut buf);
+        buf.put_slice(b"fada");
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn request_valid_unkown_frame_interleaved_after_data() {
+    request_sequence_ok(|mut buf| {
+        request_encode(
+            &mut buf,
+            Request::post("http://localhost/salut").body(()).unwrap(),
+        );
+        Frame::Data { len: 4 }.encode(&mut buf);
+        buf.put_slice(b"fada");
+        unknown_frame_encode(buf);
+        Frame::Data { len: 4 }.encode(&mut buf);
+        buf.put_slice(b"fada");
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn request_valid_unkown_frame_interleaved_before_trailers() {
+    request_sequence_ok(|mut buf| {
+        request_encode(
+            &mut buf,
+            Request::post("http://localhost/salut").body(()).unwrap(),
+        );
+        Frame::Data { len: 4 }.encode(&mut buf);
+        buf.put_slice(b"fada");
+        unknown_frame_encode(buf);
+        let mut trailers = HeaderMap::new();
+        trailers.insert("trailer", "value".parse().unwrap());
+        trailers_encode(buf, trailers);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn request_valid_unkown_frame_after_trailers() {
+    request_sequence_ok(|mut buf| {
+        request_encode(
+            &mut buf,
+            Request::post("http://localhost/salut").body(()).unwrap(),
+        );
+        Frame::Data { len: 4 }.encode(&mut buf);
+        buf.put_slice(b"fada");
+        let mut trailers = HeaderMap::new();
+        trailers.insert("trailer", "value".parse().unwrap());
+        trailers_encode(buf, trailers);
+        unknown_frame_encode(buf);
+    })
+    .await;
+}
+
+// [...]
+// Receipt of an invalid sequence of frames MUST be treated as a connection error of type H3_FRAME_UNEXPECTED
+fn invalid_request_frames() -> Vec<Frame> {
+    vec![
+        Frame::CancelPush(0),
+        Frame::Settings(frame::Settings::default()),
+        Frame::Goaway(1),
+        Frame::MaxPushId(1),
+        Frame::DuplicatePush(1),
+    ]
+}
+
+#[tokio::test]
+async fn request_invalid_frame_first() {
+    for frame in invalid_request_frames() {
+        request_sequence_unexpected(|mut buf| frame.encode(&mut buf)).await;
+    }
+}
+
+#[tokio::test]
+async fn request_invalid_frame_after_header() {
+    for frame in invalid_request_frames() {
+        request_sequence_unexpected(|mut buf| {
+            request_encode(
+                &mut buf,
+                Request::post("http://localhost/salut").body(()).unwrap(),
+            );
+            frame.encode(&mut buf);
+        })
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn request_invalid_frame_after_data() {
+    for frame in invalid_request_frames() {
+        request_sequence_unexpected(|mut buf| {
+            request_encode(
+                &mut buf,
+                Request::post("http://localhost/salut").body(()).unwrap(),
+            );
+            Frame::Data { len: 4 }.encode(&mut buf);
+            buf.put_slice(b"fada");
+            frame.encode(&mut buf);
+        })
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn request_invalid_frame_after_trailers() {
+    for frame in invalid_request_frames() {
+        request_sequence_unexpected(|mut buf| {
+            request_encode(
+                &mut buf,
+                Request::post("http://localhost/salut").body(()).unwrap(),
+            );
+            Frame::Data { len: 4 }.encode(&mut buf);
+            buf.put_slice(b"fada");
+            let mut trailers = HeaderMap::new();
+            trailers.insert("trailer", "value".parse().unwrap());
+            trailers_encode(buf, trailers);
+            frame.encode(&mut buf);
+        })
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn request_invalid_data_after_trailers() {
+    request_sequence_unexpected(|mut buf| {
+        request_encode(
+            &mut buf,
+            Request::post("http://localhost/salut").body(()).unwrap(),
+        );
+        let mut trailers = HeaderMap::new();
+        trailers.insert("trailer", "value".parse().unwrap());
+        trailers_encode(buf, trailers);
+        Frame::Data { len: 4 }.encode(&mut buf);
+        buf.put_slice(b"fada");
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn request_invalid_data_first() {
+    request_sequence_unexpected(|mut buf| {
+        Frame::Data { len: 4 }.encode(&mut buf);
+        buf.put_slice(b"fada");
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn request_invalid_two_trailers() {
+    request_sequence_unexpected(|mut buf| {
+        request_encode(
+            &mut buf,
+            Request::post("http://localhost/salut").body(()).unwrap(),
+        );
+        Frame::Data { len: 4 }.encode(&mut buf);
+        buf.put_slice(b"fada");
+        let mut trailers = HeaderMap::new();
+        trailers.insert("trailer", "value".parse().unwrap());
+        trailers_encode(buf, trailers.clone());
+        trailers_encode(buf, trailers);
+    })
+    .await;
+}
+
+// 7.1. Frame Layout
+// [...]
+// Each frame's payload MUST contain exactly the fields identified in its
+// description. A frame payload that contains additional bytes after the
+// identified fields or a frame payload that terminates before the end of the
+// identified fields MUST be treated as a connection error of type
+// H3_FRAME_ERROR; see Section 8.
+
+#[tokio::test]
+async fn request_invalid_trailing_byte() {
+    request_sequence_frame_error(|mut buf| {
+        request_encode(
+            &mut buf,
+            Request::post("http://localhost/salut").body(()).unwrap(),
+        );
+        Frame::Data { len: 4 }.encode(&mut buf);
+        buf.put_slice(b"fada");
+        let mut trailers = HeaderMap::new();
+        trailers.insert("trailer", "value".parse().unwrap());
+        trailers_encode(buf, trailers);
+        buf.put_u8(255);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn request_invalid_data_frame_length_too_large() {
+    request_sequence_frame_error(|mut buf| {
+        request_encode(
+            &mut buf,
+            Request::post("http://localhost/salut").body(()).unwrap(),
+        );
+        Frame::Data { len: 5 }.encode(&mut buf);
+        buf.put_slice(b"fada");
+        let mut trailers = HeaderMap::new();
+        trailers.insert("trailer", "value".parse().unwrap());
+        trailers_encode(buf, trailers);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn request_invalid_data_frame_length_too_short() {
+    request_sequence_frame_error(|mut buf| {
+        request_encode(
+            &mut buf,
+            Request::post("http://localhost/salut").body(()).unwrap(),
+        );
+        Frame::Data { len: 3 }.encode(&mut buf);
+        buf.put_slice(b"fada");
+    })
+    .await;
+}
+// Helpers
+
+fn request_encode<B: BufMut>(buf: &mut B, req: http::Request<()>) {
+    let (parts, _) = req.into_parts();
+    let request::Parts {
+        method,
+        uri,
+        headers,
+        ..
+    } = parts;
+    let headers = Header::request(method, uri, headers).unwrap();
+    let mut block = BytesMut::new();
+    qpack::encode_stateless(&mut block, headers).unwrap();
+    Frame::Headers(block.freeze()).encode(buf);
+}
+
+fn trailers_encode<B: BufMut>(buf: &mut B, fields: HeaderMap) {
+    let headers = Header::trailer(fields);
+    let mut block = BytesMut::new();
+    qpack::encode_stateless(&mut block, headers).unwrap();
+    Frame::Headers(block.freeze()).encode(buf);
+}
+
+fn unknown_frame_encode<B: BufMut>(buf: &mut B) {
+    buf.put_slice(&[22, 4, 0, 255, 128, 0]);
+}
+
+async fn request_sequence_ok<F>(request: F)
+where
+    F: Fn(&mut BytesMut),
+{
+    request_sequence_check(request, |res| assert!(res.is_ok())).await;
+}
+
+async fn request_sequence_unexpected<F>(request: F)
+where
+    F: Fn(&mut BytesMut),
+{
+    request_sequence_check(request, |err| {
+        assert_matches!(
+            err.unwrap_err().kind(),
+            Kind::Application {
+                code: Code::H3_FRAME_UNEXPECTED,
+                ..
+            }
+        )
+    })
+    .await;
+}
+
+async fn request_sequence_frame_error<F>(request: F)
+where
+    F: Fn(&mut BytesMut),
+{
+    request_sequence_check(request, |err| {
+        assert_matches!(
+            err.unwrap_err().kind(),
+            Kind::Application {
+                code: Code::H3_FRAME_ERROR,
+                ..
+            }
+        )
+    })
+    .await;
+}
+
+async fn request_sequence_check<F, FC>(request: F, check: FC)
+where
+    F: Fn(&mut BytesMut),
+    FC: Fn(Result<(), h3::Error>),
+{
+    h3_tests::init_tracing();
+    let mut pair = Pair::new();
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let new_connection = pair.client_inner().await;
+        let (mut req_send, mut req_recv) = new_connection.connection.open_bi().await.unwrap();
+
+        let mut buf = BytesMut::new();
+        request(&mut buf);
+        req_send.write_all(&buf[..]).await.unwrap();
+        req_send.finish().await.unwrap();
+
+        let res = req_recv
+            .read(&mut buf)
+            .await
+            .map_err(Into::<ReadError>::into)
+            .map_err(Into::<h3::Error>::into)
+            .map(|_| ());
+        check(res);
+
+        let (mut driver, _send) = client::new(h3_quinn::Connection::new(new_connection))
+            .await
+            .unwrap();
+
+        let res = future::poll_fn(|cx| driver.poll_close(cx))
+            .await
+            .map_err(Into::<h3::Error>::into)
+            .map(|_| ());
+        check(res);
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming = server::Connection::new(conn).await.unwrap();
+        let (_, mut stream) = incoming
+            .accept()
+            .await?
+            .expect("request stream end unexpected");
+        while stream.recv_data().await?.is_some() {}
+        stream.recv_trailers().await?;
+        Result::<(), h3::Error>::Ok(())
+    };
+
+    tokio::select! { res = server_fut => check(res)
+    , _ = client_fut => panic!("client resolved first") };
 }
