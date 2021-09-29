@@ -70,6 +70,7 @@ where
 {
     pub(super) shared: SharedStateRef,
     conn: C,
+    #[allow(dead_code)]
     control_send: C::SendStream,
     control_recv: Option<FrameStream<C::RecvStream>>,
     pending_recv_streams: Vec<AcceptRecvStream<C::RecvStream>>,
@@ -287,6 +288,18 @@ where
                 None => return Ok(None),
             }
         };
+
+        if !self.stream.is_eos() {
+            // Get the trailing frame
+            let trailing_frame = future::poll_fn(|cx| self.stream.poll_next(cx))
+                .await
+                .map_err(|e| self.maybe_conn_err(e))?;
+
+            if let Some(_) = trailing_frame {
+                // if it's not unknown or reserved, fail.
+                return Err(Code::H3_FRAME_UNEXPECTED.into());
+            }
+        }
 
         let (fields, mem_size) = qpack::decode_stateless(&mut trailers)?;
         if mem_size > self.max_field_section_size {
