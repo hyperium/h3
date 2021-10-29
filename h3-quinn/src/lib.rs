@@ -15,7 +15,7 @@ pub use quinn::{
     OpenBi, OpenUni, VarInt, WriteError,
 };
 
-use h3::quic::{self, QuicError};
+use h3::quic::{self, Error};
 
 pub struct Connection {
     conn: quinn::Connection,
@@ -55,7 +55,7 @@ impl fmt::Display for ConnectionError {
     }
 }
 
-impl QuicError for ConnectionError {
+impl Error for ConnectionError {
     fn is_timeout(&self) -> bool {
         if let quinn::ConnectionError::TimedOut = self.0 {
             true
@@ -345,8 +345,8 @@ impl fmt::Display for ReadError {
     }
 }
 
-impl Into<Arc<dyn QuicError>> for ReadError {
-    fn into(self) -> Arc<dyn QuicError> {
+impl Into<Arc<dyn Error>> for ReadError {
+    fn into(self) -> Arc<dyn Error> {
         Arc::new(self)
     }
 }
@@ -357,7 +357,7 @@ impl From<quinn::ReadError> for ReadError {
     }
 }
 
-impl QuicError for ReadError {
+impl Error for ReadError {
     fn is_timeout(&self) -> bool {
         match self.0 {
             quinn::ReadError::ConnectionLost(quinn::ConnectionError::TimedOut) => true,
@@ -470,7 +470,7 @@ impl From<WriteError> for SendStreamError {
     }
 }
 
-impl QuicError for SendStreamError {
+impl Error for SendStreamError {
     fn is_timeout(&self) -> bool {
         match self {
             Self::Write(quinn::WriteError::ConnectionLost(quinn::ConnectionError::TimedOut)) => {
@@ -494,8 +494,8 @@ impl QuicError for SendStreamError {
     }
 }
 
-impl Into<Arc<dyn QuicError>> for SendStreamError {
-    fn into(self) -> Arc<dyn QuicError> {
+impl Into<Arc<dyn Error>> for SendStreamError {
+    fn into(self) -> Arc<dyn Error> {
         Arc::new(self)
     }
 }

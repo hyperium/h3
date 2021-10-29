@@ -2,12 +2,12 @@
 
 use std::{fmt, sync::Arc};
 
-use crate::{frame, proto, qpack, quic::QuicError};
+use crate::{frame, proto, qpack, quic};
 
 /// Cause of an error thrown by our own h3 layer
 pub type Cause = Box<dyn std::error::Error + Send + Sync>;
 /// Error thrown by the underlying QUIC impl
-pub type TransportError = Box<dyn QuicError>;
+pub type TransportError = Box<dyn quic::Error>;
 
 /// A general error that can occur when handling the HTTP/3 protocol.
 #[derive(Clone)]
@@ -171,7 +171,7 @@ impl Code {
         Error::from(self).with_cause(cause)
     }
 
-    pub(crate) fn with_transport<E: Into<Box<dyn QuicError>>>(self, err: E) -> Error {
+    pub(crate) fn with_transport<E: Into<Box<dyn quic::Error>>>(self, err: E) -> Error {
         Error::new(Kind::Transport(Arc::new(err.into())))
     }
 }
@@ -179,12 +179,6 @@ impl Code {
 impl From<Code> for u64 {
     fn from(code: Code) -> u64 {
         code.0
-    }
-}
-
-impl From<u64> for Code {
-    fn from(code: u64) -> Code {
-        Self(code)
     }
 }
 
@@ -356,7 +350,7 @@ where
         match quic_error.err_code() {
             Some(c) if Code::H3_NO_ERROR == c => Error::new(Kind::Closed),
             Some(c) => Error::new(Kind::Application {
-                code: c.into(),
+                code: Code(c),
                 reason: None,
             }),
             None => Error::new(Kind::Transport(Arc::new(quic_error))),
