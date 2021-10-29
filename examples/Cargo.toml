@@ -12,13 +12,13 @@ h3 = { path = "../h3" }
 h3-quinn = { path = "../h3-quinn" }
 http = "0.2"
 rcgen = { version = "0.7.0" }
-rustls = { version = "0.19", features = ["dangerous_configuration"] }
+rustls = { version = "0.20", features = ["dangerous_configuration"] }
 structopt = "0.3"
 tokio-stream = "0.1"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1.10"
 tracing-subscriber = { version = "0.2.7", default-features = false, features = ["fmt", "ansi", "env-filter", "chrono", "tracing-log"] }
-webpki = "0.21"
+webpki = "0.22"
 
 [[example]]
 name = "client"

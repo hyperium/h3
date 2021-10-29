@@ -8,27 +8,27 @@ use std::{
     task::{self, Poll},
 };
 
-use futures::{ready, AsyncWrite, FutureExt, StreamExt};
-
 use bytes::{Buf, Bytes};
-use h3::quic;
+use futures::{AsyncWrite, FutureExt, ready, StreamExt};
 pub use quinn;
 use quinn::{
-    crypto::Session,
-    generic::{IncomingBiStreams, IncomingUniStreams, NewConnection, OpenBi, OpenUni},
-    ConnectionError, VarInt, WriteError,
+    ConnectionError,
+    IncomingBiStreams, IncomingUniStreams, NewConnection, OpenBi,
+    OpenUni, VarInt, WriteError,
 };
 
-pub struct Connection<S: Session> {
-    conn: quinn::generic::Connection<S>,
-    incoming_bi: IncomingBiStreams<S>,
-    opening_bi: Option<OpenBi<S>>,
-    incoming_uni: IncomingUniStreams<S>,
-    opening_uni: Option<OpenUni<S>>,
+use h3::quic;
+
+pub struct Connection {
+    conn: quinn::Connection,
+    incoming_bi: IncomingBiStreams,
+    opening_bi: Option<OpenBi>,
+    incoming_uni: IncomingUniStreams,
+    opening_uni: Option<OpenUni>,
 }
 
-impl<S: Session> Connection<S> {
-    pub fn new(new_conn: NewConnection<S>) -> Self {
+impl Connection {
+    pub fn new(new_conn: NewConnection) -> Self {
         let NewConnection {
             uni_streams,
             bi_streams,
@@ -46,14 +46,12 @@ impl<S: Session> Connection<S> {
     }
 }
 
-impl<B, S> quic::Connection<B> for Connection<S>
-where
-    B: Buf,
-    S: Session,
+impl<B> quic::Connection<B> for Connection
+    where B: Buf,
 {
-    type SendStream = SendStream<B, S>;
-    type RecvStream = RecvStream<S>;
-    type BidiStream = BidiStream<B, S>;
+    type SendStream = SendStream<B>;
+    type RecvStream = RecvStream;
+    type BidiStream = BidiStream<B>;
     type Error = ConnectionError;
 
     fn poll_accept_bidi_stream(
@@ -109,32 +107,26 @@ where
     }
 }
 
-pub struct BidiStream<B, S>
-where
-    B: Buf,
-    S: Session,
+pub struct BidiStream<B>
+    where B: Buf
 {
-    send: SendStream<B, S>,
-    recv: RecvStream<S>,
+    send: SendStream<B>,
+    recv: RecvStream,
 }
 
-impl<B, S> quic::BidiStream<B> for BidiStream<B, S>
-where
-    B: Buf,
-    S: Session,
+impl<B> quic::BidiStream<B> for BidiStream<B>
+    where B: Buf
 {
-    type SendStream = SendStream<B, S>;
-    type RecvStream = RecvStream<S>;
+    type SendStream = SendStream<B>;
+    type RecvStream = RecvStream;
 
     fn split(self) -> (Self::SendStream, Self::RecvStream) {
         (self.send, self.recv)
     }
 }
 
-impl<B, S> quic::RecvStream for BidiStream<B, S>
-where
-    B: Buf,
-    S: Session,
+impl<B> quic::RecvStream for BidiStream<B>
+    where B: Buf,
 {
     type Buf = Bytes;
     type Error = ReadError;
@@ -151,10 +143,8 @@ where
     }
 }
 
-impl<B, S> quic::SendStream<B> for BidiStream<B, S>
-where
-    B: Buf,
-    S: Session,
+impl<B> quic::SendStream<B> for BidiStream<B>
+    where B: Buf,
 {
     type Error = SendStreamError;
 
@@ -179,17 +169,17 @@ where
     }
 }
 
-pub struct RecvStream<S: Session> {
-    stream: quinn::generic::RecvStream<S>,
+pub struct RecvStream {
+    stream: quinn::RecvStream,
 }
 
-impl<S: Session> RecvStream<S> {
-    fn new(stream: quinn::generic::RecvStream<S>) -> Self {
+impl RecvStream {
+    fn new(stream: quinn::RecvStream) -> Self {
         Self { stream }
     }
 }
 
-impl<S: Session> quic::RecvStream for RecvStream<S> {
+impl quic::RecvStream for RecvStream {
     type Buf = Bytes;
     type Error = ReadError;
 
@@ -201,7 +191,7 @@ impl<S: Session> quic::RecvStream for RecvStream<S> {
             .stream
             .read_chunk(usize::MAX, true)
             .poll_unpin(cx))?
-        .map(|c| (c.bytes))))
+            .map(|c| (c.bytes))))
     }
 
     fn stop_sending(&mut self, error_code: u64) {
@@ -235,17 +225,15 @@ impl From<quinn::ReadError> for ReadError {
     }
 }
 
-pub struct SendStream<B: Buf, S: Session> {
-    stream: quinn::generic::SendStream<S>,
+pub struct SendStream<B: Buf> {
+    stream: quinn::SendStream,
     writing: Option<B>,
 }
 
-impl<B, S> SendStream<B, S>
-where
-    B: Buf,
-    S: Session,
+impl<B> SendStream<B>
+    where B: Buf,
 {
-    fn new(stream: quinn::generic::SendStream<S>) -> SendStream<B, S> {
+    fn new(stream: quinn::SendStream) -> SendStream<B> {
         Self {
             stream,
             writing: None,
@@ -253,10 +241,8 @@ where
     }
 }
 
-impl<B, S> quic::SendStream<B> for SendStream<B, S>
-where
-    B: Buf,
-    S: Session,
+impl<B> quic::SendStream<B> for SendStream<B>
+    where B: Buf,
 {
     type Error = SendStreamError;
 

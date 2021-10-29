@@ -1,10 +1,14 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::time::SystemTime;
 
-use h3_quinn::quinn;
 use rustls;
+use rustls::{Certificate, ServerName};
+use rustls::client::ServerCertVerified;
 use structopt::StructOpt;
 use tokio::io::AsyncWriteExt;
-use webpki;
+
+use h3_quinn::quinn;
+use h3_quinn::quinn::crypto::rustls::Error;
 
 static ALPN: &[u8] = b"h3-29";
 
@@ -50,34 +54,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("DNS Lookup for {:?}: {:?}", dest, addr);
 
     // quinn setup
-    let mut client_config = h3_quinn::quinn::ClientConfigBuilder::default();
-    client_config.protocols(&[ALPN]);
 
-    let mut client_endpoint_builder = h3_quinn::quinn::Endpoint::builder();
-
-    if !opt.insecure {
-        client_endpoint_builder.default_client_config(client_config.build());
+    let client_config = if !opt.insecure {
+        h3_quinn::quinn::ClientConfig::with_native_roots()
     } else {
-        let mut tls_config = rustls::ClientConfig::new();
-        tls_config.versions = vec![rustls::ProtocolVersion::TLSv1_3];
+        let mut tls_config = rustls::ClientConfig::builder()
+            .with_safe_default_cipher_suites()
+            .with_safe_default_kx_groups()
+            .with_protocol_versions(&[&rustls::version::TLS13])?
+            .with_custom_certificate_verifier(Arc::new(YesVerifier))
+            .with_no_client_auth();
         tls_config.enable_early_data = true;
-        tls_config
-            .dangerous()
-            .set_certificate_verifier(Arc::new(YesVerifier));
         tls_config.alpn_protocols = vec![ALPN.into()];
-
         let transport = quinn::TransportConfig::default();
-        client_endpoint_builder.default_client_config(quinn::ClientConfig {
+        quinn::ClientConfig {
             crypto: Arc::new(tls_config),
             transport: Arc::new(transport),
-        });
-    }
+        }
+    };
 
-    let (client_endpoint, _) = client_endpoint_builder
-        .bind(&"[::]:0".parse().unwrap())
-        .unwrap();
-
-    let quinn_conn = h3_quinn::Connection::new(client_endpoint.connect(&addr, auth.host())?.await?);
+    let mut client_endpoint = h3_quinn::quinn::Endpoint::client("[::]:0".parse().unwrap())?;
+    client_endpoint.set_default_client_config(client_config);
+    let quinn_conn = h3_quinn::Connection::new(client_endpoint.connect(addr, auth.host())?.await?);
 
     eprintln!("QUIC connected ...");
 
@@ -110,14 +108,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 struct YesVerifier;
-impl rustls::ServerCertVerifier for YesVerifier {
-    fn verify_server_cert(
-        &self,
-        _roots: &rustls::RootCertStore,
-        _presented_certs: &[rustls::Certificate],
-        _dns_name: webpki::DNSNameRef,
-        _ocsp_response: &[u8],
-    ) -> std::result::Result<rustls::ServerCertVerified, rustls::TLSError> {
-        Ok(rustls::ServerCertVerified::assertion())
+
+impl rustls::client::ServerCertVerifier for YesVerifier {
+    fn verify_server_cert(&self, _end_entity: &Certificate,
+                          _intermediates: &[Certificate],
+                          _server_name: &ServerName,
+                          _scts: &mut dyn Iterator<Item=&[u8]>,
+                          _ocsp_response: &[u8],
+                          _now: SystemTime) -> Result<ServerCertVerified, Error> {
+        Ok(ServerCertVerified::assertion())
     }
 }

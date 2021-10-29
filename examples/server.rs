@@ -1,6 +1,7 @@
-use futures::StreamExt;
-use h3_quinn::quinn::{Certificate, CertificateChain, PrivateKey};
 use std::path::PathBuf;
+
+use futures::StreamExt;
+use rustls::{Certificate, PrivateKey};
 use structopt::StructOpt;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
@@ -58,23 +59,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     trace!("{:#?}", opt);
 
     // quinn setup
-    let mut server_config = h3_quinn::quinn::ServerConfigBuilder::default();
-    server_config.protocols(&[b"h3-29"]);
-
-    let (endpoint, mut incoming) = match opt.command {
+    let (cert, key, port) = match opt.command {
         Command::SelfSigned(r) => {
-            let (cert_chain, _cert, key) = build_certs();
-
-            server_config.certificate(cert_chain, key).unwrap();
-
-            let mut server_endpoint_builder = h3_quinn::quinn::Endpoint::builder();
-            server_endpoint_builder.listen(server_config.build());
-
-            let addr = format!("[::]:{:}", r.port);
-
-            server_endpoint_builder
-                .bind(&addr.parse().unwrap())
-                .unwrap()
+            let (cert, key) = build_certs();
+            (cert, key, r.port)
         }
         Command::Certs(c) => {
             let mut cert_v = Vec::new();
@@ -85,24 +73,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             cert_f.read_to_end(&mut cert_v).await?;
             key_f.read_to_end(&mut key_v).await?;
-
-            server_config
-                .certificate(
-                    h3_quinn::quinn::CertificateChain::from_pem(cert_v.as_slice())?,
-                    h3_quinn::quinn::PrivateKey::from_pem(key_v.as_slice())?,
-                )
-                .unwrap();
-
-            let mut server_endpoint_builder = h3_quinn::quinn::Endpoint::builder();
-            server_endpoint_builder.listen(server_config.build());
-
-            let addr = format!("[::]:{:}", c.port);
-
-            server_endpoint_builder
-                .bind(&addr.parse().unwrap())
-                .unwrap()
+            (
+                rustls::Certificate(cert_v),
+                PrivateKey(key_v),
+                c.port
+            )
         }
     };
+    let server_config = h3_quinn::quinn::ServerConfig::with_single_cert(vec![cert], key)?;
+
+    let addr = format!("[::]:{:}", port).parse()?;
+    let (endpoint, mut incoming) = h3_quinn::quinn::Endpoint::server(server_config, addr)?;
 
     info!(
         "Listening on port {:?}",
@@ -153,9 +134,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-pub fn build_certs() -> (CertificateChain, Certificate, PrivateKey) {
+pub fn build_certs() -> (Certificate, PrivateKey) {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
-    let key = PrivateKey::from_der(&cert.serialize_private_key_der()).unwrap();
-    let cert = Certificate::from_der(&cert.serialize_der().unwrap()).unwrap();
-    (CertificateChain::from_certs(vec![cert.clone()]), cert, key)
+    let key = PrivateKey(cert.serialize_private_key_der());
+    let cert = Certificate(cert.serialize_der().unwrap());
+    (cert, key)
 }
