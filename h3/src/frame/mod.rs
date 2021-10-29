@@ -233,8 +233,7 @@ mod tests {
     use std::{collections::VecDeque, fmt, sync::Arc};
     use tokio;
 
-    use crate::proto::coding::Encode;
-    use crate::quic::QuicError;
+    use crate::{proto::coding::Encode, quic};
 
     // Decoder
 
@@ -512,7 +511,7 @@ mod tests {
     #[derive(Debug)]
     struct FakeError;
 
-    impl QuicError for FakeError {
+    impl quic::Error for FakeError {
         fn is_timeout(&self) -> bool {
             unimplemented!()
         }
@@ -529,9 +528,9 @@ mod tests {
         }
     }
 
-    impl Into<Arc<dyn QuicError>> for FakeError {
-        fn into(self) -> Arc<dyn QuicError> {
-            todo!()
+    impl Into<Arc<dyn quic::Error>> for FakeError {
+        fn into(self) -> Arc<dyn quic::Error> {
+            unimplemented!()
         }
     }
 }

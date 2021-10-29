@@ -12,7 +12,7 @@ use bytes::Buf;
 // - Should the `poll_` methods be `Pin<&mut Self>`?
 
 /// Trait that represent an error from the transport layer
-pub trait QuicError: std::error::Error + Send + Sync {
+pub trait Error: std::error::Error + Send + Sync {
     /// Check if the current error is a transport timeout
     fn is_timeout(&self) -> bool;
 
@@ -20,8 +20,8 @@ pub trait QuicError: std::error::Error + Send + Sync {
     fn err_code(&self) -> Option<u64>;
 }
 
-impl<'a, E: QuicError + 'a> From<E> for Box<dyn QuicError + 'a> {
-    fn from(err: E) -> Box<dyn QuicError + 'a> {
+impl<'a, E: Error + 'a> From<E> for Box<dyn Error + 'a> {
+    fn from(err: E) -> Box<dyn Error + 'a> {
         Box::new(err)
     }
 }
@@ -37,7 +37,7 @@ pub trait Connection<B: Buf> {
     /// A producer of outgoing Unidirectional and Bidirectional streams.
     type OpenStreams: OpenStreams<B>;
     /// Error type yeilded by this trait methods
-    type Error: Into<Box<dyn QuicError>>;
+    type Error: Into<Box<dyn Error>>;
 
     /// Accept an incoming unidirecional stream
     ///
@@ -83,7 +83,7 @@ pub trait OpenStreams<B: Buf>: Clone {
     /// The type of the receiving part of `BidiStream`
     type RecvStream: RecvStream;
     /// Error type yeilded by this trait methods
-    type Error: Into<Box<dyn QuicError>>;
+    type Error: Into<Box<dyn Error>>;
 
     /// Poll the connection to create a new bidirectional stream.
     fn poll_open_bidi(
@@ -104,7 +104,7 @@ pub trait OpenStreams<B: Buf>: Clone {
 /// A trait describing the "send" actions of a QUIC stream.
 pub trait SendStream<B: Buf> {
     /// The error type returned by fallible send methods.
-    type Error: Into<Box<dyn QuicError>>;
+    type Error: Into<Box<dyn Error>>;
 
     /// Polls if the stream can send more data.
     fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>>;
@@ -127,7 +127,7 @@ pub trait RecvStream {
     /// The type of `Buf` for data received on this stream.
     type Buf: Buf;
     /// The error type that can occur when receiving data.
-    type Error: Into<Box<dyn QuicError>>;
+    type Error: Into<Box<dyn Error>>;
 
     /// Poll the stream for more data.
     ///
