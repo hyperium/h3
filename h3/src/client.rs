@@ -231,13 +231,17 @@ where
                 Code::H3_GENERAL_PROTOCOL_ERROR.with_reason("Did not receive response headers")
             })?;
 
-        let (fields, mem_size) = if let Frame::Headers(ref mut encoded) = frame {
+        let decoded = if let Frame::Headers(ref mut encoded) = frame {
             qpack::decode_stateless(encoded)?
         } else {
             return Err(
                 Code::H3_FRAME_UNEXPECTED.with_reason("First response frame is not headers")
             );
         };
+
+        let qpack::Decoded {
+            fields, mem_size, ..
+        } = decoded;
 
         if mem_size > self.inner.max_field_section_size {
             self.inner.stop_sending(Code::H3_REQUEST_CANCELLED);

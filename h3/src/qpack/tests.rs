@@ -1,4 +1,4 @@
-use crate::qpack::{dynamic::DynamicTable, Decoder, DecoderError, Encoder, HeaderField};
+use crate::qpack::{dynamic::DynamicTable, Decoded, Decoder, DecoderError, Encoder, HeaderField};
 use std::io::Cursor;
 
 pub mod helpers {
@@ -51,8 +51,8 @@ fn codec_basic_get() {
     decoder.on_encoder_recv(&mut enc_cur, &mut dec_buf).unwrap();
 
     let mut block_cur = Cursor::new(&mut block_buf);
-    let (decoded, _) = decoder.decode_header(&mut block_cur).unwrap();
-    assert_eq!(decoded, header);
+    let Decoded { fields, .. } = decoder.decode_header(&mut block_cur).unwrap();
+    assert_eq!(fields, header);
 
     let mut dec_cur = Cursor::new(&mut dec_buf);
     encoder.on_decoder_recv(&mut dec_cur).unwrap();
@@ -118,8 +118,8 @@ fn codec_table_size_0() {
     decoder.on_encoder_recv(&mut enc_cur, &mut dec_buf).unwrap();
 
     let mut block_cur = Cursor::new(&mut block_buf);
-    let (decoded, _) = decoder.decode_header(&mut block_cur).unwrap();
-    assert_eq!(decoded, header);
+    let Decoded { fields, .. } = decoder.decode_header(&mut block_cur).unwrap();
+    assert_eq!(fields, header);
 
     let mut dec_cur = Cursor::new(&mut dec_buf);
     encoder.on_decoder_recv(&mut dec_cur).unwrap();
@@ -153,8 +153,8 @@ fn codec_table_full() {
     let mut block_cur = Cursor::new(&mut block_buf);
 
     decoder.on_encoder_recv(&mut enc_cur, &mut dec_buf).unwrap();
-    let (decoded, _) = decoder.decode_header(&mut block_cur).unwrap();
-    assert_eq!(decoded, header);
+    let Decoded { fields, .. } = decoder.decode_header(&mut block_cur).unwrap();
+    assert_eq!(fields, header);
 
     let mut dec_cur = Cursor::new(&mut dec_buf);
     encoder.on_decoder_recv(&mut dec_cur).unwrap();

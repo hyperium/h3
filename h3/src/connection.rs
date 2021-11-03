@@ -301,7 +301,9 @@ where
             }
         }
 
-        let (fields, mem_size) = qpack::decode_stateless(&mut trailers)?;
+        let qpack::Decoded {
+            fields, mem_size, ..
+        } = qpack::decode_stateless(&mut trailers)?;
         if mem_size > self.max_field_section_size {
             return Err(Error::header_too_big(mem_size, self.max_field_section_size));
         }
