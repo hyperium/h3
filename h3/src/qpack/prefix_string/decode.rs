@@ -111,7 +111,7 @@ macro_rules! bits_decode {
                 $( DecodeValue::Sym($sym as u8), )*
                 $( DecodeValue::Partial(&$sub), )*
             ]
-        };
+        }
     };
     // 2-final
     ( $first:expr, $second:expr ) => {
@@ -121,7 +121,7 @@ macro_rules! bits_decode {
                 DecodeValue::Sym($first as u8),
                 DecodeValue::Sym($second as u8),
             ]
-        };
+        }
     };
     // 4-final
     ( $first:expr, $second:expr, $third:expr, $fourth:expr ) => {
@@ -133,7 +133,7 @@ macro_rules! bits_decode {
                 DecodeValue::Sym($third as u8),
                 DecodeValue::Sym($fourth as u8),
             ]
-        };
+        }
     };
     // 2-final-partial
     ( $first:expr, => $second:ident ) => {
@@ -143,7 +143,7 @@ macro_rules! bits_decode {
                 DecodeValue::Sym($first as u8),
                 DecodeValue::Partial(&$second),
             ]
-        };
+        }
     };
     // 2-partial
     ( => $first:ident, => $second:ident ) => {
@@ -153,7 +153,7 @@ macro_rules! bits_decode {
                 DecodeValue::Partial(&$first),
                 DecodeValue::Partial(&$second),
             ]
-        };
+        }
     };
     // 4-partial
     ( => $first:ident, => $second:ident,
@@ -166,7 +166,7 @@ macro_rules! bits_decode {
                 DecodeValue::Partial(&$third),
                 DecodeValue::Partial(&$fourth),
             ]
-        };
+        }
     };
     [ $( $name:ident => ( $($value:tt)* ), )* ] => {
         $( const $name: HuffmanDecoder = bits_decode!( $( $value )* ); )*
