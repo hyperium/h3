@@ -36,7 +36,7 @@ pub trait Connection<B: Buf> {
     type RecvStream: RecvStream;
     /// A producer of outgoing Unidirectional and Bidirectional streams.
     type OpenStreams: OpenStreams<B>;
-    /// Error type yeilded by this trait methods
+    /// Error type yielded by this trait methods
     type Error: Into<Box<dyn Error>>;
 
     /// Accept an incoming unidirecional stream
@@ -82,7 +82,7 @@ pub trait OpenStreams<B: Buf>: Clone {
     type SendStream: SendStream<B>;
     /// The type of the receiving part of `BidiStream`
     type RecvStream: RecvStream;
-    /// Error type yeilded by this trait methods
+    /// Error type yielded by these trait methods
     type Error: Into<Box<dyn Error>>;
 
     /// Poll the connection to create a new bidirectional stream.
