@@ -63,13 +63,23 @@ pub fn stream_canceled<W: BufMut>(stream_id: u64, decoder: &mut W) {
     StreamCancel(stream_id).encode(decoder);
 }
 
+#[derive(PartialEq, Debug)]
+pub struct Decoded {
+    /// The decoded fields
+    pub fields: Vec<HeaderField>,
+    /// Whether one or more encoded fields were referencing the dynamic table
+    pub dyn_ref: bool,
+    /// Decoded size, calculated as stated in "4.1.1.3. Header Size Constraints"
+    pub mem_size: u64,
+}
+
 pub struct Decoder {
     table: DynamicTable,
 }
 
 impl Decoder {
     // Decode a header bloc received on Request of Push stream. (draft: 4.5)
-    pub fn decode_header<T: Buf>(&self, buf: &mut T) -> Result<(Vec<HeaderField>, bool), Error> {
+    pub fn decode_header<T: Buf>(&self, buf: &mut T) -> Result<Decoded, Error> {
         let (required_ref, base) = HeaderPrefix::decode(buf)?
             .get(self.table.total_inserted(), self.table.max_mem_size())?;
 
@@ -79,12 +89,19 @@ impl Decoder {
 
         let decoder_table = self.table.decoder(base);
 
+        let mut mem_size = 0;
         let mut fields = Vec::new();
         while buf.has_remaining() {
-            fields.push(Self::parse_header_field(&decoder_table, buf)?);
+            let field = Self::parse_header_field(&decoder_table, buf)?;
+            mem_size += field.mem_size() as u64;
+            fields.push(field);
         }
 
-        Ok((fields, required_ref > 0))
+        Ok(Decoded {
+            fields,
+            mem_size,
+            dyn_ref: required_ref > 0,
+        })
     }
 
     // The receiving side of encoder stream
@@ -188,14 +205,14 @@ impl Decoder {
 }
 
 // Decode a header bloc received on Request or Push stream. (draft: 4.5)
-pub fn decode_stateless<T: Buf>(buf: &mut T) -> Result<(Vec<HeaderField>, u64), Error> {
+pub fn decode_stateless<T: Buf>(buf: &mut T) -> Result<Decoded, Error> {
     let (required_ref, _base) = HeaderPrefix::decode(buf)?.get(0, 0)?;
 
     if required_ref > 0 {
         return Err(Error::MissingRefs(required_ref));
     }
 
-    let mut size = 0;
+    let mut mem_size = 0;
     let mut fields = Vec::new();
     while buf.has_remaining() {
         let field = match HeaderBlockField::decode(buf.chunk()[0]) {
@@ -217,11 +234,15 @@ pub fn decode_stateless<T: Buf>(buf: &mut T) -> Result<(Vec<HeaderField>, u64), 
             }
             _ => return Err(Error::UnknownPrefix(buf.chunk()[0])),
         };
-        size += field.mem_size() as u64;
+        mem_size += field.mem_size() as u64;
         fields.push(field);
     }
 
-    Ok((fields, size))
+    Ok(Decoded {
+        fields,
+        mem_size,
+        dyn_ref: false,
+    })
 }
 
 #[cfg(test)]
@@ -537,10 +558,12 @@ mod tests {
 
         let mut read = Cursor::new(&buf);
         let decoder = Decoder::from(build_table_with_size(2));
-        let (headers, had_refs) = decoder.decode_header(&mut read).unwrap();
-        assert!(had_refs);
+        let Decoded {
+            fields, dyn_ref, ..
+        } = decoder.decode_header(&mut read).unwrap();
+        assert!(dyn_ref);
         assert_eq!(
-            headers,
+            fields,
             &[field(2), field(1), StaticTable::get(18).unwrap().clone()]
         )
     }
@@ -567,9 +590,11 @@ mod tests {
 
         let mut read = Cursor::new(&buf);
         let decoder = Decoder::from(build_table_with_size(4));
-        let (headers, had_refs) = decoder.decode_header(&mut read).unwrap();
-        assert!(had_refs);
-        assert_eq!(headers, &[field(2), field(3), field(4)])
+        let Decoded {
+            fields, dyn_ref, ..
+        } = decoder.decode_header(&mut read).unwrap();
+        assert!(dyn_ref);
+        assert_eq!(fields, &[field(2), field(3), field(4)])
     }
 
     #[test]
@@ -585,10 +610,12 @@ mod tests {
 
         let mut read = Cursor::new(&buf);
         let decoder = Decoder::from(build_table_with_size(4));
-        let (headers, had_refs) = decoder.decode_header(&mut read).unwrap();
-        assert!(had_refs);
+        let Decoded {
+            fields, dyn_ref, ..
+        } = decoder.decode_header(&mut read).unwrap();
+        assert!(dyn_ref);
         assert_eq!(
-            headers,
+            fields,
             &[
                 field(1).with_value("new bar1"),
                 StaticTable::get(18).unwrap().with_value("PUT")
@@ -606,8 +633,8 @@ mod tests {
 
         let mut read = Cursor::new(&buf);
         let decoder = Decoder::from(build_table_with_size(4));
-        let (headers, _) = decoder.decode_header(&mut read).unwrap();
-        assert_eq!(headers, &[field(3).with_value("new bar3")]);
+        let Decoded { fields, .. } = decoder.decode_header(&mut read).unwrap();
+        assert_eq!(fields, &[field(3).with_value("new bar3")]);
     }
 
     #[test]
@@ -618,9 +645,9 @@ mod tests {
 
         let mut read = Cursor::new(&buf);
         let decoder = Decoder::from(build_table_with_size(0));
-        let (headers, _) = decoder.decode_header(&mut read).unwrap();
+        let Decoded { fields, .. } = decoder.decode_header(&mut read).unwrap();
         assert_eq!(
-            headers,
+            fields,
             &[HeaderField::new(b"foo".to_vec(), b"bar".to_vec())]
         );
     }
@@ -648,8 +675,8 @@ mod tests {
 
         let mut read = Cursor::new(&buf);
         let decoder = Decoder::from(build_table_with_size(4));
-        let (headers, _) = decoder.decode_header(&mut read).unwrap();
-        assert_eq!(headers, &[field(1), field(2), field(3), field(4)]);
+        let Decoded { fields, .. } = decoder.decode_header(&mut read).unwrap();
+        assert_eq!(fields, &[field(1), field(2), field(3), field(4)]);
     }
 
     #[test]
@@ -671,8 +698,8 @@ mod tests {
 
         let mut read = Cursor::new(&buf);
         let decoder = Decoder::from(build_table_with_size(max_entries + 10));
-        let (headers, _) = decoder.decode_header(&mut read).expect("decode");
-        assert_eq!(headers, &[field(max_entries - 5)]);
+        let Decoded { fields, .. } = decoder.decode_header(&mut read).expect("decode");
+        assert_eq!(fields, &[field(max_entries - 5)]);
 
         let mut buf = vec![];
 
@@ -689,7 +716,7 @@ mod tests {
 
         let mut read = Cursor::new(&buf);
         let decoder = Decoder::from(table);
-        let (headers, _) = decoder.decode_header(&mut read).unwrap();
-        assert_eq!(headers, &[field(max_entries + 6), field(max_entries + 10)]);
+        let Decoded { fields, .. } = decoder.decode_header(&mut read).unwrap();
+        assert_eq!(fields, &[field(max_entries + 6), field(max_entries + 10)]);
     }
 }

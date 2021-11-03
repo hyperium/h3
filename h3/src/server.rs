@@ -90,7 +90,9 @@ where
             ),
         };
 
-        let (fields, mem_size) = qpack::decode_stateless(&mut encoded)?;
+        let qpack::Decoded {
+            fields, mem_size, ..
+        } = qpack::decode_stateless(&mut encoded)?;
         if mem_size > self.max_field_section_size {
             request_stream
                 .send_response(
