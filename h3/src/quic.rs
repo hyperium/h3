@@ -138,17 +138,6 @@ pub trait RecvStream {
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Option<Self::Buf>, Self::Error>>;
 
-    /// Poll the stream for a precise number of bytes
-    ///
-    /// The `buf` slice should be filled with as much received data as possible. When
-    /// the receive side will no longer receive more data (such as because
-    /// the peer closed their sending side), this should return `None`.
-    fn poll_read(
-        &mut self,
-        buf: &mut [u8],
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<usize>, Self::Error>>;
-
     /// Send a `STOP_SENDING` QUIC code.
     fn stop_sending(&mut self, error_code: u64);
 }

@@ -4,6 +4,7 @@ pub mod error;
 pub mod quic;
 pub mod server;
 
+mod buf;
 mod connection;
 mod frame;
 mod stream;
