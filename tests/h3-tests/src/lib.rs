@@ -96,7 +96,7 @@ impl Pair {
             .unwrap()
     }
 
-    pub async fn client(&self) -> impl quic::Connection<Bytes> {
+    pub async fn client(&self) -> h3_quinn::Connection {
         Connection::new(self.client_inner().await)
     }
 }
