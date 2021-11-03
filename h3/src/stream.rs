@@ -1,13 +1,11 @@
-use std::{
-    io,
-    task::{Context, Poll},
-};
+use std::task::{Context, Poll};
 
-use bytes::{Bytes, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 use futures::{future, ready};
 use quic::RecvStream;
 
 use crate::{
+    buf::BufList,
     error::Code,
     frame::FrameStream,
     proto::{
@@ -51,9 +49,8 @@ where
     stream: S,
     ty: Option<StreamType>,
     push_id: Option<u64>,
-    buf: [u8; VarInt::MAX_SIZE],
-    expected: usize,
-    len: usize,
+    buf: BufList<S::Buf>,
+    expected: Option<usize>,
 }
 
 impl<S> AcceptRecvStream<S>
@@ -65,18 +62,19 @@ where
             stream,
             ty: None,
             push_id: None,
-            buf: [0; VarInt::MAX_SIZE],
-            expected: 1,
-            len: 0,
+            buf: BufList::new(),
+            expected: None,
         }
     }
 
     pub fn into_stream(self) -> Result<AcceptedRecvStream<S>, Error> {
         Ok(match self.ty.expect("Stream type not resolved yet") {
-            StreamType::CONTROL => AcceptedRecvStream::Control(FrameStream::new(self.stream)),
+            StreamType::CONTROL => {
+                AcceptedRecvStream::Control(FrameStream::with_bufs(self.stream, self.buf))
+            }
             StreamType::PUSH => AcceptedRecvStream::Push(
                 self.push_id.expect("Push ID not resolved yet"),
-                FrameStream::new(self.stream),
+                FrameStream::with_bufs(self.stream, self.buf),
             ),
             StreamType::ENCODER => AcceptedRecvStream::Encoder(self.stream),
             StreamType::DECODER => AcceptedRecvStream::Decoder(self.stream),
@@ -91,38 +89,41 @@ where
     pub fn poll_type(&mut self, cx: &mut Context) -> Poll<Result<(), Error>> {
         loop {
             match (self.ty.as_ref(), self.push_id) {
+                // When accepting a Push stream, we want to parse two VarInts: [StreamType, PUSH_ID]
                 (Some(&StreamType::PUSH), Some(_)) | (Some(_), _) => return Poll::Ready(Ok(())),
                 _ => (),
             }
 
-            match ready!(self
-                .stream
-                .poll_read(&mut self.buf[self.len..self.expected], cx))?
-            {
-                Some(s) => self.len += s,
+            match ready!(self.stream.poll_data(cx))? {
+                Some(b) => self.buf.push(b),
                 None => {
                     return Poll::Ready(Err(Code::H3_STREAM_CREATION_ERROR
                         .with_reason("Stream closed before type received")))
                 }
             };
 
-            if self.len == 1 {
-                self.expected = VarInt::encoded_size(self.buf[0]);
+            if self.expected.is_none() && self.buf.remaining() >= 1 {
+                self.expected = Some(VarInt::encoded_size(self.buf.chunk()[0]));
             }
-            if self.len < self.expected {
+
+            if let Some(expected) = self.expected {
+                if self.buf.remaining() < expected {
+                    continue;
+                }
+            } else {
                 continue;
             }
 
-            let mut cur = io::Cursor::new(&self.buf);
             if self.ty.is_none() {
-                self.ty = Some(StreamType::decode(&mut cur).map_err(|_| {
+                // Parse StreamType
+                self.ty = Some(StreamType::decode(&mut self.buf).map_err(|_| {
                     Code::H3_INTERNAL_ERROR.with_reason("Unexpected end parsing stream type")
                 })?);
                 // Get the next VarInt for PUSH_ID on the next iteration
-                self.len = 0;
-                self.expected = 1;
+                self.expected = None;
             } else {
-                self.push_id = Some(cur.get_var().map_err(|_| {
+                // Parse PUSH_ID
+                self.push_id = Some(self.buf.get_var().map_err(|_| {
                     Code::H3_INTERNAL_ERROR.with_reason("Unexpected end parsing stream type")
                 })?);
             }

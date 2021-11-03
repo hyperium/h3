@@ -1,5 +1,3 @@
-mod buf;
-
 use std::task::{Context, Poll};
 
 use bytes::{Buf, Bytes};
@@ -7,11 +5,11 @@ use bytes::{Buf, Bytes};
 use tracing::trace;
 
 use crate::{
+    buf::BufList,
     error::TransportError,
     proto::frame::{self, Frame},
     quic::{RecvStream, SendStream},
 };
-use buf::BufList;
 
 pub struct FrameStream<S>
 where
@@ -27,9 +25,13 @@ where
 
 impl<S: RecvStream> FrameStream<S> {
     pub fn new(stream: S) -> Self {
+        Self::with_bufs(stream, BufList::new())
+    }
+
+    pub(crate) fn with_bufs(stream: S, bufs: BufList<S::Buf>) -> Self {
         Self {
             stream,
-            bufs: BufList::new(),
+            bufs,
             decoder: FrameDecoder::default(),
             remaining_data: 0,
             is_eos: false,
@@ -493,14 +495,6 @@ mod tests {
             _: &mut Context<'_>,
         ) -> Poll<Result<Option<Self::Buf>, Self::Error>> {
             Poll::Ready(Ok(self.chunks.pop_front()))
-        }
-
-        fn poll_read(
-            &mut self,
-            _buf: &mut [u8],
-            _cx: &mut Context<'_>,
-        ) -> Poll<Result<Option<usize>, Self::Error>> {
-            todo!();
         }
 
         fn stop_sending(&mut self, _: u64) {
