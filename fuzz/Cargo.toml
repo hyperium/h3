@@ -15,6 +15,7 @@ bytes = "0.5.6"
 
 [dependencies.h3]
 path = "../h3"
+features = ["test_helpers"]
 
 # Prevent this from interfering with workspaces
 [workspace]

@@ -4,24 +4,24 @@ pub mod error;
 pub mod quic;
 pub mod server;
 
+pub use error::Error;
+
 mod buf;
 mod connection;
 mod frame;
-mod stream;
-
-pub use error::Error;
-
-#[cfg(feature = "test_helpers")]
-pub use connection::ConnectionState;
-
-#[cfg(not(feature = "test_helpers"))]
 mod proto;
-#[cfg(feature = "test_helpers")]
-pub mod proto;
-
-#[cfg(not(feature = "test_helpers"))]
 #[allow(dead_code)]
 mod qpack;
+mod stream;
+
 #[cfg(feature = "test_helpers")]
-#[allow(dead_code)]
-pub mod qpack;
+pub mod test_helpers {
+    pub mod qpack {
+        pub use crate::qpack::*;
+    }
+    pub mod proto {
+        pub use crate::proto::*;
+    }
+
+    pub use super::connection::ConnectionState;
+}

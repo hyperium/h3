@@ -8,8 +8,11 @@ use http::Request;
 use h3::{
     client,
     error::{Code, Kind},
-    proto::{coding::Encode as _, frame::Frame, stream::StreamType},
-    server, ConnectionState,
+    server,
+    test_helpers::{
+        proto::{coding::Encode as _, frame::Frame, stream::StreamType},
+        ConnectionState,
+    },
 };
 use h3_quinn::quinn;
 use h3_tests::Pair;
@@ -207,7 +210,7 @@ async fn client_error_on_bidi_recv() {
         ($e:expr) => {
             assert_matches!(
                 $e.map(|_| ()).unwrap_err().kind(),
-                Kind::Application { reason: Some(reason), code: Code::H3_STREAM_CREATION_ERROR }
+                Kind::Application { reason: Some(reason), code: Code::H3_STREAM_CREATION_ERROR, .. }
                 if *reason == *"client received a bidirectionnal stream");
         }
     }
@@ -305,12 +308,12 @@ async fn control_close_send_error() {
         // Driver detects that the recieving side of the control stream has been closed
         assert_matches!(
         incoming.accept().await.map(|_| ()).unwrap_err().kind(),
-            Kind::Application { reason: Some(reason), code: Code::H3_CLOSED_CRITICAL_STREAM }
+            Kind::Application { reason: Some(reason), code: Code::H3_CLOSED_CRITICAL_STREAM, .. }
             if *reason == *"control stream closed");
         // Poll it once again returns the previously stored error
         assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err().kind(),
-            Kind::Application { reason: Some(reason), code: Code::H3_CLOSED_CRITICAL_STREAM }
+            Kind::Application { reason: Some(reason), code: Code::H3_CLOSED_CRITICAL_STREAM, .. }
             if *reason == *"control stream closed");
     };
 
