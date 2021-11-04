@@ -5,7 +5,7 @@ use std::{fmt, sync::Arc};
 use crate::{frame, proto, qpack, quic};
 
 /// Cause of an error thrown by our own h3 layer
-pub type Cause = Box<dyn std::error::Error + Send + Sync>;
+type Cause = Box<dyn std::error::Error + Send + Sync>;
 /// Error thrown by the underlying QUIC impl
 pub type TransportError = Box<dyn quic::Error>;
 
@@ -37,17 +37,22 @@ struct ErrorImpl {
     cause: Option<Arc<Cause>>,
 }
 
+#[doc(hidden)]
+#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub enum Kind {
+    #[non_exhaustive]
     Application {
         code: Code,
         reason: Option<Box<str>>,
     },
+    #[non_exhaustive]
     HeaderTooBig {
         actual_size: u64,
         max_size: u64,
     },
     // Error from QUIC layer
+    #[non_exhaustive]
     Transport(Arc<TransportError>),
     Closed,
     Timeout,
@@ -185,10 +190,6 @@ impl From<Code> for u64 {
 // ===== impl Error =====
 
 impl Error {
-    pub fn kind(&self) -> Kind {
-        self.inner.kind.clone()
-    }
-
     fn new(kind: Kind) -> Self {
         Error {
             inner: Box::new(ErrorImpl { kind, cause: None }),
@@ -211,11 +212,16 @@ impl Error {
         Self::new(Kind::Closed)
     }
 
-    pub fn is_closed(&self) -> bool {
+    pub(crate) fn is_closed(&self) -> bool {
         if let Kind::Closed = self.inner.kind {
             return true;
         }
         false
+    }
+
+    #[cfg(feature = "test_helpers")]
+    pub fn kind(&self) -> Kind {
+        self.inner.kind.clone()
     }
 }
 

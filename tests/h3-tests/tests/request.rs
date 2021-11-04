@@ -9,12 +9,15 @@ use http::{request, HeaderMap, Request, Response, StatusCode};
 use h3::{
     client,
     error::{Code, Kind},
-    proto::{
-        coding::Encode,
-        frame::{self, Frame},
-        headers::Header,
+    server,
+    test_helpers::{
+        proto::{
+            coding::Encode,
+            frame::{self, Frame},
+            headers::Header,
+        },
+        qpack, ConnectionState,
     },
-    qpack, server, ConnectionState,
 };
 
 use h3_tests::Pair;
@@ -287,6 +290,7 @@ async fn header_too_big_response_from_server() {
             Kind::HeaderTooBig {
                 actual_size: 179,
                 max_size: 12,
+                ..
             }
         );
         let _ = incoming_req.accept().await;
@@ -352,6 +356,7 @@ async fn header_too_big_response_from_server_trailers() {
             Kind::HeaderTooBig {
                 actual_size: 239,
                 max_size: 207,
+                ..
             }
         );
         let _ = incoming_req.accept().await;
@@ -388,6 +393,7 @@ async fn header_too_big_client_error() {
                 Kind::HeaderTooBig {
                     actual_size: 179,
                     max_size: 12,
+                    ..
                 }
             );
         };
@@ -439,6 +445,7 @@ async fn header_too_big_client_error_trailer() {
                 Kind::HeaderTooBig {
                     actual_size: 239,
                     max_size: 200,
+                    ..
                 }
             );
 
@@ -491,6 +498,7 @@ async fn header_too_big_discard_from_client() {
             Kind::HeaderTooBig {
                 actual_size: 42,
                 max_size: 12,
+                ..
             }
         );
 
@@ -572,6 +580,7 @@ async fn header_too_big_discard_from_client_trailers() {
                 Kind::HeaderTooBig {
                     actual_size: 539,
                     max_size: 200,
+                    ..
                 }
             );
             request_stream.finish().await.expect("client finish");
@@ -671,7 +680,8 @@ async fn header_too_big_server_error() {
             err_kind,
             Kind::HeaderTooBig {
                 actual_size: 42,
-                max_size: 12
+                max_size: 12,
+                ..
             }
         );
     };
@@ -739,6 +749,7 @@ async fn header_too_big_server_error_trailers() {
             Kind::HeaderTooBig {
                 actual_size: 539,
                 max_size: 200,
+                ..
             }
         );
     };

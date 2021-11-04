@@ -4,7 +4,7 @@ use std::fmt;
 use super::coding::{BufExt, BufMutExt, Decode, Encode, UnexpectedEnd};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct StreamType(pub u64);
+pub struct StreamType(u64);
 
 macro_rules! stream_types {
     {$($name:ident = $val:expr,)*} => {
@@ -19,6 +19,12 @@ stream_types! {
     PUSH = 0x01,
     ENCODER = 0x02,
     DECODER = 0x03,
+}
+
+impl StreamType {
+    pub fn value(&self) -> u64 {
+        self.0
+    }
 }
 
 impl Decode for StreamType {

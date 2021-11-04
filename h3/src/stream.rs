@@ -78,10 +78,10 @@ where
             ),
             StreamType::ENCODER => AcceptedRecvStream::Encoder(self.stream),
             StreamType::DECODER => AcceptedRecvStream::Decoder(self.stream),
-            t if t.0 > 0x21 && (t.0 - 0x21) % 0x1f == 0 => AcceptedRecvStream::Reserved,
+            t if t.value() > 0x21 && (t.value() - 0x21) % 0x1f == 0 => AcceptedRecvStream::Reserved,
             t => {
                 return Err(Code::H3_STREAM_CREATION_ERROR
-                    .with_reason(format!("unknown stream type 0x{:x}", t.0)))
+                    .with_reason(format!("unknown stream type 0x{:x}", t.value())))
             }
         })
     }
