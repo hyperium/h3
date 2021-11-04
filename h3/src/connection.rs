@@ -175,8 +175,13 @@ where
             return Poll::Ready(Err(e.clone()));
         }
 
-        while self.control_recv.is_none() {
-            ready!(self.poll_accept_recv(cx))?;
+        loop {
+            match self.poll_accept_recv(cx) {
+                Poll::Ready(Ok(_)) => continue,
+                Poll::Ready(Err(e)) => return Poll::Ready(Err(e.into())),
+                Poll::Pending if self.control_recv.is_none() => return Poll::Pending,
+                _ => break,
+            }
         }
 
         let recvd = ready!(self
