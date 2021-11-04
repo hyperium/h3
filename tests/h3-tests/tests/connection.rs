@@ -381,7 +381,7 @@ async fn control_stream_frame_unexpected() {
         );
     };
 
-    tokio::select! { _ = server_fut => (), _ = client_fut => panic!("server resolved first") };
+    tokio::select! { _ = server_fut => (), _ = client_fut => panic!("client resolved first") };
 }
 
 #[tokio::test]

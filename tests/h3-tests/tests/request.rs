@@ -26,21 +26,25 @@ async fn get() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (_conn, mut client) = client::new(pair.client().await).await.expect("client init");
-        let mut request_stream = client
-            .send_request(Request::get("http://localhost/salut").body(()).unwrap())
-            .await
-            .expect("request");
+        let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
+        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let req_fut = async {
+            let mut request_stream = client
+                .send_request(Request::get("http://localhost/salut").body(()).unwrap())
+                .await
+                .expect("request");
 
-        let response = request_stream.recv_response().await.expect("recv response");
-        assert_eq!(response.status(), StatusCode::OK);
+            let response = request_stream.recv_response().await.expect("recv response");
+            assert_eq!(response.status(), StatusCode::OK);
 
-        let body = request_stream
-            .recv_data()
-            .await
-            .expect("recv data")
-            .expect("body");
-        assert_eq!(body.as_ref(), b"wonderful hypertext");
+            let body = request_stream
+                .recv_data()
+                .await
+                .expect("recv data")
+                .expect("body");
+            assert_eq!(body.as_ref(), b"wonderful hypertext");
+        };
+        tokio::select! { _ = req_fut => (), _ = drive_fut => () }
     };
 
     let server_fut = async {
@@ -74,25 +78,29 @@ async fn get_with_trailers_unknown_content_type() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (_, mut client) = client::new(pair.client().await).await.expect("client init");
-        let mut request_stream = client
-            .send_request(Request::get("http://localhost/salut").body(()).unwrap())
-            .await
-            .expect("request");
-        request_stream.recv_response().await.expect("recv response");
-        request_stream
-            .recv_data()
-            .await
-            .expect("recv data")
-            .expect("body");
+        let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
+        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let req_fut = async {
+            let mut request_stream = client
+                .send_request(Request::get("http://localhost/salut").body(()).unwrap())
+                .await
+                .expect("request");
+            request_stream.recv_response().await.expect("recv response");
+            request_stream
+                .recv_data()
+                .await
+                .expect("recv data")
+                .expect("body");
 
-        assert!(request_stream.recv_data().await.unwrap().is_none());
-        let trailers = request_stream
-            .recv_trailers()
-            .await
-            .expect("recv trailers")
-            .expect("trailers none");
-        assert_eq!(trailers.get("trailer").unwrap(), &"value");
+            assert!(request_stream.recv_data().await.unwrap().is_none());
+            let trailers = request_stream
+                .recv_trailers()
+                .await
+                .expect("recv trailers")
+                .expect("trailers none");
+            assert_eq!(trailers.get("trailer").unwrap(), &"value");
+        };
+        tokio::select! { _ = req_fut => (), _ = drive_fut => () }
     };
 
     let server_fut = async {
@@ -132,24 +140,28 @@ async fn get_with_trailers_known_content_type() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (_, mut client) = client::new(pair.client().await).await.expect("client init");
-        let mut request_stream = client
-            .send_request(Request::get("http://localhost/salut").body(()).unwrap())
-            .await
-            .expect("request");
-        request_stream.recv_response().await.expect("recv response");
-        request_stream
-            .recv_data()
-            .await
-            .expect("recv data")
-            .expect("body");
+        let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
+        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let req_fut = async {
+            let mut request_stream = client
+                .send_request(Request::get("http://localhost/salut").body(()).unwrap())
+                .await
+                .expect("request");
+            request_stream.recv_response().await.expect("recv response");
+            request_stream
+                .recv_data()
+                .await
+                .expect("recv data")
+                .expect("body");
 
-        let trailers = request_stream
-            .recv_trailers()
-            .await
-            .expect("recv trailers")
-            .expect("trailers none");
-        assert_eq!(trailers.get("trailer").unwrap(), &"value");
+            let trailers = request_stream
+                .recv_trailers()
+                .await
+                .expect("recv trailers")
+                .expect("trailers none");
+            assert_eq!(trailers.get("trailer").unwrap(), &"value");
+        };
+        tokio::select! { _ = req_fut => (), _ = drive_fut => () }
     };
 
     let server_fut = async {
@@ -190,19 +202,23 @@ async fn post() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (_, mut client) = client::new(pair.client().await).await.expect("client init");
-        let mut request_stream = client
-            .send_request(Request::get("http://localhost/salut").body(()).unwrap())
-            .await
-            .expect("request");
+        let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
+        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let req_fut = async {
+            let mut request_stream = client
+                .send_request(Request::get("http://localhost/salut").body(()).unwrap())
+                .await
+                .expect("request");
 
-        request_stream
-            .send_data("wonderful json".into())
-            .await
-            .expect("send_data");
-        request_stream.finish().await.expect("client finish");
+            request_stream
+                .send_data("wonderful json".into())
+                .await
+                .expect("send_data");
+            request_stream.finish().await.expect("client finish");
 
-        request_stream.recv_response().await.expect("recv response");
+            request_stream.recv_response().await.expect("recv response");
+        };
+        tokio::select! { _ = req_fut => (), _ = drive_fut => () }
     };
 
     let server_fut = async {
@@ -240,17 +256,21 @@ async fn header_too_big_response_from_server() {
 
     let client_fut = async {
         // Do not poll driver so client doesn't know about server's max_field section size setting
-        let (_conn, mut client) = client::new(pair.client().await).await.expect("client init");
-        let mut request_stream = client
-            .send_request(Request::get("http://localhost/salut").body(()).unwrap())
-            .await
-            .expect("request");
-        request_stream.finish().await.expect("client finish");
-        let response = request_stream.recv_response().await.unwrap();
-        assert_eq!(
-            response.status(),
-            StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
-        );
+        let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
+        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let req_fut = async {
+            let mut request_stream = client
+                .send_request(Request::get("http://localhost/salut").body(()).unwrap())
+                .await
+                .expect("request");
+            request_stream.finish().await.expect("client finish");
+            let response = request_stream.recv_response().await.unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
+            );
+        };
+        tokio::select! { _ = req_fut => (), _ = drive_fut => () }
     };
 
     let server_fut = async {
@@ -283,29 +303,33 @@ async fn header_too_big_response_from_server_trailers() {
 
     let client_fut = async {
         // Do not poll driver so client doesn't know about server's max_field_section_size setting
-        let (_conn, mut client) = client::new(pair.client().await).await.expect("client init");
-        let mut request_stream = client
-            .send_request(Request::get("http://localhost/salut").body(()).unwrap())
-            .await
-            .expect("request");
-        request_stream
-            .send_data("wonderful json".into())
-            .await
-            .expect("send_data");
+        let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
+        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let req_fut = async {
+            let mut request_stream = client
+                .send_request(Request::get("http://localhost/salut").body(()).unwrap())
+                .await
+                .expect("request");
+            request_stream
+                .send_data("wonderful json".into())
+                .await
+                .expect("send_data");
 
-        let mut trailers = HeaderMap::new();
-        trailers.insert("trailer", "A".repeat(200).parse().unwrap());
-        request_stream
-            .send_trailers(trailers)
-            .await
-            .expect("send trailers");
-        request_stream.finish().await.expect("client finish");
+            let mut trailers = HeaderMap::new();
+            trailers.insert("trailer", "A".repeat(200).parse().unwrap());
+            request_stream
+                .send_trailers(trailers)
+                .await
+                .expect("send trailers");
+            request_stream.finish().await.expect("client finish");
 
-        let response = request_stream.recv_response().await.unwrap();
-        assert_eq!(
-            response.status(),
-            StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
-        );
+            let response = request_stream.recv_response().await.unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
+            );
+        };
+        tokio::select! { _ = req_fut => (), _ = drive_fut => () }
     };
 
     let server_fut = async {
@@ -343,27 +367,31 @@ async fn header_too_big_client_error() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (_, mut client) = client::new(pair.client().await).await.expect("client init");
-        // pretend client already received server's settings
-        client
-            .shared_state()
-            .write("client")
-            .peer_max_field_section_size = 12;
+        let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
+        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let req_fut = async {
+            // pretend client already received server's settings
+            client
+                .shared_state()
+                .write("client")
+                .peer_max_field_section_size = 12;
 
-        let req = Request::get("http://localhost/salut").body(()).unwrap();
-        let err_kind = client
-            .send_request(req)
-            .await
-            .map(|_| ())
-            .unwrap_err()
-            .kind();
-        assert_matches!(
-            err_kind,
-            Kind::HeaderTooBig {
-                actual_size: 179,
-                max_size: 12,
-            }
-        );
+            let req = Request::get("http://localhost/salut").body(()).unwrap();
+            let err_kind = client
+                .send_request(req)
+                .await
+                .map(|_| ())
+                .unwrap_err()
+                .kind();
+            assert_matches!(
+                err_kind,
+                Kind::HeaderTooBig {
+                    actual_size: 179,
+                    max_size: 12,
+                }
+            );
+        };
+        tokio::select! { _ = req_fut => (), _ = drive_fut => () }
     };
 
     let server_fut = async {
@@ -381,38 +409,42 @@ async fn header_too_big_client_error_trailer() {
 
     let client_fut = async {
         // Do not poll driver so client doesn't know about server's max_field_section_size setting
-        let (_conn, mut client) = client::new(pair.client().await).await.expect("client init");
-        client
-            .shared_state()
-            .write("client")
-            .peer_max_field_section_size = 200;
+        let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
+        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let req_fut = async {
+            client
+                .shared_state()
+                .write("client")
+                .peer_max_field_section_size = 200;
 
-        let mut request_stream = client
-            .send_request(Request::get("http://localhost/salut").body(()).unwrap())
-            .await
-            .expect("request");
-        request_stream
-            .send_data("wonderful json".into())
-            .await
-            .expect("send_data");
+            let mut request_stream = client
+                .send_request(Request::get("http://localhost/salut").body(()).unwrap())
+                .await
+                .expect("request");
+            request_stream
+                .send_data("wonderful json".into())
+                .await
+                .expect("send_data");
 
-        let mut trailers = HeaderMap::new();
-        trailers.insert("trailer", "A".repeat(200).parse().unwrap());
+            let mut trailers = HeaderMap::new();
+            trailers.insert("trailer", "A".repeat(200).parse().unwrap());
 
-        let err_kind = request_stream
-            .send_trailers(trailers)
-            .await
-            .unwrap_err()
-            .kind();
-        assert_matches!(
-            err_kind,
-            Kind::HeaderTooBig {
-                actual_size: 239,
-                max_size: 200,
-            }
-        );
+            let err_kind = request_stream
+                .send_trailers(trailers)
+                .await
+                .unwrap_err()
+                .kind();
+            assert_matches!(
+                err_kind,
+                Kind::HeaderTooBig {
+                    actual_size: 239,
+                    max_size: 200,
+                }
+            );
 
-        request_stream.finish().await.expect("client finish");
+            request_stream.finish().await.expect("client finish");
+        };
+        tokio::select! { _ = req_fut => (), _ = drive_fut => () }
     };
 
     let server_fut = async {
@@ -520,27 +552,31 @@ async fn header_too_big_discard_from_client_trailers() {
 
     let client_fut = async {
         // Do not poll driver so client doesn't know about server's max_field section size setting
-        let (_conn, mut client) = client::builder()
+        let (mut driver, mut client) = client::builder()
             .max_field_section_size(200)
             .build(pair.client().await)
             .await
             .expect("client init");
-        let mut request_stream = client
-            .send_request(Request::get("http://localhost/salut").body(()).unwrap())
-            .await
-            .expect("request");
-        request_stream.recv_response().await.expect("recv response");
-        request_stream.recv_data().await.expect("recv data");
+        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let req_fut = async {
+            let mut request_stream = client
+                .send_request(Request::get("http://localhost/salut").body(()).unwrap())
+                .await
+                .expect("request");
+            request_stream.recv_response().await.expect("recv response");
+            request_stream.recv_data().await.expect("recv data");
 
-        let err_kind = request_stream.recv_trailers().await.unwrap_err().kind();
-        assert_matches!(
-            err_kind,
-            Kind::HeaderTooBig {
-                actual_size: 539,
-                max_size: 200,
-            }
-        );
-        request_stream.finish().await.expect("client finish");
+            let err_kind = request_stream.recv_trailers().await.unwrap_err().kind();
+            assert_matches!(
+                err_kind,
+                Kind::HeaderTooBig {
+                    actual_size: 539,
+                    max_size: 200,
+                }
+            );
+            request_stream.finish().await.expect("client finish");
+        };
+        tokio::select! { _ = req_fut => (), _ = drive_fut => () }
     };
 
     let server_fut = async {
@@ -591,29 +627,34 @@ async fn header_too_big_server_error() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (_conn, mut client) = client::new(pair.client().await) // header size limit faked for brevity
+        let (mut driver, mut client) = client::new(pair.client().await) // header size limit faked for brevity
             .await
             .expect("client init");
-
-        let req = Request::get("http://localhost/salut").body(()).unwrap();
-        let _ = client
-            .send_request(req)
-            .await
-            .unwrap()
-            .recv_response()
-            .await;
+        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let req_fut = async {
+            let req = Request::get("http://localhost/salut").body(()).unwrap();
+            let _ = client
+                .send_request(req)
+                .await
+                .unwrap()
+                .recv_response()
+                .await;
+        };
+        tokio::select! { _ = req_fut => (), _ = drive_fut => () }
     };
 
     let server_fut = async {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
-        // pretend the server already received client's settings
+
+        let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
+
+        // pretend the server received a smaller max_field_section_size
         incoming_req
             .shared_state()
             .write("server")
             .peer_max_field_section_size = 12;
 
-        let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
         let err_kind = request_stream
             .send_response(
                 Response::builder()
@@ -645,27 +686,25 @@ async fn header_too_big_server_error_trailers() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (_conn, mut client) = client::new(pair.client().await) // header size limit faked for brevity
+        let (mut driver, mut client) = client::new(pair.client().await) // header size limit faked for brevity
             .await
             .expect("client init");
-
-        let req = Request::get("http://localhost/salut").body(()).unwrap();
-        let _ = client
-            .send_request(req)
-            .await
-            .unwrap()
-            .recv_response()
-            .await;
+        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let req_fut = async {
+            let req = Request::get("http://localhost/salut").body(()).unwrap();
+            let _ = client
+                .send_request(req)
+                .await
+                .unwrap()
+                .recv_response()
+                .await;
+        };
+        tokio::select! { _ = req_fut => (), _ = drive_fut => () }
     };
 
     let server_fut = async {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
-        // pretend the server already received client's settings
-        incoming_req
-            .shared_state()
-            .write("write")
-            .peer_max_field_section_size = 200;
 
         let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
         request_stream
@@ -681,6 +720,12 @@ async fn header_too_big_server_error_trailers() {
             .send_data("wonderful hypertext".into())
             .await
             .expect("send_data");
+
+        // pretend the server already received client's settings
+        incoming_req
+            .shared_state()
+            .write("write")
+            .peer_max_field_section_size = 200;
 
         let mut trailers = HeaderMap::new();
         trailers.insert("trailer", "value".repeat(100).parse().unwrap());
