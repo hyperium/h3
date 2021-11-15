@@ -66,11 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .with_no_client_auth();
         tls_config.enable_early_data = true;
         tls_config.alpn_protocols = vec![ALPN.into()];
-        let transport = quinn::TransportConfig::default();
-        quinn::ClientConfig {
-            crypto: Arc::new(tls_config),
-            transport: Arc::new(transport),
-        }
+        quinn::ClientConfig::new(Arc::new(tls_config))
     };
 
     let mut client_endpoint = h3_quinn::quinn::Endpoint::client("[::]:0".parse().unwrap())?;

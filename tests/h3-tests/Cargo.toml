@@ -13,6 +13,7 @@ bytes = "1"
 futures = "0.3"
 http = "0.2.1"
 tracing-subscriber = { version = "0.2.7", default-features = false, features = ["fmt", "ansi", "env-filter", "chrono", "tracing-log"] }
+rustls = "0.20"
 
 [dev-dependencies]
-tokio = "1"
+tokio = { version = "1", features = ["macros"] }
