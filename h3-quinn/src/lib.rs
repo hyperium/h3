@@ -9,12 +9,11 @@ use std::{
 };
 
 use bytes::{Buf, Bytes};
-use futures::{AsyncWrite, FutureExt, ready, StreamExt};
+use futures::{ready, AsyncWrite, FutureExt, StreamExt};
 pub use quinn;
 use quinn::{
-    ConnectionError,
-    IncomingBiStreams, IncomingUniStreams, NewConnection, OpenBi,
-    OpenUni, VarInt, WriteError,
+    ConnectionError, IncomingBiStreams, IncomingUniStreams, NewConnection, OpenBi, OpenUni, VarInt,
+    WriteError,
 };
 
 use h3::quic;
@@ -47,7 +46,8 @@ impl Connection {
 }
 
 impl<B> quic::Connection<B> for Connection
-    where B: Buf,
+where
+    B: Buf,
 {
     type SendStream = SendStream<B>;
     type RecvStream = RecvStream;
@@ -108,14 +108,16 @@ impl<B> quic::Connection<B> for Connection
 }
 
 pub struct BidiStream<B>
-    where B: Buf
+where
+    B: Buf,
 {
     send: SendStream<B>,
     recv: RecvStream,
 }
 
 impl<B> quic::BidiStream<B> for BidiStream<B>
-    where B: Buf
+where
+    B: Buf,
 {
     type SendStream = SendStream<B>;
     type RecvStream = RecvStream;
@@ -126,7 +128,8 @@ impl<B> quic::BidiStream<B> for BidiStream<B>
 }
 
 impl<B> quic::RecvStream for BidiStream<B>
-    where B: Buf,
+where
+    B: Buf,
 {
     type Buf = Bytes;
     type Error = ReadError;
@@ -144,7 +147,8 @@ impl<B> quic::RecvStream for BidiStream<B>
 }
 
 impl<B> quic::SendStream<B> for BidiStream<B>
-    where B: Buf,
+where
+    B: Buf,
 {
     type Error = SendStreamError;
 
@@ -191,7 +195,7 @@ impl quic::RecvStream for RecvStream {
             .stream
             .read_chunk(usize::MAX, true)
             .poll_unpin(cx))?
-            .map(|c| (c.bytes))))
+        .map(|c| (c.bytes))))
     }
 
     fn stop_sending(&mut self, error_code: u64) {
@@ -231,7 +235,8 @@ pub struct SendStream<B: Buf> {
 }
 
 impl<B> SendStream<B>
-    where B: Buf,
+where
+    B: Buf,
 {
     fn new(stream: quinn::SendStream) -> SendStream<B> {
         Self {
@@ -242,7 +247,8 @@ impl<B> SendStream<B>
 }
 
 impl<B> quic::SendStream<B> for SendStream<B>
-    where B: Buf,
+where
+    B: Buf,
 {
     type Error = SendStreamError;
 
