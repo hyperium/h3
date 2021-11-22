@@ -6,12 +6,7 @@ use futures::StreamExt;
 use rustls::{Certificate, PrivateKey};
 
 use h3::quic;
-use h3_quinn::{
-    Connection,
-    quinn::{
-        Endpoint, Incoming,
-    },
-};
+use h3_quinn::{quinn::Incoming, Connection};
 
 pub fn init_tracing() {
     let _ = tracing_subscriber::fmt()
@@ -31,11 +26,7 @@ pub struct Pair {
 impl Pair {
     pub fn new() -> Self {
         let (cert, key) = build_certs();
-        Self {
-            port: 0,
-            cert,
-            key,
-        }
+        Self { port: 0, cert, key }
     }
 
     pub fn server(&mut self) -> Server {
@@ -51,7 +42,8 @@ impl Pair {
         crypto.alpn_protocols = vec![b"h3".to_vec()];
 
         let server_config = h3_quinn::quinn::ServerConfig::with_crypto(crypto.into());
-        let (endpoint, incoming) = h3_quinn::quinn::Endpoint::server(server_config, "[::]:0".parse().unwrap()).unwrap();
+        let (endpoint, incoming) =
+            h3_quinn::quinn::Endpoint::server(server_config, "[::]:0".parse().unwrap()).unwrap();
 
         self.port = endpoint.local_addr().unwrap().port();
 
@@ -77,9 +69,10 @@ impl Pair {
         crypto.enable_early_data = true;
         crypto.alpn_protocols = vec![b"h3".to_vec()];
 
-        let mut client_config = h3_quinn::quinn::ClientConfig::new(Arc::new(crypto));
+        let client_config = h3_quinn::quinn::ClientConfig::new(Arc::new(crypto));
 
-        let mut client_endpoint = h3_quinn::quinn::Endpoint::client("[::]:0".parse().unwrap()).unwrap();
+        let mut client_endpoint =
+            h3_quinn::quinn::Endpoint::client("[::]:0".parse().unwrap()).unwrap();
         client_endpoint.set_default_client_config(client_config);
         Connection::new(
             client_endpoint

@@ -73,11 +73,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             cert_f.read_to_end(&mut cert_v).await?;
             key_f.read_to_end(&mut key_v).await?;
-            (
-                rustls::Certificate(cert_v),
-                PrivateKey(key_v),
-                c.port
-            )
+            (rustls::Certificate(cert_v), PrivateKey(key_v), c.port)
         }
     };
     let server_config = h3_quinn::quinn::ServerConfig::with_single_cert(vec![cert], key)?;

@@ -2,8 +2,8 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use rustls;
-use rustls::{Certificate, ServerName};
 use rustls::client::ServerCertVerified;
+use rustls::{Certificate, ServerName};
 use structopt::StructOpt;
 use tokio::io::AsyncWriteExt;
 
@@ -106,12 +106,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 struct YesVerifier;
 
 impl rustls::client::ServerCertVerifier for YesVerifier {
-    fn verify_server_cert(&self, _end_entity: &Certificate,
-                          _intermediates: &[Certificate],
-                          _server_name: &ServerName,
-                          _scts: &mut dyn Iterator<Item=&[u8]>,
-                          _ocsp_response: &[u8],
-                          _now: SystemTime) -> Result<ServerCertVerified, Error> {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &Certificate,
+        _intermediates: &[Certificate],
+        _server_name: &ServerName,
+        _scts: &mut dyn Iterator<Item = &[u8]>,
+        _ocsp_response: &[u8],
+        _now: SystemTime,
+    ) -> Result<ServerCertVerified, Error> {
         Ok(ServerCertVerified::assertion())
     }
 }
