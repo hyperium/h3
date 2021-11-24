@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use futures::StreamExt;
 use rustls::{Certificate, PrivateKey};
@@ -6,6 +7,8 @@ use structopt::StructOpt;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use tracing::{debug, error, info, trace, trace_span, warn};
+
+static ALPN: &[u8] = b"h3";
 
 // Configs for two server modes
 // selfsigned mode will generate it's own local certificate
@@ -76,7 +79,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             (rustls::Certificate(cert_v), PrivateKey(key_v), c.port)
         }
     };
-    let server_config = h3_quinn::quinn::ServerConfig::with_single_cert(vec![cert], key)?;
+    let mut crypto = rustls::ServerConfig::builder()
+        .with_safe_default_cipher_suites()
+        .with_safe_default_kx_groups()
+        .with_protocol_versions(&[&rustls::version::TLS13])
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(vec![cert], key)?;
+    crypto.max_early_data_size = u32::MAX;
+    crypto.alpn_protocols = vec![ALPN.into()];
+    let server_config = h3_quinn::quinn::ServerConfig::with_crypto(Arc::new(crypto));
 
     let addr = format!("[::]:{:}", port).parse()?;
     let (endpoint, mut incoming) = h3_quinn::quinn::Endpoint::server(server_config, addr)?;
