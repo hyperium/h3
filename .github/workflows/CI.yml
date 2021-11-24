@@ -39,7 +39,7 @@ jobs:
           - stable
           - beta
           - nightly
-          - 1.46
+          - 1.50
 
     runs-on: ubuntu-latest
 
