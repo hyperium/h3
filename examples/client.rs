@@ -10,7 +10,7 @@ use tokio::io::AsyncWriteExt;
 use h3_quinn::quinn;
 use h3_quinn::quinn::crypto::rustls::Error;
 
-static ALPN: &[u8] = b"h3-29";
+static ALPN: &[u8] = b"h3";
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "server")]
@@ -54,20 +54,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("DNS Lookup for {:?}: {:?}", dest, addr);
 
     // quinn setup
-
-    let client_config = if !opt.insecure {
-        h3_quinn::quinn::ClientConfig::with_native_roots()
+    let tls_config_builder = rustls::ClientConfig::builder()
+        .with_safe_default_cipher_suites()
+        .with_safe_default_kx_groups()
+        .with_protocol_versions(&[&rustls::version::TLS13])?;
+    let mut tls_config = if !opt.insecure {
+        let mut roots = rustls::RootCertStore::empty();
+        match rustls_native_certs::load_native_certs() {
+            Ok(certs) => {
+                for cert in certs {
+                    if let Err(e) = roots.add(&rustls::Certificate(cert.0)) {
+                        eprintln!("failed to parse trust anchor: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("couldn't load any default trust roots: {}", e);
+            }
+        };
+        tls_config_builder
+            .with_root_certificates(roots)
+            .with_no_client_auth()
     } else {
-        let mut tls_config = rustls::ClientConfig::builder()
-            .with_safe_default_cipher_suites()
-            .with_safe_default_kx_groups()
-            .with_protocol_versions(&[&rustls::version::TLS13])?
+        tls_config_builder
             .with_custom_certificate_verifier(Arc::new(YesVerifier))
-            .with_no_client_auth();
-        tls_config.enable_early_data = true;
-        tls_config.alpn_protocols = vec![ALPN.into()];
-        quinn::ClientConfig::new(Arc::new(tls_config))
+            .with_no_client_auth()
     };
+    tls_config.enable_early_data = true;
+    tls_config.alpn_protocols = vec![ALPN.into()];
+    let client_config = quinn::ClientConfig::new(Arc::new(tls_config));
 
     let mut client_endpoint = h3_quinn::quinn::Endpoint::client("[::]:0".parse().unwrap())?;
     client_endpoint.set_default_client_config(client_config);
