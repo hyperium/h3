@@ -6,7 +6,7 @@ pub mod server;
 
 #[allow(dead_code)]
 mod connection;
-pub mod frame;
+mod frame;
 mod proto;
 #[allow(dead_code)]
 mod qpack;
