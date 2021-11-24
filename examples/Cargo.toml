@@ -13,6 +13,7 @@ h3-quinn = { path = "../h3-quinn" }
 http = "0.2"
 rcgen = { version = "0.7.0" }
 rustls = { version = "0.20", features = ["dangerous_configuration"] }
+rustls-native-certs = "0.6"
 structopt = "0.3"
 tokio-stream = "0.1"
 tokio = { version = "1", features = ["full"] }
