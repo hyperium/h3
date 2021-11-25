@@ -7,7 +7,7 @@ use crate::{frame, proto, qpack, quic};
 /// Cause of an error thrown by our own h3 layer
 type Cause = Box<dyn std::error::Error + Send + Sync>;
 /// Error thrown by the underlying QUIC impl
-pub type TransportError = Box<dyn quic::Error>;
+pub(crate) type TransportError = Box<dyn quic::Error>;
 
 /// A general error that can occur when handling the HTTP/3 protocol.
 #[derive(Clone)]
@@ -37,6 +37,8 @@ struct ErrorImpl {
     cause: Option<Arc<Cause>>,
 }
 
+// Warning: this enum is public only for testing purposes. Do not use it in
+// downstream code or be prepared to refactor as changes happen.
 #[doc(hidden)]
 #[non_exhaustive]
 #[derive(Clone, Debug)]

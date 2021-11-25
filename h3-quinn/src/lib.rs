@@ -9,10 +9,10 @@ use std::{
 };
 
 use bytes::{Buf, Bytes};
-use futures::{ready, FutureExt as _, StreamExt as _, AsyncWrite as _ };
+use futures::{ready, AsyncWrite as _, FutureExt as _, StreamExt as _};
 pub use quinn::{
-    self, crypto::Session, IncomingBiStreams, IncomingUniStreams, NewConnection,
-    OpenBi, OpenUni, VarInt, WriteError,
+    self, crypto::Session, IncomingBiStreams, IncomingUniStreams, NewConnection, OpenBi, OpenUni,
+    VarInt, WriteError,
 };
 
 use h3::quic::{self, Error};
@@ -209,8 +209,7 @@ where
     }
 }
 
-impl Clone for OpenStreams
-{
+impl Clone for OpenStreams {
     fn clone(&self) -> Self {
         Self {
             conn: self.conn.clone(),

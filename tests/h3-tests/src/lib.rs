@@ -1,4 +1,9 @@
-use std::{convert::TryInto, net::{Ipv6Addr, ToSocketAddrs}, sync::Arc, time::Duration};
+use std::{
+    convert::TryInto,
+    net::{Ipv6Addr, ToSocketAddrs},
+    sync::Arc,
+    time::Duration,
+};
 
 use bytes::Bytes;
 use futures::StreamExt;
@@ -40,7 +45,9 @@ impl Pair {
     pub fn with_timeout(&mut self, duration: Duration) {
         Arc::get_mut(&mut self.client_config)
             .unwrap()
-            .max_idle_timeout(Some(duration.try_into().expect("idle timeout duration invalid")))
+            .max_idle_timeout(Some(
+                duration.try_into().expect("idle timeout duration invalid"),
+            ))
             .initial_rtt(Duration::from_millis(10));
     }
 
