@@ -221,6 +221,11 @@ impl Error {
         false
     }
 
+    #[cfg(not(feature = "test_helpers"))]
+    pub(crate) fn kind(&self) -> Kind {
+        self.inner.kind.clone()
+    }
+
     #[cfg(feature = "test_helpers")]
     pub fn kind(&self) -> Kind {
         self.inner.kind.clone()
