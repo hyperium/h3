@@ -29,7 +29,7 @@ impl<'a, E: Error + 'a> From<E> for Box<dyn Error + 'a> {
 /// Trait representing a QUIC connection.
 pub trait Connection<B: Buf> {
     /// The type produced by `poll_accept_bidi()`
-    type BidiStream: SendStream<B> + RecvStream;
+    type BidiStream: BidiStream<B>;
     /// The type of the sending part of `BidiStream`
     type SendStream: SendStream<B>;
     /// The type produced by `poll_accept_recv()`
@@ -77,7 +77,7 @@ pub trait Connection<B: Buf> {
 /// Trait for opening outgoing streams
 pub trait OpenStreams<B: Buf> {
     /// The type produced by `poll_open_bidi()`
-    type BidiStream: SendStream<B> + RecvStream;
+    type BidiStream: BidiStream<B>;
     /// The type produced by `poll_open_send()`
     type SendStream: SendStream<B>;
     /// The type of the receiving part of `BidiStream`
