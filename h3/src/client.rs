@@ -44,7 +44,7 @@ where
     pub async fn send_request(
         &mut self,
         req: http::Request<()>,
-    ) -> Result<RequestStream<FrameStream<T::BidiStream>>, Error> {
+    ) -> Result<RequestStream<T::BidiStream>, Error> {
         let peer_max_field_section_size = self
             .conn_state
             .read("send request lock state")
@@ -209,17 +209,23 @@ where
     }
 }
 
-pub struct RequestStream<S> {
-    inner: connection::RequestStream<S, Bytes>,
+pub struct RequestStream<S>
+where
+    S: quic::RecvStream,
+{
+    inner: connection::RequestStream<FrameStream<S>, Bytes>,
 }
 
-impl<S> ConnectionState for RequestStream<S> {
+impl<S> ConnectionState for RequestStream<S>
+where
+    S: quic::RecvStream,
+{
     fn shared_state(&self) -> &SharedStateRef {
         &self.inner.conn_state
     }
 }
 
-impl<S> RequestStream<FrameStream<S>>
+impl<S> RequestStream<S>
 where
     S: quic::RecvStream,
 {
@@ -281,7 +287,7 @@ where
 
 impl<S> RequestStream<S>
 where
-    S: quic::SendStream<Bytes>,
+    S: quic::RecvStream + quic::SendStream<Bytes>,
 {
     pub async fn send_data(&mut self, buf: Bytes) -> Result<(), Error> {
         self.inner.send_data(buf).await

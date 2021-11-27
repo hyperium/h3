@@ -350,6 +350,12 @@ impl From<frame::Error> for Error {
     }
 }
 
+impl From<Error> for Box<dyn std::error::Error + std::marker::Send> {
+    fn from(e: Error) -> Self {
+        Box::new(e)
+    }
+}
+
 impl<T> From<T> for Error
 where
     T: Into<TransportError>,
