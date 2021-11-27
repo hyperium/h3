@@ -1,7 +1,9 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use bytes::Bytes;
 use futures::{future, FutureExt};
+use h3::{client::RequestStream, quic};
 use h3_quinn::quinn;
 use rustls::{self, client::ServerCertVerified};
 use rustls::{Certificate, ServerName};
@@ -107,18 +109,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut stream = conn.send_request(req).await?;
         stream.finish().await?;
 
-        eprintln!("Receiving response ...");
-        let resp = stream.recv_response().await?;
-
-        eprintln!("Response: {:?} {}", resp.version(), resp.status());
-        eprintln!("Headers: {:#?}", resp.headers());
-
-        while let Some(chunk) = stream.recv_data().await? {
-            let mut out = tokio::io::stdout();
-            out.write_all(&chunk).await?;
-            out.flush().await?;
-        }
-        Ok::<(), Box<dyn std::error::Error>>(())
+        Ok::<_, Box<dyn std::error::Error>>(handle_request(stream).await)
     };
 
     tokio::select! {
@@ -130,6 +121,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    Ok(())
+}
+
+async fn handle_request<T: quic::BidiStream<Bytes>>(
+    mut stream: RequestStream<T>,
+) -> Result<(), Box<dyn std::error::Error + Send>> {
+    eprintln!("Receiving response ...");
+    let resp = stream.recv_response().await?;
+
+    eprintln!("Response: {:?} {}", resp.version(), resp.status());
+    eprintln!("Headers: {:#?}", resp.headers());
+
+    while let Some(chunk) = stream.recv_data().await? {
+        let mut out = tokio::io::stdout();
+        out.write_all(&chunk).await.expect("write_all");
+        out.flush().await.expect("flush");
+    }
     Ok(())
 }
 

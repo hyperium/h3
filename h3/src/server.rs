@@ -4,6 +4,7 @@ use http::{response, HeaderMap, Request, Response, StatusCode};
 use std::{
     convert::TryFrom,
     marker::PhantomData,
+    ops::{Deref, DerefMut},
     task::{Context, Poll},
 };
 
@@ -47,7 +48,7 @@ where
 
     pub async fn accept(
         &mut self,
-    ) -> Result<Option<(Request<()>, RequestStream<FrameStream<C::BidiStream>>)>, Error> {
+    ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream>)>, Error> {
         let mut stream = match future::poll_fn(|cx| self.poll_accept_request(cx)).await {
             Ok(Some(s)) => FrameStream::new(s),
             Ok(None) => return Ok(None),
@@ -82,7 +83,7 @@ where
             }
         };
 
-        let mut request_stream = RequestStream {
+        let mut request_stream = RequestStreamImpl {
             inner: connection::RequestStream::new(
                 stream,
                 self.max_field_section_size,
@@ -113,7 +114,7 @@ where
         *req.headers_mut() = headers;
         *req.version_mut() = http::Version::HTTP_3;
 
-        Ok(Some((req, request_stream)))
+        Ok(Some((req, RequestStream(request_stream))))
     }
 
     pub fn poll_accept_request(
@@ -186,17 +187,41 @@ where
     }
 }
 
-pub struct RequestStream<S> {
+// Wraps the impl to hide `FrameStream` type from the public API
+pub struct RequestStream<T>(RequestStreamImpl<FrameStream<T>>)
+where
+    T: quic::RecvStream;
+
+impl<T> Deref for RequestStream<T>
+where
+    T: quic::RecvStream,
+{
+    type Target = RequestStreamImpl<FrameStream<T>>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> DerefMut for RequestStream<T>
+where
+    T: quic::RecvStream,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+pub struct RequestStreamImpl<S> {
     inner: connection::RequestStream<S, Bytes>,
 }
 
-impl<S> ConnectionState for RequestStream<S> {
+impl<S> ConnectionState for RequestStreamImpl<S> {
     fn shared_state(&self) -> &SharedStateRef {
         &self.inner.conn_state
     }
 }
 
-impl<S> RequestStream<FrameStream<S>>
+impl<S> RequestStreamImpl<FrameStream<S>>
 where
     S: quic::RecvStream,
 {
@@ -209,7 +234,7 @@ where
     }
 }
 
-impl<S> RequestStream<S>
+impl<S> RequestStreamImpl<S>
 where
     S: quic::SendStream<Bytes>,
 {
@@ -252,7 +277,7 @@ where
     }
 }
 
-impl<S> RequestStream<FrameStream<S>>
+impl<S> RequestStreamImpl<FrameStream<S>>
 where
     S: quic::RecvStream + quic::SendStream<Bytes>,
 {

@@ -4,6 +4,7 @@ use http::{request, HeaderMap, Response};
 use std::{
     convert::TryFrom,
     marker::PhantomData,
+    ops::{Deref, DerefMut},
     sync::{atomic::AtomicUsize, Arc},
     task::{Context, Poll},
 };
@@ -44,7 +45,7 @@ where
     pub async fn send_request(
         &mut self,
         req: http::Request<()>,
-    ) -> Result<RequestStream<FrameStream<T::BidiStream>>, Error> {
+    ) -> Result<RequestStream<T::BidiStream>, Error> {
         let peer_max_field_section_size = self
             .conn_state
             .read("send request lock state")
@@ -73,13 +74,13 @@ where
             .await
             .map_err(|e| self.maybe_conn_err(e))?;
 
-        Ok(RequestStream {
+        Ok(RequestStream(RequestStreamImpl {
             inner: connection::RequestStream::new(
                 FrameStream::new(stream),
                 self.max_field_section_size,
                 self.conn_state.clone(),
             ),
-        })
+        }))
     }
 }
 
@@ -209,17 +210,40 @@ where
     }
 }
 
-pub struct RequestStream<S> {
+pub struct RequestStream<T>(RequestStreamImpl<FrameStream<T>>)
+where
+    T: quic::RecvStream;
+
+impl<T> Deref for RequestStream<T>
+where
+    T: quic::RecvStream,
+{
+    type Target = RequestStreamImpl<FrameStream<T>>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> DerefMut for RequestStream<T>
+where
+    T: quic::RecvStream,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+pub struct RequestStreamImpl<S> {
     inner: connection::RequestStream<S, Bytes>,
 }
 
-impl<S> ConnectionState for RequestStream<S> {
+impl<S> ConnectionState for RequestStreamImpl<S> {
     fn shared_state(&self) -> &SharedStateRef {
         &self.inner.conn_state
     }
 }
 
-impl<S> RequestStream<FrameStream<S>>
+impl<S> RequestStreamImpl<FrameStream<S>>
 where
     S: quic::RecvStream,
 {
@@ -279,7 +303,7 @@ where
     }
 }
 
-impl<S> RequestStream<S>
+impl<S> RequestStreamImpl<S>
 where
     S: quic::SendStream<Bytes>,
 {

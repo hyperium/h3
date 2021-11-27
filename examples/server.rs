@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use futures::StreamExt;
+use h3::{quic::BidiStream, server::RequestStream};
 use rustls::{Certificate, PrivateKey};
 use structopt::StructOpt;
 use tokio::fs::File;
@@ -110,26 +112,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .await
                         .unwrap();
 
-                    while let Some((req, mut stream)) = h3_conn.accept().await.unwrap() {
+                    while let Some((req, stream)) = h3_conn.accept().await.unwrap() {
                         debug!("connection requested: {:#?}", req);
 
-                        tokio::spawn(async move {
-                            let resp = http::Response::builder()
-                                .status(http::StatusCode::NOT_FOUND)
-                                .body(())
-                                .unwrap();
-
-                            match stream.send_response(resp).await {
-                                Ok(_) => {
-                                    debug!("Response to connection successful");
-                                }
-                                Err(err) => {
-                                    error!("Unable to send response to connection peer: {:?}", err);
-                                }
-                            }
-
-                            stream.finish().await.unwrap();
-                        });
+                        tokio::spawn(handle_request(stream));
                     }
                 }
                 Err(err) => {
@@ -140,6 +126,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+async fn handle_request<T>(
+    mut stream: RequestStream<T>,
+) -> Result<(), Box<dyn std::error::Error + Send>>
+where
+    T: BidiStream<Bytes>,
+{
+    let resp = http::Response::builder()
+        .status(http::StatusCode::NOT_FOUND)
+        .body(())
+        .unwrap();
+
+    match stream.send_response(resp).await {
+        Ok(_) => {
+            debug!("Response to connection successful");
+        }
+        Err(err) => {
+            error!("Unable to send response to connection peer: {:?}", err);
+        }
+    }
+
+    Ok(stream.finish().await?)
 }
 
 pub fn build_certs() -> (Certificate, PrivateKey) {
