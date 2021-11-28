@@ -28,7 +28,7 @@ pub struct Pair {
     port: u16,
     cert: Certificate,
     key: PrivateKey,
-    client_config: Arc<TransportConfig>,
+    config: Arc<TransportConfig>,
 }
 
 impl Pair {
@@ -38,12 +38,12 @@ impl Pair {
             cert,
             key,
             port: 0,
-            client_config: Arc::new(TransportConfig::default()),
+            config: Arc::new(TransportConfig::default()),
         }
     }
 
     pub fn with_timeout(&mut self, duration: Duration) {
-        Arc::get_mut(&mut self.client_config)
+        Arc::get_mut(&mut self.config)
             .unwrap()
             .max_idle_timeout(Some(
                 duration.try_into().expect("idle timeout duration invalid"),
@@ -63,7 +63,8 @@ impl Pair {
         crypto.max_early_data_size = u32::MAX;
         crypto.alpn_protocols = vec![b"h3".to_vec()];
 
-        let server_config = h3_quinn::quinn::ServerConfig::with_crypto(crypto.into());
+        let mut server_config = h3_quinn::quinn::ServerConfig::with_crypto(crypto.into());
+        server_config.transport = self.config.clone();
         let (endpoint, incoming) =
             h3_quinn::quinn::Endpoint::server(server_config, "[::]:0".parse().unwrap()).unwrap();
 
