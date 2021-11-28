@@ -5,7 +5,7 @@ use std::{
     convert::TryFrom,
     marker::PhantomData,
     sync::{atomic::AtomicUsize, Arc},
-    task::{Context, Poll},
+    task::{Context, Poll, Waker},
 };
 
 use crate::{
@@ -35,6 +35,7 @@ pub struct SendRequest<T: quic::OpenStreams<Bytes>> {
     max_field_section_size: u64, // maximum size for a header we receive
     // counts instances of SendRequest to close the connection when the last is dropped.
     sender_count: Arc<AtomicUsize>,
+    conn_waker: Option<Waker>,
 }
 
 impl<T> SendRequest<T>
@@ -105,6 +106,7 @@ where
             conn_state: self.conn_state.clone(),
             max_field_section_size: self.max_field_section_size,
             sender_count: self.sender_count.clone(),
+            conn_waker: self.conn_waker.clone(),
         }
     }
 }
@@ -119,6 +121,9 @@ where
             .fetch_sub(1, std::sync::atomic::Ordering::AcqRel)
             == 1
         {
+            if let Some(w) = self.conn_waker.take() {
+                w.wake()
+            }
             self.shared_state().write("SendRequest drop").error = Some(Error::closed());
             self.open.close(Code::H3_NO_ERROR, b"");
         }
@@ -208,6 +213,8 @@ where
         let open = quic.opener();
         let conn_state = SharedStateRef::default();
 
+        let conn_waker = Some(future::poll_fn(|cx| Poll::Ready(cx.waker().clone())).await);
+
         Ok((
             Connection {
                 inner: ConnectionInner::new(quic, self.max_field_section_size, conn_state.clone())
@@ -216,6 +223,7 @@ where
             SendRequest {
                 open,
                 conn_state,
+                conn_waker,
                 max_field_section_size: self.max_field_section_size,
                 sender_count: Arc::new(AtomicUsize::new(1)),
             },
