@@ -148,8 +148,22 @@ where
                         .with_reason(format!("on client control stream: {:?}", frame))))
                 }
                 Err(e) => {
-                    self.inner.shared.write("poll_close error").error = e.clone().into();
-                    return Poll::Ready(Err(e));
+                    let connection_error = self
+                        .inner
+                        .shared
+                        .read("poll_close error read")
+                        .error
+                        .as_ref()
+                        .map(|e| e.clone());
+
+                    match connection_error {
+                        Some(e) if e.is_closed() => return Poll::Ready(Ok(())),
+                        Some(e) => return Poll::Ready(Err(e.clone())),
+                        None => {
+                            self.inner.shared.write("poll_close error").error = e.clone().into();
+                            return Poll::Ready(Err(e));
+                        }
+                    }
                 }
             }
         }

@@ -64,17 +64,22 @@ async fn server_drop_close() {
         let _ = server::Connection::new(conn).await.unwrap();
     };
 
+    let (mut conn, mut send) = client::new(pair.client().await).await.expect("client init");
     let client_fut = async {
-        let (mut conn, mut send) = client::new(pair.client().await).await.expect("client init");
-        let mut request_stream = send
-            .send_request(Request::get("http://no.way").body(()).unwrap())
-            .await
-            .unwrap();
-        let response = request_stream.recv_response().await;
-        assert_matches!(response.unwrap_err().kind(), Kind::Closed);
+        let request_fut = async move {
+            let mut request_stream = send
+                .send_request(Request::get("http://no.way").body(()).unwrap())
+                .await
+                .unwrap();
+            let response = request_stream.recv_response().await;
+            assert_matches!(response.unwrap_err().kind(), Kind::Closed);
+        };
 
-        let drive = future::poll_fn(|cx| conn.poll_close(cx)).await;
-        assert_matches!(drive.map(|_| ()).unwrap_err().kind(), Kind::Closed);
+        let drive_fut = async {
+            let drive = future::poll_fn(|cx| conn.poll_close(cx)).await;
+            assert_matches!(drive, Ok(()));
+        };
+        tokio::join!(request_fut, drive_fut);
     };
     tokio::join!(server_fut, client_fut);
 }
@@ -111,7 +116,7 @@ async fn client_close_only_on_last_sender_drop() {
         drop(send2);
 
         let drive = future::poll_fn(|cx| conn.poll_close(cx)).await;
-        assert_matches!(drive.map(|_| ()).unwrap_err().kind(), Kind::Closed);
+        assert_matches!(drive, Ok(()));
     };
 
     tokio::join!(server_fut, client_fut);

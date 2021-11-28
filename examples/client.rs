@@ -91,20 +91,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("QUIC connected ...");
 
     // generic h3
-    let (mut driver, mut conn) = h3::client::new(quinn_conn).await?;
+    let (mut driver, mut send_request) = h3::client::new(quinn_conn).await?;
 
     let drive = async move {
         future::poll_fn(|cx| driver.poll_close(cx)).await?;
         Ok::<(), Box<dyn std::error::Error>>(())
-    }
-    .fuse();
+    };
 
-    let request = async {
+    // In the following block, we want to take ownership of `send_request`:
+    // the connection will be closed only when all `SendRequest`s instances
+    // are dropped.
+    //
+    //             So we "move" it.
+    //                  vvvv
+    let request = async move {
         eprintln!("Sending request ...");
 
         let req = http::Request::builder().uri(dest).body(())?;
 
-        let mut stream = conn.send_request(req).await?;
+        let mut stream = send_request.send_request(req).await?;
         stream.finish().await?;
 
         eprintln!("Receiving response ...");
@@ -121,14 +126,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok::<(), Box<dyn std::error::Error>>(())
     };
 
-    tokio::select! {
-        _ = request => {
-            println!("request completed");
-        }
-        _ = drive => {
-            println!("operation compleed");
-        }
-    }
+    let (req_res, drive_res) = tokio::join!(request, drive);
+    req_res?;
+    drive_res?;
+
+    client_endpoint.wait_idle().await;
 
     Ok(())
 }
