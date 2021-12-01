@@ -120,10 +120,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         while let Some(chunk) = stream.recv_data().await? {
             let mut out = tokio::io::stdout();
-            out.write_all(&chunk).await?;
-            out.flush().await?;
+            out.write_all(&chunk).await.expect("write_all");
+            out.flush().await.expect("flush");
         }
-        Ok::<(), Box<dyn std::error::Error>>(())
+        Ok::<_, Box<dyn std::error::Error>>(())
     };
 
     let (req_res, drive_res) = tokio::join!(request, drive);

@@ -47,7 +47,7 @@ where
 
     pub async fn accept(
         &mut self,
-    ) -> Result<Option<(Request<()>, RequestStream<FrameStream<C::BidiStream>>)>, Error> {
+    ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream>)>, Error> {
         let mut stream = match future::poll_fn(|cx| self.poll_accept_request(cx)).await {
             Ok(Some(s)) => FrameStream::new(s),
             Ok(None) => return Ok(None),
@@ -186,17 +186,23 @@ where
     }
 }
 
-pub struct RequestStream<S> {
-    inner: connection::RequestStream<S, Bytes>,
+pub struct RequestStream<S>
+where
+    S: quic::RecvStream,
+{
+    inner: connection::RequestStream<FrameStream<S>, Bytes>,
 }
 
-impl<S> ConnectionState for RequestStream<S> {
+impl<S> ConnectionState for RequestStream<S>
+where
+    S: quic::RecvStream,
+{
     fn shared_state(&self) -> &SharedStateRef {
         &self.inner.conn_state
     }
 }
 
-impl<S> RequestStream<FrameStream<S>>
+impl<S> RequestStream<S>
 where
     S: quic::RecvStream,
 {
@@ -211,7 +217,7 @@ where
 
 impl<S> RequestStream<S>
 where
-    S: quic::SendStream<Bytes>,
+    S: quic::RecvStream + quic::SendStream<Bytes>,
 {
     pub async fn send_response(&mut self, resp: Response<()>) -> Result<(), Error> {
         let (parts, _) = resp.into_parts();
@@ -252,7 +258,7 @@ where
     }
 }
 
-impl<S> RequestStream<FrameStream<S>>
+impl<S> RequestStream<S>
 where
     S: quic::RecvStream + quic::SendStream<Bytes>,
 {
