@@ -5,7 +5,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use bytes::{Bytes, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 use futures::{future, ready};
 use http::HeaderMap;
 
@@ -257,7 +257,7 @@ where
     S: quic::RecvStream,
 {
     /// Receive some of the request body.
-    pub async fn recv_data(&mut self) -> Result<Option<Bytes>, Error> {
+    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
         if !self.stream.has_data() {
             let frame = future::poll_fn(|cx| self.stream.poll_next(cx))
                 .await

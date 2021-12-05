@@ -75,7 +75,7 @@ where
         }
     }
 
-    pub fn poll_data(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<Bytes>, Error>> {
+    pub fn poll_data(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<impl Buf>, Error>> {
         if self.remaining_data == 0 {
             return Poll::Ready(Ok(None));
         };
@@ -345,7 +345,7 @@ mod tests {
             Ok(Some(Frame::Data { len: 4 }))
         );
         assert_poll_matches!(
-            |mut cx| stream.poll_data(&mut cx),
+            |mut cx| to_bytes(stream.poll_data(&mut cx)),
             Ok(Some(b)) if b.remaining() == 4
         );
         assert_poll_matches!(
@@ -407,15 +407,16 @@ mod tests {
         // We get the total size of data about to be received
         assert_poll_matches!(
             |mut cx| stream.poll_next(&mut cx),
-            Ok(Some(Frame::Data { len: 4 })));
+            Ok(Some(Frame::Data { len: 4 }))
+        );
 
         // Then we get parts of body, chunked as they arrived
         assert_poll_matches!(
-            |mut cx| stream.poll_data(&mut cx),
+            |mut cx| to_bytes(stream.poll_data(&mut cx)),
             Ok(Some(b)) if b.remaining() == 2
         );
         assert_poll_matches!(
-            |mut cx| stream.poll_data(&mut cx),
+            |mut cx| to_bytes(stream.poll_data(&mut cx)),
             Ok(Some(b)) if b.remaining() == 2
         );
     }
@@ -436,7 +437,7 @@ mod tests {
             Ok(Some(Frame::Data { len: 4 }))
         );
         assert_poll_matches!(
-            |mut cx| stream.poll_data(&mut cx),
+            |mut cx| to_bytes(stream.poll_data(&mut cx)),
             Err(Error::UnexpectedEnd)
         );
     }
@@ -468,7 +469,7 @@ mod tests {
             Ok(Some(Frame::Data { len: 4 }))
         );
         assert_poll_matches!(
-            |mut cx| stream.poll_data(&mut cx),
+            |mut cx| to_bytes(stream.poll_data(&mut cx)),
             Ok(Some(b)) if &*b == b"body"
         );
     }
@@ -527,5 +528,11 @@ mod tests {
         fn into(self) -> Arc<dyn quic::Error> {
             unimplemented!()
         }
+    }
+
+    fn to_bytes(
+        x: Poll<Result<Option<impl Buf>, Error>>,
+    ) -> Poll<Result<Option<Bytes>, Error>> {
+        x.map(|b| b.map(|b| b.map(|mut b| b.copy_to_bytes(b.remaining()))))
     }
 }
