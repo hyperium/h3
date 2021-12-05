@@ -2,6 +2,7 @@ use std::task::{Context, Poll};
 
 use bytes::{Buf, Bytes};
 
+use futures::ready;
 use tracing::trace;
 
 use crate::{
@@ -16,19 +17,22 @@ where
     S: RecvStream,
 {
     stream: S,
-    bufs: BufList<S::Buf>,
+    bufs: BufList<Bytes>,
     decoder: FrameDecoder,
     remaining_data: u64,
     /// Set to true when `stream` reaches the end.
     is_eos: bool,
 }
 
-impl<S: RecvStream> FrameStream<S> {
+impl<S> FrameStream<S>
+where
+    S: RecvStream,
+{
     pub fn new(stream: S) -> Self {
         Self::with_bufs(stream, BufList::new())
     }
 
-    pub(crate) fn with_bufs(stream: S, bufs: BufList<S::Buf>) -> Self {
+    pub(crate) fn with_bufs(stream: S, bufs: BufList<Bytes>) -> Self {
         Self {
             stream,
             bufs,
@@ -76,29 +80,20 @@ impl<S: RecvStream> FrameStream<S> {
             return Poll::Ready(Ok(None));
         };
 
-        let end = match self.try_recv(cx)? {
-            Poll::Pending => return Poll::Pending,
-            Poll::Ready(end) => end,
-        };
+        let end = ready!(self.try_recv(cx))?;
+        let data = self.bufs.take_chunk(self.remaining_data as usize);
 
-        let bufs_len = self.bufs.remaining();
-
-        let data = if (bufs_len as u64) <= self.remaining_data {
-            self.bufs.copy_to_bytes(bufs_len)
-        } else {
-            self.bufs.copy_to_bytes(self.remaining_data as usize)
-        };
-
-        match (data.len(), end) {
-            (0, true) => return Poll::Ready(Ok(None)),
-            (0, false) => return Poll::Pending,
-            (x, true) if (x as u64) < self.remaining_data => {
-                return Poll::Ready(Err(Error::UnexpectedEnd));
+        match (data, end) {
+            (None, true) => Poll::Ready(Ok(None)),
+            (None, false) => Poll::Pending,
+            (Some(d), true) if (d.remaining() as u64) < self.remaining_data => {
+                Poll::Ready(Err(Error::UnexpectedEnd))
             }
-            (x, _) => self.remaining_data -= x as u64,
-        };
-
-        Poll::Ready(Ok(Some(data)))
+            (Some(d), _) => {
+                self.remaining_data -= d.remaining() as u64;
+                Poll::Ready(Ok(Some(d)))
+            }
+        }
     }
 
     pub(crate) fn stop_sending(&mut self, error_code: crate::error::Code) {
@@ -124,8 +119,8 @@ impl<S: RecvStream> FrameStream<S> {
                 self.is_eos = true;
                 Poll::Ready(Ok(true))
             }
-            Poll::Ready(Ok(Some(d))) => {
-                self.bufs.push(d);
+            Poll::Ready(Ok(Some(mut d))) => {
+                self.bufs.push_bytes(&mut d);
                 Poll::Ready(Ok(false))
             }
         }
@@ -409,13 +404,19 @@ mod tests {
         recv.chunk(buf);
         let mut stream = FrameStream::new(recv);
 
+        // We get the total size of data about to be received
         assert_poll_matches!(
             |mut cx| stream.poll_next(&mut cx),
-            Ok(Some(Frame::Data { len: 4 }))
+            Ok(Some(Frame::Data { len: 4 })));
+
+        // Then we get parts of body, chunked as they arrived
+        assert_poll_matches!(
+            |mut cx| stream.poll_data(&mut cx),
+            Ok(Some(b)) if b.remaining() == 2
         );
         assert_poll_matches!(
             |mut cx| stream.poll_data(&mut cx),
-            Ok(Some(b)) if b.remaining() == 4
+            Ok(Some(b)) if b.remaining() == 2
         );
     }
 

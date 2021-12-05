@@ -49,7 +49,7 @@ where
     stream: S,
     ty: Option<StreamType>,
     push_id: Option<u64>,
-    buf: BufList<S::Buf>,
+    buf: BufList<Bytes>,
     expected: Option<usize>,
 }
 
@@ -95,7 +95,7 @@ where
             }
 
             match ready!(self.stream.poll_data(cx))? {
-                Some(b) => self.buf.push(b),
+                Some(mut b) => self.buf.push_bytes(&mut b),
                 None => {
                     return Poll::Ready(Err(Code::H3_STREAM_CREATION_ERROR
                         .with_reason("Stream closed before type received")))
