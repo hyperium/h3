@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use assert_matches::assert_matches;
-use bytes::{BufMut, BytesMut};
+use bytes::{Buf, BufMut, BytesMut};
 use futures::future;
 use h3_quinn::ReadError;
 use http::{request, HeaderMap, Request, Response, StatusCode};
@@ -45,7 +45,7 @@ async fn get() {
                 .await
                 .expect("recv data")
                 .expect("body");
-            assert_eq!(body.as_ref(), b"wonderful hypertext");
+            assert_eq!(body.chunk(), b"wonderful hypertext");
         };
         tokio::select! { _ = req_fut => (), _ = drive_fut => () }
     };
@@ -244,7 +244,7 @@ async fn post() {
             .await
             .expect("recv data")
             .expect("server recv body");
-        assert_eq!(request_body, "wonderful json");
+        assert_eq!(request_body.chunk(), b"wonderful json");
         request_stream.finish().await.expect("client finish");
     };
 
@@ -814,7 +814,7 @@ async fn get_timeout_client_recv_data() {
 
             let _ = request_stream.recv_response().await.unwrap();
             let data = request_stream.recv_data().await;
-            assert_matches!(data.unwrap_err().kind(), h3::error::Kind::Timeout);
+            assert_matches!(data.map(|_| ()).unwrap_err().kind(), h3::error::Kind::Timeout);
         };
 
         let drive_fut = async move {
@@ -901,7 +901,7 @@ async fn post_timeout_server_recv_data() {
 
         let (_, mut req_stream) = incoming_req.accept().await.expect("accept").unwrap();
         assert_matches!(
-            req_stream.recv_data().await.unwrap_err().kind(),
+            req_stream.recv_data().await.map(|_|()).unwrap_err().kind(),
             h3::error::Kind::Timeout
         );
     };

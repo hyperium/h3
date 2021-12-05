@@ -1,4 +1,4 @@
-use bytes::{Bytes, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 use futures::future;
 use http::{response, HeaderMap, Request, Response, StatusCode};
 use std::{
@@ -206,7 +206,7 @@ impl<S> RequestStream<S>
 where
     S: quic::RecvStream,
 {
-    pub async fn recv_data(&mut self) -> Result<Option<Bytes>, Error> {
+    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
         self.inner.recv_data().await
     }
 

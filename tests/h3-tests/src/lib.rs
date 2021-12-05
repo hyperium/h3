@@ -1,11 +1,6 @@
-use std::{
-    convert::TryInto,
-    net::{Ipv6Addr, ToSocketAddrs},
-    sync::Arc,
-    time::Duration,
-};
+use std::{convert::TryInto, net::{Ipv6Addr, ToSocketAddrs}, sync::Arc, task::Poll, time::Duration};
 
-use bytes::Bytes;
+use bytes::{Buf, Bytes};
 use futures::StreamExt;
 use rustls::{Certificate, PrivateKey};
 
@@ -124,4 +119,10 @@ pub fn build_certs() -> (Certificate, PrivateKey) {
     let key = PrivateKey(cert.serialize_private_key_der());
     let cert = Certificate(cert.serialize_der().unwrap());
     (cert, key)
+}
+
+pub fn to_bytes<E>(
+    x: Poll<Result<Option<impl Buf>, E>>,
+) -> Poll<Result<Option<Bytes>, E>> {
+    x.map(|b| b.map(|b| b.map(|mut b| b.copy_to_bytes(b.remaining()))))
 }

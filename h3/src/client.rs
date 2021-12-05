@@ -1,4 +1,4 @@
-use bytes::{Bytes, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 use futures::future;
 use http::{request, HeaderMap, Response};
 use std::{
@@ -288,7 +288,7 @@ where
         Ok(resp)
     }
 
-    pub async fn recv_data(&mut self) -> Result<Option<Bytes>, Error> {
+    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
         self.inner.recv_data().await
     }
 
