@@ -295,7 +295,7 @@ where
     pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
         let res = self.inner.recv_trailers().await;
         if let Err(ref e) = res {
-            if let crate::error::Kind::HeaderTooBig { .. } = e.kind() {
+            if e.is_header_too_big() {
                 self.inner.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
             }
         }

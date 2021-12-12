@@ -221,9 +221,8 @@ impl Error {
         false
     }
 
-    #[cfg(not(feature = "test_helpers"))]
-    pub(crate) fn kind(&self) -> Kind {
-        self.inner.kind.clone()
+    pub(crate) fn is_header_too_big(&self) -> bool {
+        matches!(&self.inner.kind, Kind::HeaderTooBig { .. })
     }
 
     #[cfg(feature = "test_helpers")]

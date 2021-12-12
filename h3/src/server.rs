@@ -265,7 +265,7 @@ where
     pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
         let res = self.inner.recv_trailers().await;
         if let Err(ref e) = res {
-            if let error::Kind::HeaderTooBig { .. } = e.kind() {
+            if e.is_header_too_big() {
                 self.send_response(
                     http::Response::builder()
                         .status(StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE)
