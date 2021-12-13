@@ -36,7 +36,7 @@ impl<'a> DynamicTableDecoder<'a> {
         self.table
             .fields
             .get(real_index)
-            .ok_or_else(|| Error::BadIndex(real_index))
+            .ok_or(Error::BadIndex(real_index))
     }
 
     pub(super) fn get_postbase(&self, index: usize) -> Result<&HeaderField, Error> {
@@ -44,7 +44,7 @@ impl<'a> DynamicTableDecoder<'a> {
         self.table
             .fields
             .get(real_index)
-            .ok_or_else(|| Error::BadIndex(real_index))
+            .ok_or(Error::BadIndex(real_index))
     }
 }
 
@@ -334,7 +334,7 @@ impl DynamicTable {
         let real_index = self.vas.relative(index)?;
         self.fields
             .get(real_index)
-            .ok_or_else(|| Error::BadIndex(real_index))
+            .ok_or(Error::BadIndex(real_index))
     }
 
     pub(super) fn total_inserted(&self) -> usize {
@@ -440,10 +440,7 @@ impl DynamicTable {
     }
 
     fn is_tracked(&self, reference: usize) -> bool {
-        match self.track_map.get(&reference) {
-            Some(count) if *count > 0 => true,
-            _ => false,
-        }
+        matches!(self.track_map.get(&reference), Some(count) if *count > 0)
     }
 
     fn track_block(&mut self, stream_id: u64, refs: HashMap<usize, usize>) {
@@ -527,9 +524,9 @@ impl DynamicTable {
 impl From<vas::Error> for Error {
     fn from(e: vas::Error) -> Self {
         match e {
-            vas::Error::BadRelativeIndex(e) => Error::BadRelativeIndex(e),
-            vas::Error::BadPostbaseIndex(e) => Error::BadPostbaseIndex(e),
-            vas::Error::BadIndex(e) => Error::BadIndex(e),
+            vas::Error::RelativeIndex(e) => Error::BadRelativeIndex(e),
+            vas::Error::PostbaseIndex(e) => Error::BadPostbaseIndex(e),
+            vas::Error::Index(e) => Error::BadIndex(e),
         }
     }
 }

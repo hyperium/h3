@@ -50,12 +50,6 @@ pub struct Encoder {
 }
 
 impl Encoder {
-    pub fn new() -> Self {
-        Self {
-            table: DynamicTable::new(),
-        }
-    }
-
     pub fn encode<W, T, H>(
         &mut self,
         stream_id: u64,
@@ -187,6 +181,14 @@ impl Encoder {
     }
 }
 
+impl Default for Encoder {
+    fn default() -> Self {
+        Self {
+            table: DynamicTable::new(),
+        }
+    }
+}
+
 pub fn encode_stateless<W, T, H>(block: &mut W, fields: T) -> Result<u64, Error>
 where
     W: BufMut,
@@ -282,8 +284,8 @@ impl From<StringError> for Error {
 impl From<ParseError> for Error {
     fn from(e: ParseError) -> Self {
         match e {
-            ParseError::InvalidInteger(x) => Error::InvalidInteger(x),
-            ParseError::InvalidString(x) => Error::InvalidString(x),
+            ParseError::Integer(x) => Error::InvalidInteger(x),
+            ParseError::String(x) => Error::InvalidString(x),
             ParseError::InvalidPrefix(x) => Error::UnknownDecoderInstruction(x),
             _ => unreachable!(),
         }

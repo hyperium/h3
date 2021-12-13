@@ -30,7 +30,7 @@ pub mod helpers {
 
 #[test]
 fn codec_basic_get() {
-    let mut encoder = Encoder::new();
+    let mut encoder = Encoder::default();
     let mut decoder = Decoder::from(DynamicTable::new());
 
     let mut block_buf = vec![];

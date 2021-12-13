@@ -50,7 +50,7 @@ impl HuffmanDecoder {
     fn fetch_value(&self, bit_pos: &mut BitWindow, input: &[u8]) -> Result<Option<u32>, Error> {
         match read_bits(input, bit_pos.byte, bit_pos.bit, bit_pos.count) {
             Ok(value) => Ok(Some(value as u32)),
-            Err(()) => self.check_eof(bit_pos, &input),
+            Err(()) => self.check_eof(bit_pos, input),
         }
     }
 
@@ -63,7 +63,7 @@ impl HuffmanDecoder {
             Err(err) => return Err(err),
         };
 
-        let at_value = match (&self.table[..]).get(value) {
+        let at_value = match (self.table).get(value) {
             Some(x) => x,
             None => return Err(Error::Unhandled(bit_pos.clone(), value)),
         };

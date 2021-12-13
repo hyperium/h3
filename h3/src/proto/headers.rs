@@ -139,7 +139,7 @@ impl Iterator for HeaderIter {
 
         self.pseudo = None;
 
-        while let Some(f) = self.fields.next() {
+        for f in self.fields.by_ref() {
             if let (Some(n), v) = f {
                 return Some((n.as_str(), v.as_bytes()).into());
             }

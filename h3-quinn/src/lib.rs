@@ -57,11 +57,7 @@ impl fmt::Display for ConnectionError {
 
 impl Error for ConnectionError {
     fn is_timeout(&self) -> bool {
-        if let quinn::ConnectionError::TimedOut = self.0 {
-            true
-        } else {
-            false
-        }
+        matches!(self.0, quinn::ConnectionError::TimedOut)
     }
 
     fn err_code(&self) -> Option<u64> {
@@ -328,9 +324,9 @@ impl fmt::Display for ReadError {
     }
 }
 
-impl Into<Arc<dyn Error>> for ReadError {
-    fn into(self) -> Arc<dyn Error> {
-        Arc::new(self)
+impl From<ReadError> for Arc<dyn Error> {
+    fn from(e: ReadError) -> Self {
+        Arc::new(e)
     }
 }
 
@@ -342,10 +338,10 @@ impl From<quinn::ReadError> for ReadError {
 
 impl Error for ReadError {
     fn is_timeout(&self) -> bool {
-        match self.0 {
-            quinn::ReadError::ConnectionLost(quinn::ConnectionError::TimedOut) => true,
-            _ => false,
-        }
+        matches!(
+            self.0,
+            quinn::ReadError::ConnectionLost(quinn::ConnectionError::TimedOut)
+        )
     }
 
     fn err_code(&self) -> Option<u64> {
@@ -477,8 +473,8 @@ impl Error for SendStreamError {
     }
 }
 
-impl Into<Arc<dyn Error>> for SendStreamError {
-    fn into(self) -> Arc<dyn Error> {
-        Arc::new(self)
+impl From<SendStreamError> for Arc<dyn Error> {
+    fn from(e: SendStreamError) -> Self {
+        Arc::new(e)
     }
 }

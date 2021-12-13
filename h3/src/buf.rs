@@ -23,7 +23,7 @@ impl<T: Buf> BufList<T> {
 
     pub fn cursor(&self) -> Cursor<T> {
         Cursor {
-            buf: &self,
+            buf: self,
             pos_total: 0,
             index: 0,
             pos_front: 0,
