@@ -164,14 +164,6 @@ pub struct FrameDecoder {
     expected: Option<usize>,
 }
 
-macro_rules! decode {
-    ($buf:ident, $dec:expr) => {{
-        let mut cur = $buf.cursor();
-        let decoded = $dec(&mut cur);
-        (cur.position() as usize, decoded)
-    }};
-}
-
 impl FrameDecoder {
     fn decode<B: Buf>(&mut self, src: &mut BufList<B>) -> Result<Option<Frame<PayloadLen>>, Error> {
         // Decode in a loop since we ignore unknown frames, and there may be
@@ -187,7 +179,11 @@ impl FrameDecoder {
                 }
             }
 
-            let (pos, decoded) = decode!(src, |cur| Frame::decode(cur));
+            let (pos, decoded) = {
+                let mut cur = src.cursor();
+                let decoded = Frame::decode(&mut cur);
+                (cur.position() as usize, decoded)
+            };
 
             match decoded {
                 Err(frame::Error::UnknownFrame(ty)) => {
