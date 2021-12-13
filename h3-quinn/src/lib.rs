@@ -15,7 +15,7 @@ pub use quinn::{
     VarInt, WriteError,
 };
 
-use h3::quic::{self, Error};
+use h3::quic::{self, Error, WriteBuf};
 
 pub struct Connection {
     conn: quinn::Connection,
@@ -276,7 +276,7 @@ where
         self.send.reset(reset_code)
     }
 
-    fn send_data(&mut self, data: B) -> Result<(), Self::Error> {
+    fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), Self::Error> {
         self.send.send_data(data)
     }
 
@@ -360,7 +360,7 @@ impl Error for ReadError {
 
 pub struct SendStream<B: Buf> {
     stream: quinn::SendStream,
-    writing: Option<B>,
+    writing: Option<WriteBuf<B>>,
 }
 
 impl<B> SendStream<B>
@@ -420,11 +420,11 @@ where
             .reset(VarInt::from_u64(reset_code).unwrap_or(VarInt::MAX));
     }
 
-    fn send_data(&mut self, data: B) -> Result<(), Self::Error> {
+    fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), Self::Error> {
         if self.writing.is_some() {
             return Err(Self::Error::NotReady);
         }
-        self.writing = Some(data);
+        self.writing = Some(data.into());
         Ok(())
     }
 

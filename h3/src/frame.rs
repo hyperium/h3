@@ -8,8 +8,9 @@ use tracing::trace;
 use crate::{
     buf::BufList,
     error::TransportError,
-    proto::frame::{self, Frame},
+    proto::frame::{self, Frame, PayloadLen},
     quic::{RecvStream, SendStream},
+    stream::WriteBuf,
 };
 
 pub struct FrameStream<S>
@@ -19,7 +20,7 @@ where
     stream: S,
     bufs: BufList<Bytes>,
     decoder: FrameDecoder,
-    remaining_data: u64,
+    remaining_data: usize,
     /// Set to true when `stream` reaches the end.
     is_eos: bool,
 }
@@ -42,7 +43,10 @@ where
         }
     }
 
-    pub fn poll_next(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<Frame>, Error>> {
+    pub fn poll_next(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<Frame<PayloadLen>>, Error>> {
         assert!(
             self.remaining_data == 0,
             "There is still data to read, please call poll_data() until it returns None."
@@ -52,9 +56,9 @@ where
             let end = self.try_recv(cx)?;
 
             return match self.decoder.decode(&mut self.bufs)? {
-                Some(Frame::Data { len }) => {
+                Some(Frame::Data(PayloadLen(len))) => {
                     self.remaining_data = len;
-                    Poll::Ready(Ok(Some(Frame::Data { len })))
+                    Poll::Ready(Ok(Some(Frame::Data(PayloadLen(len)))))
                 }
                 Some(frame) => Poll::Ready(Ok(Some(frame))),
                 None => match end {
@@ -86,11 +90,11 @@ where
         match (data, end) {
             (None, true) => Poll::Ready(Ok(None)),
             (None, false) => Poll::Pending,
-            (Some(d), true) if (d.remaining() as u64) < self.remaining_data => {
+            (Some(d), true) if d.remaining() < self.remaining_data => {
                 Poll::Ready(Err(Error::UnexpectedEnd))
             }
             (Some(d), _) => {
-                self.remaining_data -= d.remaining() as u64;
+                self.remaining_data -= d.remaining();
                 Poll::Ready(Ok(Some(d)))
             }
         }
@@ -138,7 +142,7 @@ where
         self.stream.poll_ready(cx)
     }
 
-    fn send_data(&mut self, data: B) -> Result<(), Self::Error> {
+    fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), Self::Error> {
         self.stream.send_data(data)
     }
 
@@ -169,7 +173,7 @@ macro_rules! decode {
 }
 
 impl FrameDecoder {
-    fn decode<B: Buf>(&mut self, src: &mut BufList<B>) -> Result<Option<Frame>, Error> {
+    fn decode<B: Buf>(&mut self, src: &mut BufList<B>) -> Result<Option<Frame<PayloadLen>>, Error> {
         // Decode in a loop since we ignore unknown frames, and there may be
         // other frames already in our BufList.
         loop {
@@ -230,16 +234,17 @@ mod tests {
     use std::{collections::VecDeque, fmt, sync::Arc};
     use tokio;
 
-    use crate::{proto::coding::Encode, quic};
+    use crate::{
+        proto::{coding::Encode, frame::FrameType, varint::VarInt},
+        quic,
+    };
 
     // Decoder
 
     #[test]
     fn one_frame() {
-        let frame = Frame::Headers(b"salut"[..].into());
-
         let mut buf = BytesMut::with_capacity(16);
-        frame.encode(&mut buf);
+        Frame::headers(&b"salut"[..]).encode_with_payload(&mut buf);
         let mut buf = BufList::from(buf);
 
         let mut decoder = FrameDecoder::default();
@@ -248,7 +253,7 @@ mod tests {
 
     #[test]
     fn incomplete_frame() {
-        let frame = Frame::Headers(b"salut"[..].into());
+        let frame = Frame::headers(&b"salut"[..]);
 
         let mut buf = BytesMut::with_capacity(16);
         frame.encode(&mut buf);
@@ -261,10 +266,8 @@ mod tests {
 
     #[test]
     fn header_spread_multiple_buf() {
-        let frame = Frame::Headers(b"salut"[..].into());
-
         let mut buf = BytesMut::with_capacity(16);
-        frame.encode(&mut buf);
+        Frame::headers(&b"salut"[..]).encode_with_payload(&mut buf);
         let mut buf_list = BufList::new();
         // Cut buffer between type and length
         buf_list.push(&buf[..1]);
@@ -276,11 +279,9 @@ mod tests {
 
     #[test]
     fn varint_spread_multiple_buf() {
-        let payload = "salut".repeat(1024);
-        let frame = Frame::Headers(payload.into());
-
         let mut buf = BytesMut::with_capacity(16);
-        frame.encode(&mut buf);
+        Frame::headers("salut".repeat(1024)).encode_with_payload(&mut buf);
+
         let mut buf_list = BufList::new();
         // Cut buffer in the middle of length's varint
         buf_list.push(&buf[..2]);
@@ -293,17 +294,19 @@ mod tests {
     #[test]
     fn two_frames_then_incomplete() {
         let mut buf = BytesMut::with_capacity(64);
-        Frame::Headers(b"header"[..].into()).encode(&mut buf);
-        Frame::Data { len: 4 }.encode(&mut buf);
-        buf.put_slice(&b"body"[..]);
-        Frame::Headers(b"trailer"[..].into()).encode(&mut buf);
+        Frame::headers(&b"header"[..]).encode_with_payload(&mut buf);
+        Frame::Data(&b"body"[..]).encode_with_payload(&mut buf);
+        Frame::headers(&b"trailer"[..]).encode_with_payload(&mut buf);
 
         buf.truncate(buf.len() - 1);
         let mut buf = BufList::from(buf);
 
         let mut decoder = FrameDecoder::default();
         assert_matches!(decoder.decode(&mut buf), Ok(Some(Frame::Headers(_))));
-        assert_matches!(decoder.decode(&mut buf), Ok(Some(Frame::Data { len: 4 })));
+        assert_matches!(
+            decoder.decode(&mut buf),
+            Ok(Some(Frame::Data(PayloadLen(4))))
+        );
         assert_matches!(decoder.decode(&mut buf), Ok(None));
     }
 
@@ -329,11 +332,11 @@ mod tests {
         let mut recv = FakeRecv::default();
         let mut buf = BytesMut::with_capacity(64);
 
-        Frame::Headers(b"header"[..].into()).encode(&mut buf);
-        Frame::Data { len: 4 }.encode(&mut buf);
-        buf.put_slice(&b"body"[..]);
-        Frame::Headers(b"trailer"[..].into()).encode(&mut buf);
+        Frame::headers(&b"header"[..]).encode_with_payload(&mut buf);
+        Frame::Data(&b"body"[..]).encode_with_payload(&mut buf);
+        Frame::headers(&b"trailer"[..]).encode_with_payload(&mut buf);
         recv.chunk(buf.freeze());
+
         let mut stream = FrameStream::new(recv);
 
         assert_poll_matches!(
@@ -342,7 +345,7 @@ mod tests {
         );
         assert_poll_matches!(
             |mut cx| stream.poll_next(&mut cx),
-            Ok(Some(Frame::Data { len: 4 }))
+            Ok(Some(Frame::Data(PayloadLen(4))))
         );
         assert_poll_matches!(
             |mut cx| to_bytes(stream.poll_data(&mut cx)),
@@ -359,7 +362,7 @@ mod tests {
         let mut recv = FakeRecv::default();
         let mut buf = BytesMut::with_capacity(64);
 
-        Frame::Headers(b"header"[..].into()).encode(&mut buf);
+        Frame::headers(&b"header"[..]).encode_with_payload(&mut buf);
         let mut buf = buf.freeze();
         recv.chunk(buf.split_to(buf.len() - 1));
         let mut stream = FrameStream::new(recv);
@@ -378,13 +381,14 @@ mod tests {
         let mut recv = FakeRecv::default();
         let mut buf = BytesMut::with_capacity(64);
 
-        Frame::Data { len: 4 }.encode(&mut buf);
+        FrameType::DATA.encode(&mut buf);
+        VarInt::from(4u32).encode(&mut buf);
         recv.chunk(buf.freeze());
         let mut stream = FrameStream::new(recv);
 
         assert_poll_matches!(
             |mut cx| stream.poll_next(&mut cx),
-            Ok(Some(Frame::Data { len: 4 }))
+            Ok(Some(Frame::Data(PayloadLen(4))))
         );
 
         // There is still data to consume, poll_next should panic
@@ -397,8 +401,8 @@ mod tests {
         let mut buf = BytesMut::with_capacity(64);
 
         // Body is split into two bufs
-        Frame::Data { len: 4 }.encode(&mut buf);
-        buf.put_slice(&b"body"[..]);
+        Frame::Data(Bytes::from("body")).encode_with_payload(&mut buf);
+
         let mut buf = buf.freeze();
         recv.chunk(buf.split_to(buf.len() - 2));
         recv.chunk(buf);
@@ -407,7 +411,7 @@ mod tests {
         // We get the total size of data about to be received
         assert_poll_matches!(
             |mut cx| stream.poll_next(&mut cx),
-            Ok(Some(Frame::Data { len: 4 }))
+            Ok(Some(Frame::Data(PayloadLen(4))))
         );
 
         // Then we get parts of body, chunked as they arrived
@@ -427,14 +431,15 @@ mod tests {
         let mut buf = BytesMut::with_capacity(64);
 
         // Truncated body
-        Frame::Data { len: 4 }.encode(&mut buf);
+        FrameType::DATA.encode(&mut buf);
+        VarInt::from(4u32).encode(&mut buf);
         buf.put_slice(&b"b"[..]);
         recv.chunk(buf.freeze());
         let mut stream = FrameStream::new(recv);
 
         assert_poll_matches!(
             |mut cx| stream.poll_next(&mut cx),
-            Ok(Some(Frame::Data { len: 4 }))
+            Ok(Some(Frame::Data(PayloadLen(4))))
         );
         assert_poll_matches!(
             |mut cx| to_bytes(stream.poll_data(&mut cx)),
@@ -459,14 +464,14 @@ mod tests {
         buf.put_slice(b"grease");
 
         // Body
-        Frame::Data { len: 4 }.encode(&mut buf);
-        buf.put_slice(b"body");
+        Frame::Data(Bytes::from("body")).encode_with_payload(&mut buf);
+
         recv.chunk(buf.freeze());
         let mut stream = FrameStream::new(recv);
 
         assert_poll_matches!(
             |mut cx| stream.poll_next(&mut cx),
-            Ok(Some(Frame::Data { len: 4 }))
+            Ok(Some(Frame::Data(PayloadLen(4))))
         );
         assert_poll_matches!(
             |mut cx| to_bytes(stream.poll_data(&mut cx)),
@@ -530,9 +535,7 @@ mod tests {
         }
     }
 
-    fn to_bytes(
-        x: Poll<Result<Option<impl Buf>, Error>>,
-    ) -> Poll<Result<Option<Bytes>, Error>> {
+    fn to_bytes(x: Poll<Result<Option<impl Buf>, Error>>) -> Poll<Result<Option<Bytes>, Error>> {
         x.map(|b| b.map(|b| b.map(|mut b| b.copy_to_bytes(b.remaining()))))
     }
 }

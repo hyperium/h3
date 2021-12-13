@@ -7,6 +7,8 @@ use std::task::{self, Poll};
 
 use bytes::Buf;
 
+pub use crate::stream::WriteBuf;
+
 // Unresolved questions:
 //
 // - Should the `poll_` methods be `Pin<&mut Self>`?
@@ -110,7 +112,7 @@ pub trait SendStream<B: Buf> {
     fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>>;
 
     /// Send more data on the stream.
-    fn send_data(&mut self, data: B) -> Result<(), Self::Error>;
+    fn send_data<T: Into<WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error>;
 
     /// Poll to finish the sending side of the stream.
     fn poll_finish(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>>;

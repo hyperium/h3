@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use assert_matches::assert_matches;
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use futures::future;
 use h3_quinn::ReadError;
 use http::{request, HeaderMap, Request, Response, StatusCode};
@@ -13,8 +13,9 @@ use h3::{
     test_helpers::{
         proto::{
             coding::Encode,
-            frame::{self, Frame},
+            frame::{self, Frame, FrameType},
             headers::Header,
+            varint::VarInt,
         },
         qpack, ConnectionState,
     },
@@ -278,7 +279,7 @@ async fn header_too_big_response_from_server() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::Connection::builder()
+        let mut incoming_req = server::builder()
             .max_field_section_size(12)
             .build(conn)
             .await
@@ -338,7 +339,7 @@ async fn header_too_big_response_from_server_trailers() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::Connection::builder()
+        let mut incoming_req = server::builder()
             .max_field_section_size(207)
             .build(conn)
             .await
@@ -456,7 +457,7 @@ async fn header_too_big_client_error_trailer() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::Connection::builder()
+        let mut incoming_req = server::builder()
             .max_field_section_size(207)
             .build(conn)
             .await
@@ -484,7 +485,7 @@ async fn header_too_big_discard_from_client() {
         // Do not poll driver so client doesn't know about server's max_field section size setting
         let (_conn, mut client) = client::builder()
             .max_field_section_size(12)
-            .build(pair.client().await)
+            .build::<_, _, Bytes>(pair.client().await)
             .await
             .expect("client init");
         let mut request_stream = client
@@ -562,7 +563,7 @@ async fn header_too_big_discard_from_client_trailers() {
         // Do not poll driver so client doesn't know about server's max_field section size setting
         let (mut driver, mut client) = client::builder()
             .max_field_section_size(200)
-            .build(pair.client().await)
+            .build::<_, _, Bytes>(pair.client().await)
             .await
             .expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
@@ -814,7 +815,10 @@ async fn get_timeout_client_recv_data() {
 
             let _ = request_stream.recv_response().await.unwrap();
             let data = request_stream.recv_data().await;
-            assert_matches!(data.map(|_| ()).unwrap_err().kind(), h3::error::Kind::Timeout);
+            assert_matches!(
+                data.map(|_| ()).unwrap_err().kind(),
+                h3::error::Kind::Timeout
+            );
         };
 
         let drive_fut = async move {
@@ -901,7 +905,7 @@ async fn post_timeout_server_recv_data() {
 
         let (_, mut req_stream) = incoming_req.accept().await.expect("accept").unwrap();
         assert_matches!(
-            req_stream.recv_data().await.map(|_|()).unwrap_err().kind(),
+            req_stream.recv_data().await.map(|_| ()).unwrap_err().kind(),
             h3::error::Kind::Timeout
         );
     };
@@ -934,8 +938,7 @@ async fn request_valid_header_data() {
             &mut buf,
             Request::post("http://localhost/salut").body(()).unwrap(),
         );
-        Frame::Data { len: 4 }.encode(&mut buf);
-        buf.put_slice(b"fada");
+        Frame::Data(Bytes::from("fada")).encode_with_payload(&mut buf);
     })
     .await;
 }
@@ -947,8 +950,7 @@ async fn request_valid_header_data_trailer() {
             &mut buf,
             Request::post("http://localhost/salut").body(()).unwrap(),
         );
-        Frame::Data { len: 4 }.encode(&mut buf);
-        buf.put_slice(b"fada");
+        Frame::Data(Bytes::from("fada")).encode_with_payload(&mut buf);
         let mut trailers = HeaderMap::new();
         trailers.insert("trailer", "value".parse().unwrap());
         trailers_encode(buf, trailers);
@@ -963,12 +965,9 @@ async fn request_valid_header_multiple_data_trailer() {
             &mut buf,
             Request::post("http://localhost/salut").body(()).unwrap(),
         );
-        Frame::Data { len: 4 }.encode(&mut buf);
-        buf.put_slice(b"fada");
-        Frame::Data { len: 4 }.encode(&mut buf);
-        buf.put_slice(b"fada");
-        Frame::Data { len: 4 }.encode(&mut buf);
-        buf.put_slice(b"fada");
+        Frame::Data(Bytes::from("fada")).encode_with_payload(&mut buf);
+        Frame::Data(Bytes::from("fada")).encode_with_payload(&mut buf);
+        Frame::Data(Bytes::from("fada")).encode_with_payload(&mut buf);
         let mut trailers = HeaderMap::new();
         trailers.insert("trailer", "value".parse().unwrap());
         trailers_encode(buf, trailers);
@@ -1026,8 +1025,7 @@ async fn request_valid_unkown_frame_interleaved_after_header() {
             Request::post("http://localhost/salut").body(()).unwrap(),
         );
         unknown_frame_encode(buf);
-        Frame::Data { len: 4 }.encode(&mut buf);
-        buf.put_slice(b"fada");
+        Frame::Data(Bytes::from("fada")).encode_with_payload(&mut buf);
     })
     .await;
 }
@@ -1039,11 +1037,9 @@ async fn request_valid_unkown_frame_interleaved_between_data() {
             &mut buf,
             Request::post("http://localhost/salut").body(()).unwrap(),
         );
-        Frame::Data { len: 4 }.encode(&mut buf);
-        buf.put_slice(b"fada");
+        Frame::Data(Bytes::from("fada")).encode_with_payload(&mut buf);
         unknown_frame_encode(buf);
-        Frame::Data { len: 4 }.encode(&mut buf);
-        buf.put_slice(b"fada");
+        Frame::Data(Bytes::from("fada")).encode_with_payload(&mut buf);
     })
     .await;
 }
@@ -1055,11 +1051,9 @@ async fn request_valid_unkown_frame_interleaved_after_data() {
             &mut buf,
             Request::post("http://localhost/salut").body(()).unwrap(),
         );
-        Frame::Data { len: 4 }.encode(&mut buf);
-        buf.put_slice(b"fada");
+        Frame::Data(Bytes::from("fada")).encode_with_payload(&mut buf);
         unknown_frame_encode(buf);
-        Frame::Data { len: 4 }.encode(&mut buf);
-        buf.put_slice(b"fada");
+        Frame::Data(Bytes::from("fada")).encode_with_payload(&mut buf);
     })
     .await;
 }
@@ -1071,8 +1065,7 @@ async fn request_valid_unkown_frame_interleaved_before_trailers() {
             &mut buf,
             Request::post("http://localhost/salut").body(()).unwrap(),
         );
-        Frame::Data { len: 4 }.encode(&mut buf);
-        buf.put_slice(b"fada");
+        Frame::Data(Bytes::from("fada")).encode_with_payload(&mut buf);
         unknown_frame_encode(buf);
         let mut trailers = HeaderMap::new();
         trailers.insert("trailer", "value".parse().unwrap());
@@ -1088,8 +1081,7 @@ async fn request_valid_unkown_frame_after_trailers() {
             &mut buf,
             Request::post("http://localhost/salut").body(()).unwrap(),
         );
-        Frame::Data { len: 4 }.encode(&mut buf);
-        buf.put_slice(b"fada");
+        Frame::Data(Bytes::from("fada")).encode_with_payload(&mut buf);
         let mut trailers = HeaderMap::new();
         trailers.insert("trailer", "value".parse().unwrap());
         trailers_encode(buf, trailers);
@@ -1100,7 +1092,7 @@ async fn request_valid_unkown_frame_after_trailers() {
 
 // [...]
 // Receipt of an invalid sequence of frames MUST be treated as a connection error of type H3_FRAME_UNEXPECTED
-fn invalid_request_frames() -> Vec<Frame> {
+fn invalid_request_frames() -> Vec<Frame<Bytes>> {
     vec![
         Frame::CancelPush(0),
         Frame::Settings(frame::Settings::default()),
@@ -1139,8 +1131,7 @@ async fn request_invalid_frame_after_data() {
                 &mut buf,
                 Request::post("http://localhost/salut").body(()).unwrap(),
             );
-            Frame::Data { len: 4 }.encode(&mut buf);
-            buf.put_slice(b"fada");
+            Frame::Data(Bytes::from("fada")).encode_with_payload(&mut buf);
             frame.encode(&mut buf);
         })
         .await;
@@ -1155,8 +1146,7 @@ async fn request_invalid_frame_after_trailers() {
                 &mut buf,
                 Request::post("http://localhost/salut").body(()).unwrap(),
             );
-            Frame::Data { len: 4 }.encode(&mut buf);
-            buf.put_slice(b"fada");
+            Frame::Data(Bytes::from("fada")).encode_with_payload(&mut buf);
             let mut trailers = HeaderMap::new();
             trailers.insert("trailer", "value".parse().unwrap());
             trailers_encode(buf, trailers);
@@ -1176,8 +1166,7 @@ async fn request_invalid_data_after_trailers() {
         let mut trailers = HeaderMap::new();
         trailers.insert("trailer", "value".parse().unwrap());
         trailers_encode(buf, trailers);
-        Frame::Data { len: 4 }.encode(&mut buf);
-        buf.put_slice(b"fada");
+        Frame::Data(Bytes::from("fada")).encode_with_payload(&mut buf);
     })
     .await;
 }
@@ -1185,8 +1174,7 @@ async fn request_invalid_data_after_trailers() {
 #[tokio::test]
 async fn request_invalid_data_first() {
     request_sequence_unexpected(|mut buf| {
-        Frame::Data { len: 4 }.encode(&mut buf);
-        buf.put_slice(b"fada");
+        Frame::Data(Bytes::from("fada")).encode_with_payload(&mut buf);
     })
     .await;
 }
@@ -1198,8 +1186,7 @@ async fn request_invalid_two_trailers() {
             &mut buf,
             Request::post("http://localhost/salut").body(()).unwrap(),
         );
-        Frame::Data { len: 4 }.encode(&mut buf);
-        buf.put_slice(b"fada");
+        Frame::Data(Bytes::from("fada")).encode_with_payload(&mut buf);
         let mut trailers = HeaderMap::new();
         trailers.insert("trailer", "value".parse().unwrap());
         trailers_encode(buf, trailers.clone());
@@ -1223,8 +1210,7 @@ async fn request_invalid_trailing_byte() {
             &mut buf,
             Request::post("http://localhost/salut").body(()).unwrap(),
         );
-        Frame::Data { len: 4 }.encode(&mut buf);
-        buf.put_slice(b"fada");
+        Frame::Data(Bytes::from("fada")).encode_with_payload(&mut buf);
         let mut trailers = HeaderMap::new();
         trailers.insert("trailer", "value".parse().unwrap());
         trailers_encode(buf, trailers);
@@ -1240,7 +1226,8 @@ async fn request_invalid_data_frame_length_too_large() {
             &mut buf,
             Request::post("http://localhost/salut").body(()).unwrap(),
         );
-        Frame::Data { len: 5 }.encode(&mut buf);
+        FrameType::DATA.encode(&mut buf);
+        VarInt::from(5u32).encode(&mut buf);
         buf.put_slice(b"fada");
         let mut trailers = HeaderMap::new();
         trailers.insert("trailer", "value".parse().unwrap());
@@ -1256,7 +1243,8 @@ async fn request_invalid_data_frame_length_too_short() {
             &mut buf,
             Request::post("http://localhost/salut").body(()).unwrap(),
         );
-        Frame::Data { len: 3 }.encode(&mut buf);
+        FrameType::DATA.encode(&mut buf);
+        VarInt::from(3u32).encode(&mut buf);
         buf.put_slice(b"fada");
     })
     .await;
@@ -1274,14 +1262,14 @@ fn request_encode<B: BufMut>(buf: &mut B, req: http::Request<()>) {
     let headers = Header::request(method, uri, headers).unwrap();
     let mut block = BytesMut::new();
     qpack::encode_stateless(&mut block, headers).unwrap();
-    Frame::Headers(block.freeze()).encode(buf);
+    Frame::headers(block).encode_with_payload(buf);
 }
 
 fn trailers_encode<B: BufMut>(buf: &mut B, fields: HeaderMap) {
     let headers = Header::trailer(fields);
     let mut block = BytesMut::new();
     qpack::encode_stateless(&mut block, headers).unwrap();
-    Frame::Headers(block.freeze()).encode(buf);
+    Frame::headers(block).encode_with_payload(buf);
 }
 
 fn unknown_frame_encode<B: BufMut>(buf: &mut B) {
@@ -1292,7 +1280,7 @@ async fn request_sequence_ok<F>(request: F)
 where
     F: Fn(&mut BytesMut),
 {
-    request_sequence_check(request, |res| assert!(res.is_ok())).await;
+    request_sequence_check(request, |res| assert_matches!(res, Ok(_))).await;
 }
 
 async fn request_sequence_unexpected<F>(request: F)

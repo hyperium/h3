@@ -17,8 +17,9 @@ use crate::{
         stream::StreamType,
     },
     proto::{headers::Header, varint::VarInt},
-    qpack, quic, stream,
-    stream::{AcceptRecvStream, AcceptedRecvStream},
+    qpack,
+    quic::{self, SendStream as _},
+    stream::{self, AcceptRecvStream, AcceptedRecvStream},
 };
 
 #[doc(hidden)]
@@ -64,9 +65,10 @@ pub trait ConnectionState {
     }
 }
 
-pub struct ConnectionInner<C>
+pub struct ConnectionInner<C, B>
 where
-    C: quic::Connection<Bytes>,
+    C: quic::Connection<B>,
+    B: Buf,
 {
     pub(super) shared: SharedStateRef,
     conn: C,
@@ -77,9 +79,10 @@ where
     got_peer_settings: bool,
 }
 
-impl<C> ConnectionInner<C>
+impl<C, B> ConnectionInner<C, B>
 where
-    C: quic::Connection<Bytes>,
+    C: quic::Connection<B>,
+    B: Buf,
 {
     pub async fn new(
         mut conn: C,
@@ -95,8 +98,11 @@ where
             .insert(SettingId::MAX_HEADER_LIST_SIZE, max_field_section_size)
             .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
 
-        stream::write(&mut control_send, StreamType::CONTROL).await?;
-        stream::write(&mut control_send, Frame::Settings(settings)).await?;
+        stream::write(
+            &mut control_send,
+            (StreamType::CONTROL, Frame::Settings(settings)),
+        )
+        .await?;
 
         Ok(Self {
             shared,
@@ -170,7 +176,7 @@ where
         Poll::Pending
     }
 
-    pub fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<Frame, Error>> {
+    pub fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<Frame<B>, Error>> {
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
             return Poll::Ready(Err(e.clone()));
         }
@@ -252,7 +258,7 @@ impl<S, B> ConnectionState for RequestStream<S, B> {
     }
 }
 
-impl<S> RequestStream<FrameStream<S>, Bytes>
+impl<S, B> RequestStream<FrameStream<S>, B>
 where
     S: quic::RecvStream,
 {
@@ -321,23 +327,15 @@ where
     }
 }
 
-impl<S> RequestStream<S, Bytes>
+impl<S, B> RequestStream<FrameStream<S>, B>
 where
-    S: quic::SendStream<Bytes>,
+    S: quic::SendStream<B> + quic::RecvStream,
+    B: Buf,
 {
     /// Send some data on the response body.
-    pub async fn send_data(&mut self, buf: Bytes) -> Result<(), Error> {
-        let frame = Frame::Data {
-            len: buf.len() as u64,
-        };
+    pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
+        let frame = Frame::Data(buf);
         stream::write(&mut self.stream, frame)
-            .await
-            .map_err(|e| self.maybe_conn_err(e))?;
-
-        self.stream
-            .send_data(buf)
-            .map_err(|e| self.maybe_conn_err(e))?;
-        future::poll_fn(|cx| self.stream.poll_ready(cx))
             .await
             .map_err(|e| self.maybe_conn_err(e))?;
 
