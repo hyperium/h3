@@ -107,6 +107,26 @@ jobs:
           command: rustdoc
           args: -p h3 -- -D intra-doc-link-resolution-failure
 
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v1
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: clippy
+
+      - name: cargo clippy
+        uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+
   fuzz:
     name: Fuzz test
     needs: [style, test]
