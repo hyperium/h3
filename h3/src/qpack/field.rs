@@ -48,7 +48,7 @@ impl HeaderField {
 
 impl AsRef<HeaderField> for HeaderField {
     fn as_ref(&self) -> &Self {
-        &self
+        self
     }
 }
 

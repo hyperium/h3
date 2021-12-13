@@ -61,10 +61,10 @@ impl Frame<PayloadLen> {
 
     pub fn decode<T: Buf>(buf: &mut T) -> Result<Self, Error> {
         let remaining = buf.remaining();
-        let ty = FrameType::decode(buf).map_err(|_| Error::Incomplete(remaining + 1 as usize))?;
+        let ty = FrameType::decode(buf).map_err(|_| Error::Incomplete(remaining + 1))?;
         let len = buf
             .get_var()
-            .map_err(|_| Error::Incomplete(remaining + 1 as usize))?;
+            .map_err(|_| Error::Incomplete(remaining + 1))?;
 
         if ty == FrameType::DATA {
             return Ok(Frame::Data((len as usize).into()));
@@ -325,12 +325,12 @@ impl SettingId {
     const NONE: SettingId = SettingId(0);
 
     fn is_supported(self) -> bool {
-        match self {
+        matches!(
+            self,
             SettingId::MAX_HEADER_LIST_SIZE
-            | SettingId::QPACK_MAX_TABLE_CAPACITY
-            | SettingId::QPACK_MAX_BLOCKED_STREAMS => true,
-            _ => false,
-        }
+                | SettingId::QPACK_MAX_TABLE_CAPACITY
+                | SettingId::QPACK_MAX_BLOCKED_STREAMS,
+        )
     }
 
     fn decode<B: Buf>(buf: &mut B) -> Result<Self, UnexpectedEnd> {

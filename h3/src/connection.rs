@@ -89,7 +89,7 @@ where
         max_field_section_size: u64,
         shared: SharedStateRef,
     ) -> Result<Self, Error> {
-        let mut control_send = future::poll_fn(|mut cx| conn.poll_open_send(&mut cx))
+        let mut control_send = future::poll_fn(|cx| conn.poll_open_send(cx))
             .await
             .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))?;
 
@@ -160,17 +160,14 @@ where
                 .pending_recv_streams
                 .remove(index - removed)
                 .into_stream()?;
-            match stream {
-                AcceptedRecvStream::Control(s) => {
-                    if self.control_recv.is_some() {
-                        return Poll::Ready(Err(
-                            self.close(Code::H3_STREAM_CREATION_ERROR, "got two control streams")
-                        ));
-                    }
-                    self.control_recv = Some(s);
+            if let AcceptedRecvStream::Control(s) = stream {
+                if self.control_recv.is_some() {
+                    return Poll::Ready(Err(
+                        self.close(Code::H3_STREAM_CREATION_ERROR, "got two control streams")
+                    ));
                 }
-                _ => (),
-            }
+                self.control_recv = Some(s);
+            };
         }
 
         Poll::Pending
@@ -184,7 +181,7 @@ where
         loop {
             match self.poll_accept_recv(cx) {
                 Poll::Ready(Ok(_)) => continue,
-                Poll::Ready(Err(e)) => return Poll::Ready(Err(e.into())),
+                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
                 Poll::Pending if self.control_recv.is_none() => return Poll::Pending,
                 _ => break,
             }
@@ -306,7 +303,7 @@ where
                 .await
                 .map_err(|e| self.maybe_conn_err(e))?;
 
-            if let Some(_) = trailing_frame {
+            if trailing_frame.is_some() {
                 // if it's not unknown or reserved, fail.
                 return Err(Code::H3_FRAME_UNEXPECTED.into());
             }

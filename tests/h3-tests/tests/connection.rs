@@ -19,7 +19,7 @@ use h3_tests::Pair;
 
 #[tokio::test]
 async fn connect() {
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     let mut server = pair.server();
 
     let client_fut = async {
@@ -36,7 +36,7 @@ async fn connect() {
 
 #[tokio::test]
 async fn accept_request_end_on_client_close() {
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     let mut server = pair.server();
 
     let client_fut = async {
@@ -56,7 +56,7 @@ async fn accept_request_end_on_client_close() {
 
 #[tokio::test]
 async fn server_drop_close() {
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     let mut server = pair.server();
 
     let server_fut = async {
@@ -86,7 +86,7 @@ async fn server_drop_close() {
 
 #[tokio::test]
 async fn client_close_only_on_last_sender_drop() {
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     let mut server = pair.server();
 
     let server_fut = async {
@@ -125,7 +125,7 @@ async fn client_close_only_on_last_sender_drop() {
 #[tokio::test]
 async fn settings_exchange_client() {
     h3_tests::init_tracing();
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     let mut server = pair.server();
 
     let client_fut = async {
@@ -168,7 +168,7 @@ async fn settings_exchange_client() {
 #[tokio::test]
 async fn settings_exchange_server() {
     h3_tests::init_tracing();
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     let mut server = pair.server();
 
     let client_fut = async {
@@ -208,7 +208,7 @@ async fn settings_exchange_server() {
 
 #[tokio::test]
 async fn client_error_on_bidi_recv() {
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     let mut server = pair.server();
 
     macro_rules! check_err {
@@ -254,7 +254,7 @@ async fn client_error_on_bidi_recv() {
 #[tokio::test]
 async fn two_control_streams() {
     h3_tests::init_tracing();
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     let mut server = pair.server();
 
     let client_fut = async {
@@ -288,7 +288,7 @@ async fn two_control_streams() {
 #[tokio::test]
 async fn control_close_send_error() {
     h3_tests::init_tracing();
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     let mut server = pair.server();
 
     let client_fut = async {
@@ -328,7 +328,7 @@ async fn control_close_send_error() {
 #[tokio::test]
 async fn missing_settings() {
     h3_tests::init_tracing();
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     let mut server = pair.server();
 
     let client_fut = async {
@@ -362,7 +362,7 @@ async fn missing_settings() {
 #[tokio::test]
 async fn control_stream_frame_unexpected() {
     h3_tests::init_tracing();
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     let mut server = pair.server();
 
     let client_fut = async {
@@ -395,7 +395,7 @@ async fn control_stream_frame_unexpected() {
 #[tokio::test]
 async fn timeout_on_control_frame_read() {
     h3_tests::init_tracing();
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     pair.with_timeout(Duration::from_millis(10));
 
     let mut server = pair.server();

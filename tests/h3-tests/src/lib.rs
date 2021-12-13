@@ -32,8 +32,8 @@ pub struct Pair {
     config: Arc<TransportConfig>,
 }
 
-impl Pair {
-    pub fn new() -> Self {
+impl Default for Pair {
+    fn default() -> Self {
         let (cert, key) = build_certs();
         Self {
             cert,
@@ -42,7 +42,9 @@ impl Pair {
             config: Arc::new(TransportConfig::default()),
         }
     }
+}
 
+impl Pair {
     pub fn with_timeout(&mut self, duration: Duration) {
         Arc::get_mut(&mut self.config)
             .unwrap()

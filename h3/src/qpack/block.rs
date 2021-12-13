@@ -327,7 +327,7 @@ impl Literal {
 
     pub fn decode<R: Buf>(buf: &mut R) -> Result<Self, ParseError> {
         if buf.remaining() < 1 {
-            return Err(ParseError::InvalidInteger(prefix_int::Error::UnexpectedEnd));
+            return Err(ParseError::Integer(prefix_int::Error::UnexpectedEnd));
         } else if buf.chunk()[0] & 0b1110_0000 != 0b0010_0000 {
             return Err(ParseError::InvalidPrefix(buf.chunk()[0]));
         }

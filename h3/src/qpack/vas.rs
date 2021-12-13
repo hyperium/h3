@@ -72,9 +72,9 @@ pub type AbsoluteIndex = usize;
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
-    BadRelativeIndex(usize),
-    BadPostbaseIndex(usize),
-    BadIndex(usize),
+    RelativeIndex(usize),
+    PostbaseIndex(usize),
+    Index(usize),
 }
 
 #[derive(Debug, Default)]
@@ -98,7 +98,7 @@ impl VirtualAddressSpace {
 
     pub fn relative(&self, index: RelativeIndex) -> Result<usize, Error> {
         if self.inserted < index || self.delta == 0 || self.inserted - index <= self.dropped {
-            Err(Error::BadRelativeIndex(index))
+            Err(Error::RelativeIndex(index))
         } else {
             Ok(self.inserted - self.dropped - index - 1)
         }
@@ -110,7 +110,7 @@ impl VirtualAddressSpace {
 
     pub fn relative_base(&self, base: usize, index: RelativeIndex) -> Result<usize, Error> {
         if self.delta == 0 || index > base || base - index <= self.dropped {
-            Err(Error::BadRelativeIndex(index))
+            Err(Error::RelativeIndex(index))
         } else {
             Ok(base - self.dropped - index - 1)
         }
@@ -118,7 +118,7 @@ impl VirtualAddressSpace {
 
     pub fn post_base(&self, base: usize, index: RelativeIndex) -> Result<usize, Error> {
         if self.delta == 0 || base + index >= self.inserted || base + index < self.dropped {
-            Err(Error::BadPostbaseIndex(index))
+            Err(Error::PostbaseIndex(index))
         } else {
             Ok(base + index - self.dropped)
         }
@@ -126,7 +126,7 @@ impl VirtualAddressSpace {
 
     pub fn index(&self, index: usize) -> Result<usize, Error> {
         if index >= self.delta {
-            Err(Error::BadIndex(index))
+            Err(Error::Index(index))
         } else {
             Ok(index + self.dropped + 1)
         }
@@ -150,14 +150,14 @@ mod tests {
     fn test_no_relative_index_when_empty() {
         let vas = VirtualAddressSpace::default();
         let res = vas.relative_base(0, 0);
-        assert_eq!(res, Err(Error::BadRelativeIndex(0)));
+        assert_eq!(res, Err(Error::RelativeIndex(0)));
     }
 
     #[test]
     fn test_relative_underflow_protected() {
         let mut vas = VirtualAddressSpace::default();
         vas.add();
-        assert_eq!(vas.relative(2), Err(Error::BadRelativeIndex(2)));
+        assert_eq!(vas.relative(2), Err(Error::RelativeIndex(2)));
     }
 
     proptest! {
@@ -181,7 +181,7 @@ mod tests {
             (1..*count).for_each(|_| { vas.add(); });
             (0..*count - 1).for_each(|_| vas.drop());
 
-            assert_eq!(vas.relative_base(*count, count - 1), Err(Error::BadRelativeIndex(count - 1)), "{:?}", vas);
+            assert_eq!(vas.relative_base(*count, count - 1), Err(Error::RelativeIndex(count - 1)), "{:?}", vas);
         }
 
         #[test]
@@ -250,25 +250,25 @@ mod tests {
         assert_eq!(vas.relative(0), Ok(6));
         assert_eq!(vas.relative(1), Ok(5));
         assert_eq!(vas.relative(6), Ok(0));
-        assert_eq!(vas.relative(7), Err(Error::BadRelativeIndex(7)));
+        assert_eq!(vas.relative(7), Err(Error::RelativeIndex(7)));
     }
 
     #[test]
     fn absolute_from_real_index() {
         let mut vas = VirtualAddressSpace::default();
-        assert_eq!(vas.index(0), Err(Error::BadIndex(0)));
+        assert_eq!(vas.index(0), Err(Error::Index(0)));
         vas.add();
         assert_eq!(vas.index(0), Ok(1));
         vas.add();
         vas.drop();
         assert_eq!(vas.index(0), Ok(2));
         vas.drop();
-        assert_eq!(vas.index(0), Err(Error::BadIndex(0)));
+        assert_eq!(vas.index(0), Err(Error::Index(0)));
         vas.add();
         vas.add();
         assert_eq!(vas.index(0), Ok(3));
         assert_eq!(vas.index(1), Ok(4));
-        assert_eq!(vas.index(2), Err(Error::BadIndex(2)));
+        assert_eq!(vas.index(2), Err(Error::Index(2)));
     }
 
     #[test]

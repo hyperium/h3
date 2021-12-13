@@ -26,7 +26,7 @@ use h3_tests::Pair;
 #[tokio::test]
 async fn get() {
     h3_tests::init_tracing();
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     let mut server = pair.server();
 
     let client_fut = async {
@@ -78,7 +78,7 @@ async fn get() {
 #[tokio::test]
 async fn get_with_trailers_unknown_content_type() {
     h3_tests::init_tracing();
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     let mut server = pair.server();
 
     let client_fut = async {
@@ -140,7 +140,7 @@ async fn get_with_trailers_unknown_content_type() {
 #[tokio::test]
 async fn get_with_trailers_known_content_type() {
     h3_tests::init_tracing();
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     let mut server = pair.server();
 
     let client_fut = async {
@@ -202,7 +202,7 @@ async fn get_with_trailers_known_content_type() {
 #[tokio::test]
 async fn post() {
     h3_tests::init_tracing();
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     let mut server = pair.server();
 
     let client_fut = async {
@@ -255,7 +255,7 @@ async fn post() {
 #[tokio::test]
 async fn header_too_big_response_from_server() {
     h3_tests::init_tracing();
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     let mut server = pair.server();
 
     let client_fut = async {
@@ -303,7 +303,7 @@ async fn header_too_big_response_from_server() {
 #[tokio::test]
 async fn header_too_big_response_from_server_trailers() {
     h3_tests::init_tracing();
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     let mut server = pair.server();
 
     let client_fut = async {
@@ -369,7 +369,7 @@ async fn header_too_big_response_from_server_trailers() {
 #[tokio::test]
 async fn header_too_big_client_error() {
     h3_tests::init_tracing();
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     let mut server = pair.server();
 
     let client_fut = async {
@@ -411,7 +411,7 @@ async fn header_too_big_client_error() {
 #[tokio::test]
 async fn header_too_big_client_error_trailer() {
     h3_tests::init_tracing();
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     let mut server = pair.server();
 
     let client_fut = async {
@@ -478,7 +478,7 @@ async fn header_too_big_client_error_trailer() {
 #[tokio::test]
 async fn header_too_big_discard_from_client() {
     h3_tests::init_tracing();
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     let mut server = pair.server();
 
     let client_fut = async {
@@ -556,7 +556,7 @@ async fn header_too_big_discard_from_client() {
 #[tokio::test]
 async fn header_too_big_discard_from_client_trailers() {
     h3_tests::init_tracing();
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     let mut server = pair.server();
 
     let client_fut = async {
@@ -633,7 +633,7 @@ async fn header_too_big_discard_from_client_trailers() {
 #[tokio::test]
 async fn header_too_big_server_error() {
     h3_tests::init_tracing();
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     let mut server = pair.server();
 
     let client_fut = async {
@@ -693,7 +693,7 @@ async fn header_too_big_server_error() {
 #[tokio::test]
 async fn header_too_big_server_error_trailers() {
     h3_tests::init_tracing();
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     let mut server = pair.server();
 
     let client_fut = async {
@@ -761,7 +761,7 @@ async fn header_too_big_server_error_trailers() {
 #[tokio::test]
 async fn get_timeout_client_recv_response() {
     h3_tests::init_tracing();
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     pair.with_timeout(Duration::from_millis(100));
     let mut server = pair.server();
 
@@ -801,7 +801,7 @@ async fn get_timeout_client_recv_response() {
 #[tokio::test]
 async fn get_timeout_client_recv_data() {
     h3_tests::init_tracing();
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     pair.with_timeout(Duration::from_millis(200));
     let mut server = pair.server();
 
@@ -852,7 +852,7 @@ async fn get_timeout_client_recv_data() {
 #[tokio::test]
 async fn get_timeout_server_accept() {
     h3_tests::init_tracing();
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     pair.with_timeout(Duration::from_millis(200));
     let mut server = pair.server();
 
@@ -886,7 +886,7 @@ async fn get_timeout_server_accept() {
 #[tokio::test]
 async fn post_timeout_server_recv_data() {
     h3_tests::init_tracing();
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     pair.with_timeout(Duration::from_millis(100));
     let mut server = pair.server();
 
@@ -1321,7 +1321,7 @@ where
     FC: Fn(Result<(), h3::Error>),
 {
     h3_tests::init_tracing();
-    let mut pair = Pair::new();
+    let mut pair = Pair::default();
     let mut server = pair.server();
 
     let client_fut = async {

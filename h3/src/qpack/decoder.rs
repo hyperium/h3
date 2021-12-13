@@ -29,7 +29,7 @@ pub enum Error {
     InvalidInteger(prefix_int::Error),
     InvalidString(prefix_string::Error),
     InvalidIndex(vas::Error),
-    DynamicTableError(DynamicTableError),
+    DynamicTable(DynamicTableError),
     InvalidStaticIndex(usize),
     UnknownPrefix(u8),
     MissingRefs(usize),
@@ -45,7 +45,7 @@ impl std::fmt::Display for Error {
             Error::InvalidInteger(e) => write!(f, "invalid integer: {}", e),
             Error::InvalidString(e) => write!(f, "invalid string: {:?}", e),
             Error::InvalidIndex(e) => write!(f, "invalid dynamic index: {:?}", e),
-            Error::DynamicTableError(e) => write!(f, "dynamic table error: {:?}", e),
+            Error::DynamicTable(e) => write!(f, "dynamic table error: {:?}", e),
             Error::InvalidStaticIndex(i) => write!(f, "unknown static index: {}", i),
             Error::UnknownPrefix(p) => write!(f, "unknown instruction code: 0x{}", p),
             Error::MissingRefs(n) => write!(f, "missing {} refs to decode bloc", n),
@@ -303,15 +303,15 @@ impl From<StaticError> for Error {
 
 impl From<DynamicTableError> for Error {
     fn from(e: DynamicTableError) -> Self {
-        Error::DynamicTableError(e)
+        Error::DynamicTable(e)
     }
 }
 
 impl From<ParseError> for Error {
     fn from(e: ParseError) -> Self {
         match e {
-            ParseError::InvalidInteger(x) => Error::InvalidInteger(x),
-            ParseError::InvalidString(x) => Error::InvalidString(x),
+            ParseError::Integer(x) => Error::InvalidInteger(x),
+            ParseError::String(x) => Error::InvalidString(x),
             ParseError::InvalidPrefix(p) => Error::UnknownPrefix(p),
             ParseError::InvalidBase(b) => Error::BadBaseIndex(b),
         }
@@ -382,9 +382,9 @@ mod tests {
         let res = decoder.on_encoder_recv(&mut enc, &mut dec);
         assert_eq!(
             res,
-            Err(Error::DynamicTableError(
-                DynamicTableError::BadRelativeIndex(3000)
-            ))
+            Err(Error::DynamicTable(DynamicTableError::BadRelativeIndex(
+                3000
+            )))
         );
 
         assert!(dec.is_empty());
