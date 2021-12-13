@@ -33,9 +33,8 @@ impl fmt::Display for Error {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum Frame {
-    Data { len: u64 },
+pub enum Frame<B> {
+    Data(B),
     Headers(Bytes),
     CancelPush(u64),
     Settings(Settings),
@@ -45,7 +44,21 @@ pub enum Frame {
     DuplicatePush(u64),
 }
 
-impl Frame {
+/// Represents the available data len for a `Data` frame on a RecvStream
+///
+/// Decoding recieved frames does not handle `Data` frames payload. Instead, recieving it
+/// and passing it to the user is left under the responsability of `RequestStream`s.
+pub struct PayloadLen(pub usize);
+
+impl From<usize> for PayloadLen {
+    fn from(len: usize) -> Self {
+        PayloadLen(len)
+    }
+}
+
+impl Frame<PayloadLen> {
+    pub const MAX_ENCODED_SIZE: usize = VarInt::MAX_SIZE * 3;
+
     pub fn decode<T: Buf>(buf: &mut T) -> Result<Self, Error> {
         let remaining = buf.remaining();
         let ty = FrameType::decode(buf).map_err(|_| Error::Incomplete(remaining + 1 as usize))?;
@@ -54,7 +67,7 @@ impl Frame {
             .map_err(|_| Error::Incomplete(remaining + 1 as usize))?;
 
         if ty == FrameType::DATA {
-            return Ok(Frame::Data { len });
+            return Ok(Frame::Data((len as usize).into()));
         }
 
         if buf.remaining() < len as usize {
@@ -91,21 +104,23 @@ impl Frame {
     }
 }
 
-impl Encode for Frame {
+impl<B> Encode for Frame<B>
+where
+    B: Buf,
+{
     fn encode<T: BufMut>(&self, buf: &mut T) {
         match self {
-            Frame::Data { len } => {
+            Frame::Data(b) => {
                 FrameType::DATA.encode(buf);
-                buf.write_var(*len);
+                buf.write_var(b.remaining() as u64);
             }
             Frame::Headers(f) => {
                 FrameType::HEADERS.encode(buf);
                 buf.write_var(f.len() as u64);
-                buf.put_slice(f);
             }
             Frame::Settings(f) => f.encode(buf),
-            Frame::CancelPush(id) => simple_frame_encode(FrameType::CANCEL_PUSH, *id, buf),
             Frame::PushPromise(f) => f.encode(buf),
+            Frame::CancelPush(id) => simple_frame_encode(FrameType::CANCEL_PUSH, *id, buf),
             Frame::Goaway(id) => simple_frame_encode(FrameType::GOAWAY, *id, buf),
             Frame::MaxPushId(id) => simple_frame_encode(FrameType::MAX_PUSH_ID, *id, buf),
             Frame::DuplicatePush(id) => simple_frame_encode(FrameType::DUPLICATE_PUSH, *id, buf),
@@ -113,10 +128,52 @@ impl Encode for Frame {
     }
 }
 
-impl fmt::Display for Frame {
+impl<B> Frame<B>
+where
+    B: Buf,
+{
+    pub fn payload(&self) -> Option<&dyn Buf> {
+        match self {
+            Frame::Data(f) => Some(f),
+            Frame::Headers(f) => Some(f),
+            Frame::PushPromise(f) => Some(&f.encoded),
+            _ => None,
+        }
+    }
+
+    pub fn payload_mut(&mut self) -> Option<&mut dyn Buf> {
+        match self {
+            Frame::Data(f) => Some(f),
+            Frame::Headers(f) => Some(f),
+            Frame::PushPromise(f) => Some(&mut f.encoded),
+            _ => None,
+        }
+    }
+
+    #[cfg(any(test, feature = "test_helpers"))]
+    pub fn encode_with_payload<T: BufMut>(&mut self, buf: &mut T) {
+        self.encode(buf);
+        match self {
+            Frame::Data(b) => {
+                while b.has_remaining() {
+                    let pos = {
+                        let chunk = b.chunk();
+                        buf.put_slice(chunk);
+                        chunk.len()
+                    };
+                    b.advance(pos)
+                }
+            }
+            Frame::Headers(b) => buf.put_slice(b),
+            _ => (),
+        }
+    }
+}
+
+impl fmt::Display for Frame<PayloadLen> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Frame::Data { len } => write!(f, "Data({} bytes)", len),
+            Frame::Data(len) => write!(f, "Data: {} bytes", len.0),
             Frame::Headers(frame) => write!(f, "Headers({} entries)", frame.len()),
             Frame::Settings(_) => write!(f, "Settings"),
             Frame::CancelPush(id) => write!(f, "CancelPush({})", id),
@@ -127,6 +184,66 @@ impl fmt::Display for Frame {
         }
     }
 }
+
+impl fmt::Debug for Frame<PayloadLen> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        <Self as fmt::Display>::fmt(self, f)
+    }
+}
+
+impl<B> fmt::Display for Frame<B>
+where
+    B: Buf,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Frame::Data(data) => write!(f, "Data: {} bytes", data.remaining()),
+            Frame::Headers(frame) => write!(f, "Headers({} entries)", frame.len()),
+            Frame::Settings(_) => write!(f, "Settings"),
+            Frame::CancelPush(id) => write!(f, "CancelPush({})", id),
+            Frame::PushPromise(frame) => write!(f, "PushPromise({})", frame.id),
+            Frame::Goaway(id) => write!(f, "GoAway({})", id),
+            Frame::MaxPushId(id) => write!(f, "MaxPushId({})", id),
+            Frame::DuplicatePush(id) => write!(f, "DuplicatePush({})", id),
+        }
+    }
+}
+
+impl<B> fmt::Debug for Frame<B>
+where
+    B: Buf,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        <Self as fmt::Display>::fmt(self, f)
+    }
+}
+
+/// Compare two frames ignoring data
+///
+/// Only useful for `encode() -> Frame<Buf>` then `decode() -> Frame<PayloadLen>` unit tests.
+#[cfg(test)]
+impl<T, U> PartialEq<Frame<T>> for Frame<U> {
+    fn eq(&self, other: &Frame<T>) -> bool {
+        match self {
+            Frame::Data(_) => matches!(other, Frame::Data(_)),
+            Frame::Settings(x) => matches!(other, Frame::Settings(y) if x == y),
+            Frame::Headers(x) => matches!(other, Frame::Headers(y) if x == y),
+            Frame::CancelPush(x) => matches!(other, Frame::CancelPush(y) if x == y),
+            Frame::PushPromise(x) => matches!(other, Frame::PushPromise(y) if x == y),
+            Frame::Goaway(x) => matches!(other, Frame::Goaway(y) if x == y),
+            Frame::MaxPushId(x) => matches!(other, Frame::MaxPushId(y) if x == y),
+            Frame::DuplicatePush(x) => matches!(other, Frame::DuplicatePush(y) if x == y),
+        }
+    }
+}
+
+#[cfg(any(test, feature = "test_helpers"))]
+impl Frame<Bytes> {
+    pub fn headers<T: Into<Bytes>>(block: T) -> Self {
+        Frame::Headers(block.into())
+    }
+}
+
 macro_rules! frame_types {
     {$($name:ident = $val:expr,)*} => {
         impl FrameType {
@@ -151,20 +268,18 @@ frame_types! {
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub(crate) struct FrameType(u64);
-
-impl FrameType {
-    #[cfg(test)]
-    pub(crate) const RESERVED: FrameType = FrameType(0x1f * 1337 + 0x21);
-}
+pub struct FrameType(u64);
 
 impl FrameType {
     fn decode<B: Buf>(buf: &mut B) -> Result<Self, UnexpectedEnd> {
         Ok(FrameType(buf.get_var()?))
     }
-    pub(crate) fn encode<B: BufMut>(&self, buf: &mut B) {
+    pub fn encode<B: BufMut>(&self, buf: &mut B) {
         buf.write_var(self.0);
     }
+
+    #[cfg(test)]
+    pub(crate) const RESERVED: FrameType = FrameType(0x1f * 1337 + 0x21);
 }
 
 pub(crate) trait FrameHeader {
@@ -184,8 +299,18 @@ pub struct PushPromise {
 
 impl FrameHeader for PushPromise {
     const TYPE: FrameType = FrameType::PUSH_PROMISE;
+
+    fn encode_header<T: BufMut>(&self, buf: &mut T) {
+        Self::TYPE.encode(buf);
+        buf.write_var(self.len() as u64);
+        buf.write_var(self.id);
+    }
+
     fn len(&self) -> usize {
-        VarInt::from_u64(self.id).unwrap().size() + self.encoded.as_ref().len()
+        VarInt::from_u64(self.id)
+            .expect("PushPromise id varint overflow")
+            .size()
+            + self.encoded.as_ref().len()
     }
 }
 
@@ -198,7 +323,6 @@ impl PushPromise {
     }
     fn encode<B: BufMut>(&self, buf: &mut B) {
         self.encode_header(buf);
-        buf.write_var(self.id);
         buf.put(self.encoded.clone());
     }
 }
@@ -247,16 +371,18 @@ setting_identifiers! {
     MAX_HEADER_LIST_SIZE = 0x6,
 }
 
+const SETTINGS_LEN: usize = 3;
+
 #[derive(Debug, PartialEq)]
 pub struct Settings {
-    entries: [(SettingId, u64); 3],
+    entries: [(SettingId, u64); SETTINGS_LEN],
     len: usize,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            entries: [(SettingId::NONE, 0); 3],
+            entries: [(SettingId::NONE, 0); SETTINGS_LEN],
             len: 0,
         }
     }
@@ -272,6 +398,8 @@ impl FrameHeader for Settings {
 }
 
 impl Settings {
+    pub const MAX_ENCODED_SIZE: usize = SETTINGS_LEN * 2 * VarInt::MAX_SIZE;
+
     pub fn insert(&mut self, id: SettingId, value: u64) -> Result<(), SettingsError> {
         if self.len >= self.entries.len() {
             return Err(SettingsError::Exceeded);
@@ -369,45 +497,45 @@ impl From<UnexpectedEnd> for Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assert_matches::assert_matches;
     use std::io::Cursor;
 
     #[test]
     fn unknown_frame_type() {
         let mut buf = Cursor::new(&[22, 4, 0, 255, 128, 0, 3, 1, 2]);
-        assert_eq!(Frame::decode(&mut buf), Err(Error::UnknownFrame(22)));
-        assert_eq!(Frame::decode(&mut buf), Ok(Frame::CancelPush(2)));
+        assert_matches!(Frame::decode(&mut buf), Err(Error::UnknownFrame(22)));
+        assert_matches!(Frame::decode(&mut buf), Ok(Frame::CancelPush(2)));
     }
 
     #[test]
     fn len_unexpected_end() {
         let mut buf = Cursor::new(&[0, 255]);
         let decoded = Frame::decode(&mut buf);
-        assert_eq!(decoded, Err(Error::Incomplete(3)));
+        assert_matches!(decoded, Err(Error::Incomplete(3)));
     }
 
     #[test]
     fn type_unexpected_end() {
         let mut buf = Cursor::new(&[255]);
         let decoded = Frame::decode(&mut buf);
-        assert_eq!(decoded, Err(Error::Incomplete(2)));
+        assert_matches!(decoded, Err(Error::Incomplete(2)));
     }
 
     #[test]
     fn buffer_too_short() {
         let mut buf = Cursor::new(&[4, 4, 0, 255, 128]);
         let decoded = Frame::decode(&mut buf);
-        assert_eq!(decoded, Err(Error::Incomplete(6)));
+        assert_matches!(decoded, Err(Error::Incomplete(6)));
     }
 
-    fn codec_frame_check(frame: Frame, wire: &[u8]) {
+    fn codec_frame_check(mut frame: Frame<Bytes>, wire: &[u8]) {
         let mut buf = Vec::new();
-        frame.encode(&mut buf);
-        println!("buf: {:?}", buf);
+        frame.encode_with_payload(&mut buf);
         assert_eq!(&buf, &wire);
 
         let mut read = Cursor::new(&buf);
         let decoded = Frame::decode(&mut read).unwrap();
-        assert_eq!(decoded, frame);
+        assert_eq!(frame, decoded);
     }
 
     #[test]
@@ -434,7 +562,10 @@ mod tests {
 
     #[test]
     fn data_frame() {
-        codec_frame_check(Frame::Data { len: 7 }, &[0, 7]);
+        codec_frame_check(
+            Frame::Data(Bytes::from("1234567")),
+            &[0, 7, 49, 50, 51, 52, 53, 54, 55],
+        );
     }
 
     #[test]
@@ -448,7 +579,7 @@ mod tests {
     #[test]
     fn headers_frames() {
         codec_frame_check(
-            Frame::Headers(Bytes::from("TODO QPACK")),
+            Frame::headers("TODO QPACK"),
             &[1, 10, 84, 79, 68, 79, 32, 81, 80, 65, 67, 75],
         );
         codec_frame_check(
@@ -467,6 +598,6 @@ mod tests {
         raw.extend(&[6, 0, 255, 128, 0, 250, 218]);
         let mut buf = Cursor::new(&raw);
         let decoded = Frame::decode(&mut buf);
-        assert_eq!(decoded, Err(Error::UnknownFrame(95)));
+        assert_matches!(decoded, Err(Error::UnknownFrame(95)));
     }
 }

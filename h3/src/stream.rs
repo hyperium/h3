@@ -1,6 +1,6 @@
 use std::task::{Context, Poll};
 
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Buf, BufMut as _, Bytes};
 use futures::{future, ready};
 use quic::RecvStream;
 
@@ -10,6 +10,7 @@ use crate::{
     frame::FrameStream,
     proto::{
         coding::{BufExt, Decode as _, Encode},
+        frame::Frame,
         stream::StreamType,
         varint::VarInt,
     },
@@ -17,18 +18,142 @@ use crate::{
     Error,
 };
 
-pub(crate) async fn write<S, T>(stream: &mut S, data: T) -> Result<(), Error>
+#[inline]
+pub(crate) async fn write<S, D, B>(stream: &mut S, data: D) -> Result<(), Error>
 where
-    S: SendStream<Bytes>,
-    T: Encode,
+    S: SendStream<B>,
+    D: Into<WriteBuf<B>>,
+    B: Buf,
 {
-    let mut buf = BytesMut::new();
-    data.encode(&mut buf);
-
-    stream.send_data(buf.freeze())?;
+    stream.send_data(data)?;
     future::poll_fn(|cx| stream.poll_ready(cx)).await?;
 
     Ok(())
+}
+
+const WRITE_BUF_ENCODE_SIZE: usize = StreamType::MAX_ENCODED_SIZE + Frame::MAX_ENCODED_SIZE;
+
+/// Wrap frames to encode their header on the stack before sending them on the wire
+///
+/// Implements `Buf` so wire data is seamlessly available for transport layer transmits:
+/// `Buf::chunk()` will yield the encoded header, then the payload. For unidirectionnal streams,
+/// this type makes it possible to prefix wire data with the `StreamType`.
+///
+/// Conveying frames as `Into<WriteBuf>` makes it possible to encode only when generating wire-format
+/// data is necessary (say, in `quic::SendStream::send_data`). It also has a public API ergonomy
+/// advantage: `WriteBuf` doesn't have to appear in public associated types. On the other hand,
+/// QUIC implementers have to call `into()`, which will encode the header in `Self::buf`.
+pub struct WriteBuf<B>
+where
+    B: Buf,
+{
+    buf: [u8; WRITE_BUF_ENCODE_SIZE],
+    len: usize,
+    pos: usize,
+    frame: Option<Frame<B>>,
+}
+
+impl<B> WriteBuf<B>
+where
+    B: Buf,
+{
+    fn encode_stream_type(&mut self, ty: StreamType) {
+        let mut buf_mut = &mut self.buf[self.len..];
+        ty.encode(&mut buf_mut);
+        self.len = WRITE_BUF_ENCODE_SIZE - buf_mut.remaining_mut();
+    }
+
+    fn encode_frame_header(&mut self) {
+        if let Some(frame) = self.frame.as_ref() {
+            let mut buf_mut = &mut self.buf[self.len..];
+            frame.encode(&mut buf_mut);
+            self.len = WRITE_BUF_ENCODE_SIZE - buf_mut.remaining_mut();
+        }
+    }
+}
+
+impl<B> From<StreamType> for WriteBuf<B>
+where
+    B: Buf,
+{
+    fn from(ty: StreamType) -> Self {
+        let mut me = Self {
+            buf: [0; WRITE_BUF_ENCODE_SIZE],
+            len: 0,
+            pos: 0,
+            frame: None,
+        };
+        me.encode_stream_type(ty);
+        me
+    }
+}
+
+impl<B> From<Frame<B>> for WriteBuf<B>
+where
+    B: Buf,
+{
+    fn from(frame: Frame<B>) -> Self {
+        let mut me = Self {
+            buf: [0; WRITE_BUF_ENCODE_SIZE],
+            len: 0,
+            pos: 0,
+            frame: Some(frame),
+        };
+        me.encode_frame_header();
+        me
+    }
+}
+
+impl<B> From<(StreamType, Frame<B>)> for WriteBuf<B>
+where
+    B: Buf,
+{
+    fn from(ty_stream: (StreamType, Frame<B>)) -> Self {
+        let (ty, frame) = ty_stream;
+        let mut me = Self {
+            buf: [0; WRITE_BUF_ENCODE_SIZE],
+            len: 0,
+            pos: 0,
+            frame: Some(frame),
+        };
+        me.encode_stream_type(ty);
+        me.encode_frame_header();
+        me
+    }
+}
+
+impl<B> Buf for WriteBuf<B>
+where
+    B: Buf,
+{
+    fn remaining(&self) -> usize {
+        self.len - self.pos
+            + self
+                .frame
+                .as_ref()
+                .and_then(|f| f.payload())
+                .map_or(0, |x| x.remaining())
+    }
+
+    fn chunk(&self) -> &[u8] {
+        if self.len - self.pos > 0 {
+            &self.buf[self.pos..self.len]
+        } else if let Some(payload) = self.frame.as_ref().and_then(|f| f.payload()) {
+            payload.chunk()
+        } else {
+            &[]
+        }
+    }
+
+    fn advance(&mut self, cnt: usize) {
+        let remaining = self.len - self.pos;
+        if remaining > 0 {
+            assert!(cnt <= remaining);
+            self.pos += cnt;
+        } else if let Some(payload) = self.frame.as_mut().and_then(|f| f.payload_mut()) {
+            payload.advance(cnt);
+        }
+    }
 }
 
 pub(super) enum AcceptedRecvStream<S>
@@ -128,5 +253,48 @@ where
                 })?);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn write_buf_encode_streamtype() {
+        let wbuf = WriteBuf::<Bytes>::from(StreamType::ENCODER);
+
+        assert_eq!(wbuf.chunk(), b"\x02");
+        assert_eq!(wbuf.len, 1);
+    }
+
+    #[test]
+    fn write_buf_encode_frame() {
+        let wbuf = WriteBuf::<Bytes>::from(Frame::Goaway(2));
+
+        assert_eq!(wbuf.chunk(), b"\x07\x01\x02");
+        assert_eq!(wbuf.len, 3);
+    }
+
+    #[test]
+    fn write_buf_encode_streamtype_then_frame() {
+        let wbuf = WriteBuf::<Bytes>::from((StreamType::ENCODER, Frame::Goaway(2)));
+
+        assert_eq!(wbuf.chunk(), b"\x02\x07\x01\x02");
+    }
+
+    #[test]
+    fn write_buf_advances() {
+        let mut wbuf =
+            WriteBuf::<Bytes>::from((StreamType::ENCODER, Frame::Data(Bytes::from("hey"))));
+
+        assert_eq!(wbuf.chunk(), b"\x02\x00\x03");
+        wbuf.advance(3);
+        assert_eq!(wbuf.remaining(), 3);
+        assert_eq!(wbuf.chunk(), b"hey");
+        wbuf.advance(2);
+        assert_eq!(wbuf.chunk(), b"y");
+        wbuf.advance(1);
+        assert_eq!(wbuf.remaining(), 0);
     }
 }

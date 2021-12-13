@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use assert_matches::assert_matches;
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use futures::{future, StreamExt};
 use http::Request;
 
@@ -154,7 +154,7 @@ async fn settings_exchange_client() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::builder()
+        let mut incoming = server::builder()
             .max_field_section_size(12)
             .build(conn)
             .await
@@ -174,7 +174,7 @@ async fn settings_exchange_server() {
     let client_fut = async {
         let (mut conn, _client) = client::builder()
             .max_field_section_size(12)
-            .build(pair.client().await)
+            .build::<_, _, Bytes>(pair.client().await)
             .await
             .expect("client init");
         let drive = async move {
@@ -338,7 +338,7 @@ async fn missing_settings() {
         let mut buf = BytesMut::new();
         StreamType::CONTROL.encode(&mut buf);
         // Send a non-settings frame before the mandatory Settings frame on control stream
-        Frame::CancelPush(0).encode(&mut buf);
+        Frame::<Bytes>::CancelPush(0).encode(&mut buf);
         control_stream.write_all(&buf[..]).await.unwrap();
 
         tokio::time::sleep(Duration::from_secs(10)).await;
@@ -371,7 +371,7 @@ async fn control_stream_frame_unexpected() {
 
         let mut buf = BytesMut::new();
         StreamType::CONTROL.encode(&mut buf);
-        Frame::Data { len: 0 }.encode(&mut buf);
+        Frame::Data(Bytes::from("")).encode(&mut buf);
         control_stream.write_all(&buf[..]).await.unwrap();
 
         tokio::time::sleep(Duration::from_secs(10)).await;

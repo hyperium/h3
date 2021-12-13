@@ -3,51 +3,58 @@ use futures::future;
 use http::{response, HeaderMap, Request, Response, StatusCode};
 use std::{
     convert::TryFrom,
-    marker::PhantomData,
     task::{Context, Poll},
 };
 
 use crate::{
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
-    error::{self, Code, Error},
+    error::{Code, Error},
     frame::FrameStream,
     proto::{frame::Frame, headers::Header, varint::VarInt},
     qpack, quic, stream,
 };
 use tracing::{trace, warn};
 
-pub struct Connection<C>
+pub fn builder() -> Builder {
+    Builder::new()
+}
+
+pub struct Connection<C, B>
 where
-    C: quic::Connection<Bytes>,
+    C: quic::Connection<B>,
+    B: Buf,
 {
-    inner: ConnectionInner<C>,
+    inner: ConnectionInner<C, B>,
     max_field_section_size: u64,
 }
 
-impl<C> ConnectionState for Connection<C>
+impl<C, B> ConnectionState for Connection<C, B>
 where
-    C: quic::Connection<Bytes>,
+    C: quic::Connection<B>,
+    B: Buf,
 {
     fn shared_state(&self) -> &SharedStateRef {
         &self.inner.shared
     }
 }
 
-impl<C> Connection<C>
+impl<C> Connection<C, Bytes>
 where
     C: quic::Connection<Bytes>,
 {
     pub async fn new(conn: C) -> Result<Self, Error> {
-        Ok(Self::builder().build(conn).await?)
+        Ok(builder().build(conn).await?)
     }
+}
 
-    pub fn builder() -> Builder<Connection<C>> {
-        Builder::new()
-    }
-
+impl<C, B> Connection<C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
     pub async fn accept(
         &mut self,
-    ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream>)>, Error> {
+    ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
         let mut stream = match future::poll_fn(|cx| self.poll_accept_request(cx)).await {
             Ok(Some(s)) => FrameStream::new(s),
             Ok(None) => return Ok(None),
@@ -141,25 +148,24 @@ where
     }
 }
 
-impl<C> Drop for Connection<C>
+impl<C, B> Drop for Connection<C, B>
 where
-    C: quic::Connection<Bytes>,
+    C: quic::Connection<B>,
+    B: Buf,
 {
     fn drop(&mut self) {
         self.inner.close(Code::H3_NO_ERROR, "");
     }
 }
 
-pub struct Builder<C> {
+pub struct Builder {
     pub(super) max_field_section_size: u64,
-    _conn: PhantomData<C>,
 }
 
-impl<C> Builder<C> {
+impl Builder {
     pub(super) fn new() -> Self {
         Builder {
             max_field_section_size: VarInt::MAX.0,
-            _conn: PhantomData,
         }
     }
 
@@ -169,11 +175,12 @@ impl<C> Builder<C> {
     }
 }
 
-impl<C> Builder<Connection<C>>
-where
-    C: quic::Connection<Bytes>,
-{
-    pub async fn build(&self, conn: C) -> Result<Connection<C>, Error> {
+impl Builder {
+    pub async fn build<C, B>(&self, conn: C) -> Result<Connection<C, B>, Error>
+    where
+        C: quic::Connection<B>,
+        B: Buf,
+    {
         Ok(Connection {
             inner: ConnectionInner::new(
                 conn,
@@ -186,14 +193,14 @@ where
     }
 }
 
-pub struct RequestStream<S>
+pub struct RequestStream<S, B>
 where
     S: quic::RecvStream,
 {
-    inner: connection::RequestStream<FrameStream<S>, Bytes>,
+    inner: connection::RequestStream<FrameStream<S>, B>,
 }
 
-impl<S> ConnectionState for RequestStream<S>
+impl<S, B> ConnectionState for RequestStream<S, B>
 where
     S: quic::RecvStream,
 {
@@ -202,7 +209,7 @@ where
     }
 }
 
-impl<S> RequestStream<S>
+impl<S, B> RequestStream<S, B>
 where
     S: quic::RecvStream,
 {
@@ -215,9 +222,10 @@ where
     }
 }
 
-impl<S> RequestStream<S>
+impl<S, B> RequestStream<S, B>
 where
-    S: quic::RecvStream + quic::SendStream<Bytes>,
+    S: quic::RecvStream + quic::SendStream<B>,
+    B: Buf,
 {
     pub async fn send_response(&mut self, resp: Response<()>) -> Result<(), Error> {
         let (parts, _) = resp.into_parts();
@@ -245,7 +253,7 @@ where
         Ok(())
     }
 
-    pub async fn send_data(&mut self, buf: Bytes) -> Result<(), Error> {
+    pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
         self.inner.send_data(buf).await
     }
 
@@ -258,9 +266,10 @@ where
     }
 }
 
-impl<S> RequestStream<S>
+impl<S, B> RequestStream<S, B>
 where
-    S: quic::RecvStream + quic::SendStream<Bytes>,
+    S: quic::RecvStream + quic::SendStream<B>,
+    B: Buf,
 {
     pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
         let res = self.inner.recv_trailers().await;

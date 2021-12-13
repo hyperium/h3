@@ -1,12 +1,14 @@
-use bytes::{Buf, Bytes, BytesMut};
-use futures::future;
-use http::{request, HeaderMap, Response};
 use std::{
     convert::TryFrom,
     marker::PhantomData,
     sync::{atomic::AtomicUsize, Arc},
     task::{Context, Poll, Waker},
 };
+
+use bytes::{Buf, Bytes, BytesMut};
+use futures::future;
+use http::{request, HeaderMap, Response};
+use tracing::{trace, warn};
 
 use crate::{
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
@@ -15,13 +17,12 @@ use crate::{
     proto::{frame::Frame, headers::Header, varint::VarInt},
     qpack, quic, stream,
 };
-use tracing::{trace, warn};
 
-pub fn builder<C: quic::Connection<Bytes>>() -> Builder<C> {
+pub fn builder() -> Builder {
     Builder::new()
 }
 
-pub async fn new<C, O>(conn: C) -> Result<(Connection<C>, SendRequest<C::OpenStreams>), Error>
+pub async fn new<C, O>(conn: C) -> Result<(Connection<C, Bytes>, SendRequest<O, Bytes>), Error>
 where
     C: quic::Connection<Bytes, OpenStreams = O>,
     O: quic::OpenStreams<Bytes>,
@@ -29,23 +30,29 @@ where
     Ok(Builder::new().build(conn).await?)
 }
 
-pub struct SendRequest<T: quic::OpenStreams<Bytes>> {
+pub struct SendRequest<T, B>
+where
+    T: quic::OpenStreams<B>,
+    B: Buf,
+{
     open: T,
     conn_state: SharedStateRef,
     max_field_section_size: u64, // maximum size for a header we receive
     // counts instances of SendRequest to close the connection when the last is dropped.
     sender_count: Arc<AtomicUsize>,
     conn_waker: Option<Waker>,
+    _buf: PhantomData<fn(B)>,
 }
 
-impl<T> SendRequest<T>
+impl<T, B> SendRequest<T, B>
 where
-    T: quic::OpenStreams<Bytes>,
+    T: quic::OpenStreams<B>,
+    B: Buf,
 {
     pub async fn send_request(
         &mut self,
         req: http::Request<()>,
-    ) -> Result<RequestStream<T::BidiStream>, Error> {
+    ) -> Result<RequestStream<T::BidiStream, B>, Error> {
         let peer_max_field_section_size = self
             .conn_state
             .read("send request lock state")
@@ -84,18 +91,20 @@ where
     }
 }
 
-impl<T> ConnectionState for SendRequest<T>
+impl<T, B> ConnectionState for SendRequest<T, B>
 where
-    T: quic::OpenStreams<Bytes>,
+    T: quic::OpenStreams<B>,
+    B: Buf,
 {
     fn shared_state(&self) -> &SharedStateRef {
         &self.conn_state
     }
 }
 
-impl<T> Clone for SendRequest<T>
+impl<T, B> Clone for SendRequest<T, B>
 where
-    T: quic::OpenStreams<Bytes> + Clone,
+    T: quic::OpenStreams<B> + Clone,
+    B: Buf,
 {
     fn clone(&self) -> Self {
         self.sender_count
@@ -107,13 +116,15 @@ where
             max_field_section_size: self.max_field_section_size,
             sender_count: self.sender_count.clone(),
             conn_waker: self.conn_waker.clone(),
+            _buf: PhantomData,
         }
     }
 }
 
-impl<T> Drop for SendRequest<T>
+impl<T, B> Drop for SendRequest<T, B>
 where
-    T: quic::OpenStreams<Bytes>,
+    T: quic::OpenStreams<B>,
+    B: Buf,
 {
     fn drop(&mut self) {
         if self
@@ -130,16 +141,18 @@ where
     }
 }
 
-pub struct Connection<C>
+pub struct Connection<C, B>
 where
-    C: quic::Connection<Bytes>,
+    C: quic::Connection<B>,
+    B: Buf,
 {
-    inner: ConnectionInner<C>,
+    inner: ConnectionInner<C, B>,
 }
 
-impl<C> Connection<C>
+impl<C, B> Connection<C, B>
 where
-    C: quic::Connection<Bytes>,
+    C: quic::Connection<B>,
+    B: Buf,
 {
     pub fn poll_close(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         while let Poll::Ready(result) = self.inner.poll_control(cx) {
@@ -184,23 +197,14 @@ where
     }
 }
 
-pub struct Builder<C>
-where
-    C: quic::Connection<Bytes>,
-{
-    pub(super) max_field_section_size: u64,
-    _conn: PhantomData<C>,
+pub struct Builder {
+    max_field_section_size: u64,
 }
 
-impl<C, O> Builder<C>
-where
-    C: quic::Connection<Bytes, OpenStreams = O>,
-    O: quic::OpenStreams<Bytes>,
-{
+impl Builder {
     pub(super) fn new() -> Self {
         Builder {
             max_field_section_size: VarInt::MAX.0,
-            _conn: PhantomData,
         }
     }
 
@@ -209,7 +213,15 @@ where
         self
     }
 
-    pub async fn build(&mut self, quic: C) -> Result<(Connection<C>, SendRequest<O>), Error> {
+    pub async fn build<C, O, B>(
+        &mut self,
+        quic: C,
+    ) -> Result<(Connection<C, B>, SendRequest<O, B>), Error>
+    where
+        C: quic::Connection<B, OpenStreams = O>,
+        O: quic::OpenStreams<B>,
+        B: Buf,
+    {
         let open = quic.opener();
         let conn_state = SharedStateRef::default();
 
@@ -226,19 +238,20 @@ where
                 conn_waker,
                 max_field_section_size: self.max_field_section_size,
                 sender_count: Arc::new(AtomicUsize::new(1)),
+                _buf: PhantomData,
             },
         ))
     }
 }
 
-pub struct RequestStream<S>
+pub struct RequestStream<S, B>
 where
     S: quic::RecvStream,
 {
-    inner: connection::RequestStream<FrameStream<S>, Bytes>,
+    inner: connection::RequestStream<FrameStream<S>, B>,
 }
 
-impl<S> ConnectionState for RequestStream<S>
+impl<S, B> ConnectionState for RequestStream<S, B>
 where
     S: quic::RecvStream,
 {
@@ -247,7 +260,7 @@ where
     }
 }
 
-impl<S> RequestStream<S>
+impl<S, B> RequestStream<S, B>
 where
     S: quic::RecvStream,
 {
@@ -307,11 +320,12 @@ where
     }
 }
 
-impl<S> RequestStream<S>
+impl<S, B> RequestStream<S, B>
 where
-    S: quic::RecvStream + quic::SendStream<Bytes>,
+    S: quic::RecvStream + quic::SendStream<B>,
+    B: Buf,
 {
-    pub async fn send_data(&mut self, buf: Bytes) -> Result<(), Error> {
+    pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
         self.inner.send_data(buf).await
     }
 

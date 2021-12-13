@@ -1,4 +1,10 @@
-use std::{convert::TryInto, net::{Ipv6Addr, ToSocketAddrs}, sync::Arc, task::Poll, time::Duration};
+use std::{
+    convert::TryInto,
+    net::{Ipv6Addr, ToSocketAddrs},
+    sync::Arc,
+    task::Poll,
+    time::Duration,
+};
 
 use bytes::{Buf, Bytes};
 use futures::StreamExt;
@@ -121,8 +127,6 @@ pub fn build_certs() -> (Certificate, PrivateKey) {
     (cert, key)
 }
 
-pub fn to_bytes<E>(
-    x: Poll<Result<Option<impl Buf>, E>>,
-) -> Poll<Result<Option<Bytes>, E>> {
+pub fn to_bytes<E>(x: Poll<Result<Option<impl Buf>, E>>) -> Poll<Result<Option<Bytes>, E>> {
     x.map(|b| b.map(|b| b.map(|mut b| b.copy_to_bytes(b.remaining()))))
 }

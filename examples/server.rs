@@ -129,7 +129,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn handle_request<T>(
-    mut stream: RequestStream<T>,
+    mut stream: RequestStream<T, Bytes>,
 ) -> Result<(), Box<dyn std::error::Error + Send>>
 where
     T: BidiStream<Bytes>,

@@ -1,7 +1,10 @@
 use bytes::{Buf, BufMut};
 use std::fmt;
 
-use super::coding::{BufExt, BufMutExt, Decode, Encode, UnexpectedEnd};
+use super::{
+    coding::{BufExt, BufMutExt, Decode, Encode, UnexpectedEnd},
+    varint::VarInt,
+};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct StreamType(u64);
@@ -22,6 +25,8 @@ stream_types! {
 }
 
 impl StreamType {
+    pub const MAX_ENCODED_SIZE: usize = VarInt::MAX_SIZE;
+
     pub fn value(&self) -> u64 {
         self.0
     }
