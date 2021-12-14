@@ -145,12 +145,15 @@ where
         }
     }
 
-    fn advance(&mut self, cnt: usize) {
-        let remaining = self.len - self.pos;
-        if remaining > 0 {
-            assert!(cnt <= remaining);
-            self.pos += cnt;
-        } else if let Some(payload) = self.frame.as_mut().and_then(|f| f.payload_mut()) {
+    fn advance(&mut self, mut cnt: usize) {
+        let remaining_header = self.len - self.pos;
+        if remaining_header > 0 {
+            let advanced = usize::min(cnt, remaining_header);
+            self.pos += advanced;
+            cnt -= advanced;
+        }
+
+        if let Some(payload) = self.frame.as_mut().and_then(|f| f.payload_mut()) {
             payload.advance(cnt);
         }
     }
@@ -296,5 +299,14 @@ mod tests {
         assert_eq!(wbuf.chunk(), b"y");
         wbuf.advance(1);
         assert_eq!(wbuf.remaining(), 0);
+    }
+
+    #[test]
+    fn write_buf_advance_jumps_header_and_payload_start() {
+        let mut wbuf =
+            WriteBuf::<Bytes>::from((StreamType::ENCODER, Frame::Data(Bytes::from("hey"))));
+
+        wbuf.advance(4);
+        assert_eq!(wbuf.chunk(), b"ey");
     }
 }
