@@ -94,7 +94,7 @@ impl Frame<PayloadLen> {
         };
         if let Ok(frame) = &frame {
             trace!(
-                "got frame {}, len: {}, remaining: {}",
+                "got frame {:?}, len: {}, remaining: {}",
                 frame,
                 len,
                 buf.remaining()
@@ -170,34 +170,10 @@ where
     }
 }
 
-impl fmt::Display for Frame<PayloadLen> {
+impl fmt::Debug for Frame<PayloadLen> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Frame::Data(len) => write!(f, "Data: {} bytes", len.0),
-            Frame::Headers(frame) => write!(f, "Headers({} entries)", frame.len()),
-            Frame::Settings(_) => write!(f, "Settings"),
-            Frame::CancelPush(id) => write!(f, "CancelPush({})", id),
-            Frame::PushPromise(frame) => write!(f, "PushPromise({})", frame.id),
-            Frame::Goaway(id) => write!(f, "GoAway({})", id),
-            Frame::MaxPushId(id) => write!(f, "MaxPushId({})", id),
-            Frame::DuplicatePush(id) => write!(f, "DuplicatePush({})", id),
-        }
-    }
-}
-
-impl fmt::Debug for Frame<PayloadLen> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        <Self as fmt::Display>::fmt(self, f)
-    }
-}
-
-impl<B> fmt::Display for Frame<B>
-where
-    B: Buf,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Frame::Data(data) => write!(f, "Data: {} bytes", data.remaining()),
             Frame::Headers(frame) => write!(f, "Headers({} entries)", frame.len()),
             Frame::Settings(_) => write!(f, "Settings"),
             Frame::CancelPush(id) => write!(f, "CancelPush({})", id),
@@ -214,7 +190,16 @@ where
     B: Buf,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        <Self as fmt::Display>::fmt(self, f)
+        match self {
+            Frame::Data(data) => write!(f, "Data: {} bytes", data.remaining()),
+            Frame::Headers(frame) => write!(f, "Headers({} entries)", frame.len()),
+            Frame::Settings(_) => write!(f, "Settings"),
+            Frame::CancelPush(id) => write!(f, "CancelPush({})", id),
+            Frame::PushPromise(frame) => write!(f, "PushPromise({})", frame.id),
+            Frame::Goaway(id) => write!(f, "GoAway({})", id),
+            Frame::MaxPushId(id) => write!(f, "MaxPushId({})", id),
+            Frame::DuplicatePush(id) => write!(f, "DuplicatePush({})", id),
+        }
     }
 }
 
