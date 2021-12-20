@@ -5,6 +5,7 @@ use tracing::trace;
 
 use super::{
     coding::Encode,
+    stream::StreamId,
     varint::{BufExt, BufMutExt, UnexpectedEnd, VarInt},
 };
 
@@ -36,11 +37,11 @@ impl fmt::Display for Error {
 pub enum Frame<B> {
     Data(B),
     Headers(Bytes),
-    CancelPush(u64),
+    CancelPush(StreamId),
     Settings(Settings),
     PushPromise(PushPromise),
-    Goaway(u64),
-    MaxPushId(u64),
+    Goaway(StreamId),
+    MaxPushId(StreamId),
 }
 
 /// Represents the available data len for a `Data` frame on a RecvStream
@@ -77,10 +78,10 @@ impl Frame<PayloadLen> {
         let frame = match ty {
             FrameType::HEADERS => Ok(Frame::Headers(payload.copy_to_bytes(len as usize))),
             FrameType::SETTINGS => Ok(Frame::Settings(Settings::decode(&mut payload)?)),
-            FrameType::CANCEL_PUSH => Ok(Frame::CancelPush(payload.get_var()?)),
+            FrameType::CANCEL_PUSH => Ok(Frame::CancelPush(payload.get_var()?.into())),
             FrameType::PUSH_PROMISE => Ok(Frame::PushPromise(PushPromise::decode(&mut payload)?)),
-            FrameType::GOAWAY => Ok(Frame::Goaway(payload.get_var()?)),
-            FrameType::MAX_PUSH_ID => Ok(Frame::MaxPushId(payload.get_var()?)),
+            FrameType::GOAWAY => Ok(Frame::Goaway(payload.get_var()?.into())),
+            FrameType::MAX_PUSH_ID => Ok(Frame::MaxPushId(payload.get_var()?.into())),
             FrameType::H2_PRIORITY
             | FrameType::H2_PING
             | FrameType::H2_WINDOW_UPDATE
@@ -305,10 +306,10 @@ impl PushPromise {
     }
 }
 
-fn simple_frame_encode<B: BufMut>(ty: FrameType, id: u64, buf: &mut B) {
+fn simple_frame_encode<B: BufMut>(ty: FrameType, id: StreamId, buf: &mut B) {
     ty.encode(buf);
     buf.write_var(1);
-    buf.write_var(id);
+    id.encode(buf);
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
@@ -482,7 +483,7 @@ mod tests {
     fn unknown_frame_type() {
         let mut buf = Cursor::new(&[22, 4, 0, 255, 128, 0, 3, 1, 2]);
         assert_matches!(Frame::decode(&mut buf), Err(Error::UnknownFrame(22)));
-        assert_matches!(Frame::decode(&mut buf), Ok(Frame::CancelPush(2)));
+        assert_matches!(Frame::decode(&mut buf), Ok(Frame::CancelPush(StreamId(2))));
     }
 
     #[test]
@@ -548,9 +549,9 @@ mod tests {
 
     #[test]
     fn simple_frames() {
-        codec_frame_check(Frame::CancelPush(2), &[3, 1, 2]);
-        codec_frame_check(Frame::Goaway(2), &[7, 1, 2]);
-        codec_frame_check(Frame::MaxPushId(2), &[13, 1, 2]);
+        codec_frame_check(Frame::CancelPush(StreamId(2)), &[3, 1, 2]);
+        codec_frame_check(Frame::Goaway(StreamId(2)), &[7, 1, 2]);
+        codec_frame_check(Frame::MaxPushId(StreamId(2)), &[13, 1, 2]);
     }
 
     #[test]

@@ -1,16 +1,20 @@
 use std::time::Duration;
 
 use assert_matches::assert_matches;
-use bytes::{Bytes, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 use futures::{future, StreamExt};
-use http::Request;
+use http::{Request, Response, StatusCode};
 
 use h3::{
-    client,
+    client::{self, SendRequest},
     error::{Code, Kind},
-    server,
+    quic, server,
     test_helpers::{
-        proto::{coding::Encode as _, frame::Frame, stream::StreamType},
+        proto::{
+            coding::Encode as _,
+            frame::{Frame, Settings},
+            stream::{StreamId, StreamType},
+        },
         ConnectionState,
     },
 };
@@ -338,7 +342,7 @@ async fn missing_settings() {
         let mut buf = BytesMut::new();
         StreamType::CONTROL.encode(&mut buf);
         // Send a non-settings frame before the mandatory Settings frame on control stream
-        Frame::<Bytes>::CancelPush(0).encode(&mut buf);
+        Frame::<Bytes>::CancelPush(StreamId(0)).encode(&mut buf);
         control_stream.write_all(&buf[..]).await.unwrap();
 
         tokio::time::sleep(Duration::from_secs(10)).await;
@@ -415,4 +419,89 @@ async fn timeout_on_control_frame_read() {
     };
 
     tokio::join!(server_fut, client_fut);
+}
+
+#[tokio::test]
+async fn goaway_from_client_not_push_id() {
+    h3_tests::init_tracing();
+    let mut pair = Pair::default();
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let new_connection = pair.client_inner().await;
+        let mut control_stream = new_connection.connection.open_uni().await.unwrap();
+
+        let mut buf = BytesMut::new();
+        StreamType::CONTROL.encode(&mut buf);
+        Frame::<Bytes>::Settings(Settings::default()).encode(&mut buf);
+        // StreamId(index=0 << 2 | dir=Bi << 1 | initiator=Server as u64)
+        Frame::<Bytes>::Goaway(StreamId(0u64 << 2 | 0 << 1 | 1)).encode(&mut buf);
+        control_stream.write_all(&buf[..]).await.unwrap();
+
+        tokio::time::sleep(Duration::from_secs(10)).await;
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming = server::Connection::new(conn).await.unwrap();
+        assert_matches!(
+            incoming.accept().await.map(|_| ()).unwrap_err().kind(),
+            Kind::Application {
+                // The StreamId sent in the GoAway frame from the client is not a PushId:
+                code: Code::H3_ID_ERROR,
+                ..
+            }
+        );
+    };
+
+    tokio::select! { _ = server_fut => (), _ = client_fut => panic!("client resolved first") };
+}
+
+#[tokio::test]
+async fn goaway_from_server_not_request_id() {
+    h3_tests::init_tracing();
+    let mut pair = Pair::default();
+    let mut server = pair.server_inner();
+
+    let client_fut = async {
+        let new_connection = pair.client_inner().await;
+        let mut control_stream = new_connection.connection.open_uni().await.unwrap();
+
+        let mut buf = BytesMut::new();
+        StreamType::CONTROL.encode(&mut buf);
+        control_stream.write_all(&buf[..]).await.unwrap();
+        control_stream.finish().await.unwrap(); // close the client control stream immediately
+
+        let (mut driver, _send) = client::new(h3_quinn::Connection::new(new_connection))
+            .await
+            .unwrap();
+
+        assert_matches!(
+            future::poll_fn(|cx| driver.poll_close(cx))
+                .await
+                .unwrap_err()
+                .kind(),
+            Kind::Application {
+                // The sent in the GoAway frame from the client is not a Request:
+                code: Code::H3_ID_ERROR,
+                ..
+            }
+        )
+    };
+
+    let server_fut = async {
+        let conn = server.next().await.unwrap().await.unwrap();
+        let mut control_stream = conn.connection.open_uni().await.unwrap();
+
+        let mut buf = BytesMut::new();
+        StreamType::CONTROL.encode(&mut buf);
+        Frame::<Bytes>::Settings(Settings::default()).encode(&mut buf);
+        // StreamId(index=0 << 2 | dir=Uni << 1 | initiator=Server as u64)
+        Frame::<Bytes>::Goaway(StreamId(0u64 << 2 | 0 << 1 | 1)).encode(&mut buf);
+        control_stream.write_all(&buf[..]).await.unwrap();
+
+        tokio::time::sleep(Duration::from_secs(10)).await;
+    };
+
+    tokio::select! { _ = server_fut => panic!("client resolved first"), _ = client_fut => () };
 }

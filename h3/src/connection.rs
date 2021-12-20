@@ -13,10 +13,11 @@ use crate::{
     error::{Code, Error},
     frame::FrameStream,
     proto::{
-        frame::{Frame, SettingId, Settings},
+        frame::{Frame, PayloadLen, SettingId, Settings},
+        headers::Header,
         stream::StreamType,
+        varint::VarInt,
     },
-    proto::{headers::Header, varint::VarInt},
     qpack,
     quic::{self, SendStream as _},
     stream::{self, AcceptRecvStream, AcceptedRecvStream},
@@ -173,7 +174,7 @@ where
         Poll::Pending
     }
 
-    pub fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<Frame<B>, Error>> {
+    pub fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<Frame<PayloadLen>, Error>> {
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
             return Poll::Ready(Err(e.clone()));
         }
@@ -205,13 +206,15 @@ where
                         .unwrap_or(VarInt::MAX.0);
                     Ok(Frame::Settings(settings))
                 }
-                Frame::CancelPush(_) | Frame::MaxPushId(_) | Frame::Goaway(_)
-                    if !self.got_peer_settings =>
-                {
-                    Err(self.close(
-                        Code::H3_MISSING_SETTINGS,
-                        format!("received {:?} before settings on control stream", frame),
-                    ))
+                f @ Frame::CancelPush(_) | f @ Frame::MaxPushId(_) | f @ Frame::Goaway(_) => {
+                    if self.got_peer_settings {
+                        Ok(f)
+                    } else {
+                        Err(self.close(
+                            Code::H3_MISSING_SETTINGS,
+                            format!("received {:?} before settings on control stream", f),
+                        ))
+                    }
                 }
                 frame => Err(self.close(
                     Code::H3_FRAME_UNEXPECTED,

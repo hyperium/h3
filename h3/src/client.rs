@@ -8,7 +8,7 @@ use std::{
 use bytes::{Buf, Bytes, BytesMut};
 use futures::future;
 use http::{request, HeaderMap, Response};
-use tracing::{trace, warn};
+use tracing::trace;
 
 use crate::{
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
@@ -158,8 +158,13 @@ where
         while let Poll::Ready(result) = self.inner.poll_control(cx) {
             match result {
                 Ok(Frame::Settings(_)) => trace!("Got settings"),
-                Ok(f @ Frame::Goaway(_)) => {
-                    warn!("Control frame ignored {:?}", f);
+                Ok(Frame::Goaway(id)) => {
+                    if !id.is_request() {
+                        return Poll::Ready(Err(Code::H3_ID_ERROR.with_reason(format!(
+                            "non-request StreamId in a GoAway frame: {}",
+                            id
+                        ))));
+                    }
                 }
                 Ok(frame) => {
                     return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED

@@ -15,7 +15,7 @@ pub use quinn::{
     VarInt, WriteError,
 };
 
-use h3::quic::{self, Error, WriteBuf};
+use h3::quic::{self, Error, StreamId, WriteBuf};
 
 pub struct Connection {
     conn: quinn::Connection,
@@ -276,7 +276,7 @@ where
         self.send.send_data(data)
     }
 
-    fn id(&self) -> u64 {
+    fn id(&self) -> StreamId {
         self.send.id()
     }
 }
@@ -424,8 +424,8 @@ where
         Ok(())
     }
 
-    fn id(&self) -> u64 {
-        self.stream.id().0
+    fn id(&self) -> StreamId {
+        self.stream.id().0.into()
     }
 }
 
