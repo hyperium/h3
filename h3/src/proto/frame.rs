@@ -41,7 +41,6 @@ pub enum Frame<B> {
     PushPromise(PushPromise),
     Goaway(u64),
     MaxPushId(u64),
-    DuplicatePush(u64),
 }
 
 /// Represents the available data len for a `Data` frame on a RecvStream
@@ -82,7 +81,6 @@ impl Frame<PayloadLen> {
             FrameType::PUSH_PROMISE => Ok(Frame::PushPromise(PushPromise::decode(&mut payload)?)),
             FrameType::GOAWAY => Ok(Frame::Goaway(payload.get_var()?)),
             FrameType::MAX_PUSH_ID => Ok(Frame::MaxPushId(payload.get_var()?)),
-            FrameType::DUPLICATE_PUSH => Ok(Frame::DuplicatePush(payload.get_var()?)),
             FrameType::H2_PRIORITY
             | FrameType::H2_PING
             | FrameType::H2_WINDOW_UPDATE
@@ -123,7 +121,6 @@ where
             Frame::CancelPush(id) => simple_frame_encode(FrameType::CANCEL_PUSH, *id, buf),
             Frame::Goaway(id) => simple_frame_encode(FrameType::GOAWAY, *id, buf),
             Frame::MaxPushId(id) => simple_frame_encode(FrameType::MAX_PUSH_ID, *id, buf),
-            Frame::DuplicatePush(id) => simple_frame_encode(FrameType::DUPLICATE_PUSH, *id, buf),
         }
     }
 }
@@ -180,7 +177,6 @@ impl fmt::Debug for Frame<PayloadLen> {
             Frame::PushPromise(frame) => write!(f, "PushPromise({})", frame.id),
             Frame::Goaway(id) => write!(f, "GoAway({})", id),
             Frame::MaxPushId(id) => write!(f, "MaxPushId({})", id),
-            Frame::DuplicatePush(id) => write!(f, "DuplicatePush({})", id),
         }
     }
 }
@@ -198,7 +194,6 @@ where
             Frame::PushPromise(frame) => write!(f, "PushPromise({})", frame.id),
             Frame::Goaway(id) => write!(f, "GoAway({})", id),
             Frame::MaxPushId(id) => write!(f, "MaxPushId({})", id),
-            Frame::DuplicatePush(id) => write!(f, "DuplicatePush({})", id),
         }
     }
 }
@@ -217,7 +212,6 @@ impl<T, U> PartialEq<Frame<T>> for Frame<U> {
             Frame::PushPromise(x) => matches!(other, Frame::PushPromise(y) if x == y),
             Frame::Goaway(x) => matches!(other, Frame::Goaway(y) if x == y),
             Frame::MaxPushId(x) => matches!(other, Frame::MaxPushId(y) if x == y),
-            Frame::DuplicatePush(x) => matches!(other, Frame::DuplicatePush(y) if x == y),
         }
     }
 }
@@ -249,7 +243,6 @@ frame_types! {
     H2_WINDOW_UPDATE = 0x8,
     H2_CONTINUATION = 0x9,
     MAX_PUSH_ID = 0xD,
-    DUPLICATE_PUSH = 0xE,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -558,7 +551,6 @@ mod tests {
         codec_frame_check(Frame::CancelPush(2), &[3, 1, 2]);
         codec_frame_check(Frame::Goaway(2), &[7, 1, 2]);
         codec_frame_check(Frame::MaxPushId(2), &[13, 1, 2]);
-        codec_frame_check(Frame::DuplicatePush(2), &[14, 1, 2]);
     }
 
     #[test]

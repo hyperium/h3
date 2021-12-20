@@ -1098,7 +1098,6 @@ fn invalid_request_frames() -> Vec<Frame<Bytes>> {
         Frame::Settings(frame::Settings::default()),
         Frame::Goaway(1),
         Frame::MaxPushId(1),
-        Frame::DuplicatePush(1),
     ]
 }
 
