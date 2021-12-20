@@ -15,6 +15,7 @@ use h3::{
             coding::Encode,
             frame::{self, Frame, FrameType},
             headers::Header,
+            stream::StreamId,
             varint::VarInt,
         },
         qpack, ConnectionState,
@@ -1094,10 +1095,10 @@ async fn request_valid_unkown_frame_after_trailers() {
 // Receipt of an invalid sequence of frames MUST be treated as a connection error of type H3_FRAME_UNEXPECTED
 fn invalid_request_frames() -> Vec<Frame<Bytes>> {
     vec![
-        Frame::CancelPush(0),
+        Frame::CancelPush(StreamId(0)),
         Frame::Settings(frame::Settings::default()),
-        Frame::Goaway(1),
-        Frame::MaxPushId(1),
+        Frame::Goaway(StreamId(1)),
+        Frame::MaxPushId(StreamId(1)),
     ]
 }
 

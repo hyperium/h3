@@ -54,7 +54,7 @@ impl Pair {
             .initial_rtt(Duration::from_millis(10));
     }
 
-    pub fn server(&mut self) -> Server {
+    pub fn server_inner(&mut self) -> Incoming {
         let mut crypto = rustls::ServerConfig::builder()
             .with_safe_default_cipher_suites()
             .with_safe_default_kx_groups()
@@ -73,7 +73,13 @@ impl Pair {
 
         self.port = endpoint.local_addr().unwrap().port();
 
-        Server { incoming }
+        incoming
+    }
+
+    pub fn server(&mut self) -> Server {
+        Server {
+            incoming: self.server_inner(),
+        }
     }
 
     pub async fn client_inner(&self) -> NewConnection {

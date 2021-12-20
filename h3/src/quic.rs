@@ -7,6 +7,7 @@ use std::task::{self, Poll};
 
 use bytes::Buf;
 
+pub use crate::proto::stream::StreamId;
 pub use crate::stream::WriteBuf;
 
 // Unresolved questions:
@@ -121,7 +122,7 @@ pub trait SendStream<B: Buf> {
     fn reset(&mut self, reset_code: u64);
 
     /// Get QUIC send stream id
-    fn id(&self) -> u64;
+    fn id(&self) -> StreamId;
 }
 
 /// A trait describing the "receive" actions of a QUIC stream.

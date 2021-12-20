@@ -8,7 +8,10 @@ use tracing::trace;
 use crate::{
     buf::BufList,
     error::TransportError,
-    proto::frame::{self, Frame, PayloadLen},
+    proto::{
+        frame::{self, Frame, PayloadLen},
+        stream::StreamId,
+    },
     quic::{RecvStream, SendStream},
     stream::WriteBuf,
 };
@@ -154,7 +157,7 @@ where
         self.stream.reset(reset_code)
     }
 
-    fn id(&self) -> u64 {
+    fn id(&self) -> StreamId {
         self.stream.id()
     }
 }

@@ -135,7 +135,13 @@ where
         while let Poll::Ready(frame) = self.inner.poll_control(cx)? {
             match frame {
                 Frame::Settings(_) => trace!("Got settings"),
-                f @ Frame::Goaway(_) | f @ Frame::MaxPushId(_) | f @ Frame::CancelPush(_) => {
+                Frame::Goaway(id) => {
+                    if !id.is_push() {
+                        return Poll::Ready(Err(Code::H3_ID_ERROR
+                            .with_reason(format!("non-push StreamId in a GoAway frame: {}", id))));
+                    }
+                }
+                f @ Frame::MaxPushId(_) | f @ Frame::CancelPush(_) => {
                     warn!("Control frame ignored {:?}", f);
                 }
                 frame => {
