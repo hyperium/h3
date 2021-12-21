@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{borrow::BorrowMut, time::Duration};
 
 use assert_matches::assert_matches;
 use bytes::{Buf, Bytes, BytesMut};
@@ -8,7 +8,8 @@ use http::{Request, Response, StatusCode};
 use h3::{
     client::{self, SendRequest},
     error::{Code, Kind},
-    quic, server,
+    quic::{self, SendStream},
+    server,
     test_helpers::{
         proto::{
             coding::Encode as _,
@@ -461,7 +462,7 @@ async fn goaway_from_client_not_push_id() {
 async fn goaway_from_server_not_request_id() {
     h3_tests::init_tracing();
     let mut pair = Pair::default();
-    let mut server = pair.server_inner();
+    let (_, mut server) = pair.server_inner();
 
     let client_fut = async {
         let new_connection = pair.client_inner().await;
@@ -504,4 +505,181 @@ async fn goaway_from_server_not_request_id() {
     };
 
     tokio::select! { _ = server_fut => panic!("client resolved first"), _ = client_fut => () };
+}
+
+#[tokio::test]
+async fn graceful_shutdown_server_rejects() {
+    h3_tests::init_tracing();
+    let mut pair = Pair::default();
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let (_driver, mut send_request) = client::new(pair.client().await).await.unwrap();
+
+        let mut first = send_request
+            .send_request(Request::get("http://no.way").body(()).unwrap())
+            .await
+            .unwrap();
+        let mut rejected = send_request
+            .send_request(Request::get("http://no.way").body(()).unwrap())
+            .await
+            .unwrap();
+        let first = first.recv_response().await;
+        let rejected = rejected.recv_response().await;
+
+        assert_matches!(first, Ok(_));
+        assert_matches!(
+            rejected.unwrap_err().kind(),
+            Kind::Application {
+                code: Code::H3_REQUEST_REJECTED,
+                ..
+            }
+        );
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming = server::Connection::new(conn).await.unwrap();
+        let (_, stream) = incoming.accept().await.unwrap().unwrap();
+        response(stream).await;
+        incoming.shutdown(0).await.unwrap();
+        assert_matches!(incoming.accept().await.map(|x| x.map(|_| ())), Ok(None));
+        server.endpoint.wait_idle().await;
+    };
+
+    tokio::join!(server_fut, client_fut);
+}
+
+#[tokio::test]
+async fn graceful_shutdown_grace_interval() {
+    h3_tests::init_tracing();
+    let mut pair = Pair::default();
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let (mut driver, mut send_request) = client::new(pair.client().await).await.unwrap();
+
+        // Sent as the connection is not shutting down
+        let mut first = send_request
+            .send_request(Request::get("http://no.way").body(()).unwrap())
+            .await
+            .unwrap();
+        // Sent as the connection is shutting down, but GoAway has not been received yet
+        let mut in_flight = send_request
+            .send_request(Request::get("http://no.way").body(()).unwrap())
+            .await
+            .unwrap();
+        let first = first.recv_response().await;
+        let in_flight = in_flight.recv_response().await;
+
+        // Will not be sent as client's driver already received the GoAway
+        let too_late = async move {
+            tokio::time::sleep(Duration::from_millis(15)).await;
+            request(send_request).await
+        };
+        let driver = future::poll_fn(|cx| driver.poll_close(cx));
+
+        let (too_late, driver) = tokio::join!(too_late, driver);
+        assert_matches!(first, Ok(_));
+        assert_matches!(in_flight, Ok(_));
+        assert_matches!(too_late.unwrap_err().kind(), Kind::Closing);
+        assert_matches!(driver, Ok(_));
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming = server::Connection::new(conn).await.unwrap();
+        let (_, first) = incoming.accept().await.unwrap().unwrap();
+        incoming.shutdown(1).await.unwrap();
+        let (_, in_flight) = incoming.accept().await.unwrap().unwrap();
+        response(first).await;
+        response(in_flight).await;
+
+        while let Ok(Some((_, stream))) = incoming.accept().await {
+            response(stream).await;
+        }
+        // Ensure `too_late` request is executed as the connection is still
+        // closing (no QUIC `Close` frame has been fired yet)
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+
+    tokio::join!(server_fut, client_fut);
+}
+
+#[tokio::test]
+async fn graceful_shutdown_closes_when_idle() {
+    h3_tests::init_tracing();
+    let mut pair = Pair::default();
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let (mut driver, mut send_request) = client::new(pair.client().await).await.unwrap();
+
+        // Make continuous requests, ignoring GoAway because the connection is not driven
+        while let Ok(_) = request(&mut send_request).await {
+            tokio::task::yield_now().await;
+        }
+        assert_matches!(
+            future::poll_fn(|cx| {
+                println!("client drive");
+                driver.poll_close(cx)
+            })
+            .await,
+            Ok(())
+        );
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming = server::Connection::new(conn).await.unwrap();
+
+        let mut count = 0;
+
+        while let Ok(Some((_, stream))) = incoming.accept().await {
+            if count < 3 {
+                count += 1;
+            } else if count == 3 {
+                count += 1;
+                incoming.shutdown(2).await.unwrap();
+            }
+
+            response(stream).await;
+        }
+    };
+
+    tokio::select! {
+        _ = client_fut => (),
+        r = tokio::time::timeout(Duration::from_millis(100), server_fut)
+            => assert_matches!(r, Ok(())),
+    };
+}
+
+async fn request<T, O, B>(mut send_request: T) -> Result<Response<()>, h3::Error>
+where
+    T: BorrowMut<SendRequest<O, B>>,
+    O: quic::OpenStreams<B>,
+    B: Buf,
+{
+    let mut request_stream = send_request
+        .borrow_mut()
+        .send_request(Request::get("http://no.way").body(()).unwrap())
+        .await?;
+    request_stream.recv_response().await
+}
+
+async fn response<S, B>(mut stream: server::RequestStream<S, B>)
+where
+    S: quic::RecvStream + SendStream<B>,
+    B: Buf,
+{
+    stream
+        .send_response(
+            Response::builder()
+                .status(StatusCode::IM_A_TEAPOT)
+                .body(())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    stream.finish().await.unwrap();
 }

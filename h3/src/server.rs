@@ -1,19 +1,25 @@
-use bytes::{Buf, Bytes, BytesMut};
-use futures::future;
-use http::{response, HeaderMap, Request, Response, StatusCode};
 use std::{
+    collections::HashSet,
     convert::TryFrom,
     task::{Context, Poll},
 };
+
+use bytes::{Buf, Bytes, BytesMut};
+use futures::future;
+use http::{response, HeaderMap, Request, Response, StatusCode};
+use quic::StreamId;
+use tokio::sync::mpsc;
 
 use crate::{
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
     error::{Code, Error},
     frame::FrameStream,
     proto::{frame::Frame, headers::Header, varint::VarInt},
-    qpack, quic, stream,
+    qpack,
+    quic::{self, RecvStream as _, SendStream as _},
+    stream,
 };
-use tracing::{trace, warn};
+use tracing::{error, trace, warn};
 
 pub fn builder() -> Builder {
     Builder::new()
@@ -26,6 +32,11 @@ where
 {
     inner: ConnectionInner<C, B>,
     max_field_section_size: u64,
+    // List of all incoming streams that are currently running.
+    ongoing_streams: HashSet<StreamId>,
+    // Let the streams tell us when they are no longer running.
+    request_end_recv: mpsc::UnboundedReceiver<StreamId>,
+    request_end_send: mpsc::UnboundedSender<StreamId>,
 }
 
 impl<C, B> ConnectionState for Connection<C, B>
@@ -57,7 +68,12 @@ where
     ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
         let mut stream = match future::poll_fn(|cx| self.poll_accept_request(cx)).await {
             Ok(Some(s)) => FrameStream::new(s),
-            Ok(None) => return Ok(None),
+            Ok(None) => {
+                // We always send a last GoAway frame to the client, so it knows which was the last
+                // non-rejected request.
+                self.inner.shutdown(0).await?;
+                return Ok(None);
+            }
             Err(e) => {
                 if e.is_closed() {
                     return Ok(None);
@@ -90,6 +106,8 @@ where
         };
 
         let mut request_stream = RequestStream {
+            stream_id: stream.id(),
+            request_end: self.request_end_send.clone(),
             inner: connection::RequestStream::new(
                 stream,
                 self.max_field_section_size,
@@ -123,12 +141,59 @@ where
         Ok(Some((req, request_stream)))
     }
 
-    pub fn poll_accept_request(
+    pub async fn shutdown(&mut self, max_requests: usize) -> Result<(), Error> {
+        self.inner.shutdown(max_requests).await
+    }
+
+    fn poll_accept_request(
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<C::BidiStream>, Error>> {
         let _ = self.poll_control(cx)?;
-        self.inner.poll_accept_request(cx)
+        let _ = self.poll_requests_completion(cx);
+
+        let closing = self.shared_state().read("server accept").closing;
+
+        loop {
+            match self.inner.poll_accept_request(cx) {
+                Poll::Ready(Err(x)) => break Poll::Ready(Err(x)),
+                Poll::Ready(Ok(None)) => {
+                    if self.poll_requests_completion(cx).is_ready() {
+                        break Poll::Ready(Ok(None));
+                    } else {
+                        // Wait for all the requests to be finished, request_end_recv will wake
+                        // us on each request completion.
+                        break Poll::Pending;
+                    }
+                }
+                Poll::Pending => {
+                    if closing.is_some() && self.poll_requests_completion(cx).is_ready() {
+                        // The connection is now idle.
+                        break Poll::Ready(Ok(None));
+                    } else {
+                        return Poll::Pending;
+                    }
+                }
+                Poll::Ready(Ok(Some(mut s))) => {
+                    // When the connection is in a graceful shutdown procedure, reject all
+                    // incoming requests not belonging to the grace interval. It's possible that
+                    // some acceptable request streams arrive after rejected requests.
+                    if let Some(max_id) = closing {
+                        if s.id() > max_id {
+                            s.stop_sending(Code::H3_REQUEST_REJECTED.value());
+                            s.reset(Code::H3_REQUEST_REJECTED.value());
+                            if self.poll_requests_completion(cx).is_ready() {
+                                break Poll::Ready(Ok(None));
+                            }
+                            continue;
+                        }
+                    }
+                    self.inner.start_stream(s.id());
+                    self.ongoing_streams.insert(s.id());
+                    break Poll::Ready(Ok(Some(s)));
+                }
+            };
+        }
     }
 
     fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
@@ -151,6 +216,28 @@ where
             }
         }
         Poll::Pending
+    }
+
+    fn poll_requests_completion(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+        loop {
+            match self.request_end_recv.poll_recv(cx) {
+                // The channel is closed
+                Poll::Ready(None) => return Poll::Ready(()),
+                // A request has completed
+                Poll::Ready(Some(id)) => {
+                    self.ongoing_streams.remove(&id);
+                }
+                Poll::Pending => {
+                    if self.ongoing_streams.is_empty() {
+                        // Tell the caller there is not more ongoing requests.
+                        // Still, the completion of future requests will wake us.
+                        return Poll::Ready(());
+                    } else {
+                        return Poll::Pending;
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -187,6 +274,7 @@ impl Builder {
         C: quic::Connection<B>,
         B: Buf,
     {
+        let (sender, receiver) = mpsc::unbounded_channel();
         Ok(Connection {
             inner: ConnectionInner::new(
                 conn,
@@ -195,6 +283,9 @@ impl Builder {
             )
             .await?,
             max_field_section_size: self.max_field_section_size,
+            request_end_send: sender,
+            request_end_recv: receiver,
+            ongoing_streams: HashSet::new(),
         })
     }
 }
@@ -204,6 +295,8 @@ where
     S: quic::RecvStream,
 {
     inner: connection::RequestStream<FrameStream<S>, B>,
+    stream_id: StreamId,
+    request_end: mpsc::UnboundedSender<StreamId>,
 }
 
 impl<S, B> ConnectionState for RequestStream<S, B>
@@ -291,5 +384,19 @@ where
             }
         }
         res
+    }
+}
+
+impl<S, B> Drop for RequestStream<S, B>
+where
+    S: quic::RecvStream,
+{
+    fn drop(&mut self) {
+        if let Err(e) = self.request_end.send(self.stream_id) {
+            error!(
+                "failed to notify connection of request end: {} {}",
+                self.stream_id, e
+            );
+        }
     }
 }

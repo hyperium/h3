@@ -54,7 +54,7 @@ impl Pair {
             .initial_rtt(Duration::from_millis(10));
     }
 
-    pub fn server_inner(&mut self) -> Incoming {
+    pub fn server_inner(&mut self) -> (h3_quinn::Endpoint, Incoming) {
         let mut crypto = rustls::ServerConfig::builder()
             .with_safe_default_cipher_suites()
             .with_safe_default_kx_groups()
@@ -73,13 +73,12 @@ impl Pair {
 
         self.port = endpoint.local_addr().unwrap().port();
 
-        incoming
+        (endpoint, incoming)
     }
 
     pub fn server(&mut self) -> Server {
-        Server {
-            incoming: self.server_inner(),
-        }
+        let (endpoint, incoming) = self.server_inner();
+        Server { endpoint, incoming }
     }
 
     pub async fn client_inner(&self) -> NewConnection {
@@ -119,6 +118,7 @@ impl Pair {
 }
 
 pub struct Server {
+    pub endpoint: h3_quinn::Endpoint,
     pub incoming: Incoming,
 }
 
