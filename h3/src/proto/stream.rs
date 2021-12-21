@@ -1,5 +1,5 @@
 use bytes::{Buf, BufMut};
-use std::fmt;
+use std::{fmt, ops::Add};
 
 use super::{
     coding::{BufExt, BufMutExt, Decode, Encode, UnexpectedEnd},
@@ -83,9 +83,8 @@ impl fmt::Display for StreamId {
 }
 
 impl StreamId {
-    /// Distinguishes streams of the same initiator and directionality
-    pub fn index(self) -> u64 {
-        self.0 >> 2
+    pub fn first_request() -> Self {
+        Self::new(0, Dir::Bi, Side::Client)
     }
 
     pub fn is_request(&self) -> bool {
@@ -98,13 +97,23 @@ impl StreamId {
 
     /// Create a new StreamId
     /// Which side of a connection initiated the stream
-    fn initiator(self) -> Side {
+    pub(crate) fn initiator(self) -> Side {
         if self.0 & 0x1 == 0 {
             Side::Client
         } else {
             Side::Server
         }
     }
+
+    fn new(index: u64, dir: Dir, initiator: Side) -> Self {
+        StreamId((index as u64) << 2 | (dir as u64) << 1 | initiator as u64)
+    }
+
+    /// Distinguishes streams of the same initiator and directionality
+    fn index(self) -> u64 {
+        self.0 >> 2
+    }
+
     /// Which directions data flows in
     fn dir(self) -> Dir {
         if self.0 & 0x2 == 0 {
@@ -127,8 +136,21 @@ impl Encode for StreamId {
     }
 }
 
+impl Add<usize> for StreamId {
+    type Output = StreamId;
+
+    #[allow(clippy::suspicious_arithmetic_impl)]
+    fn add(self, rhs: usize) -> Self::Output {
+        let index = u64::min(
+            u64::saturating_add(self.index(), rhs as u64),
+            VarInt::MAX.0 >> 2,
+        );
+        Self::new(index, self.dir(), self.initiator())
+    }
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-enum Side {
+pub enum Side {
     /// The initiator of a connection
     Client = 0,
     /// The acceptor of a connection

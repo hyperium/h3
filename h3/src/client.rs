@@ -8,7 +8,7 @@ use std::{
 use bytes::{Buf, Bytes, BytesMut};
 use futures::future;
 use http::{request, HeaderMap, Response};
-use tracing::trace;
+use tracing::{info, trace};
 
 use crate::{
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
@@ -53,10 +53,14 @@ where
         &mut self,
         req: http::Request<()>,
     ) -> Result<RequestStream<T::BidiStream, B>, Error> {
-        let peer_max_field_section_size = self
-            .conn_state
-            .read("send request lock state")
-            .peer_max_field_section_size;
+        let (peer_max_field_section_size, closing) = {
+            let state = self.conn_state.read("send request lock state");
+            (state.peer_max_field_section_size, state.closing)
+        };
+
+        if closing.is_some() {
+            return Err(Error::closing());
+        }
 
         let (parts, _) = req.into_parts();
         let request::Parts {
@@ -165,6 +169,10 @@ where
                             id
                         ))));
                     }
+                    info!(
+                        "Server initiated gracefull shutdown, last: StreamId({})",
+                        id
+                    );
                 }
                 Ok(frame) => {
                     return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED

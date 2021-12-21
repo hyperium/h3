@@ -56,7 +56,10 @@ pub enum Kind {
     // Error from QUIC layer
     #[non_exhaustive]
     Transport(Arc<TransportError>),
+    // Connection has been closed with `Code::NO_ERROR`
     Closed,
+    // Currently in a graceful shutdown procedure
+    Closing,
     Timeout,
 }
 
@@ -210,6 +213,10 @@ impl Error {
         self
     }
 
+    pub(crate) fn closing() -> Self {
+        Self::new(Kind::Closing)
+    }
+
     pub(crate) fn closed() -> Self {
         Self::new(Kind::Closed)
     }
@@ -238,6 +245,9 @@ impl fmt::Debug for Error {
         match self.inner.kind {
             Kind::Closed => {
                 builder.field("connection closed", &true);
+            }
+            Kind::Closing => {
+                builder.field("closing", &true);
             }
             Kind::Timeout => {
                 builder.field("timeout", &true);
@@ -273,6 +283,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.inner.kind {
             Kind::Closed => write!(f, "connection is closed")?,
+            Kind::Closing => write!(f, "connection is gracefully closing")?,
             Kind::Transport(ref e) => write!(f, "quic transport error: {}", e)?,
             Kind::Timeout => write!(f, "timeout",)?,
             Kind::Application { code, ref reason } => {

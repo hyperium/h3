@@ -15,7 +15,7 @@ use crate::{
     proto::{
         frame::{Frame, PayloadLen, SettingId, Settings},
         headers::Header,
-        stream::StreamType,
+        stream::{StreamId, StreamType},
         varint::VarInt,
     },
     qpack,
@@ -29,6 +29,10 @@ pub struct SharedState {
     pub peer_max_field_section_size: u64,
     // connection-wide error, concerns all RequestStreams and drivers
     pub error: Option<Error>,
+    // Has the connection received a GoAway frame? If so, this StreamId is the last
+    // we're willing to accept. This lets us finish the requests or pushes that were
+    // already in flight when the graceful shutdown was initiated.
+    pub closing: Option<StreamId>,
 }
 
 #[derive(Clone)]
@@ -50,6 +54,7 @@ impl Default for SharedStateRef {
         Self(Arc::new(RwLock::new(SharedState {
             peer_max_field_section_size: VarInt::MAX.0,
             error: None,
+            closing: None,
         })))
     }
 }
@@ -73,10 +78,12 @@ where
 {
     pub(super) shared: SharedStateRef,
     conn: C,
-    #[allow(dead_code)]
     control_send: C::SendStream,
     control_recv: Option<FrameStream<C::RecvStream>>,
     pending_recv_streams: Vec<AcceptRecvStream<C::RecvStream>>,
+    // The id of the last stream received by this connection:
+    // request and push stream for server and clients respectively.
+    last_accepted_stream: Option<StreamId>,
     got_peer_settings: bool,
 }
 
@@ -111,16 +118,32 @@ where
             control_send,
             control_recv: None,
             pending_recv_streams: Vec::with_capacity(3),
+            last_accepted_stream: None,
             got_peer_settings: false,
         })
+    }
+
+    /// Initiate graceful shutdown, accepting `max_streams` potentially in-flight streams
+    pub async fn shutdown(&mut self, max_streams: usize) -> Result<(), Error> {
+        let max_id = self
+            .last_accepted_stream
+            .map(|id| id + max_streams)
+            .unwrap_or_else(StreamId::first_request);
+
+        self.shared.write("graceful shutdown").closing = Some(max_id);
+
+        stream::write(&mut self.control_send, Frame::Goaway(max_id)).await
     }
 
     pub fn poll_accept_request(
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<C::BidiStream>, Error>> {
-        if let Some(ref e) = self.shared.read("poll_accept_request").error {
-            return Poll::Ready(Err(e.clone()));
+        {
+            let state = self.shared.read("poll_accept_request");
+            if let Some(ref e) = state.error {
+                return Poll::Ready(Err(e.clone()));
+            }
         }
 
         // .into().into() converts the impl QuicError into crate::error::Error.
@@ -196,33 +219,63 @@ where
 
         let res = match recvd {
             None => Err(self.close(Code::H3_CLOSED_CRITICAL_STREAM, "control stream closed")),
-            Some(frame) => match frame {
-                Frame::Settings(settings) if !self.got_peer_settings => {
-                    self.got_peer_settings = true;
-                    self.shared
-                        .write("connection settings write")
-                        .peer_max_field_section_size = settings
-                        .get(SettingId::MAX_HEADER_LIST_SIZE)
-                        .unwrap_or(VarInt::MAX.0);
-                    Ok(Frame::Settings(settings))
-                }
-                f @ Frame::CancelPush(_) | f @ Frame::MaxPushId(_) | f @ Frame::Goaway(_) => {
-                    if self.got_peer_settings {
-                        Ok(f)
-                    } else {
-                        Err(self.close(
-                            Code::H3_MISSING_SETTINGS,
-                            format!("received {:?} before settings on control stream", f),
-                        ))
+            Some(frame) => {
+                match frame {
+                    Frame::Settings(settings) if !self.got_peer_settings => {
+                        self.got_peer_settings = true;
+                        self.shared
+                            .write("connection settings write")
+                            .peer_max_field_section_size = settings
+                            .get(SettingId::MAX_HEADER_LIST_SIZE)
+                            .unwrap_or(VarInt::MAX.0);
+                        Ok(Frame::Settings(settings))
                     }
+                    Frame::Goaway(id) => {
+                        let closing = self.shared.read("connection goaway read").closing;
+                        match closing {
+                            Some(closing_id) if closing_id.initiator() == id.initiator() => {
+                                if id <= closing_id {
+                                    self.shared.write("connection goaway overwrite").closing =
+                                        Some(id);
+                                    Ok(Frame::Goaway(id))
+                                } else {
+                                    Err(self.close(
+                                        Code::H3_ID_ERROR,
+                                        format!("received a GoAway({}) greater than the former one ({})", id, closing_id)
+                                ))
+                                }
+                            }
+                            // When closing initiator is different, the current side has already started to close
+                            // and should not be initiating any new requests / pushes anyway. So we can ignore it.
+                            Some(_) => Ok(Frame::Goaway(id)),
+                            None => {
+                                self.shared.write("connection goaway write").closing = Some(id);
+                                Ok(Frame::Goaway(id))
+                            }
+                        }
+                    }
+                    f @ Frame::CancelPush(_) | f @ Frame::MaxPushId(_) => {
+                        if self.got_peer_settings {
+                            Ok(f)
+                        } else {
+                            Err(self.close(
+                                Code::H3_MISSING_SETTINGS,
+                                format!("received {:?} before settings on control stream", f),
+                            ))
+                        }
+                    }
+                    frame => Err(self.close(
+                        Code::H3_FRAME_UNEXPECTED,
+                        format!("on control stream: {:?}", frame),
+                    )),
                 }
-                frame => Err(self.close(
-                    Code::H3_FRAME_UNEXPECTED,
-                    format!("on control stream: {:?}", frame),
-                )),
-            },
+            }
         };
         Poll::Ready(res)
+    }
+
+    pub fn start_stream(&mut self, id: StreamId) {
+        self.last_accepted_stream = Some(id);
     }
 
     pub fn close<T: AsRef<str>>(&mut self, code: Code, reason: T) -> Error {
