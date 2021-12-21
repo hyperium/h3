@@ -349,6 +349,7 @@ impl Error for ReadError {
             quinn::ReadError::ConnectionLost(quinn::ConnectionError::ApplicationClosed(
                 quinn_proto::ApplicationClose { error_code, .. },
             )) => Some(error_code.into_inner()),
+            quinn::ReadError::Reset(error_code) => Some(error_code.into_inner()),
             _ => None,
         }
     }
