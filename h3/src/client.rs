@@ -158,6 +158,10 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
+    pub async fn shutdown(&mut self, max_requests: usize) -> Result<(), Error> {
+        self.inner.shutdown(max_requests).await
+    }
+
     pub fn poll_close(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         while let Poll::Ready(result) = self.inner.poll_control(cx) {
             match result {
