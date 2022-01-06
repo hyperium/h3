@@ -93,7 +93,9 @@ where
         match (data, end) {
             (None, true) => Poll::Ready(Ok(None)),
             (None, false) => Poll::Pending,
-            (Some(d), true) if d.remaining() < self.remaining_data => {
+            (Some(d), true)
+                if d.remaining() < self.remaining_data && !self.bufs.has_remaining() =>
+            {
                 Poll::Ready(Err(Error::UnexpectedEnd))
             }
             (Some(d), _) => {
@@ -475,6 +477,38 @@ mod tests {
         assert_poll_matches!(
             |mut cx| to_bytes(stream.poll_data(&mut cx)),
             Ok(Some(b)) if &*b == b"body"
+        );
+    }
+
+    #[tokio::test]
+    async fn poll_data_eos_but_buffered_data() {
+        let mut recv = FakeRecv::default();
+        let mut buf = BytesMut::with_capacity(64);
+
+        FrameType::DATA.encode(&mut buf);
+        VarInt::from(4u32).encode(&mut buf);
+        buf.put_slice(&b"bo"[..]);
+        recv.chunk(buf.clone().freeze());
+
+        let mut stream = FrameStream::new(recv);
+
+        assert_poll_matches!(
+            |mut cx| stream.poll_next(&mut cx),
+            Ok(Some(Frame::Data(PayloadLen(4))))
+        );
+
+        buf.truncate(0);
+        buf.put_slice(&b"dy"[..]);
+        stream.bufs.push_bytes(&mut buf.freeze());
+
+        assert_poll_matches!(
+            |mut cx| to_bytes(stream.poll_data(&mut cx)),
+            Ok(Some(b)) if &*b == b"bo"
+        );
+
+        assert_poll_matches!(
+            |mut cx| to_bytes(stream.poll_data(&mut cx)),
+            Ok(Some(b)) if &*b == b"dy"
         );
     }
 
