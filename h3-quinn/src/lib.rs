@@ -2,6 +2,7 @@
 //!
 //! This module implements QUIC traits with Quinn.
 use std::{
+    convert::TryInto,
     fmt::{self, Display},
     pin::Pin,
     sync::Arc,
@@ -426,7 +427,7 @@ where
     }
 
     fn id(&self) -> StreamId {
-        self.stream.id().0.into()
+        self.stream.id().0.try_into().expect("invalid stream id")
     }
 }
 
