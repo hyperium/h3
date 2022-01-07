@@ -1,11 +1,11 @@
-use std::fmt;
+use std::{convert::TryInto, fmt};
 
 use bytes::{Buf, BufMut, Bytes};
 use tracing::trace;
 
 use super::{
     coding::Encode,
-    stream::StreamId,
+    stream::{InvalidStreamId, StreamId},
     varint::{BufExt, BufMutExt, UnexpectedEnd, VarInt},
 };
 
@@ -17,6 +17,7 @@ pub enum Error {
     InvalidFrameValue,
     Incomplete(usize),
     Settings(SettingsError),
+    InvalidStreamId(InvalidStreamId),
 }
 
 impl std::error::Error for Error {}
@@ -28,8 +29,9 @@ impl fmt::Display for Error {
             Error::UnsupportedFrame(c) => write!(f, "frame 0x{:x} is not allowed h3", c),
             Error::UnknownFrame(c) => write!(f, "frame 0x{:x} ignored", c),
             Error::InvalidFrameValue => write!(f, "frame value is invalid"),
-            Error::Incomplete(_) => write!(f, ""),
-            Error::Settings(_) => write!(f, ""),
+            Error::Incomplete(x) => write!(f, "internal error: frame incomplete {}", x),
+            Error::Settings(x) => write!(f, "invalid settings: {}", x),
+            Error::InvalidStreamId(x) => write!(f, "invalid stream id: {}", x),
         }
     }
 }
@@ -78,10 +80,10 @@ impl Frame<PayloadLen> {
         let frame = match ty {
             FrameType::HEADERS => Ok(Frame::Headers(payload.copy_to_bytes(len as usize))),
             FrameType::SETTINGS => Ok(Frame::Settings(Settings::decode(&mut payload)?)),
-            FrameType::CANCEL_PUSH => Ok(Frame::CancelPush(payload.get_var()?.into())),
+            FrameType::CANCEL_PUSH => Ok(Frame::CancelPush(payload.get_var()?.try_into()?)),
             FrameType::PUSH_PROMISE => Ok(Frame::PushPromise(PushPromise::decode(&mut payload)?)),
-            FrameType::GOAWAY => Ok(Frame::Goaway(payload.get_var()?.into())),
-            FrameType::MAX_PUSH_ID => Ok(Frame::MaxPushId(payload.get_var()?.into())),
+            FrameType::GOAWAY => Ok(Frame::Goaway(payload.get_var()?.try_into()?)),
+            FrameType::MAX_PUSH_ID => Ok(Frame::MaxPushId(payload.get_var()?.try_into()?)),
             FrameType::H2_PRIORITY
             | FrameType::H2_PING
             | FrameType::H2_WINDOW_UPDATE
@@ -470,6 +472,12 @@ impl From<SettingsError> for Error {
 impl From<UnexpectedEnd> for Error {
     fn from(e: UnexpectedEnd) -> Self {
         Error::Incomplete(e.0)
+    }
+}
+
+impl From<InvalidStreamId> for Error {
+    fn from(e: InvalidStreamId) -> Self {
+        Error::InvalidStreamId(e)
     }
 }
 

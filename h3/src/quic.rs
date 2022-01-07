@@ -7,7 +7,7 @@ use std::task::{self, Poll};
 
 use bytes::Buf;
 
-pub use crate::proto::stream::StreamId;
+pub use crate::proto::stream::{InvalidStreamId, StreamId};
 pub use crate::stream::WriteBuf;
 
 // Unresolved questions:

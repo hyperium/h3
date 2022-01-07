@@ -347,6 +347,7 @@ impl From<frame::Error> for Error {
                 Code::H3_FRAME_ERROR.with_reason("received incomplete frame")
             }
             frame::Error::Proto(e) => match e {
+                proto::frame::Error::InvalidStreamId(_) => Code::H3_ID_ERROR,
                 proto::frame::Error::Settings(_) => Code::H3_SETTINGS_ERROR,
                 proto::frame::Error::UnsupportedFrame(_) | proto::frame::Error::UnknownFrame(_) => {
                     Code::H3_FRAME_UNEXPECTED
@@ -384,6 +385,12 @@ where
             }),
             None => Error::new(Kind::Transport(Arc::new(quic_error))),
         }
+    }
+}
+
+impl From<proto::stream::InvalidStreamId> for Error {
+    fn from(e: proto::stream::InvalidStreamId) -> Self {
+        Self::from(Code::H3_ID_ERROR).with_cause(format!("{}", e))
     }
 }
 

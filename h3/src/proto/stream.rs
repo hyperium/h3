@@ -1,5 +1,9 @@
 use bytes::{Buf, BufMut};
-use std::{fmt, ops::Add};
+use std::{
+    convert::TryFrom,
+    fmt::{self, Display},
+    ops::Add,
+};
 
 use super::{
     coding::{BufExt, BufMutExt, Decode, Encode, UnexpectedEnd},
@@ -124,9 +128,22 @@ impl StreamId {
     }
 }
 
-impl From<u64> for StreamId {
-    fn from(v: u64) -> Self {
-        Self(v)
+impl TryFrom<u64> for StreamId {
+    type Error = InvalidStreamId;
+    fn try_from(v: u64) -> Result<Self, Self::Error> {
+        if v > VarInt::MAX.0 {
+            return Err(InvalidStreamId(v));
+        }
+        Ok(Self(v))
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct InvalidStreamId(u64);
+
+impl Display for InvalidStreamId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid stream id: {:x}", self.0)
     }
 }
 
