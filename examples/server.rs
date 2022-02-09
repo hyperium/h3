@@ -18,7 +18,7 @@ struct Opt {
         short,
         long,
         help = "Root directory of the files to serve. \
-                If omited, server will respond OK."
+                If omitted, server will respond OK."
     )]
     pub root: Option<PathBuf>,
 
@@ -26,7 +26,7 @@ struct Opt {
         short,
         long,
         default_value = "[::1]:4433",
-        help = "What adress:port to listen for new connections"
+        help = "What address:port to listen for new connections"
     )]
     pub listen: SocketAddr,
 
