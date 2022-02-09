@@ -1,7 +1,5 @@
-use std::task::{Context, Poll};
-
 use bytes::{Buf, BufMut as _, Bytes};
-use futures::{future, ready};
+
 use quic::RecvStream;
 
 use crate::{
@@ -26,7 +24,7 @@ where
     B: Buf,
 {
     stream.send_data(data)?;
-    future::poll_fn(|cx| stream.poll_ready(cx)).await?;
+    stream.ready().await?;
 
     Ok(())
 }
@@ -214,19 +212,19 @@ where
         })
     }
 
-    pub fn poll_type(&mut self, cx: &mut Context) -> Poll<Result<(), Error>> {
+    pub async fn get_type(&mut self) -> Result<(), Error> {
         loop {
             match (self.ty.as_ref(), self.push_id) {
                 // When accepting a Push stream, we want to parse two VarInts: [StreamType, PUSH_ID]
-                (Some(&StreamType::PUSH), Some(_)) | (Some(_), _) => return Poll::Ready(Ok(())),
+                (Some(&StreamType::PUSH), Some(_)) | (Some(_), _) => return Ok(()),
                 _ => (),
             }
 
-            match ready!(self.stream.poll_data(cx))? {
+            match self.stream.get_data().await? {
                 Some(mut b) => self.buf.push_bytes(&mut b),
                 None => {
-                    return Poll::Ready(Err(Code::H3_STREAM_CREATION_ERROR
-                        .with_reason("Stream closed before type received")))
+                    return Err(Code::H3_STREAM_CREATION_ERROR
+                        .with_reason("Stream closed before type received"))
                 }
             };
 
@@ -261,8 +259,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::proto::stream::StreamId;
+
+    use super::*;
 
     #[test]
     fn write_buf_encode_streamtype() {

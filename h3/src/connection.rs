@@ -2,11 +2,9 @@ use std::{
     convert::TryFrom,
     marker::PhantomData,
     sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
-    task::{Context, Poll},
 };
 
 use bytes::{Buf, Bytes, BytesMut};
-use futures::{future, ready};
 use http::HeaderMap;
 
 use crate::{
@@ -97,7 +95,8 @@ where
         max_field_section_size: u64,
         shared: SharedStateRef,
     ) -> Result<Self, Error> {
-        let mut control_send = future::poll_fn(|cx| conn.poll_open_send(cx))
+        let mut control_send = conn
+            .open_send()
             .await
             .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))?;
 
@@ -135,48 +134,40 @@ where
         stream::write(&mut self.control_send, Frame::Goaway(max_id)).await
     }
 
-    pub fn poll_accept_request(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<C::BidiStream>, Error>> {
+    pub async fn accept_request(&mut self) -> Result<Option<C::BidiStream>, Error> {
         {
             let state = self.shared.read("poll_accept_request");
             if let Some(ref e) = state.error {
-                return Poll::Ready(Err(e.clone()));
+                return Err(e.clone());
             }
         }
 
         // .into().into() converts the impl QuicError into crate::error::Error.
         // The `?` operator doesn't work here for some reason.
-        self.conn.poll_accept_bidi(cx).map_err(|e| e.into().into())
+        self.conn.accept_bidi().await.map_err(|e| e.into().into())
     }
 
-    pub fn poll_accept_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+    pub async fn accept_recv(&mut self) -> Result<(), Error> {
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
-            return Poll::Ready(Err(e.clone()));
+            return Err(e.clone());
         }
 
-        loop {
-            match self.conn.poll_accept_recv(cx)? {
-                Poll::Ready(Some(stream)) => self
-                    .pending_recv_streams
-                    .push(AcceptRecvStream::new(stream)),
-                Poll::Ready(None) => {
-                    return Poll::Ready(Err(
-                        Code::H3_GENERAL_PROTOCOL_ERROR.with_reason("Connection closed unexpected")
-                    ))
-                }
-                Poll::Pending => break,
+        match self.conn.accept_recv().await? {
+            Some(stream) => self
+                .pending_recv_streams
+                .push(AcceptRecvStream::new(stream)),
+            None => {
+                return Err(
+                    Code::H3_GENERAL_PROTOCOL_ERROR.with_reason("Connection closed unexpected")
+                )
             }
         }
 
         let mut resolved = vec![];
 
         for (index, pending) in self.pending_recv_streams.iter_mut().enumerate() {
-            match pending.poll_type(cx)? {
-                Poll::Ready(()) => resolved.push(index),
-                Poll::Pending => (),
-            }
+            pending.get_type().await?;
+            resolved.push(index);
         }
 
         for (removed, index) in resolved.into_iter().enumerate() {
@@ -186,36 +177,33 @@ where
                 .into_stream()?;
             if let AcceptedRecvStream::Control(s) = stream {
                 if self.control_recv.is_some() {
-                    return Poll::Ready(Err(
+                    return Err(
                         self.close(Code::H3_STREAM_CREATION_ERROR, "got two control streams")
-                    ));
+                    );
                 }
                 self.control_recv = Some(s);
             };
         }
 
-        Poll::Pending
+        Ok(())
     }
 
-    pub fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<Frame<PayloadLen>, Error>> {
+    pub async fn control(&mut self) -> Result<Frame<PayloadLen>, Error> {
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
-            return Poll::Ready(Err(e.clone()));
+            return Err(e.clone());
         }
 
-        loop {
-            match self.poll_accept_recv(cx) {
-                Poll::Ready(Ok(_)) => continue,
-                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
-                Poll::Pending if self.control_recv.is_none() => return Poll::Pending,
-                _ => break,
-            }
+        match self.accept_recv().await {
+            Ok(_) => {}
+            Err(e) => return Err(e),
         }
 
-        let recvd = ready!(self
+        let recvd = self
             .control_recv
             .as_mut()
             .expect("control_recv")
-            .poll_next(cx))?;
+            .next()
+            .await?;
 
         let res = match recvd {
             None => Err(self.close(Code::H3_CLOSED_CRITICAL_STREAM, "control stream closed")),
@@ -271,7 +259,7 @@ where
                 }
             }
         };
-        Poll::Ready(res)
+        res
     }
 
     pub fn start_stream(&mut self, id: StreamId) {
@@ -318,7 +306,9 @@ where
     /// Receive some of the request body.
     pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
         if !self.stream.has_data() {
-            let frame = future::poll_fn(|cx| self.stream.poll_next(cx))
+            let frame = self
+                .stream
+                .next()
                 .await
                 .map_err(|e| self.maybe_conn_err(e))?;
             match frame {
@@ -332,7 +322,9 @@ where
             }
         }
 
-        let data = future::poll_fn(|cx| self.stream.poll_data(cx))
+        let data = self
+            .stream
+            .get_data()
             .await
             .map_err(|e| self.maybe_conn_err(e))?;
         Ok(data)
@@ -343,7 +335,9 @@ where
         let mut trailers = if let Some(encoded) = self.trailers.take() {
             encoded
         } else {
-            let frame = future::poll_fn(|cx| self.stream.poll_next(cx))
+            let frame = self
+                .stream
+                .next()
                 .await
                 .map_err(|e| self.maybe_conn_err(e))?;
             match frame {
@@ -355,7 +349,9 @@ where
 
         if !self.stream.is_eos() {
             // Get the trailing frame
-            let trailing_frame = future::poll_fn(|cx| self.stream.poll_next(cx))
+            let trailing_frame = self
+                .stream
+                .next()
                 .await
                 .map_err(|e| self.maybe_conn_err(e))?;
 
@@ -382,7 +378,7 @@ where
 
 impl<S, B> RequestStream<FrameStream<S>, B>
 where
-    S: quic::SendStream<B> + quic::RecvStream,
+    S: quic::SendStream<B> + quic::RecvStream + Send,
     B: Buf,
 {
     /// Send some data on the response body.
@@ -415,10 +411,12 @@ where
     }
 
     pub async fn finish(&mut self) -> Result<(), Error> {
-        future::poll_fn(|cx| self.stream.poll_ready(cx))
+        self.stream
+            .ready()
             .await
             .map_err(|e| self.maybe_conn_err(e))?;
-        future::poll_fn(|cx| self.stream.poll_finish(cx))
+        self.stream
+            .finish()
             .await
             .map_err(|e| self.maybe_conn_err(e))
     }

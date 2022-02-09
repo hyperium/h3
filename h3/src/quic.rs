@@ -3,8 +3,7 @@
 //! This module includes traits and types meant to allow being generic over any
 //! QUIC implementation.
 
-use std::task::{self, Poll};
-
+use async_trait::async_trait;
 use bytes::Buf;
 
 pub use crate::proto::stream::{InvalidStreamId, StreamId};
@@ -30,6 +29,7 @@ impl<'a, E: Error + 'a> From<E> for Box<dyn Error + 'a> {
 }
 
 /// Trait representing a QUIC connection.
+#[async_trait]
 pub trait Connection<B: Buf> {
     /// The type produced by `poll_accept_bidi()`
     type BidiStream: SendStream<B> + RecvStream;
@@ -45,30 +45,18 @@ pub trait Connection<B: Buf> {
     /// Accept an incoming unidirecional stream
     ///
     /// Returning `None` implies the connection is closing or closed.
-    fn poll_accept_recv(
-        &mut self,
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::RecvStream>, Self::Error>>;
+    async fn accept_recv(&mut self) -> Result<Option<Self::RecvStream>, Self::Error>;
 
     /// Accept an incoming bidirecional stream
     ///
     /// Returning `None` implies the connection is closing or closed.
-    fn poll_accept_bidi(
-        &mut self,
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::BidiStream>, Self::Error>>;
+    async fn accept_bidi(&mut self) -> Result<Option<Self::BidiStream>, Self::Error>;
 
     /// Poll the connection to create a new bidirectional stream.
-    fn poll_open_bidi(
-        &mut self,
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Self::BidiStream, Self::Error>>;
+    async fn open_bidi(&mut self) -> Result<Self::BidiStream, Self::Error>;
 
     /// Poll the connection to create a new unidirectional stream.
-    fn poll_open_send(
-        &mut self,
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Self::SendStream, Self::Error>>;
+    async fn open_send(&mut self) -> Result<Self::SendStream, Self::Error>;
 
     /// Get an object to open outgoing streams.
     fn opener(&self) -> Self::OpenStreams;
@@ -78,6 +66,7 @@ pub trait Connection<B: Buf> {
 }
 
 /// Trait for opening outgoing streams
+#[async_trait]
 pub trait OpenStreams<B: Buf> {
     /// The type produced by `poll_open_bidi()`
     type BidiStream: SendStream<B> + RecvStream;
@@ -89,34 +78,29 @@ pub trait OpenStreams<B: Buf> {
     type Error: Into<Box<dyn Error>>;
 
     /// Poll the connection to create a new bidirectional stream.
-    fn poll_open_bidi(
-        &mut self,
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Self::BidiStream, Self::Error>>;
+    async fn open_bidi(&mut self) -> Result<Self::BidiStream, Self::Error>;
 
     /// Poll the connection to create a new unidirectional stream.
-    fn poll_open_send(
-        &mut self,
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Self::SendStream, Self::Error>>;
+    async fn open_send(&mut self) -> Result<Self::SendStream, Self::Error>;
 
     /// Close the connection immediately
     fn close(&mut self, code: crate::error::Code, reason: &[u8]);
 }
 
 /// A trait describing the "send" actions of a QUIC stream.
+#[async_trait]
 pub trait SendStream<B: Buf> {
     /// The error type returned by fallible send methods.
     type Error: Into<Box<dyn Error>>;
 
     /// Polls if the stream can send more data.
-    fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>>;
+    async fn ready(&mut self) -> Result<(), Self::Error>;
 
     /// Send more data on the stream.
     fn send_data<T: Into<WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error>;
 
     /// Poll to finish the sending side of the stream.
-    fn poll_finish(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>>;
+    async fn finish(&mut self) -> Result<(), Self::Error>;
 
     /// Send a QUIC reset code.
     fn reset(&mut self, reset_code: u64);
@@ -126,6 +110,7 @@ pub trait SendStream<B: Buf> {
 }
 
 /// A trait describing the "receive" actions of a QUIC stream.
+#[async_trait]
 pub trait RecvStream {
     /// The type of `Buf` for data received on this stream.
     type Buf: Buf;
@@ -136,10 +121,7 @@ pub trait RecvStream {
     ///
     /// When the receive side will no longer receive more data (such as because
     /// the peer closed their sending side), this should return `None`.
-    fn poll_data(
-        &mut self,
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::Buf>, Self::Error>>;
+    async fn get_data(&mut self) -> Result<Option<Self::Buf>, Self::Error>;
 
     /// Send a `STOP_SENDING` QUIC code.
     fn stop_sending(&mut self, error_code: u64);

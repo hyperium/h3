@@ -1,11 +1,7 @@
-use std::{
-    collections::HashSet,
-    convert::TryFrom,
-    task::{Context, Poll},
-};
+use std::{collections::HashSet, convert::TryFrom};
 
 use bytes::{Buf, Bytes, BytesMut};
-use futures::future;
+
 use http::{response, HeaderMap, Request, Response, StatusCode};
 use quic::StreamId;
 use tokio::sync::mpsc;
@@ -66,7 +62,7 @@ where
     pub async fn accept(
         &mut self,
     ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
-        let mut stream = match future::poll_fn(|cx| self.poll_accept_request(cx)).await {
+        let mut stream = match self.accept_request().await {
             Ok(Some(s)) => FrameStream::new(s),
             Ok(None) => {
                 // We always send a last GoAway frame to the client, so it knows which was the last
@@ -82,7 +78,7 @@ where
             }
         };
 
-        let frame = future::poll_fn(|cx| stream.poll_next(cx)).await;
+        let frame = stream.next().await;
 
         let mut encoded = match frame {
             Ok(Some(Frame::Headers(h))) => h,
@@ -145,36 +141,20 @@ where
         self.inner.shutdown(max_requests).await
     }
 
-    fn poll_accept_request(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<C::BidiStream>, Error>> {
-        let _ = self.poll_control(cx)?;
-        let _ = self.poll_requests_completion(cx);
+    async fn accept_request(&mut self) -> Result<Option<C::BidiStream>, Error> {
+        let _ = self.control().await?;
+        let _ = self.requests_completion().await;
 
         let closing = self.shared_state().read("server accept").closing;
 
         loop {
-            match self.inner.poll_accept_request(cx) {
-                Poll::Ready(Err(x)) => break Poll::Ready(Err(x)),
-                Poll::Ready(Ok(None)) => {
-                    if self.poll_requests_completion(cx).is_ready() {
-                        break Poll::Ready(Ok(None));
-                    } else {
-                        // Wait for all the requests to be finished, request_end_recv will wake
-                        // us on each request completion.
-                        break Poll::Pending;
-                    }
+            match self.inner.accept_request().await {
+                Err(x) => break Err(x),
+                Ok(None) => {
+                    self.requests_completion().await;
+                    break Ok(None);
                 }
-                Poll::Pending => {
-                    if closing.is_some() && self.poll_requests_completion(cx).is_ready() {
-                        // The connection is now idle.
-                        break Poll::Ready(Ok(None));
-                    } else {
-                        return Poll::Pending;
-                    }
-                }
-                Poll::Ready(Ok(Some(mut s))) => {
+                Ok(Some(mut s)) => {
                     // When the connection is in a graceful shutdown procedure, reject all
                     // incoming requests not belonging to the grace interval. It's possible that
                     // some acceptable request streams arrive after rejected requests.
@@ -182,59 +162,50 @@ where
                         if s.id() > max_id {
                             s.stop_sending(Code::H3_REQUEST_REJECTED.value());
                             s.reset(Code::H3_REQUEST_REJECTED.value());
-                            if self.poll_requests_completion(cx).is_ready() {
-                                break Poll::Ready(Ok(None));
-                            }
-                            continue;
+                            self.requests_completion().await;
+                            break Ok(None);
                         }
                     }
                     self.inner.start_stream(s.id());
                     self.ongoing_streams.insert(s.id());
-                    break Poll::Ready(Ok(Some(s)));
+                    break Ok(Some(s));
                 }
             };
         }
     }
 
-    fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
-        while let Poll::Ready(frame) = self.inner.poll_control(cx)? {
+    async fn control(&mut self) -> Result<(), Error> {
+        while let frame = self.inner.control().await? {
             match frame {
                 Frame::Settings(_) => trace!("Got settings"),
                 Frame::Goaway(id) => {
                     if !id.is_push() {
-                        return Poll::Ready(Err(Code::H3_ID_ERROR
-                            .with_reason(format!("non-push StreamId in a GoAway frame: {}", id))));
+                        return Err(Code::H3_ID_ERROR
+                            .with_reason(format!("non-push StreamId in a GoAway frame: {}", id)));
                     }
                 }
                 f @ Frame::MaxPushId(_) | f @ Frame::CancelPush(_) => {
                     warn!("Control frame ignored {:?}", f);
                 }
                 frame => {
-                    return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED
-                        .with_reason(format!("on server control stream: {:?}", frame))))
+                    return Err(Code::H3_FRAME_UNEXPECTED
+                        .with_reason(format!("on server control stream: {:?}", frame)))
                 }
             }
         }
-        Poll::Pending
+        Ok(())
     }
 
-    fn poll_requests_completion(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+    async fn requests_completion(&mut self) {
         loop {
-            match self.request_end_recv.poll_recv(cx) {
+            match self.request_end_recv.recv().await {
                 // The channel is closed
-                Poll::Ready(None) => return Poll::Ready(()),
-                // A request has completed
-                Poll::Ready(Some(id)) => {
-                    self.ongoing_streams.remove(&id);
+                None => {
+                    return;
                 }
-                Poll::Pending => {
-                    if self.ongoing_streams.is_empty() {
-                        // Tell the caller there is not more ongoing requests.
-                        // Still, the completion of future requests will wake us.
-                        return Poll::Ready(());
-                    } else {
-                        return Poll::Pending;
-                    }
+                // A request has completed
+                Some(id) => {
+                    self.ongoing_streams.remove(&id);
                 }
             }
         }
@@ -323,7 +294,7 @@ where
 
 impl<S, B> RequestStream<S, B>
 where
-    S: quic::RecvStream + quic::SendStream<B>,
+    S: quic::RecvStream + quic::SendStream<B> + Send,
     B: Buf,
 {
     pub async fn send_response(&mut self, resp: Response<()>) -> Result<(), Error> {

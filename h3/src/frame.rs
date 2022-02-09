@@ -1,8 +1,5 @@
-use std::task::{Context, Poll};
-
+use async_trait::async_trait;
 use bytes::{Buf, Bytes};
-
-use futures::ready;
 use tracing::trace;
 
 use crate::{
@@ -46,35 +43,31 @@ where
         }
     }
 
-    pub fn poll_next(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<Frame<PayloadLen>>, Error>> {
+    pub async fn next(&mut self) -> Result<Option<Frame<PayloadLen>>, Error> {
         assert!(
             self.remaining_data == 0,
             "There is still data to read, please call poll_data() until it returns None."
         );
 
         loop {
-            let end = self.try_recv(cx)?;
+            let end = self.try_recv().await?;
 
             return match self.decoder.decode(&mut self.bufs)? {
                 Some(Frame::Data(PayloadLen(len))) => {
                     self.remaining_data = len;
-                    Poll::Ready(Ok(Some(Frame::Data(PayloadLen(len)))))
+                    Ok(Some(Frame::Data(PayloadLen(len))))
                 }
-                Some(frame) => Poll::Ready(Ok(Some(frame))),
+                Some(frame) => Ok(Some(frame)),
                 None => match end {
-                    // Recieved a chunk but frame is incomplete, poll until we get `Pending`.
-                    Poll::Ready(false) => continue,
-                    Poll::Pending => Poll::Pending,
-                    Poll::Ready(true) => {
+                    // Received a chunk but frame is incomplete, poll until we get `Pending`.
+                    false => continue,
+                    true => {
                         if self.bufs.has_remaining() {
-                            // Reached the end of recieve stream, but there is still some data:
+                            // Reached the end of receive stream, but there is still some data:
                             // The frame is incomplete.
-                            Poll::Ready(Err(Error::UnexpectedEnd))
+                            Err(Error::UnexpectedEnd)
                         } else {
-                            Poll::Ready(Ok(None))
+                            Ok(None)
                         }
                     }
                 },
@@ -82,25 +75,22 @@ where
         }
     }
 
-    pub fn poll_data(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<impl Buf>, Error>> {
+    pub async fn get_data(&mut self) -> Result<Option<impl Buf>, Error> {
         if self.remaining_data == 0 {
-            return Poll::Ready(Ok(None));
+            return Ok(None);
         };
 
-        let end = ready!(self.try_recv(cx))?;
+        while !self.try_recv().await? {}
         let data = self.bufs.take_chunk(self.remaining_data as usize);
 
-        match (data, end) {
-            (None, true) => Poll::Ready(Ok(None)),
-            (None, false) => Poll::Pending,
-            (Some(d), true)
-                if d.remaining() < self.remaining_data && !self.bufs.has_remaining() =>
-            {
-                Poll::Ready(Err(Error::UnexpectedEnd))
+        match data {
+            None => Ok(None),
+            Some(d) if d.remaining() < self.remaining_data && !self.bufs.has_remaining() => {
+                Err(Error::UnexpectedEnd)
             }
-            (Some(d), _) => {
+            Some(d) => {
                 self.remaining_data -= d.remaining();
-                Poll::Ready(Ok(Some(d)))
+                Ok(Some(d))
             }
         }
     }
@@ -117,42 +107,42 @@ where
         self.is_eos && !self.bufs.has_remaining()
     }
 
-    fn try_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<bool, Error>> {
+    async fn try_recv(&mut self) -> Result<bool, Error> {
         if self.is_eos {
-            return Poll::Ready(Ok(true));
+            return Ok(true);
         }
-        match self.stream.poll_data(cx) {
-            Poll::Ready(Err(e)) => Poll::Ready(Err(Error::Quic(e.into()))),
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Ok(None)) => {
+        match self.stream.get_data().await {
+            Err(e) => Err(Error::Quic(e.into())),
+            Ok(None) => {
                 self.is_eos = true;
-                Poll::Ready(Ok(true))
+                Ok(true)
             }
-            Poll::Ready(Ok(Some(mut d))) => {
+            Ok(Some(mut d)) => {
                 self.bufs.push_bytes(&mut d);
-                Poll::Ready(Ok(false))
+                Ok(false)
             }
         }
     }
 }
 
+#[async_trait]
 impl<T, B> SendStream<B> for FrameStream<T>
 where
-    T: SendStream<B> + RecvStream,
+    T: SendStream<B> + RecvStream + Send,
     B: Buf,
 {
     type Error = <T as SendStream<B>>::Error;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.stream.poll_ready(cx)
+    async fn ready(&mut self) -> Result<(), Self::Error> {
+        self.stream.ready().await
     }
 
     fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), Self::Error> {
         self.stream.send_data(data)
     }
 
-    fn poll_finish(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.stream.poll_finish(cx)
+    async fn finish(&mut self) -> Result<(), Self::Error> {
+        self.stream.finish().await
     }
 
     fn reset(&mut self, reset_code: u64) {
@@ -227,18 +217,17 @@ impl From<frame::Error> for Error {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::{collections::VecDeque, fmt, sync::Arc};
 
     use assert_matches::assert_matches;
     use bytes::{BufMut, BytesMut};
-    use futures::future::poll_fn;
-    use std::{collections::VecDeque, fmt, sync::Arc};
-    use tokio;
 
     use crate::{
         proto::{coding::Encode, frame::FrameType, varint::VarInt},
         quic,
     };
+
+    use super::*;
 
     // Decoder
 
@@ -313,21 +302,6 @@ mod tests {
 
     // FrameStream
 
-    macro_rules! assert_poll_matches {
-        ($poll_fn:expr, $match:pat) => {
-            assert_matches!(
-                poll_fn($poll_fn).await,
-                $match
-            );
-        };
-        ($poll_fn:expr, $match:pat if $cond:expr ) => {
-            assert_matches!(
-                poll_fn($poll_fn).await,
-                $match if $cond
-            );
-        }
-    }
-
     #[tokio::test]
     async fn poll_full_request() {
         let mut recv = FakeRecv::default();
@@ -340,22 +314,13 @@ mod tests {
 
         let mut stream = FrameStream::new(recv);
 
-        assert_poll_matches!(
-            |mut cx| stream.poll_next(&mut cx),
-            Ok(Some(Frame::Headers(_)))
-        );
-        assert_poll_matches!(
-            |mut cx| stream.poll_next(&mut cx),
-            Ok(Some(Frame::Data(PayloadLen(4))))
-        );
-        assert_poll_matches!(
-            |mut cx| to_bytes(stream.poll_data(&mut cx)),
+        assert_matches!(stream.next().await, Ok(Some(Frame::Headers(_))));
+        assert_matches!(stream.next().await, Ok(Some(Frame::Data(PayloadLen(4)))));
+        assert_matches!(
+            to_bytes(stream.get_data().await),
             Ok(Some(b)) if b.remaining() == 4
         );
-        assert_poll_matches!(
-            |mut cx| stream.poll_next(&mut cx),
-            Ok(Some(Frame::Headers(_)))
-        );
+        assert_matches!(stream.next().await, Ok(Some(Frame::Headers(_))));
     }
 
     #[tokio::test]
@@ -368,10 +333,7 @@ mod tests {
         recv.chunk(buf.split_to(buf.len() - 1));
         let mut stream = FrameStream::new(recv);
 
-        assert_poll_matches!(
-            |mut cx| stream.poll_next(&mut cx),
-            Err(Error::UnexpectedEnd)
-        );
+        assert_matches!(stream.next().await, Err(Error::UnexpectedEnd));
     }
 
     #[tokio::test]
@@ -387,13 +349,10 @@ mod tests {
         recv.chunk(buf.freeze());
         let mut stream = FrameStream::new(recv);
 
-        assert_poll_matches!(
-            |mut cx| stream.poll_next(&mut cx),
-            Ok(Some(Frame::Data(PayloadLen(4))))
-        );
+        assert_matches!(stream.next().await, Ok(Some(Frame::Data(PayloadLen(4)))));
 
         // There is still data to consume, poll_next should panic
-        let _ = poll_fn(|mut cx| stream.poll_next(&mut cx)).await;
+        let _ = stream.next().await;
     }
 
     #[tokio::test]
@@ -410,18 +369,15 @@ mod tests {
         let mut stream = FrameStream::new(recv);
 
         // We get the total size of data about to be received
-        assert_poll_matches!(
-            |mut cx| stream.poll_next(&mut cx),
-            Ok(Some(Frame::Data(PayloadLen(4))))
-        );
+        assert_matches!(stream.next().await, Ok(Some(Frame::Data(PayloadLen(4)))));
 
         // Then we get parts of body, chunked as they arrived
-        assert_poll_matches!(
-            |mut cx| to_bytes(stream.poll_data(&mut cx)),
+        assert_matches!(
+            to_bytes(stream.get_data().await),
             Ok(Some(b)) if b.remaining() == 2
         );
-        assert_poll_matches!(
-            |mut cx| to_bytes(stream.poll_data(&mut cx)),
+        assert_matches!(
+            to_bytes(stream.get_data().await),
             Ok(Some(b)) if b.remaining() == 2
         );
     }
@@ -438,14 +394,8 @@ mod tests {
         recv.chunk(buf.freeze());
         let mut stream = FrameStream::new(recv);
 
-        assert_poll_matches!(
-            |mut cx| stream.poll_next(&mut cx),
-            Ok(Some(Frame::Data(PayloadLen(4))))
-        );
-        assert_poll_matches!(
-            |mut cx| to_bytes(stream.poll_data(&mut cx)),
-            Err(Error::UnexpectedEnd)
-        );
+        assert_matches!(stream.next().await, Ok(Some(Frame::Data(PayloadLen(4)))));
+        assert_matches!(to_bytes(stream.get_data().await), Err(Error::UnexpectedEnd));
     }
 
     #[tokio::test]
@@ -470,12 +420,9 @@ mod tests {
         recv.chunk(buf.freeze());
         let mut stream = FrameStream::new(recv);
 
-        assert_poll_matches!(
-            |mut cx| stream.poll_next(&mut cx),
-            Ok(Some(Frame::Data(PayloadLen(4))))
-        );
-        assert_poll_matches!(
-            |mut cx| to_bytes(stream.poll_data(&mut cx)),
+        assert_matches!(stream.next().await, Ok(Some(Frame::Data(PayloadLen(4)))));
+        assert_matches!(
+            to_bytes(stream.get_data().await),
             Ok(Some(b)) if &*b == b"body"
         );
     }
@@ -492,22 +439,19 @@ mod tests {
 
         let mut stream = FrameStream::new(recv);
 
-        assert_poll_matches!(
-            |mut cx| stream.poll_next(&mut cx),
-            Ok(Some(Frame::Data(PayloadLen(4))))
-        );
+        assert_matches!(stream.next().await, Ok(Some(Frame::Data(PayloadLen(4)))));
 
         buf.truncate(0);
         buf.put_slice(&b"dy"[..]);
         stream.bufs.push_bytes(&mut buf.freeze());
 
-        assert_poll_matches!(
-            |mut cx| to_bytes(stream.poll_data(&mut cx)),
+        assert_matches!(
+            to_bytes(stream.get_data().await),
             Ok(Some(b)) if &*b == b"bo"
         );
 
-        assert_poll_matches!(
-            |mut cx| to_bytes(stream.poll_data(&mut cx)),
+        assert_matches!(
+            to_bytes(stream.get_data().await),
             Ok(Some(b)) if &*b == b"dy"
         );
     }
@@ -526,15 +470,13 @@ mod tests {
         }
     }
 
+    #[async_trait]
     impl RecvStream for FakeRecv {
         type Buf = Bytes;
         type Error = FakeError;
 
-        fn poll_data(
-            &mut self,
-            _: &mut Context<'_>,
-        ) -> Poll<Result<Option<Self::Buf>, Self::Error>> {
-            Poll::Ready(Ok(self.chunks.pop_front()))
+        async fn get_data(&mut self) -> Result<Option<Self::Buf>, Self::Error> {
+            Ok(self.chunks.pop_front())
         }
 
         fn stop_sending(&mut self, _: u64) {
@@ -568,7 +510,7 @@ mod tests {
         }
     }
 
-    fn to_bytes(x: Poll<Result<Option<impl Buf>, Error>>) -> Poll<Result<Option<Bytes>, Error>> {
-        x.map(|b| b.map(|b| b.map(|mut b| b.copy_to_bytes(b.remaining()))))
+    fn to_bytes(x: Result<Option<impl Buf>, Error>) -> Result<Option<Bytes>, Error> {
+        x.map(|b| b.map(|mut b| b.copy_to_bytes(b.remaining())))
     }
 }

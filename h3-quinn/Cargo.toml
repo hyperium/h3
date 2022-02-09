@@ -7,8 +7,8 @@ edition = "2018"
 [dependencies]
 h3 = { path = "../h3" }
 bytes = "1"
-quinn = "0.8.0"
-quinn-proto = "0.8.0"
+quinn = { git = "https://www.github.com/quinn-rs/quinn", branch = "main" }
+quinn-proto = { git = "https://www.github.com/quinn-rs/quinn", branch = "main" }
 futures = "0.3"
 
 [dev-dependencies]

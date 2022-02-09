@@ -2,7 +2,7 @@ use std::{
     convert::TryFrom,
     marker::PhantomData,
     sync::{atomic::AtomicUsize, Arc},
-    task::{Context, Poll, Waker},
+    task::{Poll, Waker},
 };
 
 use bytes::{Buf, Bytes, BytesMut};
@@ -71,7 +71,9 @@ where
         } = parts;
         let headers = Header::request(method, uri, headers)?;
 
-        let mut stream = future::poll_fn(|cx| self.open.poll_open_bidi(cx))
+        let mut stream = self
+            .open
+            .open_bidi()
             .await
             .map_err(|e| self.maybe_conn_err(e))?;
 
@@ -162,16 +164,16 @@ where
         self.inner.shutdown(max_requests).await
     }
 
-    pub fn poll_close(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
-        while let Poll::Ready(result) = self.inner.poll_control(cx) {
+    pub async fn close(&mut self) -> Result<(), Error> {
+        while let result = self.inner.control().await {
             match result {
                 Ok(Frame::Settings(_)) => trace!("Got settings"),
                 Ok(Frame::Goaway(id)) => {
                     if !id.is_request() {
-                        return Poll::Ready(Err(Code::H3_ID_ERROR.with_reason(format!(
+                        return Err(Code::H3_ID_ERROR.with_reason(format!(
                             "non-request StreamId in a GoAway frame: {}",
                             id
-                        ))));
+                        )));
                     }
                     info!(
                         "Server initiated gracefull shutdown, last: StreamId({})",
@@ -179,8 +181,8 @@ where
                     );
                 }
                 Ok(frame) => {
-                    return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED
-                        .with_reason(format!("on client control stream: {:?}", frame))))
+                    return Err(Code::H3_FRAME_UNEXPECTED
+                        .with_reason(format!("on client control stream: {:?}", frame)))
                 }
                 Err(e) => {
                     let connection_error = self
@@ -191,26 +193,25 @@ where
                         .as_ref()
                         .cloned();
 
-                    match connection_error {
-                        Some(e) if e.is_closed() => return Poll::Ready(Ok(())),
-                        Some(e) => return Poll::Ready(Err(e)),
+                    return match connection_error {
+                        Some(e) if e.is_closed() => Ok(()),
+                        Some(e) => Err(e),
                         None => {
                             self.inner.shared.write("poll_close error").error = e.clone().into();
-                            return Poll::Ready(Err(e));
+                            Err(e)
                         }
-                    }
+                    };
                 }
             }
         }
 
-        if self.inner.poll_accept_request(cx).is_ready() {
-            return Poll::Ready(Err(self.inner.close(
+        if self.inner.accept_request().await.is_ok() {
+            return Err(self.inner.close(
                 Code::H3_STREAM_CREATION_ERROR,
                 "client received a bidirectionnal stream",
-            )));
+            ));
         }
-
-        Poll::Pending
+        Ok(())
     }
 }
 
@@ -282,7 +283,10 @@ where
     S: quic::RecvStream,
 {
     pub async fn recv_response(&mut self) -> Result<Response<()>, Error> {
-        let mut frame = future::poll_fn(|cx| self.inner.stream.poll_next(cx))
+        let mut frame = self
+            .inner
+            .stream
+            .next()
             .await
             .map_err(|e| self.maybe_conn_err(e))?
             .ok_or_else(|| {
@@ -339,7 +343,7 @@ where
 
 impl<S, B> RequestStream<S, B>
 where
-    S: quic::RecvStream + quic::SendStream<B>,
+    S: quic::RecvStream + quic::SendStream<B> + Send,
     B: Buf,
 {
     pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
