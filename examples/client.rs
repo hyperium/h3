@@ -120,8 +120,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         while let Some(mut chunk) = stream.recv_data().await? {
             let mut out = tokio::io::stdout();
-            out.write_all_buf(&mut chunk).await.expect("write_all");
-            out.flush().await.expect("flush");
+            out.write_all_buf(&mut chunk).await?;
+            out.flush().await?;
         }
         Ok::<_, Box<dyn std::error::Error>>(())
     };

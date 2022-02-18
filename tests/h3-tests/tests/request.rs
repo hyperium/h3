@@ -2,13 +2,14 @@ use std::time::Duration;
 
 use assert_matches::assert_matches;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use futures::future;
+use futures::{future, Future};
 use h3_quinn::ReadError;
 use http::{request, HeaderMap, Request, Response, StatusCode};
 
 use h3::{
     client,
     error::{Code, Kind},
+    quic,
     server,
     test_helpers::{
         proto::{
@@ -71,6 +72,36 @@ async fn get() {
             .await
             .expect("send_data");
         request_stream.finish().await.expect("finish");
+    };
+
+    tokio::join!(server_fut, client_fut);
+}
+
+async fn run_test<Client, ClientFut, Server, ServerC, ServerFut>(client_fn: Client, service_fn: Server)
+where Client: FnOnce(client::SendRequest<h3_quinn::OpenStreams, Bytes>) -> ClientFut,
+      ClientFut: Future<Output = ()>,
+      Server: FnOnce(server::Connection<ServerC, Bytes>) -> ServerFut,
+      ServerFut: Future<Output = ()>,
+      ServerC: quic::Connection<Bytes>,
+{
+    h3_tests::init_tracing();
+    let mut pair = Pair::default();
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
+        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let req_fut = async {
+            client_fn(client).await
+        };
+        tokio::select! { _ = req_fut => (), _ = drive_fut => () }
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming_req = server::Connection::new(conn).await.unwrap();
+
+        service_fn(incoming_req).await
     };
 
     tokio::join!(server_fut, client_fut);
@@ -988,6 +1019,18 @@ async fn request_valid_header_trailer() {
         trailers_encode(buf, trailers);
     })
     .await;
+}
+
+// --- Invalid API use
+
+#[tokio::test]
+async fn poll_data_before_response() {
+    todo!();
+}
+
+#[tokio::test]
+async fn poll_trailers_before_data() {
+    todo!();
 }
 
 // Frames of unknown types (Section 9), including reserved frames (Section
