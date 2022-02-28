@@ -18,3 +18,4 @@ assert_matches = "1.5"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros"] }
+quinn = { features = ["tls-rustls"] }
