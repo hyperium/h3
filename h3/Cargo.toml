@@ -18,4 +18,4 @@ tracing = "0.1.18"
 [dev-dependencies]
 assert_matches= "1.3.0"
 tokio = { version = "1", features = ["rt", "macros"] }
-proptest = "0.10.1"
+proptest = "1"
