@@ -290,7 +290,7 @@ async fn header_too_big_response_from_server() {
         assert_matches!(
             err_kind,
             Kind::HeaderTooBig {
-                actual_size: 179,
+                actual_size: 42,
                 max_size: 12,
                 ..
             }

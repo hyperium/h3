@@ -116,19 +116,18 @@ where
         };
 
         let qpack::Decoded {
-            fields, mem_size, ..
-        } = qpack::decode_stateless(&mut encoded)?;
-        if mem_size > self.max_field_section_size {
-            request_stream
-                .send_response(
-                    http::Response::builder()
-                        .status(StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE)
-                        .body(())
-                        .expect("header too big response"),
-                )
-                .await?;
-            return Err(Error::header_too_big(mem_size, self.max_field_section_size));
-        }
+            fields, ..
+        } = match qpack::decode_stateless(&mut encoded,self.max_field_section_size){
+            Err(qpack::DecoderError::HeaderToLong(cancel_size)) => {request_stream
+                .send_response(http::Response::builder()
+                    .status(StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE)
+                    .body(())
+                    .expect("header too big response"),
+                ).await?;
+            return Err(Error::header_too_big(cancel_size, self.max_field_section_size))},
+            Ok(decoded) => decoded,
+            Err(e) => return Err(e.into()),
+        };
 
         let (method, uri, headers) = Header::try_from(fields)?.into_request_parts()?;
 

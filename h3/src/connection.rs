@@ -340,6 +340,7 @@ where
 
     /// Receive trailers
     pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
+        
         let mut trailers = if let Some(encoded) = self.trailers.take() {
             encoded
         } else {
@@ -366,11 +367,12 @@ where
         }
 
         let qpack::Decoded {
-            fields, mem_size, ..
-        } = qpack::decode_stateless(&mut trailers)?;
-        if mem_size > self.max_field_section_size {
-            return Err(Error::header_too_big(mem_size, self.max_field_section_size));
-        }
+            fields, ..
+        } =  match qpack::decode_stateless(&mut trailers,self.max_field_section_size){
+            Err(qpack::DecoderError::HeaderToLong(cancel_size)) => return Err(Error::header_too_big(cancel_size, self.max_field_section_size)),
+            Ok(decoded) => decoded,
+            Err(e) => return Err(e.into()),
+        };
 
         Ok(Some(Header::try_from(fields)?.into_fields()))
     }
