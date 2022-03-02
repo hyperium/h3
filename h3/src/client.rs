@@ -6,7 +6,7 @@ use std::{
 };
 
 use bytes::{Buf, Bytes, BytesMut};
-use futures::future;
+use futures_util::future;
 use http::{request, HeaderMap, Response};
 use tracing::{info, trace};
 

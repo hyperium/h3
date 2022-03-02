@@ -5,7 +5,7 @@ use std::{
 };
 
 use bytes::{Buf, Bytes, BytesMut};
-use futures::future;
+use futures_util::future;
 use http::{response, HeaderMap, Request, Response, StatusCode};
 use quic::StreamId;
 use tokio::sync::mpsc;

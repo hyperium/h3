@@ -1,7 +1,7 @@
 use std::task::{Context, Poll};
 
 use bytes::{Buf, BufMut as _, Bytes};
-use futures::{future, ready};
+use futures_util::{future, ready};
 use quic::RecvStream;
 
 use crate::{

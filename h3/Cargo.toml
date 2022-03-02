@@ -10,7 +10,7 @@ test_helpers = []
 
 [dependencies]
 bytes = "1"
-futures = "0.3"
+futures-util = { version = "0.3", default-features = false }
 http = "0.2.3"
 tokio = { version = "1", features = ["sync"] }
 tracing = "0.1.18"
