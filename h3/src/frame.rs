@@ -2,7 +2,7 @@ use std::task::{Context, Poll};
 
 use bytes::{Buf, Bytes};
 
-use futures::ready;
+use futures_util::ready;
 use tracing::trace;
 
 use crate::{
@@ -231,7 +231,7 @@ mod tests {
 
     use assert_matches::assert_matches;
     use bytes::{BufMut, BytesMut};
-    use futures::future::poll_fn;
+    use futures_util::future::poll_fn;
     use std::{collections::VecDeque, fmt, sync::Arc};
     use tokio;
 

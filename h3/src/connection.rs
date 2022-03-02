@@ -6,7 +6,7 @@ use std::{
 };
 
 use bytes::{Buf, Bytes, BytesMut};
-use futures::{future, ready};
+use futures_util::{future, ready};
 use http::HeaderMap;
 
 use crate::{

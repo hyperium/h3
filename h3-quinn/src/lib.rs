@@ -10,7 +10,11 @@ use std::{
 };
 
 use bytes::{Buf, Bytes};
-use futures::{ready, AsyncWrite as _, FutureExt as _, StreamExt as _};
+use futures_util::future::FutureExt as _;
+use futures_util::io::AsyncWrite as _;
+use futures_util::ready;
+use futures_util::stream::StreamExt as _;
+
 pub use quinn::{
     self, crypto::Session, Endpoint, IncomingBiStreams, IncomingUniStreams, NewConnection, OpenBi,
     OpenUni, VarInt, WriteError,
