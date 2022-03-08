@@ -289,9 +289,8 @@ where
                 Code::H3_GENERAL_PROTOCOL_ERROR.with_reason("Did not receive response headers")
             })?;
 
-        let decoded;
-        if let Frame::Headers(ref mut encoded) = frame {
-            decoded = match qpack::decode_stateless(encoded, self.inner.max_field_section_size) {
+        let decoded = if let Frame::Headers(ref mut encoded) = frame {
+            match qpack::decode_stateless(encoded, self.inner.max_field_section_size) {
                 Err(qpack::DecoderError::HeaderTooLong(cancel_size)) => {
                     self.inner.stop_sending(Code::H3_REQUEST_CANCELLED);
                     return Err(Error::header_too_big(
@@ -301,7 +300,7 @@ where
                 }
                 Ok(decoded) => decoded,
                 Err(e) => return Err(e.into()),
-            };
+            }
         } else {
             return Err(
                 Code::H3_FRAME_UNEXPECTED.with_reason("First response frame is not headers")
