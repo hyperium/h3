@@ -35,6 +35,7 @@ pub enum Error {
     MissingRefs(usize),
     BadBaseIndex(isize),
     UnexpectedEnd,
+    HeaderTooLong(u64),
 }
 
 impl std::error::Error for Error {}
@@ -51,6 +52,7 @@ impl std::fmt::Display for Error {
             Error::MissingRefs(n) => write!(f, "missing {} refs to decode bloc", n),
             Error::BadBaseIndex(i) => write!(f, "out of bounds base index: {}", i),
             Error::UnexpectedEnd => write!(f, "unexpected end"),
+            Error::HeaderTooLong(_) => write!(f, "header too long"),
         }
     }
 }
@@ -205,7 +207,7 @@ impl Decoder {
 }
 
 // Decode a header bloc received on Request or Push stream. (draft: 4.5)
-pub fn decode_stateless<T: Buf>(buf: &mut T) -> Result<Decoded, Error> {
+pub fn decode_stateless<T: Buf>(buf: &mut T, max_size: u64) -> Result<Decoded, Error> {
     let (required_ref, _base) = HeaderPrefix::decode(buf)?.get(0, 0)?;
 
     if required_ref > 0 {
@@ -235,6 +237,10 @@ pub fn decode_stateless<T: Buf>(buf: &mut T) -> Result<Decoded, Error> {
             _ => return Err(Error::UnknownPrefix(buf.chunk()[0])),
         };
         mem_size += field.mem_size() as u64;
+        // Cancel decoding if the header is considered too big
+        if mem_size > max_size {
+            return Err(Error::HeaderTooLong(mem_size));
+        }
         fields.push(field);
     }
 
@@ -322,6 +328,20 @@ impl From<ParseError> for Error {
 mod tests {
     use super::*;
     use crate::qpack::tests::helpers::{build_table_with_size, TABLE_SIZE};
+
+    #[test]
+    fn test_header_too_long() {
+        let mut trailers = http::HeaderMap::new();
+        trailers.insert("trailer", "value".parse().unwrap());
+        trailers.insert("trailer2", "value2".parse().unwrap());
+        let mut buf = bytes::BytesMut::new();
+        let _ = crate::qpack::encode_stateless(
+            &mut buf,
+            crate::proto::headers::Header::trailer(trailers),
+        );
+        let result = decode_stateless(&mut buf, 2);
+        assert_eq!(result, Err(Error::HeaderTooLong(44)));
+    }
 
     /**
      * https://tools.ietf.org/html/draft-ietf-quic-qpack-00
