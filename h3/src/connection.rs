@@ -80,6 +80,8 @@ where
     conn: C,
     control_send: C::SendStream,
     control_recv: Option<FrameStream<C::RecvStream>>,
+    decoder_recv: Option<AcceptedRecvStream<C::RecvStream>>,
+    encoder_recv: Option<AcceptedRecvStream<C::RecvStream>>,
     pending_recv_streams: Vec<AcceptRecvStream<C::RecvStream>>,
     // The id of the last stream received by this connection:
     // request and push stream for server and clients respectively.
@@ -117,6 +119,8 @@ where
             conn,
             control_send,
             control_recv: None,
+            decoder_recv: None,
+            encoder_recv: None,
             pending_recv_streams: Vec::with_capacity(3),
             last_accepted_stream: None,
             got_peer_settings: false,
@@ -184,14 +188,31 @@ where
                 .pending_recv_streams
                 .remove(index - removed)
                 .into_stream()?;
-            if let AcceptedRecvStream::Control(s) = stream {
-                if self.control_recv.is_some() {
-                    return Poll::Ready(Err(
-                        self.close(Code::H3_STREAM_CREATION_ERROR, "got two control streams")
-                    ));
+            match stream {
+                AcceptedRecvStream::Control(s) => {
+                    if self.control_recv.is_some() {
+                        return Poll::Ready(Err(
+                            self.close(Code::H3_STREAM_CREATION_ERROR, "got two control streams")
+                        ));
+                    }
+                    self.control_recv = Some(s);
                 }
-                self.control_recv = Some(s);
-            };
+                enc @ AcceptedRecvStream::Encoder(_) => {
+                    if let Some(_prev) = self.encoder_recv.replace(enc) {
+                        return Poll::Ready(Err(
+                            self.close(Code::H3_STREAM_CREATION_ERROR, "got two encoder streams")
+                        ));
+                    }
+                }
+                dec @ AcceptedRecvStream::Decoder(_) => {
+                    if let Some(_prev) = self.decoder_recv.replace(dec) {
+                        return Poll::Ready(Err(
+                            self.close(Code::H3_STREAM_CREATION_ERROR, "got two decoder streams")
+                        ));
+                    }
+                }
+                _ => (),
+            }
         }
 
         Poll::Pending
