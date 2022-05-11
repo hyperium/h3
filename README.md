@@ -19,7 +19,7 @@ The eventual goal is to use `h3` as an internal dependency of [hyper][].
 
 ## Getting Started
 
-The [examples][] directory can help get started in two ways:
+The [examples](./examples) directory can help get started in two ways:
 
 - There are ready-to-use `client` and `server` binaries to interact with _other_ HTTP/3 peers. Check the README in that directory.
 - The source code of those examples can help teach how to use `h3` as either a client or a server.
