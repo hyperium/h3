@@ -42,7 +42,7 @@ pub trait Connection<B: Buf> {
     /// Error type yielded by this trait methods
     type Error: Into<Box<dyn Error>>;
 
-    /// Accept an incoming unidirecional stream
+    /// Accept an incoming unidirectional stream
     ///
     /// Returning `None` implies the connection is closing or closed.
     fn poll_accept_recv(
@@ -50,7 +50,7 @@ pub trait Connection<B: Buf> {
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Option<Self::RecvStream>, Self::Error>>;
 
-    /// Accept an incoming bidirecional stream
+    /// Accept an incoming bidirectional stream
     ///
     /// Returning `None` implies the connection is closing or closed.
     fn poll_accept_bidi(

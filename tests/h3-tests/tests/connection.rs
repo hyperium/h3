@@ -221,7 +221,7 @@ async fn client_error_on_bidi_recv() {
             assert_matches!(
                 $e.map(|_| ()).unwrap_err().kind(),
                 Kind::Application { reason: Some(reason), code: Code::H3_STREAM_CREATION_ERROR, .. }
-                if *reason == *"client received a bidirectionnal stream");
+                if *reason == *"client received a bidirectional stream");
         }
     }
 

@@ -258,12 +258,14 @@ where
 
 pub struct Builder {
     pub(super) max_field_section_size: u64,
+    pub(super) send_grease_setting: bool,
 }
 
 impl Builder {
     pub(super) fn new() -> Self {
         Builder {
             max_field_section_size: VarInt::MAX.0,
+            send_grease_setting: true,
         }
     }
 
@@ -285,6 +287,7 @@ impl Builder {
                 conn,
                 self.max_field_section_size,
                 SharedStateRef::default(),
+                self.send_grease_setting,
             )
             .await?,
             max_field_section_size: self.max_field_section_size,

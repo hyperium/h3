@@ -70,7 +70,7 @@ where
                     Poll::Pending => Poll::Pending,
                     Poll::Ready(true) => {
                         if self.bufs.has_remaining() {
-                            // Reached the end of recieve stream, but there is still some data:
+                            // Reached the end of receive stream, but there is still some data:
                             // The frame is incomplete.
                             Poll::Ready(Err(Error::UnexpectedEnd))
                         } else {

@@ -173,10 +173,7 @@ where
                             id
                         ))));
                     }
-                    info!(
-                        "Server initiated gracefull shutdown, last: StreamId({})",
-                        id
-                    );
+                    info!("Server initiated graceful shutdown, last: StreamId({})", id);
                 }
                 Ok(frame) => {
                     return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED
@@ -206,7 +203,7 @@ where
         if self.inner.poll_accept_request(cx).is_ready() {
             return Poll::Ready(Err(self.inner.close(
                 Code::H3_STREAM_CREATION_ERROR,
-                "client received a bidirectionnal stream",
+                "client received a bidirectional stream",
             )));
         }
 
@@ -246,8 +243,13 @@ impl Builder {
 
         Ok((
             Connection {
-                inner: ConnectionInner::new(quic, self.max_field_section_size, conn_state.clone())
-                    .await?,
+                inner: ConnectionInner::new(
+                    quic,
+                    self.max_field_section_size,
+                    conn_state.clone(),
+                    true,
+                )
+                .await?,
             },
             SendRequest {
                 open,

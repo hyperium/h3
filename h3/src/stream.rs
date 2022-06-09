@@ -36,7 +36,7 @@ const WRITE_BUF_ENCODE_SIZE: usize = StreamType::MAX_ENCODED_SIZE + Frame::MAX_E
 /// Wrap frames to encode their header on the stack before sending them on the wire
 ///
 /// Implements `Buf` so wire data is seamlessly available for transport layer transmits:
-/// `Buf::chunk()` will yield the encoded header, then the payload. For unidirectionnal streams,
+/// `Buf::chunk()` will yield the encoded header, then the payload. For unidirectional streams,
 /// this type makes it possible to prefix wire data with the `StreamType`.
 ///
 /// Conveying frames as `Into<WriteBuf>` makes it possible to encode only when generating wire-format
