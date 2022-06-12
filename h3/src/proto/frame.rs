@@ -1,5 +1,4 @@
 use bytes::{Buf, BufMut, Bytes};
-use rand::Rng;
 use std::{convert::TryInto, fmt};
 use tracing::trace;
 
@@ -323,8 +322,7 @@ impl SettingId {
     /// returns a SettingId type with random number of the 0x1f * N + 0x21
     /// format within the range of the Varint implementation
     pub fn grease() -> Self {
-        let mut ran = rand::thread_rng();
-        SettingId(ran.gen_range(0..0x210842108421083) * 0x1f + 0x21)
+        SettingId(fastrand::u64(0..0x210842108421083) * 0x1f + 0x21)
     }
 
     fn is_supported(self) -> bool {

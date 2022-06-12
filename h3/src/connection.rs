@@ -109,7 +109,7 @@ where
             .insert(SettingId::MAX_HEADER_LIST_SIZE, max_field_section_size)
             .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
 
-        // Grease Settings (https://quicwg.org/base-drafts/draft-ietf-quic-http.html#section-7.2.4.1)
+        // Grease Settings (https://httpwg.org/specs/rfc9114.html#rfc.section.7.2.4.1)
         if grease {
             settings.insert(SettingId::grease(), 0).unwrap();
         }
