@@ -1,6 +1,5 @@
 use std::{
     convert::TryFrom,
-    marker::PhantomData,
     sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
     task::{Context, Poll},
 };
@@ -71,10 +70,9 @@ pub trait ConnectionState {
     }
 }
 
-pub struct ConnectionInner<C, B>
+pub struct ConnectionInner<C>
 where
-    C: quic::Connection<B>,
-    B: Buf,
+    C: quic::Connection,
 {
     pub(super) shared: SharedStateRef,
     conn: C,
@@ -89,10 +87,9 @@ where
     got_peer_settings: bool,
 }
 
-impl<C, B> ConnectionInner<C, B>
+impl<C> ConnectionInner<C>
 where
-    C: quic::Connection<B>,
-    B: Buf,
+    C: quic::Connection,
 {
     pub async fn new(
         mut conn: C,
@@ -110,7 +107,7 @@ where
 
         stream::write(
             &mut control_send,
-            (StreamType::CONTROL, Frame::Settings(settings)),
+            (StreamType::CONTROL, Frame::<Bytes>::Settings(settings)),
         )
         .await?;
 
@@ -136,7 +133,7 @@ where
 
         self.shared.write("graceful shutdown").closing = Some(max_id);
 
-        stream::write(&mut self.control_send, Frame::Goaway(max_id)).await
+        stream::write(&mut self.control_send, Frame::<Bytes>::Goaway(max_id)).await
     }
 
     pub fn poll_accept_request(
@@ -306,33 +303,31 @@ where
     }
 }
 
-pub struct RequestStream<S, B> {
+pub struct RequestStream<S> {
     pub(super) stream: S,
     pub(super) trailers: Option<Bytes>,
     pub(super) conn_state: SharedStateRef,
     pub(super) max_field_section_size: u64,
-    _phantom_buffer: PhantomData<B>,
 }
 
-impl<S, B> RequestStream<S, B> {
+impl<S> RequestStream<S> {
     pub fn new(stream: S, max_field_section_size: u64, conn_state: SharedStateRef) -> Self {
         Self {
             stream,
             conn_state,
             max_field_section_size,
             trailers: None,
-            _phantom_buffer: PhantomData,
         }
     }
 }
 
-impl<S, B> ConnectionState for RequestStream<S, B> {
+impl<S> ConnectionState for RequestStream<S> {
     fn shared_state(&self) -> &SharedStateRef {
         &self.conn_state
     }
 }
 
-impl<S, B> RequestStream<FrameStream<S>, B>
+impl<S> RequestStream<FrameStream<S>>
 where
     S: quic::RecvStream,
 {
@@ -406,13 +401,12 @@ where
     }
 }
 
-impl<S, B> RequestStream<FrameStream<S>, B>
+impl<S> RequestStream<FrameStream<S>>
 where
-    S: quic::SendStream<B> + quic::RecvStream,
-    B: Buf,
+    S: quic::SendStream + quic::RecvStream,
 {
     /// Send some data on the response body.
-    pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
+    pub async fn send_data<B: Buf>(&mut self, buf: B) -> Result<(), Error> {
         let frame = Frame::Data(buf);
         stream::write(&mut self.stream, frame)
             .await
@@ -433,7 +427,7 @@ where
             return Err(Error::header_too_big(mem_size, max_mem_size));
         }
 
-        stream::write(&mut self.stream, Frame::Headers(block.freeze()))
+        stream::write(&mut self.stream, Frame::<Bytes>::Headers(block.freeze()))
             .await
             .map_err(|e| self.maybe_conn_err(e))?;
 
@@ -441,9 +435,6 @@ where
     }
 
     pub async fn finish(&mut self) -> Result<(), Error> {
-        future::poll_fn(|cx| self.stream.poll_ready(cx))
-            .await
-            .map_err(|e| self.maybe_conn_err(e))?;
         future::poll_fn(|cx| self.stream.poll_finish(cx))
             .await
             .map_err(|e| self.maybe_conn_err(e))

@@ -21,13 +21,12 @@ use crate::{
 #[inline]
 pub(crate) async fn write<S, D, B>(stream: &mut S, data: D) -> Result<(), Error>
 where
-    S: SendStream<B>,
+    S: SendStream,
     D: Into<WriteBuf<B>>,
     B: Buf,
 {
-    stream.send_data(data)?;
-    future::poll_fn(|cx| stream.poll_ready(cx)).await?;
-
+    let mut write_buf: WriteBuf<B> = data.into();
+    future::poll_fn(|cx| stream.poll_write(&mut write_buf, cx)).await?;
     Ok(())
 }
 

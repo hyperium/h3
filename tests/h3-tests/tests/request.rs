@@ -67,7 +67,7 @@ async fn get() {
             .await
             .expect("send_response");
         request_stream
-            .send_data("wonderful hypertext".into())
+            .send_data(Bytes::from("wonderful hypertext"))
             .await
             .expect("send_data");
         request_stream.finish().await.expect("finish");
@@ -123,7 +123,7 @@ async fn get_with_trailers_unknown_content_type() {
             .await
             .expect("send_response");
         request_stream
-            .send_data("wonderful hypertext".into())
+            .send_data(Bytes::from("wonderful hypertext"))
             .await
             .expect("send_data");
         let mut trailers = HeaderMap::new();
@@ -184,7 +184,7 @@ async fn get_with_trailers_known_content_type() {
             .await
             .expect("send_response");
         request_stream
-            .send_data("wonderful hypertext".into())
+            .send_data(Bytes::from("wonderful hypertext"))
             .await
             .expect("send_data");
 
@@ -216,7 +216,7 @@ async fn post() {
                 .expect("request");
 
             request_stream
-                .send_data("wonderful json".into())
+                .send_data(Bytes::from("wonderful json"))
                 .await
                 .expect("send_data");
             request_stream.finish().await.expect("client finish");
@@ -317,7 +317,7 @@ async fn header_too_big_response_from_server_trailers() {
                 .await
                 .expect("request");
             request_stream
-                .send_data("wonderful json".into())
+                .send_data(Bytes::from("wonderful json"))
                 .await
                 .expect("send_data");
 
@@ -430,7 +430,7 @@ async fn header_too_big_client_error_trailer() {
                 .await
                 .expect("request");
             request_stream
-                .send_data("wonderful json".into())
+                .send_data(Bytes::from("wonderful json"))
                 .await
                 .expect("send_data");
 
@@ -486,7 +486,7 @@ async fn header_too_big_discard_from_client() {
         // Do not poll driver so client doesn't know about server's max_field section size setting
         let (_conn, mut client) = client::builder()
             .max_field_section_size(12)
-            .build::<_, _, Bytes>(pair.client().await)
+            .build(pair.client().await)
             .await
             .expect("client init");
         let mut request_stream = client
@@ -535,7 +535,7 @@ async fn header_too_big_discard_from_client() {
         // Keep sending: wait for the stream to be cancelled by the client
         let mut err = None;
         for _ in 0..100 {
-            if let Err(e) = request_stream.send_data("some data".into()).await {
+            if let Err(e) = request_stream.send_data(Bytes::from("some data")).await {
                 err = Some(e);
                 break;
             }
@@ -564,7 +564,7 @@ async fn header_too_big_discard_from_client_trailers() {
         // Do not poll driver so client doesn't know about server's max_field section size setting
         let (mut driver, mut client) = client::builder()
             .max_field_section_size(200)
-            .build::<_, _, Bytes>(pair.client().await)
+            .build::<_, _>(pair.client().await)
             .await
             .expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
@@ -613,7 +613,7 @@ async fn header_too_big_discard_from_client_trailers() {
             .expect("send_response");
 
         request_stream
-            .send_data("wonderful hypertext".into())
+            .send_data(Bytes::from("wonderful hypertext"))
             .await
             .expect("send_data");
 
@@ -729,7 +729,7 @@ async fn header_too_big_server_error_trailers() {
             .await
             .unwrap();
         request_stream
-            .send_data("wonderful hypertext".into())
+            .send_data(Bytes::from("wonderful hypertext"))
             .await
             .expect("send_data");
 

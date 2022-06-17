@@ -25,12 +25,11 @@ pub fn builder() -> Builder {
     Builder::new()
 }
 
-pub struct Connection<C, B>
+pub struct Connection<C>
 where
-    C: quic::Connection<B>,
-    B: Buf,
+    C: quic::Connection,
 {
-    inner: ConnectionInner<C, B>,
+    inner: ConnectionInner<C>,
     max_field_section_size: u64,
     // List of all incoming streams that are currently running.
     ongoing_streams: HashSet<StreamId>,
@@ -39,33 +38,31 @@ where
     request_end_send: mpsc::UnboundedSender<StreamId>,
 }
 
-impl<C, B> ConnectionState for Connection<C, B>
+impl<C> ConnectionState for Connection<C>
 where
-    C: quic::Connection<B>,
-    B: Buf,
+    C: quic::Connection,
 {
     fn shared_state(&self) -> &SharedStateRef {
         &self.inner.shared
     }
 }
 
-impl<C> Connection<C, Bytes>
+impl<C> Connection<C>
 where
-    C: quic::Connection<Bytes>,
+    C: quic::Connection,
 {
     pub async fn new(conn: C) -> Result<Self, Error> {
         Ok(builder().build(conn).await?)
     }
 }
 
-impl<C, B> Connection<C, B>
+impl<C> Connection<C>
 where
-    C: quic::Connection<B>,
-    B: Buf,
+    C: quic::Connection,
 {
     pub async fn accept(
         &mut self,
-    ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
+    ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream>)>, Error> {
         let mut stream = match future::poll_fn(|cx| self.poll_accept_request(cx)).await {
             Ok(Some(s)) => FrameStream::new(s),
             Ok(None) => {
@@ -246,10 +243,9 @@ where
     }
 }
 
-impl<C, B> Drop for Connection<C, B>
+impl<C> Drop for Connection<C>
 where
-    C: quic::Connection<B>,
-    B: Buf,
+    C: quic::Connection,
 {
     fn drop(&mut self) {
         self.inner.close(Code::H3_NO_ERROR, "");
@@ -274,10 +270,9 @@ impl Builder {
 }
 
 impl Builder {
-    pub async fn build<C, B>(&self, conn: C) -> Result<Connection<C, B>, Error>
+    pub async fn build<C>(&self, conn: C) -> Result<Connection<C>, Error>
     where
-        C: quic::Connection<B>,
-        B: Buf,
+        C: quic::Connection,
     {
         let (sender, receiver) = mpsc::unbounded_channel();
         Ok(Connection {
@@ -295,16 +290,16 @@ impl Builder {
     }
 }
 
-pub struct RequestStream<S, B>
+pub struct RequestStream<S>
 where
     S: quic::RecvStream,
 {
-    inner: connection::RequestStream<FrameStream<S>, B>,
+    inner: connection::RequestStream<FrameStream<S>>,
     stream_id: StreamId,
     request_end: mpsc::UnboundedSender<StreamId>,
 }
 
-impl<S, B> ConnectionState for RequestStream<S, B>
+impl<S> ConnectionState for RequestStream<S>
 where
     S: quic::RecvStream,
 {
@@ -313,7 +308,7 @@ where
     }
 }
 
-impl<S, B> RequestStream<S, B>
+impl<S> RequestStream<S>
 where
     S: quic::RecvStream,
 {
@@ -326,10 +321,9 @@ where
     }
 }
 
-impl<S, B> RequestStream<S, B>
+impl<S> RequestStream<S>
 where
-    S: quic::RecvStream + quic::SendStream<B>,
-    B: Buf,
+    S: quic::RecvStream + quic::SendStream,
 {
     pub async fn send_response(&mut self, resp: Response<()>) -> Result<(), Error> {
         let (parts, _) = resp.into_parts();
@@ -350,14 +344,17 @@ where
             return Err(Error::header_too_big(mem_size, max_mem_size));
         }
 
-        stream::write(&mut self.inner.stream, Frame::Headers(block.freeze()))
-            .await
-            .map_err(|e| self.maybe_conn_err(e))?;
+        stream::write(
+            &mut self.inner.stream,
+            Frame::<Bytes>::Headers(block.freeze()),
+        )
+        .await
+        .map_err(|e| self.maybe_conn_err(e))?;
 
         Ok(())
     }
 
-    pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
+    pub async fn send_data<B: Buf>(&mut self, buf: B) -> Result<(), Error> {
         self.inner.send_data(buf).await
     }
 
@@ -370,10 +367,9 @@ where
     }
 }
 
-impl<S, B> RequestStream<S, B>
+impl<S> RequestStream<S>
 where
-    S: quic::RecvStream + quic::SendStream<B>,
-    B: Buf,
+    S: quic::RecvStream + quic::SendStream,
 {
     pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
         let res = self.inner.recv_trailers().await;
@@ -392,7 +388,7 @@ where
     }
 }
 
-impl<S, B> Drop for RequestStream<S, B>
+impl<S> Drop for RequestStream<S>
 where
     S: quic::RecvStream,
 {
