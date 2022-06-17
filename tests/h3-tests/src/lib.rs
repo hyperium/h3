@@ -123,7 +123,7 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn next(&mut self) -> impl quic::Connection<Bytes> {
+    pub async fn next(&mut self) -> impl quic::Connection {
         Connection::new(self.incoming.next().await.unwrap().await.unwrap())
     }
 }

@@ -20,7 +20,7 @@ pub use quinn::{
     OpenUni, VarInt, WriteError,
 };
 
-use h3::quic::{self, Error, StreamId, WriteBuf};
+use h3::quic::{self, Error, StreamId};
 
 pub struct Connection {
     conn: quinn::Connection,
@@ -82,13 +82,10 @@ impl From<quinn::ConnectionError> for ConnectionError {
     }
 }
 
-impl<B> quic::Connection<B> for Connection
-where
-    B: Buf,
-{
-    type SendStream = SendStream<B>;
+impl quic::Connection for Connection {
+    type SendStream = SendStream;
     type RecvStream = RecvStream;
-    type BidiStream = BidiStream<B>;
+    type BidiStream = BidiStream;
     type OpenStreams = OpenStreams;
     type Error = ConnectionError;
 
@@ -166,13 +163,10 @@ pub struct OpenStreams {
     opening_uni: Option<OpenUni>,
 }
 
-impl<B> quic::OpenStreams<B> for OpenStreams
-where
-    B: Buf,
-{
+impl quic::OpenStreams for OpenStreams {
     type RecvStream = RecvStream;
-    type SendStream = SendStream<B>;
-    type BidiStream = BidiStream<B>;
+    type SendStream = SendStream;
+    type BidiStream = BidiStream;
     type Error = ConnectionError;
 
     fn poll_open_bidi(
@@ -220,19 +214,13 @@ impl Clone for OpenStreams {
     }
 }
 
-pub struct BidiStream<B>
-where
-    B: Buf,
-{
-    send: SendStream<B>,
+pub struct BidiStream {
+    send: SendStream,
     recv: RecvStream,
 }
 
-impl<B> quic::BidiStream<B> for BidiStream<B>
-where
-    B: Buf,
-{
-    type SendStream = SendStream<B>;
+impl quic::BidiStream for BidiStream {
+    type SendStream = SendStream;
     type RecvStream = RecvStream;
 
     fn split(self) -> (Self::SendStream, Self::RecvStream) {
@@ -240,10 +228,7 @@ where
     }
 }
 
-impl<B> quic::RecvStream for BidiStream<B>
-where
-    B: Buf,
-{
+impl quic::RecvStream for BidiStream {
     type Buf = Bytes;
     type Error = ReadError;
 
@@ -259,14 +244,15 @@ where
     }
 }
 
-impl<B> quic::SendStream<B> for BidiStream<B>
-where
-    B: Buf,
-{
+impl quic::SendStream for BidiStream {
     type Error = SendStreamError;
 
-    fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.send.poll_ready(cx)
+    fn poll_write<B: Buf>(
+        &mut self,
+        buf: &mut B,
+        cx: &mut task::Context<'_>,
+    ) -> Poll<Result<(), Self::Error>> {
+        self.send.poll_write(buf, cx)
     }
 
     fn poll_finish(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -275,10 +261,6 @@ where
 
     fn reset(&mut self, reset_code: u64) {
         self.send.reset(reset_code)
-    }
-
-    fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), Self::Error> {
-        self.send.send_data(data)
     }
 
     fn id(&self) -> StreamId {
@@ -360,55 +342,44 @@ impl Error for ReadError {
     }
 }
 
-pub struct SendStream<B: Buf> {
+pub struct SendStream {
     stream: quinn::SendStream,
-    writing: Option<WriteBuf<B>>,
 }
 
-impl<B> SendStream<B>
-where
-    B: Buf,
-{
-    fn new(stream: quinn::SendStream) -> SendStream<B> {
-        Self {
-            stream,
-            writing: None,
-        }
+impl SendStream {
+    fn new(stream: quinn::SendStream) -> SendStream {
+        Self { stream }
     }
 }
 
-impl<B> quic::SendStream<B> for SendStream<B>
-where
-    B: Buf,
-{
+impl quic::SendStream for SendStream {
     type Error = SendStreamError;
 
-    fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        if let Some(ref mut data) = self.writing {
-            while data.has_remaining() {
-                match ready!(Pin::new(&mut self.stream).poll_write(cx, data.chunk())) {
-                    Ok(cnt) => data.advance(cnt),
-                    Err(err) => {
-                        // We are forced to use AsyncWrite for now because we cannot store
-                        // the result of a call to:
-                        // quinn::send_stream::write<'a>(&'a mut self, buf: &'a [u8]) -> Write<'a, S>.
-                        //
-                        // This is why we have to unpack the error from io::Error below. This should not
-                        // panic as long as quinn's AsyncWrite impl doesn't change.
-                        return Poll::Ready(Err(SendStreamError::Write(
-                            err.into_inner()
-                                .expect("write stream returned an empty error")
-                                .downcast_ref::<WriteError>()
-                                .expect(
-                                    "write stream returned an error which type is not WriteError",
-                                )
-                                .clone(),
-                        )));
-                    }
+    fn poll_write<B: Buf>(
+        &mut self,
+        buf: &mut B,
+        cx: &mut task::Context<'_>,
+    ) -> Poll<Result<(), Self::Error>> {
+        while buf.has_remaining() {
+            match ready!(Pin::new(&mut self.stream).poll_write(cx, buf.chunk())) {
+                Ok(cnt) => buf.advance(cnt),
+                Err(err) => {
+                    // We are forced to use AsyncWrite for now because we cannot store
+                    // the result of a call to:
+                    // quinn::send_stream::write<'a>(&'a mut self, buf: &'a [u8]) -> Write<'a, S>.
+                    //
+                    // This is why we have to unpack the error from io::Error below. This should not
+                    // panic as long as quinn's AsyncWrite impl doesn't change.
+                    return Poll::Ready(Err(SendStreamError::Write(
+                        err.into_inner()
+                            .expect("write stream returned an empty error")
+                            .downcast_ref::<WriteError>()
+                            .expect("write stream returned an error which type is not WriteError")
+                            .clone(),
+                    )));
                 }
             }
         }
-        self.writing = None;
         Poll::Ready(Ok(()))
     }
 
@@ -420,14 +391,6 @@ where
         let _ = self
             .stream
             .reset(VarInt::from_u64(reset_code).unwrap_or(VarInt::MAX));
-    }
-
-    fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), Self::Error> {
-        if self.writing.is_some() {
-            return Err(Self::Error::NotReady);
-        }
-        self.writing = Some(data.into());
-        Ok(())
     }
 
     fn id(&self) -> StreamId {

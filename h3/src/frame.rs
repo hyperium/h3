@@ -13,7 +13,6 @@ use crate::{
         stream::StreamId,
     },
     quic::{RecvStream, SendStream},
-    stream::WriteBuf,
 };
 
 pub struct FrameStream<S>
@@ -136,19 +135,18 @@ where
     }
 }
 
-impl<T, B> SendStream<B> for FrameStream<T>
+impl<T> SendStream for FrameStream<T>
 where
-    T: SendStream<B> + RecvStream,
-    B: Buf,
+    T: SendStream + RecvStream,
 {
-    type Error = <T as SendStream<B>>::Error;
+    type Error = <T as SendStream>::Error;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.stream.poll_ready(cx)
-    }
-
-    fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), Self::Error> {
-        self.stream.send_data(data)
+    fn poll_write<B: Buf>(
+        &mut self,
+        buf: &mut B,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), Self::Error>> {
+        self.stream.poll_write(buf, cx)
     }
 
     fn poll_finish(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {

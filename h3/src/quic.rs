@@ -30,15 +30,15 @@ impl<'a, E: Error + 'a> From<E> for Box<dyn Error + 'a> {
 }
 
 /// Trait representing a QUIC connection.
-pub trait Connection<B: Buf> {
+pub trait Connection {
     /// The type produced by `poll_accept_bidi()`
-    type BidiStream: SendStream<B> + RecvStream;
+    type BidiStream: SendStream + RecvStream;
     /// The type of the sending part of `BidiStream`
-    type SendStream: SendStream<B>;
+    type SendStream: SendStream;
     /// The type produced by `poll_accept_recv()`
     type RecvStream: RecvStream;
     /// A producer of outgoing Unidirectional and Bidirectional streams.
-    type OpenStreams: OpenStreams<B>;
+    type OpenStreams: OpenStreams;
     /// Error type yielded by this trait methods
     type Error: Into<Box<dyn Error>>;
 
@@ -78,11 +78,11 @@ pub trait Connection<B: Buf> {
 }
 
 /// Trait for opening outgoing streams
-pub trait OpenStreams<B: Buf> {
+pub trait OpenStreams {
     /// The type produced by `poll_open_bidi()`
-    type BidiStream: SendStream<B> + RecvStream;
+    type BidiStream: SendStream + RecvStream;
     /// The type produced by `poll_open_send()`
-    type SendStream: SendStream<B>;
+    type SendStream: SendStream;
     /// The type of the receiving part of `BidiStream`
     type RecvStream: RecvStream;
     /// Error type yielded by these trait methods
@@ -105,15 +105,16 @@ pub trait OpenStreams<B: Buf> {
 }
 
 /// A trait describing the "send" actions of a QUIC stream.
-pub trait SendStream<B: Buf> {
+pub trait SendStream {
     /// The error type returned by fallible send methods.
     type Error: Into<Box<dyn Error>>;
 
-    /// Polls if the stream can send more data.
-    fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>>;
-
     /// Send more data on the stream.
-    fn send_data<T: Into<WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error>;
+    fn poll_write<B: Buf>(
+        &mut self,
+        buf: &mut B,
+        cx: &mut task::Context<'_>,
+    ) -> Poll<Result<(), Self::Error>>;
 
     /// Poll to finish the sending side of the stream.
     fn poll_finish(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>>;
@@ -146,9 +147,9 @@ pub trait RecvStream {
 }
 
 /// Optional trait to allow "splitting" a bidirectional stream into two sides.
-pub trait BidiStream<B: Buf>: SendStream<B> + RecvStream {
+pub trait BidiStream: SendStream + RecvStream {
     /// The type for the send half.
-    type SendStream: SendStream<B>;
+    type SendStream: SendStream;
     /// The type for the receive half.
     type RecvStream: RecvStream;
 
