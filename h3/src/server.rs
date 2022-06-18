@@ -317,7 +317,7 @@ impl<S, B> RequestStream<S, B>
 where
     S: quic::RecvStream,
 {
-    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
+    pub async fn recv_data(&mut self) -> Result<Option<Bytes>, Error> {
         self.inner.recv_data().await
     }
 

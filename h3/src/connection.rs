@@ -337,7 +337,7 @@ where
     S: quic::RecvStream,
 {
     /// Receive some of the request body.
-    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
+    pub async fn recv_data(&mut self) -> Result<Option<Bytes>, Error> {
         if !self.stream.has_data() {
             let frame = future::poll_fn(|cx| self.stream.poll_next(cx))
                 .await

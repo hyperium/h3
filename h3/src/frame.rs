@@ -82,7 +82,7 @@ where
         }
     }
 
-    pub fn poll_data(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<impl Buf>, Error>> {
+    pub fn poll_data(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<Bytes>, Error>> {
         if self.remaining_data == 0 {
             return Poll::Ready(Ok(None));
         };
