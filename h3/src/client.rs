@@ -261,17 +261,11 @@ impl Builder {
     }
 }
 
-pub struct RequestStream<S, B>
-where
-    S: quic::RecvStream,
-{
-    inner: connection::RequestStream<FrameStream<S>, B>,
+pub struct RequestStream<S, B> {
+    inner: connection::RequestStream<S, B>,
 }
 
-impl<S, B> ConnectionState for RequestStream<S, B>
-where
-    S: quic::RecvStream,
-{
+impl<S, B> ConnectionState for RequestStream<S, B> {
     fn shared_state(&self) -> &SharedStateRef {
         &self.inner.conn_state
     }
@@ -339,7 +333,7 @@ where
 
 impl<S, B> RequestStream<S, B>
 where
-    S: quic::RecvStream + quic::SendStream<B>,
+    S: quic::SendStream<B>,
     B: Buf,
 {
     pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
@@ -352,5 +346,21 @@ where
 
     pub async fn finish(&mut self) -> Result<(), Error> {
         self.inner.finish().await
+    }
+}
+
+impl<S, B> RequestStream<S, B>
+where
+    S: quic::BidiStream<B>,
+    B: Buf,
+{
+    pub fn split(
+        self,
+    ) -> (
+        RequestStream<S::SendStream, B>,
+        RequestStream<S::RecvStream, B>,
+    ) {
+        let (send, recv) = self.inner.split();
+        (RequestStream { inner: send }, RequestStream { inner: recv })
     }
 }
