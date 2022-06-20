@@ -4,7 +4,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Buf, BytesMut};
 use futures_util::future;
 use http::{response, HeaderMap, Request, Response, StatusCode};
 use quic::StreamId;
@@ -49,9 +49,10 @@ where
     }
 }
 
-impl<C> Connection<C, Bytes>
+impl<C, B> Connection<C, B>
 where
-    C: quic::Connection<Bytes>,
+    C: quic::Connection<B>,
+    B: Buf,
 {
     pub async fn new(conn: C) -> Result<Self, Error> {
         Ok(builder().build(conn).await?)
