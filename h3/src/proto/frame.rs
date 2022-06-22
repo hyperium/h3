@@ -43,6 +43,7 @@ pub enum Frame<B> {
     PushPromise(PushPromise),
     Goaway(StreamId),
     MaxPushId(StreamId),
+    Grease,
 }
 
 /// Represents the available data len for a `Data` frame on a RecvStream
@@ -123,6 +124,9 @@ where
             Frame::CancelPush(id) => simple_frame_encode(FrameType::CANCEL_PUSH, *id, buf),
             Frame::Goaway(id) => simple_frame_encode(FrameType::GOAWAY, *id, buf),
             Frame::MaxPushId(id) => simple_frame_encode(FrameType::MAX_PUSH_ID, *id, buf),
+            Frame::Grease => {
+                FrameType::grease().encode(buf);
+            }
         }
     }
 }
@@ -179,6 +183,7 @@ impl fmt::Debug for Frame<PayloadLen> {
             Frame::PushPromise(frame) => write!(f, "PushPromise({})", frame.id),
             Frame::Goaway(id) => write!(f, "GoAway({})", id),
             Frame::MaxPushId(id) => write!(f, "MaxPushId({})", id),
+            Frame::Grease => write!(f, "Grease()"),
         }
     }
 }
@@ -196,6 +201,7 @@ where
             Frame::PushPromise(frame) => write!(f, "PushPromise({})", frame.id),
             Frame::Goaway(id) => write!(f, "GoAway({})", id),
             Frame::MaxPushId(id) => write!(f, "MaxPushId({})", id),
+            Frame::Grease => write!(f, "Grease()"),
         }
     }
 }
@@ -214,6 +220,7 @@ impl<T, U> PartialEq<Frame<T>> for Frame<U> {
             Frame::PushPromise(x) => matches!(other, Frame::PushPromise(y) if x == y),
             Frame::Goaway(x) => matches!(other, Frame::Goaway(y) if x == y),
             Frame::MaxPushId(x) => matches!(other, Frame::MaxPushId(y) if x == y),
+            Frame::Grease => matches!(other, Frame::Grease),
         }
     }
 }
@@ -245,6 +252,14 @@ frame_types! {
     H2_WINDOW_UPDATE = 0x8,
     H2_CONTINUATION = 0x9,
     MAX_PUSH_ID = 0xD,
+}
+
+impl FrameType {
+    /// returns a FrameType type with random number of the 0x1f * N + 0x21
+    /// format within the range of the Varint implementation
+    pub fn grease() -> Self {
+        FrameType(fastrand::u64(0..0x210842108421083) * 0x1f + 0x21)
+    }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
