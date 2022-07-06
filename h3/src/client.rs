@@ -27,7 +27,7 @@ where
     C: quic::Connection<Bytes, OpenStreams = O>,
     O: quic::OpenStreams<Bytes>,
 {
-    Ok(Builder::new().build(conn).await?)
+    Builder::new().build(conn).await
 }
 
 pub struct SendRequest<T, B>
@@ -160,6 +160,10 @@ where
 {
     pub async fn shutdown(&mut self, max_requests: usize) -> Result<(), Error> {
         self.inner.shutdown(max_requests).await
+    }
+
+    pub async fn wait_idle(&mut self) -> Result<(), Error> {
+        future::poll_fn(|cx| self.poll_close(cx)).await
     }
 
     pub fn poll_close(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
