@@ -424,4 +424,44 @@ mod tests {
             Err(Error::ContradictedAuthority)
         );
     }
+
+    #[test]
+    fn preserves_duplicate_headers() {
+        let headers = Header::try_from(vec![
+            (b":method", Method::GET.as_str()).into(),
+            (b":authority", b"test.com").into(),
+            (b"set-cookie", b"foo=foo").into(),
+            (b"set-cookie", b"bar=bar").into(),
+            (b"other-header", b"other-header-value").into(),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            headers
+                .clone()
+                .into_iter()
+                .filter(|h| h.name.as_ref() == b"set-cookie")
+                .collect::<Vec<_>>(),
+            vec![
+                HeaderField {
+                    name: std::borrow::Cow::Borrowed(b"set-cookie"),
+                    value: std::borrow::Cow::Borrowed(b"foo=foo")
+                },
+                HeaderField {
+                    name: std::borrow::Cow::Borrowed(b"set-cookie"),
+                    value: std::borrow::Cow::Borrowed(b"bar=bar")
+                }
+            ]
+        );
+        assert_eq!(
+            headers
+                .into_iter()
+                .filter(|h| h.name.as_ref() == b"other-header")
+                .collect::<Vec<_>>(),
+            vec![HeaderField {
+                name: std::borrow::Cow::Borrowed(b"other-header"),
+                value: std::borrow::Cow::Borrowed(b"other-header-value")
+            },]
+        );
+    }
 }
