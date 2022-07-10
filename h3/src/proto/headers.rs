@@ -101,6 +101,7 @@ impl IntoIterator for Header {
     fn into_iter(self) -> Self::IntoIter {
         HeaderIter {
             pseudo: Some(self.pseudo),
+            last_header_name: None,
             fields: self.fields.into_iter(),
         }
     }
@@ -108,6 +109,7 @@ impl IntoIterator for Header {
 
 pub struct HeaderIter {
     pseudo: Option<Pseudo>,
+    last_header_name: Option<HeaderName>,
     fields: header::IntoIter<HeaderValue>,
 }
 
@@ -139,8 +141,11 @@ impl Iterator for HeaderIter {
 
         self.pseudo = None;
 
-        for f in self.fields.by_ref() {
-            if let (Some(n), v) = f {
+        for (new_header_name, header_value) in self.fields.by_ref() {
+            if let Some(new) = new_header_name {
+                self.last_header_name = Some(new);
+            }
+            if let (Some(ref n), v) = (&self.last_header_name, header_value) {
                 return Some((n.as_str(), v.as_bytes()).into());
             }
         }
