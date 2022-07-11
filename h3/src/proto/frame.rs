@@ -126,6 +126,9 @@ where
             Frame::MaxPushId(id) => simple_frame_encode(FrameType::MAX_PUSH_ID, *id, buf),
             Frame::Grease => {
                 FrameType::grease().encode(buf);
+                buf.write_var(6);
+                buf.put_slice(b"grease");
+                
             }
         }
     }

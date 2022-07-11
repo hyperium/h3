@@ -42,6 +42,7 @@ where
     sender_count: Arc<AtomicUsize>,
     conn_waker: Option<Waker>,
     _buf: PhantomData<fn(B)>,
+    send_grease_frame: bool,
 }
 
 impl<T, B> SendRequest<T, B>
@@ -85,13 +86,17 @@ where
             .await
             .map_err(|e| self.maybe_conn_err(e))?;
 
-        Ok(RequestStream {
+        let request_stream = RequestStream {
             inner: connection::RequestStream::new(
                 FrameStream::new(stream),
                 self.max_field_section_size,
                 self.conn_state.clone(),
+                self.send_grease_frame,
             ),
-        })
+        };
+        // send the grease frame only once
+        self.send_grease_frame = false;
+        Ok(request_stream)
     }
 }
 
@@ -121,6 +126,7 @@ where
             sender_count: self.sender_count.clone(),
             conn_waker: self.conn_waker.clone(),
             _buf: PhantomData,
+            send_grease_frame: self.send_grease_frame,
         }
     }
 }
@@ -213,12 +219,14 @@ where
 
 pub struct Builder {
     max_field_section_size: u64,
+    send_grease: bool,
 }
 
 impl Builder {
     pub(super) fn new() -> Self {
         Builder {
             max_field_section_size: VarInt::MAX.0,
+            send_grease: true,
         }
     }
 
@@ -247,7 +255,7 @@ impl Builder {
                     quic,
                     self.max_field_section_size,
                     conn_state.clone(),
-                    true,
+                    self.send_grease,
                 )
                 .await?,
             },
@@ -258,6 +266,7 @@ impl Builder {
                 max_field_section_size: self.max_field_section_size,
                 sender_count: Arc::new(AtomicUsize::new(1)),
                 _buf: PhantomData,
+                send_grease_frame: self.send_grease,
             },
         ))
     }

@@ -65,7 +65,7 @@ where
                 }
                 Some(frame) => Poll::Ready(Ok(Some(frame))),
                 None => match end {
-                    // Recieved a chunk but frame is incomplete, poll until we get `Pending`.
+                    // Received a chunk but frame is incomplete, poll until we get `Pending`.
                     Poll::Ready(false) => continue,
                     Poll::Pending => Poll::Pending,
                     Poll::Ready(true) => {
@@ -456,11 +456,11 @@ mod tests {
         let mut buf = BytesMut::with_capacity(64);
 
         // grease a lil
-        crate::proto::frame::FrameType::RESERVED.encode(&mut buf);
+        crate::proto::frame::FrameType::grease().encode(&mut buf);
         buf.write_var(0);
 
         // grease with some data
-        crate::proto::frame::FrameType::RESERVED.encode(&mut buf);
+        crate::proto::frame::FrameType::grease().encode(&mut buf);
         buf.write_var(6);
         buf.put_slice(b"grease");
 
