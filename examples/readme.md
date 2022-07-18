@@ -33,3 +33,19 @@ To start the client simply put the file name behind the URI:
 ```bash
 > cargo run --example client -- https://localhost:4433/index.html --insecure=true
 ```
+
+## Test against the Browser 
+The first step is to run the server.  
+For Browsers to work the server have to listen to ipv6 (`--listen=[::]:4433 `).  
+Also the browser need a valid certificate (`--cert=examples/cert.der --key=examples/key.der`).  
+
+```bash
+> cargo run --example server -- --listen=[::]:4433 --dir=examples/root --cert=examples/cert.der --key=examples/key.der
+```
+
+Then run chromium and force it to use Quic.
+```bash
+> chromium --enable-quic --quic-version=h3 --origin-to-force-quic-on=localhost:4433
+```
+
+Now you can navigate to files in the `root` folder for example `https://localhost:4433/index.html`.
