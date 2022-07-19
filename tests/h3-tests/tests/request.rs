@@ -275,7 +275,7 @@ async fn header_too_big_response_from_server() {
                 StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
             );
         };
-        tokio::select! { _ = req_fut => (), _ = drive_fut => () }
+        tokio::select! {biased; _ = req_fut => (), _ = drive_fut => () }
     };
 
     let server_fut = async {
@@ -335,7 +335,7 @@ async fn header_too_big_response_from_server_trailers() {
                 StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
             );
         };
-        tokio::select! { _ = req_fut => (), _ = drive_fut => () }
+        tokio::select! {biased; _ = req_fut => (), _ = drive_fut => () }
     };
 
     let server_fut = async {
@@ -399,7 +399,7 @@ async fn header_too_big_client_error() {
                 }
             );
         };
-        tokio::select! { _ = req_fut => (), _ = drive_fut => () }
+        tokio::select! {biased;  _ = drive_fut => (),_ = req_fut => () }
     };
 
     let server_fut = async {
@@ -453,7 +453,7 @@ async fn header_too_big_client_error_trailer() {
 
             request_stream.finish().await.expect("client finish");
         };
-        tokio::select! { _ = req_fut => (), _ = drive_fut => () }
+        tokio::select! {biased; _ = req_fut => (), _ = drive_fut => () }
     };
 
     let server_fut = async {
@@ -587,7 +587,7 @@ async fn header_too_big_discard_from_client_trailers() {
             );
             request_stream.finish().await.expect("client finish");
         };
-        tokio::select! { _ = req_fut => (), _ = drive_fut => () }
+        tokio::select! {biased; _ = req_fut => (), _ = drive_fut => () }
     };
 
     let server_fut = async {
