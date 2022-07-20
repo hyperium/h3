@@ -399,11 +399,16 @@ async fn header_too_big_client_error() {
                 }
             );
         };
-        tokio::select! {biased;  _ = drive_fut => (),_ = req_fut => () }
+        tokio::select! {biased; _ = req_fut => (),_ = drive_fut => () }
     };
 
     let server_fut = async {
-        server.next().await;
+        let conn = server.next().await;
+        server::builder()
+            .max_field_section_size(12)
+            .build(conn)
+            .await
+            .unwrap();
     };
 
     tokio::join!(server_fut, client_fut);

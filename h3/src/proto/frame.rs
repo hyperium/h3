@@ -128,7 +128,6 @@ where
                 FrameType::grease().encode(buf);
                 buf.write_var(6);
                 buf.put_slice(b"grease");
-                
             }
         }
     }

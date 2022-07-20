@@ -8,6 +8,7 @@ use std::{
 use bytes::{Buf, Bytes, BytesMut};
 use futures_util::{future, ready};
 use http::HeaderMap;
+use tracing::warn;
 
 use crate::{
     error::{Code, Error},
@@ -121,7 +122,7 @@ where
         )
         .await?;
 
-        Ok(Self {
+        let mut conn_inner = Self {
             shared,
             conn,
             control_send,
@@ -132,7 +133,13 @@ where
             last_accepted_stream: None,
             got_peer_settings: false,
             send_grease_frame: grease,
-        })
+        };
+        // start a grease stream
+        if grease {
+            conn_inner.start_grease_stream().await;
+        }
+
+        Ok(conn_inner)
     }
 
     /// Initiate graceful shutdown, accepting `max_streams` potentially in-flight streams
@@ -311,6 +318,42 @@ where
         self.shared.write("connection close err").error = Some(code.with_reason(reason.as_ref()));
         self.conn.close(code, reason.as_ref().as_bytes());
         code.with_reason(reason.as_ref())
+    }
+
+    /// starts an grease stream
+    /// https://httpwg.org/specs/rfc9114.html#stream-grease
+    async fn start_grease_stream(&mut self) -> () {
+        // start the stream
+        let mut grease_stream = match future::poll_fn(|cx| self.conn.poll_open_send(cx))
+            .await
+            .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))
+        {
+            Err(err) => {
+                warn!("grease stream creation failed with {}", err);
+                return ();
+            }
+            Ok(grease) => grease,
+        };
+        // send a frame over the stream
+        match stream::write(&mut grease_stream, (StreamType::grease(), Frame::Grease)).await {
+            Ok(_) => (),
+            Err(err) => {
+                warn!("write data on grease stream failed with {}", err);
+                return ();
+            }
+        }
+        // close the stream
+        match future::poll_fn(|cx| grease_stream.poll_finish(cx))
+            .await
+            .map_err(|e| Code::H3_NO_ERROR.with_transport(e))
+        {
+            Err(err) => {
+                warn!("grease stream error on close {}", err);
+                return ();
+            }
+            Ok(_) => (),
+        }
+        ()
     }
 }
 
