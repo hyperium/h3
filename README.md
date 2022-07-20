@@ -6,7 +6,7 @@
 
 This crate provides an [HTTP/3][spec] implementation that is generic over a provided QUIC transport. This allows the project to focus on just HTTP/3, while letting users pick their QUIC implementation based on their specific needs. It includes client and server APIs. Check the original [design][] for more details.
 
-[spec]: https://quicwg.org/base-drafts/draft-ietf-quic-http.html
+[spec]: https://httpwg.org/specs/rfc9114.html
 [design]: design/PROPOSAL.md
 
 ## Status
