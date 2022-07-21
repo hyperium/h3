@@ -27,7 +27,7 @@ where
     C: quic::Connection<Bytes, OpenStreams = O>,
     O: quic::OpenStreams<Bytes>,
 {
-    Ok(Builder::new().build(conn).await?)
+    Builder::new().build(conn).await
 }
 
 pub struct SendRequest<T, B>
@@ -168,6 +168,10 @@ where
         self.inner.shutdown(max_requests).await
     }
 
+    pub async fn wait_idle(&mut self) -> Result<(), Error> {
+        future::poll_fn(|cx| self.poll_close(cx)).await
+    }
+
     pub fn poll_close(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         while let Poll::Ready(result) = self.inner.poll_control(cx) {
             match result {
@@ -272,17 +276,11 @@ impl Builder {
     }
 }
 
-pub struct RequestStream<S, B>
-where
-    S: quic::RecvStream,
-{
-    inner: connection::RequestStream<FrameStream<S>, B>,
+pub struct RequestStream<S, B> {
+    inner: connection::RequestStream<S, B>,
 }
 
-impl<S, B> ConnectionState for RequestStream<S, B>
-where
-    S: quic::RecvStream,
-{
+impl<S, B> ConnectionState for RequestStream<S, B> {
     fn shared_state(&self) -> &SharedStateRef {
         &self.inner.conn_state
     }
@@ -350,7 +348,7 @@ where
 
 impl<S, B> RequestStream<S, B>
 where
-    S: quic::RecvStream + quic::SendStream<B>,
+    S: quic::SendStream<B>,
     B: Buf,
 {
     pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
@@ -363,5 +361,21 @@ where
 
     pub async fn finish(&mut self) -> Result<(), Error> {
         self.inner.finish().await
+    }
+}
+
+impl<S, B> RequestStream<S, B>
+where
+    S: quic::BidiStream<B>,
+    B: Buf,
+{
+    pub fn split(
+        self,
+    ) -> (
+        RequestStream<S::SendStream, B>,
+        RequestStream<S::RecvStream, B>,
+    ) {
+        let (send, recv) = self.inner.split();
+        (RequestStream { inner: send }, RequestStream { inner: recv })
     }
 }

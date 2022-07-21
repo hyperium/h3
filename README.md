@@ -6,7 +6,7 @@
 
 This crate provides an [HTTP/3][spec] implementation that is generic over a provided QUIC transport. This allows the project to focus on just HTTP/3, while letting users pick their QUIC implementation based on their specific needs. It includes client and server APIs. Check the original [design][] for more details.
 
-[spec]: https://quicwg.org/base-drafts/draft-ietf-quic-http.html
+[spec]: https://httpwg.org/specs/rfc9114.html
 [design]: design/PROPOSAL.md
 
 ## Status
@@ -19,7 +19,7 @@ The eventual goal is to use `h3` as an internal dependency of [hyper][].
 
 ## Getting Started
 
-The [examples][] directory can help get started in two ways:
+The [examples](./examples) directory can help get started in two ways:
 
 - There are ready-to-use `client` and `server` binaries to interact with _other_ HTTP/3 peers. Check the README in that directory.
 - The source code of those examples can help teach how to use `h3` as either a client or a server.

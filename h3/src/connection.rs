@@ -1,6 +1,5 @@
 use std::{
     convert::TryFrom,
-    marker::PhantomData,
     sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
     task::{Context, Poll},
 };
@@ -80,9 +79,9 @@ where
     pub(super) shared: SharedStateRef,
     conn: C,
     control_send: C::SendStream,
-    control_recv: Option<FrameStream<C::RecvStream>>,
-    decoder_recv: Option<AcceptedRecvStream<C::RecvStream>>,
-    encoder_recv: Option<AcceptedRecvStream<C::RecvStream>>,
+    control_recv: Option<FrameStream<C::RecvStream, B>>,
+    decoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
+    encoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
     pending_recv_streams: Vec<AcceptRecvStream<C::RecvStream>>,
     // The id of the last stream received by this connection:
     // request and push stream for server and clients respectively.
@@ -361,17 +360,16 @@ where
 }
 
 pub struct RequestStream<S, B> {
-    pub(super) stream: S,
+    pub(super) stream: FrameStream<S, B>,
     pub(super) trailers: Option<Bytes>,
     pub(super) conn_state: SharedStateRef,
     pub(super) max_field_section_size: u64,
-    _phantom_buffer: PhantomData<B>,
     send_grease_frame: bool,
 }
 
 impl<S, B> RequestStream<S, B> {
     pub fn new(
-        stream: S,
+        stream: FrameStream<S, B>,
         max_field_section_size: u64,
         conn_state: SharedStateRef,
         grease: bool,
@@ -381,7 +379,6 @@ impl<S, B> RequestStream<S, B> {
             conn_state,
             max_field_section_size,
             trailers: None,
-            _phantom_buffer: PhantomData,
             send_grease_frame: grease,
         }
     }
@@ -393,7 +390,7 @@ impl<S, B> ConnectionState for RequestStream<S, B> {
     }
 }
 
-impl<S, B> RequestStream<FrameStream<S>, B>
+impl<S, B> RequestStream<S, B>
 where
     S: quic::RecvStream,
 {
@@ -467,9 +464,9 @@ where
     }
 }
 
-impl<S, B> RequestStream<FrameStream<S>, B>
+impl<S, B> RequestStream<S, B>
 where
-    S: quic::SendStream<B> + quic::RecvStream,
+    S: quic::SendStream<B>,
     B: Buf,
 {
     /// Send some data on the response body.
@@ -514,5 +511,37 @@ where
         future::poll_fn(|cx| self.stream.poll_finish(cx))
             .await
             .map_err(|e| self.maybe_conn_err(e))
+    }
+}
+
+impl<S, B> RequestStream<S, B>
+where
+    S: quic::BidiStream<B>,
+    B: Buf,
+{
+    pub(crate) fn split(
+        self,
+    ) -> (
+        RequestStream<S::SendStream, B>,
+        RequestStream<S::RecvStream, B>,
+    ) {
+        let (send, recv) = self.stream.split();
+
+        (
+            RequestStream {
+                stream: send,
+                trailers: None,
+                conn_state: self.conn_state.clone(),
+                max_field_section_size: 0,
+                send_grease_frame: self.send_grease_frame,
+            },
+            RequestStream {
+                stream: recv,
+                trailers: self.trailers,
+                conn_state: self.conn_state,
+                max_field_section_size: self.max_field_section_size,
+                send_grease_frame: self.send_grease_frame,
+            },
+        )
     }
 }

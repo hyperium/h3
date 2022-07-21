@@ -159,12 +159,12 @@ where
     }
 }
 
-pub(super) enum AcceptedRecvStream<S>
+pub(super) enum AcceptedRecvStream<S, B>
 where
     S: quic::RecvStream,
 {
-    Control(FrameStream<S>),
-    Push(u64, FrameStream<S>),
+    Control(FrameStream<S, B>),
+    Push(u64, FrameStream<S, B>),
     Encoder(S),
     Decoder(S),
     Reserved,
@@ -195,7 +195,7 @@ where
         }
     }
 
-    pub fn into_stream(self) -> Result<AcceptedRecvStream<S>, Error> {
+    pub fn into_stream<B>(self) -> Result<AcceptedRecvStream<S, B>, Error> {
         Ok(match self.ty.expect("Stream type not resolved yet") {
             StreamType::CONTROL => {
                 AcceptedRecvStream::Control(FrameStream::with_bufs(self.stream, self.buf))

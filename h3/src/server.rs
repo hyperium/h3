@@ -1,10 +1,11 @@
 use std::{
     collections::HashSet,
     convert::TryFrom,
+    sync::Arc,
     task::{Context, Poll},
 };
 
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Buf, BytesMut};
 use futures_util::future;
 use http::{response, HeaderMap, Request, Response, StatusCode};
 use quic::StreamId;
@@ -49,9 +50,10 @@ where
     }
 }
 
-impl<C> Connection<C, Bytes>
+impl<C, B> Connection<C, B>
 where
-    C: quic::Connection<Bytes>,
+    C: quic::Connection<B>,
+    B: Buf,
 {
     pub async fn new(conn: C) -> Result<Self, Error> {
         Ok(builder().build(conn).await?)
@@ -106,8 +108,10 @@ where
         };
 
         let mut request_stream = RequestStream {
-            stream_id: stream.id(),
-            request_end: self.request_end_send.clone(),
+            request_end: Arc::new(RequestEnd {
+                request_end: self.request_end_send.clone(),
+                stream_id: stream.id(),
+            }),
             inner: connection::RequestStream::new(
                 stream,
                 self.max_field_section_size,
@@ -301,19 +305,23 @@ impl Builder {
     }
 }
 
-pub struct RequestStream<S, B>
-where
-    S: quic::RecvStream,
-{
-    inner: connection::RequestStream<FrameStream<S>, B>,
-    stream_id: StreamId,
+pub struct RequestEnd {
     request_end: mpsc::UnboundedSender<StreamId>,
+    stream_id: StreamId,
 }
 
-impl<S, B> ConnectionState for RequestStream<S, B>
-where
-    S: quic::RecvStream,
-{
+pub struct RequestStream<S, B> {
+    inner: connection::RequestStream<S, B>,
+    request_end: Arc<RequestEnd>,
+}
+
+impl<S, B> AsMut<connection::RequestStream<S, B>> for RequestStream<S, B> {
+    fn as_mut(&mut self) -> &mut connection::RequestStream<S, B> {
+        &mut self.inner
+    }
+}
+
+impl<S, B> ConnectionState for RequestStream<S, B> {
     fn shared_state(&self) -> &SharedStateRef {
         &self.inner.conn_state
     }
@@ -334,7 +342,7 @@ where
 
 impl<S, B> RequestStream<S, B>
 where
-    S: quic::RecvStream + quic::SendStream<B>,
+    S: quic::SendStream<B>,
     B: Buf,
 {
     pub async fn send_response(&mut self, resp: Response<()>) -> Result<(), Error> {
@@ -398,10 +406,32 @@ where
     }
 }
 
-impl<S, B> Drop for RequestStream<S, B>
+impl<S, B> RequestStream<S, B>
 where
-    S: quic::RecvStream,
+    S: quic::BidiStream<B>,
+    B: Buf,
 {
+    pub fn split(
+        self,
+    ) -> (
+        RequestStream<S::SendStream, B>,
+        RequestStream<S::RecvStream, B>,
+    ) {
+        let (send, recv) = self.inner.split();
+        (
+            RequestStream {
+                inner: send,
+                request_end: self.request_end.clone(),
+            },
+            RequestStream {
+                inner: recv,
+                request_end: self.request_end,
+            },
+        )
+    }
+}
+
+impl Drop for RequestEnd {
     fn drop(&mut self) {
         if let Err(e) = self.request_end.send(self.stream_id) {
             error!(
