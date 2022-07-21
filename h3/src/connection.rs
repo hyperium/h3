@@ -88,7 +88,7 @@ where
     // request and push stream for server and clients respectively.
     last_accepted_stream: Option<StreamId>,
     got_peer_settings: bool,
-    pub send_grease_frame: bool,
+    pub(super) send_grease_frame: bool,
 }
 
 impl<C, B> ConnectionInner<C, B>
@@ -113,7 +113,10 @@ where
 
         // Grease Settings (https://httpwg.org/specs/rfc9114.html#rfc.section.7.2.4.1)
         if grease {
-            settings.insert(SettingId::grease(), 0).unwrap();
+            match settings.insert(SettingId::grease(), 0) {
+                Ok(_) => (),
+                Err(err) => warn!("Error when adding the grease Setting. Reason {}", err),
+            }
         }
 
         stream::write(
@@ -322,7 +325,7 @@ where
 
     /// starts an grease stream
     /// https://httpwg.org/specs/rfc9114.html#stream-grease
-    async fn start_grease_stream(&mut self) -> () {
+    async fn start_grease_stream(&mut self) {
         // start the stream
         let mut grease_stream = match future::poll_fn(|cx| self.conn.poll_open_send(cx))
             .await
