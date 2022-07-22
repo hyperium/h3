@@ -84,7 +84,7 @@ async fn server_drop_close() {
             let drive = future::poll_fn(|cx| conn.poll_close(cx)).await;
             assert_matches!(drive, Ok(()));
         };
-        tokio::join!(request_fut, drive_fut);
+        tokio::select! {biased; _ = request_fut => (), _ = drive_fut => () }
     };
     tokio::join!(server_fut, client_fut);
 }
