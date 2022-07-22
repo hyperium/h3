@@ -10,6 +10,7 @@ fn server_and_client_should_connect_successfully() {
     command.push("../../target/debug/examples/server");
 
     let mut server = Command::new(command.as_path())
+        .arg("--listen=[::]:4433")
         .spawn()
         .expect("Failed to run server example");
     assert!(server.stderr.is_none(), "Failed to listen on localhost");
