@@ -10,7 +10,7 @@ pub type Result<T> = ::std::result::Result<T, UnexpectedEnd>;
 // Trait for encoding / decoding helpers on basic types, such as `u16`, for
 // example: `buf.decode::<u16>()?`.
 // This enables to return `UnexpectedEnd` instead of panicking as the `Buf`
-// impls do when ther is not enough bytes.
+// impls do when there is not enough bytes.
 
 pub trait Encode {
     fn encode<B: BufMut>(&self, buf: &mut B);

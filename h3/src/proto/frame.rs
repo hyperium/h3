@@ -1,6 +1,5 @@
-use std::{convert::TryInto, fmt};
-
 use bytes::{Buf, BufMut, Bytes};
+use std::{convert::TryInto, fmt};
 use tracing::trace;
 
 use super::{
@@ -44,11 +43,12 @@ pub enum Frame<B> {
     PushPromise(PushPromise),
     Goaway(StreamId),
     MaxPushId(StreamId),
+    Grease,
 }
 
 /// Represents the available data len for a `Data` frame on a RecvStream
 ///
-/// Decoding recieved frames does not handle `Data` frames payload. Instead, recieving it
+/// Decoding received frames does not handle `Data` frames payload. Instead, receiving it
 /// and passing it to the user is left under the responsability of `RequestStream`s.
 pub struct PayloadLen(pub usize);
 
@@ -124,6 +124,11 @@ where
             Frame::CancelPush(id) => simple_frame_encode(FrameType::CANCEL_PUSH, *id, buf),
             Frame::Goaway(id) => simple_frame_encode(FrameType::GOAWAY, *id, buf),
             Frame::MaxPushId(id) => simple_frame_encode(FrameType::MAX_PUSH_ID, *id, buf),
+            Frame::Grease => {
+                FrameType::grease().encode(buf);
+                buf.write_var(6);
+                buf.put_slice(b"grease");
+            }
         }
     }
 }
@@ -180,6 +185,7 @@ impl fmt::Debug for Frame<PayloadLen> {
             Frame::PushPromise(frame) => write!(f, "PushPromise({})", frame.id),
             Frame::Goaway(id) => write!(f, "GoAway({})", id),
             Frame::MaxPushId(id) => write!(f, "MaxPushId({})", id),
+            Frame::Grease => write!(f, "Grease()"),
         }
     }
 }
@@ -197,6 +203,7 @@ where
             Frame::PushPromise(frame) => write!(f, "PushPromise({})", frame.id),
             Frame::Goaway(id) => write!(f, "GoAway({})", id),
             Frame::MaxPushId(id) => write!(f, "MaxPushId({})", id),
+            Frame::Grease => write!(f, "Grease()"),
         }
     }
 }
@@ -215,6 +222,7 @@ impl<T, U> PartialEq<Frame<T>> for Frame<U> {
             Frame::PushPromise(x) => matches!(other, Frame::PushPromise(y) if x == y),
             Frame::Goaway(x) => matches!(other, Frame::Goaway(y) if x == y),
             Frame::MaxPushId(x) => matches!(other, Frame::MaxPushId(y) if x == y),
+            Frame::Grease => matches!(other, Frame::Grease),
         }
     }
 }
@@ -246,6 +254,14 @@ frame_types! {
     H2_WINDOW_UPDATE = 0x8,
     H2_CONTINUATION = 0x9,
     MAX_PUSH_ID = 0xD,
+}
+
+impl FrameType {
+    /// returns a FrameType type with random number of the 0x1f * N + 0x21
+    /// format within the range of the Varint implementation
+    pub fn grease() -> Self {
+        FrameType(fastrand::u64(0..0x210842108421083) * 0x1f + 0x21)
+    }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -320,6 +336,12 @@ pub struct SettingId(pub u64);
 impl SettingId {
     const NONE: SettingId = SettingId(0);
 
+    /// returns a SettingId type with random number of the 0x1f * N + 0x21
+    /// format within the range of the Varint implementation
+    pub fn grease() -> Self {
+        SettingId(fastrand::u64(0..0x210842108421083) * 0x1f + 0x21)
+    }
+
     fn is_supported(self) -> bool {
         matches!(
             self,
@@ -352,7 +374,7 @@ setting_identifiers! {
     MAX_HEADER_LIST_SIZE = 0x6,
 }
 
-const SETTINGS_LEN: usize = 3;
+const SETTINGS_LEN: usize = 4;
 
 #[derive(Debug, PartialEq)]
 pub struct Settings {
@@ -515,14 +537,14 @@ mod tests {
         assert_matches!(decoded, Err(Error::Incomplete(6)));
     }
 
-    fn codec_frame_check(mut frame: Frame<Bytes>, wire: &[u8]) {
+    fn codec_frame_check(mut frame: Frame<Bytes>, wire: &[u8], check_frame: Frame<Bytes>) {
         let mut buf = Vec::new();
         frame.encode_with_payload(&mut buf);
         assert_eq!(&buf, &wire);
 
         let mut read = Cursor::new(&buf);
         let decoded = Frame::decode(&mut read).unwrap();
-        assert_eq!(frame, decoded);
+        assert_eq!(check_frame, decoded);
     }
 
     #[test]
@@ -533,18 +555,33 @@ mod tests {
                     (SettingId::MAX_HEADER_LIST_SIZE, 0xfad1),
                     (SettingId::QPACK_MAX_TABLE_CAPACITY, 0xfad2),
                     (SettingId::QPACK_MAX_BLOCKED_STREAMS, 0xfad3),
+                    (SettingId(95), 0),
+                ],
+                len: 4,
+            }),
+            &[
+                4, 18, 6, 128, 0, 250, 209, 1, 128, 0, 250, 210, 7, 128, 0, 250, 211, 64, 95, 0,
+            ],
+            Frame::Settings(Settings {
+                entries: [
+                    (SettingId::MAX_HEADER_LIST_SIZE, 0xfad1),
+                    (SettingId::QPACK_MAX_TABLE_CAPACITY, 0xfad2),
+                    (SettingId::QPACK_MAX_BLOCKED_STREAMS, 0xfad3),
+                    // check without the Grease setting because this is ignored
+                    (SettingId(0), 0),
                 ],
                 len: 3,
             }),
-            &[
-                4, 15, 6, 128, 0, 250, 209, 1, 128, 0, 250, 210, 7, 128, 0, 250, 211,
-            ],
         );
     }
 
     #[test]
     fn settings_frame_emtpy() {
-        codec_frame_check(Frame::Settings(Settings::default()), &[4, 0]);
+        codec_frame_check(
+            Frame::Settings(Settings::default()),
+            &[4, 0],
+            Frame::Settings(Settings::default()),
+        );
     }
 
     #[test]
@@ -552,14 +589,27 @@ mod tests {
         codec_frame_check(
             Frame::Data(Bytes::from("1234567")),
             &[0, 7, 49, 50, 51, 52, 53, 54, 55],
+            Frame::Data(Bytes::from("1234567")),
         );
     }
 
     #[test]
     fn simple_frames() {
-        codec_frame_check(Frame::CancelPush(StreamId(2)), &[3, 1, 2]);
-        codec_frame_check(Frame::Goaway(StreamId(2)), &[7, 1, 2]);
-        codec_frame_check(Frame::MaxPushId(StreamId(2)), &[13, 1, 2]);
+        codec_frame_check(
+            Frame::CancelPush(StreamId(2)),
+            &[3, 1, 2],
+            Frame::CancelPush(StreamId(2)),
+        );
+        codec_frame_check(
+            Frame::Goaway(StreamId(2)),
+            &[7, 1, 2],
+            Frame::Goaway(StreamId(2)),
+        );
+        codec_frame_check(
+            Frame::MaxPushId(StreamId(2)),
+            &[13, 1, 2],
+            Frame::MaxPushId(StreamId(2)),
+        );
     }
 
     #[test]
@@ -567,6 +617,7 @@ mod tests {
         codec_frame_check(
             Frame::headers("TODO QPACK"),
             &[1, 10, 84, 79, 68, 79, 32, 81, 80, 65, 67, 75],
+            Frame::headers("TODO QPACK"),
         );
         codec_frame_check(
             Frame::PushPromise(PushPromise {
@@ -574,6 +625,10 @@ mod tests {
                 encoded: Bytes::from("TODO QPACK"),
             }),
             &[5, 12, 64, 134, 84, 79, 68, 79, 32, 81, 80, 65, 67, 75],
+            Frame::PushPromise(PushPromise {
+                id: 134,
+                encoded: Bytes::from("TODO QPACK"),
+            }),
         );
     }
 

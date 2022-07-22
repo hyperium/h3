@@ -34,6 +34,11 @@ impl StreamType {
     pub fn value(&self) -> u64 {
         self.0
     }
+    /// returns a StreamType type with random number of the 0x1f * N + 0x21
+    /// format within the range of the Varint implementation
+    pub fn grease() -> Self {
+        StreamType(fastrand::u64(0..0x210842108421083) * 0x1f + 0x21)
+    }
 }
 
 impl Decode for StreamType {

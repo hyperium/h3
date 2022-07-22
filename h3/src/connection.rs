@@ -7,6 +7,7 @@ use std::{
 use bytes::{Buf, Bytes, BytesMut};
 use futures_util::{future, ready};
 use http::HeaderMap;
+use tracing::warn;
 
 use crate::{
     error::{Code, Error},
@@ -86,6 +87,7 @@ where
     // request and push stream for server and clients respectively.
     last_accepted_stream: Option<StreamId>,
     got_peer_settings: bool,
+    pub(super) send_grease_frame: bool,
 }
 
 impl<C, B> ConnectionInner<C, B>
@@ -97,6 +99,7 @@ where
         mut conn: C,
         max_field_section_size: u64,
         shared: SharedStateRef,
+        grease: bool,
     ) -> Result<Self, Error> {
         let mut control_send = future::poll_fn(|cx| conn.poll_open_send(cx))
             .await
@@ -107,13 +110,21 @@ where
             .insert(SettingId::MAX_HEADER_LIST_SIZE, max_field_section_size)
             .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
 
+        // Grease Settings (https://httpwg.org/specs/rfc9114.html#rfc.section.7.2.4.1)
+        if grease {
+            match settings.insert(SettingId::grease(), 0) {
+                Ok(_) => (),
+                Err(err) => warn!("Error when adding the grease Setting. Reason {}", err),
+            }
+        }
+
         stream::write(
             &mut control_send,
             (StreamType::CONTROL, Frame::Settings(settings)),
         )
         .await?;
 
-        Ok(Self {
+        let mut conn_inner = Self {
             shared,
             conn,
             control_send,
@@ -123,7 +134,14 @@ where
             pending_recv_streams: Vec::with_capacity(3),
             last_accepted_stream: None,
             got_peer_settings: false,
-        })
+            send_grease_frame: grease,
+        };
+        // start a grease stream
+        if grease {
+            conn_inner.start_grease_stream().await;
+        }
+
+        Ok(conn_inner)
     }
 
     /// Initiate graceful shutdown, accepting `max_streams` potentially in-flight streams
@@ -303,6 +321,42 @@ where
         self.conn.close(code, reason.as_ref().as_bytes());
         code.with_reason(reason.as_ref())
     }
+
+    /// starts an grease stream
+    /// https://httpwg.org/specs/rfc9114.html#stream-grease
+    async fn start_grease_stream(&mut self) {
+        // start the stream
+        let mut grease_stream = match future::poll_fn(|cx| self.conn.poll_open_send(cx))
+            .await
+            .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))
+        {
+            Err(err) => {
+                warn!("grease stream creation failed with {}", err);
+                return ();
+            }
+            Ok(grease) => grease,
+        };
+        // send a frame over the stream
+        match stream::write(&mut grease_stream, (StreamType::grease(), Frame::Grease)).await {
+            Ok(_) => (),
+            Err(err) => {
+                warn!("write data on grease stream failed with {}", err);
+                return ();
+            }
+        }
+        // close the stream
+        match future::poll_fn(|cx| grease_stream.poll_finish(cx))
+            .await
+            .map_err(|e| Code::H3_NO_ERROR.with_transport(e))
+        {
+            Err(err) => {
+                warn!("grease stream error on close {}", err);
+                return ();
+            }
+            Ok(_) => (),
+        }
+        ()
+    }
 }
 
 pub struct RequestStream<S, B> {
@@ -310,6 +364,7 @@ pub struct RequestStream<S, B> {
     pub(super) trailers: Option<Bytes>,
     pub(super) conn_state: SharedStateRef,
     pub(super) max_field_section_size: u64,
+    send_grease_frame: bool,
 }
 
 impl<S, B> RequestStream<S, B> {
@@ -317,12 +372,14 @@ impl<S, B> RequestStream<S, B> {
         stream: FrameStream<S, B>,
         max_field_section_size: u64,
         conn_state: SharedStateRef,
+        grease: bool,
     ) -> Self {
         Self {
             stream,
             conn_state,
             max_field_section_size,
             trailers: None,
+            send_grease_frame: grease,
         }
     }
 }
@@ -415,10 +472,10 @@ where
     /// Send some data on the response body.
     pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
         let frame = Frame::Data(buf);
+
         stream::write(&mut self.stream, frame)
             .await
             .map_err(|e| self.maybe_conn_err(e))?;
-
         Ok(())
     }
 
@@ -433,7 +490,6 @@ where
         if mem_size > max_mem_size {
             return Err(Error::header_too_big(mem_size, max_mem_size));
         }
-
         stream::write(&mut self.stream, Frame::Headers(block.freeze()))
             .await
             .map_err(|e| self.maybe_conn_err(e))?;
@@ -442,6 +498,13 @@ where
     }
 
     pub async fn finish(&mut self) -> Result<(), Error> {
+        if self.send_grease_frame {
+            // send a grease frame once per Connection
+            stream::write(&mut self.stream, Frame::Grease)
+                .await
+                .map_err(|e| self.maybe_conn_err(e))?;
+            self.send_grease_frame = false;
+        }
         future::poll_fn(|cx| self.stream.poll_ready(cx))
             .await
             .map_err(|e| self.maybe_conn_err(e))?;
@@ -470,12 +533,14 @@ where
                 trailers: None,
                 conn_state: self.conn_state.clone(),
                 max_field_section_size: 0,
+                send_grease_frame: self.send_grease_frame,
             },
             RequestStream {
                 stream: recv,
                 trailers: self.trailers,
                 conn_state: self.conn_state,
                 max_field_section_size: self.max_field_section_size,
+                send_grease_frame: self.send_grease_frame,
             },
         )
     }

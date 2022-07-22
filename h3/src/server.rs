@@ -116,6 +116,7 @@ where
                 stream,
                 self.max_field_section_size,
                 self.inner.shared.clone(),
+                self.inner.send_grease_frame,
             ),
         };
 
@@ -146,6 +147,8 @@ where
         *req.uri_mut() = uri;
         *req.headers_mut() = headers;
         *req.version_mut() = http::Version::HTTP_3;
+        // send the grease frame only once
+        self.inner.send_grease_frame = false;
 
         Ok(Some((req, request_stream)))
     }
@@ -262,12 +265,14 @@ where
 
 pub struct Builder {
     pub(super) max_field_section_size: u64,
+    pub(super) send_grease: bool,
 }
 
 impl Builder {
     pub(super) fn new() -> Self {
         Builder {
             max_field_section_size: VarInt::MAX.0,
+            send_grease: true,
         }
     }
 
@@ -289,6 +294,7 @@ impl Builder {
                 conn,
                 self.max_field_section_size,
                 SharedStateRef::default(),
+                self.send_grease,
             )
             .await?,
             max_field_section_size: self.max_field_section_size,

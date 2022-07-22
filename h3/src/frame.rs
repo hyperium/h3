@@ -67,12 +67,12 @@ where
                 }
                 Some(frame) => Poll::Ready(Ok(Some(frame))),
                 None => match end {
-                    // Recieved a chunk but frame is incomplete, poll until we get `Pending`.
+                    // Received a chunk but frame is incomplete, poll until we get `Pending`.
                     Poll::Ready(false) => continue,
                     Poll::Pending => Poll::Pending,
                     Poll::Ready(true) => {
                         if self.bufs.has_remaining() {
-                            // Reached the end of recieve stream, but there is still some data:
+                            // Reached the end of receive stream, but there is still some data:
                             // The frame is incomplete.
                             Poll::Ready(Err(Error::UnexpectedEnd))
                         } else {
@@ -486,11 +486,11 @@ mod tests {
         let mut buf = BytesMut::with_capacity(64);
 
         // grease a lil
-        crate::proto::frame::FrameType::RESERVED.encode(&mut buf);
+        crate::proto::frame::FrameType::grease().encode(&mut buf);
         buf.write_var(0);
 
         // grease with some data
-        crate::proto::frame::FrameType::RESERVED.encode(&mut buf);
+        crate::proto::frame::FrameType::grease().encode(&mut buf);
         buf.write_var(6);
         buf.put_slice(b"grease");
 

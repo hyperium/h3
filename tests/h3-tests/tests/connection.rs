@@ -84,7 +84,7 @@ async fn server_drop_close() {
             let drive = future::poll_fn(|cx| conn.poll_close(cx)).await;
             assert_matches!(drive, Ok(()));
         };
-        tokio::join!(request_fut, drive_fut);
+        tokio::select! {biased; _ = request_fut => (), _ = drive_fut => () }
     };
     tokio::join!(server_fut, client_fut);
 }
@@ -221,7 +221,7 @@ async fn client_error_on_bidi_recv() {
             assert_matches!(
                 $e.map(|_| ()).unwrap_err().kind(),
                 Kind::Application { reason: Some(reason), code: Code::H3_STREAM_CREATION_ERROR, .. }
-                if *reason == *"client received a bidirectionnal stream");
+                if *reason == *"client received a bidirectional stream");
         }
     }
 
