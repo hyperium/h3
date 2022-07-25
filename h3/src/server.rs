@@ -1,5 +1,3 @@
-#![allow(rustdoc::private_intra_doc_links)]
-
 //! This module provides methods to create a http/3 Server.  
 //!
 //! It allows to accept incoming requests, and send responses.
@@ -99,7 +97,8 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    /// This method creates a new Connection for Servers with default settings see [`Builder::new()`].  
+    /// This method creates a new Connection for Servers with default settings.
+    /// Use [`builder()`] to create a connection with different settings.   
     /// Provide a Connection which implements [`quic::Connection`].
     pub async fn new(conn: C) -> Result<Self, Error> {
         Ok(builder().build(conn).await?)
