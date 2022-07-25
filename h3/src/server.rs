@@ -1,3 +1,39 @@
+//! This module provides methods to create a http/3 Server.  
+//!
+//! It allows to accept incoming requests, and send responses.
+//!
+//! # Examples
+//!   
+//! ## Simple example
+//! ```rust
+//! async fn doc<C>(conn: C)
+//! where
+//! C: h3::quic::Connection<bytes::Bytes>,
+//! <C as h3::quic::Connection<bytes::Bytes>>::BidiStream: Send + 'static
+//! {
+//!     let mut server_builder = h3::server::builder();
+//!     // Build the Connection
+//!     let mut h3_conn = server_builder.build(conn).await.unwrap();
+//!     // Accept incoming requests
+//!     while let Some((req, mut stream)) = h3_conn.accept().await.unwrap() {
+//!         // spawn a new task to handle the request
+//!         tokio::spawn(async move {
+//!             // build a http response
+//!             let response = http::Response::builder().status(http::StatusCode::OK).body(()).unwrap();
+//!             // send the response to the wire
+//!             stream.send_response(response).await.unwrap();
+//!             // send some date
+//!             stream.send_data(bytes::Bytes::from("test")).await.unwrap();
+//!             // finnish the stream
+//!             stream.finish().await.unwrap();
+//!         });
+//!     };
+//! }
+//! ```
+//!
+//! ## File server
+//! A ready-to-use example of a file server is available [here](https://github.com/hyperium/h3/blob/master/examples/client.rs)  
+
 use std::{
     collections::HashSet,
     convert::TryFrom,
@@ -22,10 +58,16 @@ use crate::{
 };
 use tracing::{error, trace, warn};
 
+/// This function creates a [`Builder`] for the Server.
 pub fn builder() -> Builder {
     Builder::new()
 }
 
+/// The [`Connection`] struct manages a connection from the http/3 Server.
+///
+/// Create a new Instance with [`Connection::new()`].  
+/// Accept incoming requests with [`Connection::accept()`].  
+/// And shutdown a connection with [`Connection::shutdown()`].  
 pub struct Connection<C, B>
 where
     C: quic::Connection<B>,
@@ -55,6 +97,9 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
+    /// This method creates a new Connection for Servers with default settings.
+    /// Use [`builder()`] to create a connection with different settings.   
+    /// Provide a Connection which implements [`quic::Connection`].
     pub async fn new(conn: C) -> Result<Self, Error> {
         Ok(builder().build(conn).await?)
     }
@@ -65,6 +110,10 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
+    /// This method accepts a http request from a Client.  
+    /// It returns a tuple with a [`http::Request`] and an [`RequestStream`].  
+    /// The [`http::Request`] is the received request from the client.  
+    /// The [`RequestStream`] can be used to send the response.  
     pub async fn accept(
         &mut self,
     ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
@@ -153,6 +202,8 @@ where
         Ok(Some((req, request_stream)))
     }
 
+    /// This method stops the connection gracefully.  
+    /// See [Connection-Shutdown](https://httpwg.org/specs/rfc9114.html#connection-shutdown) for more information.  
     pub async fn shutdown(&mut self, max_requests: usize) -> Result<(), Error> {
         self.inner.shutdown(max_requests).await
     }
@@ -263,12 +314,33 @@ where
     }
 }
 
+/// Use this struct to create a new [`Connection`].  
+/// All the settings for the [`Connection`] can be provided here.  
+///
+/// # Example
+///
+/// ```rust
+/// fn doc<C,B>(conn: C)
+/// where
+/// C: h3::quic::Connection<B>,
+/// B: bytes::Buf,
+/// {
+///     let mut server_builder = h3::server::builder();
+///     // Set the maximum header size
+///     server_builder.max_field_section_size(1000);
+///     // do not send grease types
+///     server_builder.send_grease(false);
+///     // Build the Connection
+///     let mut h3_conn = server_builder.build(conn);
+/// }
+/// ```
 pub struct Builder {
     pub(super) max_field_section_size: u64,
     pub(super) send_grease: bool,
 }
 
 impl Builder {
+    /// Creates a new [`Builder`] with default settings.  
     pub(super) fn new() -> Self {
         Builder {
             max_field_section_size: VarInt::MAX.0,
@@ -276,13 +348,23 @@ impl Builder {
         }
     }
 
+    /// Set the `max_field_section_size` for the [`Builder`].  
+    /// See [Header size](https://httpwg.org/specs/rfc9114.html#header-size-constraints) for more information.  
     pub fn max_field_section_size(&mut self, value: u64) -> &mut Self {
         self.max_field_section_size = value;
+        self
+    }
+
+    /// Send grease values to the Client.  
+    /// See [setting](https://httpwg.org/specs/rfc9114.html#settings-parameters), [frame](https://httpwg.org/specs/rfc9114.html#frame-reserved) and [stream](https://httpwg.org/specs/rfc9114.html#stream-grease) for more information.
+    pub fn send_grease(&mut self, value: bool) -> &mut Self {
+        self.send_grease = value;
         self
     }
 }
 
 impl Builder {
+    /// This method creates a [`Connection`] instance with the settings in the [`Builder`].  
     pub async fn build<C, B>(&self, conn: C) -> Result<Connection<C, B>, Error>
     where
         C: quic::Connection<B>,
@@ -310,6 +392,7 @@ pub struct RequestEnd {
     stream_id: StreamId,
 }
 
+/// The [`RequestStream`] struct is to send and/or receive information from the client.  
 pub struct RequestStream<S, B> {
     inner: connection::RequestStream<S, B>,
     request_end: Arc<RequestEnd>,
@@ -331,6 +414,7 @@ impl<S, B> RequestStream<S, B>
 where
     S: quic::RecvStream,
 {
+    /// Receives data, sent from the Client.
     pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
         self.inner.recv_data().await
     }
@@ -345,6 +429,7 @@ where
     S: quic::SendStream<B>,
     B: Buf,
 {
+    /// This method sends a Http-Response to the Client.  
     pub async fn send_response(&mut self, resp: Response<()>) -> Result<(), Error> {
         let (parts, _) = resp.into_parts();
         let response::Parts {
@@ -371,14 +456,17 @@ where
         Ok(())
     }
 
+    /// Send data to the Client.
     pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
         self.inner.send_data(buf).await
     }
 
+    /// Send the Http-Trailers.
     pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
         self.inner.send_trailers(trailers).await
     }
 
+    // Closes the Stream when all data is sent.
     pub async fn finish(&mut self) -> Result<(), Error> {
         self.inner.finish().await
     }
@@ -389,6 +477,7 @@ where
     S: quic::RecvStream + quic::SendStream<B>,
     B: Buf,
 {
+    /// Receives Http-Trailers from the Client.
     pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
         let res = self.inner.recv_trailers().await;
         if let Err(ref e) = res {
@@ -411,6 +500,8 @@ where
     S: quic::BidiStream<B>,
     B: Buf,
 {
+    /// Splits the Request-Stream into send and receive.  
+    /// This can be used the send and receive data on different tasks.  
     pub fn split(
         self,
     ) -> (
