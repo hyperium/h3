@@ -1,0 +1,26 @@
+target = "ci/compliance/specs/rfc9114.txt#7.2.2"
+
+# 7.2.2.  HEADERS
+#
+# The HEADERS frame (type=0x01) is used to carry an HTTP field section
+# that is encoded using QPACK.  See [QPACK] for more details.
+# 
+# HEADERS Frame {
+#   Type (i) = 0x01,
+#   Length (i),
+#   Encoded Field Section (..),
+# }
+# 
+#                        Figure 5: HEADERS Frame
+# 
+# HEADERS frames can only be sent on request streams or push streams.
+# If a HEADERS frame is received on a control stream, the recipient
+# MUST respond with a connection error of type H3_FRAME_UNEXPECTED.
+
+[[spec]]
+level = "MUST"
+quote = '''
+If a HEADERS frame is received on a control stream, the recipient
+MUST respond with a connection error of type H3_FRAME_UNEXPECTED.
+'''
+

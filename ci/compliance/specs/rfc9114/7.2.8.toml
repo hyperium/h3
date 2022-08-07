@@ -1,0 +1,49 @@
+target = "ci/compliance/specs/rfc9114.txt#7.2.8"
+
+# 7.2.8.  Reserved Frame Types
+#
+# Frame types of the format 0x1f * N + 0x21 for non-negative integer
+# values of N are reserved to exercise the requirement that unknown
+# types be ignored (Section 9).  These frames have no semantics, and
+# they MAY be sent on any stream where frames are allowed to be sent.
+# This enables their use for application-layer padding.  Endpoints MUST
+# NOT consider these frames to have any meaning upon receipt.
+# 
+# The payload and length of the frames are selected in any manner the
+# implementation chooses.
+# 
+# Frame types that were used in HTTP/2 where there is no corresponding
+# HTTP/3 frame have also been reserved (Section 11.2.1).  These frame
+# types MUST NOT be sent, and their receipt MUST be treated as a
+# connection error of type H3_FRAME_UNEXPECTED.
+
+[[spec]]
+level = "MAY"
+quote = '''
+These frames have no semantics, and
+they MAY be sent on any stream where frames are allowed to be sent.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Endpoints MUST
+NOT consider these frames to have any meaning upon receipt.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+These frame
+types MUST NOT be sent, and their receipt MUST be treated as a
+connection error of type H3_FRAME_UNEXPECTED.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+These frame
+types MUST NOT be sent, and their receipt MUST be treated as a
+connection error of type H3_FRAME_UNEXPECTED.
+'''
+

@@ -1,0 +1,67 @@
+target = "ci/compliance/specs/rfc9114.txt#6.2.2"
+
+# 6.2.2.  Push Streams
+#
+# Server push is an optional feature introduced in HTTP/2 that allows a
+# server to initiate a response before a request has been made.  See
+# Section 4.6 for more details.
+# 
+# A push stream is indicated by a stream type of 0x01, followed by the
+# push ID of the promise that it fulfills, encoded as a variable-length
+# integer.  The remaining data on this stream consists of HTTP/3
+# frames, as defined in Section 7.2, and fulfills a promised server
+# push by zero or more interim HTTP responses followed by a single
+# final HTTP response, as defined in Section 4.1.  Server push and push
+# IDs are described in Section 4.6.
+# 
+# Only servers can push; if a server receives a client-initiated push
+# stream, this MUST be treated as a connection error of type
+# H3_STREAM_CREATION_ERROR.
+# 
+# Push Stream Header {
+#   Stream Type (i) = 0x01,
+#   Push ID (i),
+# }
+# 
+#                      Figure 2: Push Stream Header
+# 
+# A client SHOULD NOT abort reading on a push stream prior to reading
+# the push stream header, as this could lead to disagreement between
+# client and server on which push IDs have already been consumed.
+# 
+# Each push ID MUST only be used once in a push stream header.  If a
+# client detects that a push stream header includes a push ID that was
+# used in another push stream header, the client MUST treat this as a
+# connection error of type H3_ID_ERROR.
+
+[[spec]]
+level = "MUST"
+quote = '''
+Only servers can push; if a server receives a client-initiated push
+stream, this MUST be treated as a connection error of type
+H3_STREAM_CREATION_ERROR.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+A client SHOULD NOT abort reading on a push stream prior to reading
+the push stream header, as this could lead to disagreement between
+client and server on which push IDs have already been consumed.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Each push ID MUST only be used once in a push stream header.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+If a
+client detects that a push stream header includes a push ID that was
+used in another push stream header, the client MUST treat this as a
+connection error of type H3_ID_ERROR.
+'''
+

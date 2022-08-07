@@ -1,0 +1,142 @@
+target = "ci/compliance/specs/rfc9114.txt#4.1.1"
+
+# 4.1.1.  Request Cancellation and Rejection
+#
+# Once a request stream has been opened, the request MAY be cancelled
+# by either endpoint.  Clients cancel requests if the response is no
+# longer of interest; servers cancel requests if they are unable to or
+# choose not to respond.  When possible, it is RECOMMENDED that servers
+# send an HTTP response with an appropriate status code rather than
+# cancelling a request it has already begun processing.
+# 
+# Implementations SHOULD cancel requests by abruptly terminating any
+# directions of a stream that are still open.  To do so, an
+# implementation resets the sending parts of streams and aborts reading
+# on the receiving parts of streams; see Section 2.4 of
+# [QUIC-TRANSPORT].
+# 
+# When the server cancels a request without performing any application
+# processing, the request is considered "rejected".  The server SHOULD
+# abort its response stream with the error code H3_REQUEST_REJECTED.
+# In this context, "processed" means that some data from the stream was
+# passed to some higher layer of software that might have taken some
+# action as a result.  The client can treat requests rejected by the
+# server as though they had never been sent at all, thereby allowing
+# them to be retried later.
+# 
+# Servers MUST NOT use the H3_REQUEST_REJECTED error code for requests
+# that were partially or fully processed.  When a server abandons a
+# response after partial processing, it SHOULD abort its response
+# stream with the error code H3_REQUEST_CANCELLED.
+# 
+# Client SHOULD use the error code H3_REQUEST_CANCELLED to cancel
+# requests.  Upon receipt of this error code, a server MAY abruptly
+# terminate the response using the error code H3_REQUEST_REJECTED if no
+# processing was performed.  Clients MUST NOT use the
+# H3_REQUEST_REJECTED error code, except when a server has requested
+# closure of the request stream with this error code.
+# 
+# If a stream is cancelled after receiving a complete response, the
+# client MAY ignore the cancellation and use the response.  However, if
+# a stream is cancelled after receiving a partial response, the
+# response SHOULD NOT be used.  Only idempotent actions such as GET,
+# PUT, or DELETE can be safely retried; a client SHOULD NOT
+# automatically retry a request with a non-idempotent method unless it
+# has some means to know that the request semantics are idempotent
+# independent of the method or some means to detect that the original
+# request was never applied.  See Section 9.2.2 of [HTTP] for more
+# details.
+
+[[spec]]
+level = "MAY"
+quote = '''
+Once a request stream has been opened, the request MAY be cancelled
+by either endpoint.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+When possible, it is RECOMMENDED that servers
+send an HTTP response with an appropriate status code rather than
+cancelling a request it has already begun processing.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+Implementations SHOULD cancel requests by abruptly terminating any
+directions of a stream that are still open.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+The server SHOULD
+abort its response stream with the error code H3_REQUEST_REJECTED.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Servers MUST NOT use the H3_REQUEST_REJECTED error code for requests
+that were partially or fully processed.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+When a server abandons a
+response after partial processing, it SHOULD abort its response
+stream with the error code H3_REQUEST_CANCELLED.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+Client SHOULD use the error code H3_REQUEST_CANCELLED to cancel
+requests.
+'''
+
+[[spec]]
+level = "MAY"
+quote = '''
+Upon receipt of this error code, a server MAY abruptly
+terminate the response using the error code H3_REQUEST_REJECTED if no
+processing was performed.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Clients MUST NOT use the
+H3_REQUEST_REJECTED error code, except when a server has requested
+closure of the request stream with this error code.
+'''
+
+[[spec]]
+level = "MAY"
+quote = '''
+If a stream is cancelled after receiving a complete response, the
+client MAY ignore the cancellation and use the response.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+However, if
+a stream is cancelled after receiving a partial response, the
+response SHOULD NOT be used.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+Only idempotent actions such as GET,
+PUT, or DELETE can be safely retried; a client SHOULD NOT
+automatically retry a request with a non-idempotent method unless it
+has some means to know that the request semantics are idempotent
+independent of the method or some means to detect that the original
+request was never applied.
+'''
+

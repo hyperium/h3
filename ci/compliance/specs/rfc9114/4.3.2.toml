@@ -1,0 +1,21 @@
+target = "ci/compliance/specs/rfc9114.txt#4.3.2"
+
+# 4.3.2.  Response Pseudo-Header Fields
+#
+# For responses, a single ":status" pseudo-header field is defined that
+# carries the HTTP status code; see Section 15 of [HTTP].  This pseudo-
+# header field MUST be included in all responses; otherwise, the
+# response is malformed (see Section 4.1.2).
+# 
+# HTTP/3 does not define a way to carry the version or reason phrase
+# that is included in an HTTP/1.1 status line.  HTTP/3 responses
+# implicitly have a protocol version of "3.0".
+
+[[spec]]
+level = "MUST"
+quote = '''
+This pseudo-
+header field MUST be included in all responses; otherwise, the
+response is malformed (see Section 4.1.2).
+'''
+

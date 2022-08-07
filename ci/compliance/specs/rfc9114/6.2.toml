@@ -1,0 +1,151 @@
+target = "ci/compliance/specs/rfc9114.txt#6.2"
+
+# 6.2.  Unidirectional Streams
+#
+# Unidirectional streams, in either direction, are used for a range of
+# purposes.  The purpose is indicated by a stream type, which is sent
+# as a variable-length integer at the start of the stream.  The format
+# and structure of data that follows this integer is determined by the
+# stream type.
+# 
+# Unidirectional Stream Header {
+#   Stream Type (i),
+# }
+# 
+#                 Figure 1: Unidirectional Stream Header
+# 
+# Two stream types are defined in this document: control streams
+# (Section 6.2.1) and push streams (Section 6.2.2).  [QPACK] defines
+# two additional stream types.  Other stream types can be defined by
+# extensions to HTTP/3; see Section 9 for more details.  Some stream
+# types are reserved (Section 6.2.3).
+# 
+# The performance of HTTP/3 connections in the early phase of their
+# lifetime is sensitive to the creation and exchange of data on
+# unidirectional streams.  Endpoints that excessively restrict the
+# number of streams or the flow-control window of these streams will
+# increase the chance that the remote peer reaches the limit early and
+# becomes blocked.  In particular, implementations should consider that
+# remote peers may wish to exercise reserved stream behavior
+# (Section 6.2.3) with some of the unidirectional streams they are
+# permitted to use.
+# 
+# Each endpoint needs to create at least one unidirectional stream for
+# the HTTP control stream.  QPACK requires two additional
+# unidirectional streams, and other extensions might require further
+# streams.  Therefore, the transport parameters sent by both clients
+# and servers MUST allow the peer to create at least three
+# unidirectional streams.  These transport parameters SHOULD also
+# provide at least 1,024 bytes of flow-control credit to each
+# unidirectional stream.
+# 
+# Note that an endpoint is not required to grant additional credits to
+# create more unidirectional streams if its peer consumes all the
+# initial credits before creating the critical unidirectional streams.
+# Endpoints SHOULD create the HTTP control stream as well as the
+# unidirectional streams required by mandatory extensions (such as the
+# QPACK encoder and decoder streams) first, and then create additional
+# streams as allowed by their peer.
+# 
+# If the stream header indicates a stream type that is not supported by
+# the recipient, the remainder of the stream cannot be consumed as the
+# semantics are unknown.  Recipients of unknown stream types MUST
+# either abort reading of the stream or discard incoming data without
+# further processing.  If reading is aborted, the recipient SHOULD use
+# the H3_STREAM_CREATION_ERROR error code or a reserved error code
+# (Section 8.1).  The recipient MUST NOT consider unknown stream types
+# to be a connection error of any kind.
+# 
+# As certain stream types can affect connection state, a recipient
+# SHOULD NOT discard data from incoming unidirectional streams prior to
+# reading the stream type.
+# 
+# Implementations MAY send stream types before knowing whether the peer
+# supports them.  However, stream types that could modify the state or
+# semantics of existing protocol components, including QPACK or other
+# extensions, MUST NOT be sent until the peer is known to support them.
+# 
+# A sender can close or reset a unidirectional stream unless otherwise
+# specified.  A receiver MUST tolerate unidirectional streams being
+# closed or reset prior to the reception of the unidirectional stream
+# header.
+
+[[spec]]
+level = "MUST"
+quote = '''
+Therefore, the transport parameters sent by both clients
+and servers MUST allow the peer to create at least three
+unidirectional streams.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+These transport parameters SHOULD also
+provide at least 1,024 bytes of flow-control credit to each
+unidirectional stream.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+Endpoints SHOULD create the HTTP control stream as well as the
+unidirectional streams required by mandatory extensions (such as the
+QPACK encoder and decoder streams) first, and then create additional
+streams as allowed by their peer.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Recipients of unknown stream types MUST
+either abort reading of the stream or discard incoming data without
+further processing.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+If reading is aborted, the recipient SHOULD use
+the H3_STREAM_CREATION_ERROR error code or a reserved error code
+(Section 8.1).
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+The recipient MUST NOT consider unknown stream types
+to be a connection error of any kind.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+As certain stream types can affect connection state, a recipient
+SHOULD NOT discard data from incoming unidirectional streams prior to
+reading the stream type.
+'''
+
+[[spec]]
+level = "MAY"
+quote = '''
+Implementations MAY send stream types before knowing whether the peer
+supports them.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+However, stream types that could modify the state or
+semantics of existing protocol components, including QPACK or other
+extensions, MUST NOT be sent until the peer is known to support them.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+A receiver MUST tolerate unidirectional streams being
+closed or reset prior to the reception of the unidirectional stream
+header.
+'''
+

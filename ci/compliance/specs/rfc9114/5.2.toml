@@ -1,0 +1,194 @@
+target = "ci/compliance/specs/rfc9114.txt#5.2"
+
+# 5.2.  Connection Shutdown
+#
+# Even when a connection is not idle, either endpoint can decide to
+# stop using the connection and initiate a graceful connection close.
+# Endpoints initiate the graceful shutdown of an HTTP/3 connection by
+# sending a GOAWAY frame.  The GOAWAY frame contains an identifier that
+# indicates to the receiver the range of requests or pushes that were
+# or might be processed in this connection.  The server sends a client-
+# initiated bidirectional stream ID; the client sends a push ID.
+# Requests or pushes with the indicated identifier or greater are
+# rejected (Section 4.1.1) by the sender of the GOAWAY.  This
+# identifier MAY be zero if no requests or pushes were processed.
+# 
+# The information in the GOAWAY frame enables a client and server to
+# agree on which requests or pushes were accepted prior to the shutdown
+# of the HTTP/3 connection.  Upon sending a GOAWAY frame, the endpoint
+# SHOULD explicitly cancel (see Sections 4.1.1 and 7.2.3) any requests
+# or pushes that have identifiers greater than or equal to the one
+# indicated, in order to clean up transport state for the affected
+# streams.  The endpoint SHOULD continue to do so as more requests or
+# pushes arrive.
+# 
+# Endpoints MUST NOT initiate new requests or promise new pushes on the
+# connection after receipt of a GOAWAY frame from the peer.  Clients
+# MAY establish a new connection to send additional requests.
+# 
+# Some requests or pushes might already be in transit:
+# 
+# *  Upon receipt of a GOAWAY frame, if the client has already sent
+#    requests with a stream ID greater than or equal to the identifier
+#    contained in the GOAWAY frame, those requests will not be
+#    processed.  Clients can safely retry unprocessed requests on a
+#    different HTTP connection.  A client that is unable to retry
+#    requests loses all requests that are in flight when the server
+#    closes the connection.
+# 
+#    Requests on stream IDs less than the stream ID in a GOAWAY frame
+#    from the server might have been processed; their status cannot be
+#    known until a response is received, the stream is reset
+#    individually, another GOAWAY is received with a lower stream ID
+#    than that of the request in question, or the connection
+#    terminates.
+# 
+#    Servers MAY reject individual requests on streams below the
+#    indicated ID if these requests were not processed.
+# 
+# *  If a server receives a GOAWAY frame after having promised pushes
+#    with a push ID greater than or equal to the identifier contained
+#    in the GOAWAY frame, those pushes will not be accepted.
+# 
+# Servers SHOULD send a GOAWAY frame when the closing of a connection
+# is known in advance, even if the advance notice is small, so that the
+# remote peer can know whether or not a request has been partially
+# processed.  For example, if an HTTP client sends a POST at the same
+# time that a server closes a QUIC connection, the client cannot know
+# if the server started to process that POST request if the server does
+# not send a GOAWAY frame to indicate what streams it might have acted
+# on.
+# 
+# An endpoint MAY send multiple GOAWAY frames indicating different
+# identifiers, but the identifier in each frame MUST NOT be greater
+# than the identifier in any previous frame, since clients might
+# already have retried unprocessed requests on another HTTP connection.
+# Receiving a GOAWAY containing a larger identifier than previously
+# received MUST be treated as a connection error of type H3_ID_ERROR.
+# 
+# An endpoint that is attempting to gracefully shut down a connection
+# can send a GOAWAY frame with a value set to the maximum possible
+# value (2^62-4 for servers, 2^62-1 for clients).  This ensures that
+# the peer stops creating new requests or pushes.  After allowing time
+# for any in-flight requests or pushes to arrive, the endpoint can send
+# another GOAWAY frame indicating which requests or pushes it might
+# accept before the end of the connection.  This ensures that a
+# connection can be cleanly shut down without losing requests.
+# 
+# A client has more flexibility in the value it chooses for the Push ID
+# field in a GOAWAY that it sends.  A value of 2^62-1 indicates that
+# the server can continue fulfilling pushes that have already been
+# promised.  A smaller value indicates the client will reject pushes
+# with push IDs greater than or equal to this value.  Like the server,
+# the client MAY send subsequent GOAWAY frames so long as the specified
+# push ID is no greater than any previously sent value.
+# 
+# Even when a GOAWAY indicates that a given request or push will not be
+# processed or accepted upon receipt, the underlying transport
+# resources still exist.  The endpoint that initiated these requests
+# can cancel them to clean up transport state.
+# 
+# Once all accepted requests and pushes have been processed, the
+# endpoint can permit the connection to become idle, or it MAY initiate
+# an immediate closure of the connection.  An endpoint that completes a
+# graceful shutdown SHOULD use the H3_NO_ERROR error code when closing
+# the connection.
+# 
+# If a client has consumed all available bidirectional stream IDs with
+# requests, the server need not send a GOAWAY frame, since the client
+# is unable to make further requests.
+
+[[spec]]
+level = "MAY"
+quote = '''
+This
+identifier MAY be zero if no requests or pushes were processed.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+Upon sending a GOAWAY frame, the endpoint
+SHOULD explicitly cancel (see Sections 4.1.1 and 7.2.3) any requests
+or pushes that have identifiers greater than or equal to the one
+indicated, in order to clean up transport state for the affected
+streams.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+The endpoint SHOULD continue to do so as more requests or
+pushes arrive.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Endpoints MUST NOT initiate new requests or promise new pushes on the
+connection after receipt of a GOAWAY frame from the peer.
+'''
+
+[[spec]]
+level = "MAY"
+quote = '''
+Clients
+MAY establish a new connection to send additional requests.
+'''
+
+[[spec]]
+level = "MAY"
+quote = '''
+Servers MAY reject individual requests on streams below the
+indicated ID if these requests were not processed.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+Servers SHOULD send a GOAWAY frame when the closing of a connection
+is known in advance, even if the advance notice is small, so that the
+remote peer can know whether or not a request has been partially
+processed.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+An endpoint MAY send multiple GOAWAY frames indicating different
+identifiers, but the identifier in each frame MUST NOT be greater
+than the identifier in any previous frame, since clients might
+already have retried unprocessed requests on another HTTP connection.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Receiving a GOAWAY containing a larger identifier than previously
+received MUST be treated as a connection error of type H3_ID_ERROR.
+'''
+
+[[spec]]
+level = "MAY"
+quote = '''
+Like the server,
+the client MAY send subsequent GOAWAY frames so long as the specified
+push ID is no greater than any previously sent value.
+'''
+
+[[spec]]
+level = "MAY"
+quote = '''
+Once all accepted requests and pushes have been processed, the
+endpoint can permit the connection to become idle, or it MAY initiate
+an immediate closure of the connection.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+An endpoint that completes a
+graceful shutdown SHOULD use the H3_NO_ERROR error code when closing
+the connection.
+'''
+

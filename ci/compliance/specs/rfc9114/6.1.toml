@@ -1,0 +1,49 @@
+target = "ci/compliance/specs/rfc9114.txt#6.1"
+
+# 6.1.  Bidirectional Streams
+#
+# All client-initiated bidirectional streams are used for HTTP requests
+# and responses.  A bidirectional stream ensures that the response can
+# be readily correlated with the request.  These streams are referred
+# to as request streams.
+# 
+# This means that the client's first request occurs on QUIC stream 0,
+# with subsequent requests on streams 4, 8, and so on.  In order to
+# permit these streams to open, an HTTP/3 server SHOULD configure non-
+# zero minimum values for the number of permitted streams and the
+# initial stream flow-control window.  So as to not unnecessarily limit
+# parallelism, at least 100 request streams SHOULD be permitted at a
+# time.
+# 
+# HTTP/3 does not use server-initiated bidirectional streams, though an
+# extension could define a use for these streams.  Clients MUST treat
+# receipt of a server-initiated bidirectional stream as a connection
+# error of type H3_STREAM_CREATION_ERROR unless such an extension has
+# been negotiated.
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+In order to
+permit these streams to open, an HTTP/3 server SHOULD configure non-
+zero minimum values for the number of permitted streams and the
+initial stream flow-control window.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+So as to not unnecessarily limit
+parallelism, at least 100 request streams SHOULD be permitted at a
+time.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Clients MUST treat
+receipt of a server-initiated bidirectional stream as a connection
+error of type H3_STREAM_CREATION_ERROR unless such an extension has
+been negotiated.
+'''
+

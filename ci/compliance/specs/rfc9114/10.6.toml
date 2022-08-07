@@ -1,0 +1,41 @@
+target = "ci/compliance/specs/rfc9114.txt#10.6"
+
+# 10.6.  Use of Compression
+#
+# Compression can allow an attacker to recover secret data when it is
+# compressed in the same context as data under attacker control.
+# HTTP/3 enables compression of fields (Section 4.2); the following
+# concerns also apply to the use of HTTP compressed content-codings;
+# see Section 8.4.1 of [HTTP].
+# 
+# There are demonstrable attacks on compression that exploit the
+# characteristics of the web (e.g., [BREACH]).  The attacker induces
+# multiple requests containing varying plaintext, observing the length
+# of the resulting ciphertext in each, which reveals a shorter length
+# when a guess about the secret is correct.
+# 
+# Implementations communicating on a secure channel MUST NOT compress
+# content that includes both confidential and attacker-controlled data
+# unless separate compression contexts are used for each source of
+# data.  Compression MUST NOT be used if the source of data cannot be
+# reliably determined.
+# 
+# Further considerations regarding the compression of field sections
+# are described in [QPACK].
+
+[[spec]]
+level = "MUST"
+quote = '''
+Implementations communicating on a secure channel MUST NOT compress
+content that includes both confidential and attacker-controlled data
+unless separate compression contexts are used for each source of
+data.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Compression MUST NOT be used if the source of data cannot be
+reliably determined.
+'''
+

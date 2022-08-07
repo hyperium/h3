@@ -1,0 +1,67 @@
+target = "ci/compliance/specs/rfc9114.txt#7.1"
+
+# 7.1.  Frame Layout
+#
+# All frames have the following format:
+# 
+# HTTP/3 Frame Format {
+#   Type (i),
+#   Length (i),
+#   Frame Payload (..),
+# }
+# 
+#                     Figure 3: HTTP/3 Frame Format
+# 
+# A frame includes the following fields:
+# 
+# Type:  A variable-length integer that identifies the frame type.
+# 
+# Length:  A variable-length integer that describes the length in bytes
+#    of the Frame Payload.
+# 
+# Frame Payload:  A payload, the semantics of which are determined by
+#    the Type field.
+# 
+# Each frame's payload MUST contain exactly the fields identified in
+# its description.  A frame payload that contains additional bytes
+# after the identified fields or a frame payload that terminates before
+# the end of the identified fields MUST be treated as a connection
+# error of type H3_FRAME_ERROR.  In particular, redundant length
+# encodings MUST be verified to be self-consistent; see Section 10.8.
+# 
+# When a stream terminates cleanly, if the last frame on the stream was
+# truncated, this MUST be treated as a connection error of type
+# H3_FRAME_ERROR.  Streams that terminate abruptly may be reset at any
+# point in a frame.
+
+[[spec]]
+level = "MUST"
+quote = '''
+Each frame's payload MUST contain exactly the fields identified in
+its description.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+A frame payload that contains additional bytes
+after the identified fields or a frame payload that terminates before
+the end of the identified fields MUST be treated as a connection
+error of type H3_FRAME_ERROR.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+In particular, redundant length
+encodings MUST be verified to be self-consistent; see Section 10.8.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+When a stream terminates cleanly, if the last frame on the stream was
+truncated, this MUST be treated as a connection error of type
+H3_FRAME_ERROR.
+'''
+

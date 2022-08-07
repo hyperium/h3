@@ -1,0 +1,27 @@
+target = "ci/compliance/specs/rfc9114.txt#3.1.2"
+
+# 3.1.2.  Other Schemes
+#
+# Although HTTP is independent of the transport protocol, the "http"
+# scheme associates authority with the ability to receive TCP
+# connections on the indicated port of whatever host is identified
+# within the authority component.  Because HTTP/3 does not use TCP,
+# HTTP/3 cannot be used for direct access to the authoritative server
+# for a resource identified by an "http" URI.  However, protocol
+# extensions such as [ALTSVC] permit the authoritative server to
+# identify other services that are also authoritative and that might be
+# reachable over HTTP/3.
+# 
+# Prior to making requests for an origin whose scheme is not "https",
+# the client MUST ensure the server is willing to serve that scheme.
+# For origins whose scheme is "http", an experimental method to
+# accomplish this is described in [RFC8164].  Other mechanisms might be
+# defined for various schemes in the future.
+
+[[spec]]
+level = "MUST"
+quote = '''
+Prior to making requests for an origin whose scheme is not "https",
+the client MUST ensure the server is willing to serve that scheme.
+'''
+

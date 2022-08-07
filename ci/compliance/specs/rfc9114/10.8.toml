@@ -1,0 +1,17 @@
+target = "ci/compliance/specs/rfc9114.txt#10.8"
+
+# 10.8.  Frame Parsing
+#
+# Several protocol elements contain nested length elements, typically
+# in the form of frames with an explicit length containing variable-
+# length integers.  This could pose a security risk to an incautious
+# implementer.  An implementation MUST ensure that the length of a
+# frame exactly matches the length of the fields it contains.
+
+[[spec]]
+level = "MUST"
+quote = '''
+An implementation MUST ensure that the length of a
+frame exactly matches the length of the fields it contains.
+'''
+

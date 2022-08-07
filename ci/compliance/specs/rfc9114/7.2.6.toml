@@ -1,0 +1,48 @@
+target = "ci/compliance/specs/rfc9114.txt#7.2.6"
+
+# 7.2.6.  GOAWAY
+#
+# The GOAWAY frame (type=0x07) is used to initiate graceful shutdown of
+# an HTTP/3 connection by either endpoint.  GOAWAY allows an endpoint
+# to stop accepting new requests or pushes while still finishing
+# processing of previously received requests and pushes.  This enables
+# administrative actions, like server maintenance.  GOAWAY by itself
+# does not close a connection.
+# 
+# GOAWAY Frame {
+#   Type (i) = 0x07,
+#   Length (i),
+#   Stream ID/Push ID (i),
+# }
+# 
+#                         Figure 9: GOAWAY Frame
+# 
+# The GOAWAY frame is always sent on the control stream.  In the
+# server-to-client direction, it carries a QUIC stream ID for a client-
+# initiated bidirectional stream encoded as a variable-length integer.
+# A client MUST treat receipt of a GOAWAY frame containing a stream ID
+# of any other type as a connection error of type H3_ID_ERROR.
+# 
+# In the client-to-server direction, the GOAWAY frame carries a push ID
+# encoded as a variable-length integer.
+# 
+# The GOAWAY frame applies to the entire connection, not a specific
+# stream.  A client MUST treat a GOAWAY frame on a stream other than
+# the control stream as a connection error of type H3_FRAME_UNEXPECTED.
+# 
+# See Section 5.2 for more information on the use of the GOAWAY frame.
+
+[[spec]]
+level = "MUST"
+quote = '''
+A client MUST treat receipt of a GOAWAY frame containing a stream ID
+of any other type as a connection error of type H3_ID_ERROR.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+A client MUST treat a GOAWAY frame on a stream other than
+the control stream as a connection error of type H3_FRAME_UNEXPECTED.
+'''
+

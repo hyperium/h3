@@ -1,0 +1,85 @@
+target = "ci/compliance/specs/rfc9114.txt#9"
+
+# 9.  Extensions to HTTP/3
+#
+# HTTP/3 permits extension of the protocol.  Within the limitations
+# described in this section, protocol extensions can be used to provide
+# additional services or alter any aspect of the protocol.  Extensions
+# are effective only within the scope of a single HTTP/3 connection.
+# 
+# This applies to the protocol elements defined in this document.  This
+# does not affect the existing options for extending HTTP, such as
+# defining new methods, status codes, or fields.
+# 
+# Extensions are permitted to use new frame types (Section 7.2), new
+# settings (Section 7.2.4.1), new error codes (Section 8), or new
+# unidirectional stream types (Section 6.2).  Registries are
+# established for managing these extension points: frame types
+# (Section 11.2.1), settings (Section 11.2.2), error codes
+# (Section 11.2.3), and stream types (Section 11.2.4).
+# 
+# Implementations MUST ignore unknown or unsupported values in all
+# extensible protocol elements.  Implementations MUST discard data or
+# abort reading on unidirectional streams that have unknown or
+# unsupported types.  This means that any of these extension points can
+# be safely used by extensions without prior arrangement or
+# negotiation.  However, where a known frame type is required to be in
+# a specific location, such as the SETTINGS frame as the first frame of
+# the control stream (see Section 6.2.1), an unknown frame type does
+# not satisfy that requirement and SHOULD be treated as an error.
+# 
+# Extensions that could change the semantics of existing protocol
+# components MUST be negotiated before being used.  For example, an
+# extension that changes the layout of the HEADERS frame cannot be used
+# until the peer has given a positive signal that this is acceptable.
+# Coordinating when such a revised layout comes into effect could prove
+# complex.  As such, allocating new identifiers for new definitions of
+# existing protocol elements is likely to be more effective.
+# 
+# This document does not mandate a specific method for negotiating the
+# use of an extension, but it notes that a setting (Section 7.2.4.1)
+# could be used for that purpose.  If both peers set a value that
+# indicates willingness to use the extension, then the extension can be
+# used.  If a setting is used for extension negotiation, the default
+# value MUST be defined in such a fashion that the extension is
+# disabled if the setting is omitted.
+
+[[spec]]
+level = "MUST"
+quote = '''
+Implementations MUST ignore unknown or unsupported values in all
+extensible protocol elements.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Implementations MUST discard data or
+abort reading on unidirectional streams that have unknown or
+unsupported types.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+However, where a known frame type is required to be in
+a specific location, such as the SETTINGS frame as the first frame of
+the control stream (see Section 6.2.1), an unknown frame type does
+not satisfy that requirement and SHOULD be treated as an error.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Extensions that could change the semantics of existing protocol
+components MUST be negotiated before being used.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+If a setting is used for extension negotiation, the default
+value MUST be defined in such a fashion that the extension is
+disabled if the setting is omitted.
+'''
+

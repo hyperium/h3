@@ -1,0 +1,33 @@
+target = "ci/compliance/specs/rfc9114.txt#7.2.1"
+
+# 7.2.1.  DATA
+#
+# DATA frames (type=0x00) convey arbitrary, variable-length sequences
+# of bytes associated with HTTP request or response content.
+# 
+# DATA frames MUST be associated with an HTTP request or response.  If
+# a DATA frame is received on a control stream, the recipient MUST
+# respond with a connection error of type H3_FRAME_UNEXPECTED.
+# 
+# DATA Frame {
+#   Type (i) = 0x00,
+#   Length (i),
+#   Data (..),
+# }
+# 
+#                          Figure 4: DATA Frame
+
+[[spec]]
+level = "MUST"
+quote = '''
+DATA frames MUST be associated with an HTTP request or response.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+If
+a DATA frame is received on a control stream, the recipient MUST
+respond with a connection error of type H3_FRAME_UNEXPECTED.
+'''
+

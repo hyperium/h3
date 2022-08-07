@@ -1,0 +1,48 @@
+target = "ci/compliance/specs/rfc9114.txt#5.1"
+
+# 5.1.  Idle Connections
+#
+# Each QUIC endpoint declares an idle timeout during the handshake.  If
+# the QUIC connection remains idle (no packets received) for longer
+# than this duration, the peer will assume that the connection has been
+# closed.  HTTP/3 implementations will need to open a new HTTP/3
+# connection for new requests if the existing connection has been idle
+# for longer than the idle timeout negotiated during the QUIC
+# handshake, and they SHOULD do so if approaching the idle timeout; see
+# Section 10.1 of [QUIC-TRANSPORT].
+# 
+# HTTP clients are expected to request that the transport keep
+# connections open while there are responses outstanding for requests
+# or server pushes, as described in Section 10.1.2 of [QUIC-TRANSPORT].
+# If the client is not expecting a response from the server, allowing
+# an idle connection to time out is preferred over expending effort
+# maintaining a connection that might not be needed.  A gateway MAY
+# maintain connections in anticipation of need rather than incur the
+# latency cost of connection establishment to servers.  Servers SHOULD
+# NOT actively keep connections open.
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+HTTP/3 implementations will need to open a new HTTP/3
+connection for new requests if the existing connection has been idle
+for longer than the idle timeout negotiated during the QUIC
+handshake, and they SHOULD do so if approaching the idle timeout; see
+Section 10.1 of [QUIC-TRANSPORT].
+'''
+
+[[spec]]
+level = "MAY"
+quote = '''
+A gateway MAY
+maintain connections in anticipation of need rather than incur the
+latency cost of connection establishment to servers.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+Servers SHOULD
+NOT actively keep connections open.
+'''
+

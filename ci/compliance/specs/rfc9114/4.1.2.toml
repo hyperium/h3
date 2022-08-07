@@ -1,0 +1,70 @@
+target = "ci/compliance/specs/rfc9114.txt#4.1.2"
+
+# 4.1.2.  Malformed Requests and Responses
+#
+# A malformed request or response is one that is an otherwise valid
+# sequence of frames but is invalid due to:
+# 
+# *  the presence of prohibited fields or pseudo-header fields,
+# 
+# *  the absence of mandatory pseudo-header fields,
+# 
+# *  invalid values for pseudo-header fields,
+# 
+# *  pseudo-header fields after fields,
+# 
+# *  an invalid sequence of HTTP messages,
+# 
+# *  the inclusion of uppercase field names, or
+# 
+# *  the inclusion of invalid characters in field names or values.
+# 
+# A request or response that is defined as having content when it
+# contains a Content-Length header field (Section 8.6 of [HTTP]) is
+# malformed if the value of the Content-Length header field does not
+# equal the sum of the DATA frame lengths received.  A response that is
+# defined as never having content, even when a Content-Length is
+# present, can have a non-zero Content-Length header field even though
+# no content is included in DATA frames.
+# 
+# Intermediaries that process HTTP requests or responses (i.e., any
+# intermediary not acting as a tunnel) MUST NOT forward a malformed
+# request or response.  Malformed requests or responses that are
+# detected MUST be treated as a stream error of type H3_MESSAGE_ERROR.
+# 
+# For malformed requests, a server MAY send an HTTP response indicating
+# the error prior to closing or resetting the stream.  Clients MUST NOT
+# accept a malformed response.  Note that these requirements are
+# intended to protect against several types of common attacks against
+# HTTP; they are deliberately strict because being permissive can
+# expose implementations to these vulnerabilities.
+
+[[spec]]
+level = "MUST"
+quote = '''
+Intermediaries that process HTTP requests or responses (i.e., any
+intermediary not acting as a tunnel) MUST NOT forward a malformed
+request or response.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Malformed requests or responses that are
+detected MUST be treated as a stream error of type H3_MESSAGE_ERROR.
+'''
+
+[[spec]]
+level = "MAY"
+quote = '''
+For malformed requests, a server MAY send an HTTP response indicating
+the error prior to closing or resetting the stream.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Clients MUST NOT
+accept a malformed response.
+'''
+

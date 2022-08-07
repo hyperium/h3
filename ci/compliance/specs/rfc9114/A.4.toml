@@ -1,0 +1,59 @@
+target = "ci/compliance/specs/rfc9114.txt#A.4"
+
+# A.4.  HTTP/2 Error Codes
+#
+# QUIC has the same concepts of "stream" and "connection" errors that
+# HTTP/2 provides.  However, the differences between HTTP/2 and HTTP/3
+# mean that error codes are not directly portable between versions.
+# 
+# The HTTP/2 error codes defined in Section 7 of [HTTP/2] logically map
+# to the HTTP/3 error codes as follows:
+# 
+# NO_ERROR (0x00):  H3_NO_ERROR in Section 8.1.
+# 
+# PROTOCOL_ERROR (0x01):  This is mapped to H3_GENERAL_PROTOCOL_ERROR
+#    except in cases where more specific error codes have been defined.
+#    Such cases include H3_FRAME_UNEXPECTED, H3_MESSAGE_ERROR, and
+#    H3_CLOSED_CRITICAL_STREAM defined in Section 8.1.
+# 
+# INTERNAL_ERROR (0x02):  H3_INTERNAL_ERROR in Section 8.1.
+# 
+# FLOW_CONTROL_ERROR (0x03):  Not applicable, since QUIC handles flow
+#    control.
+# 
+# SETTINGS_TIMEOUT (0x04):  Not applicable, since no acknowledgment of
+#    SETTINGS is defined.
+# 
+# STREAM_CLOSED (0x05):  Not applicable, since QUIC handles stream
+#    management.
+# 
+# FRAME_SIZE_ERROR (0x06):  H3_FRAME_ERROR error code defined in
+#    Section 8.1.
+# 
+# REFUSED_STREAM (0x07):  H3_REQUEST_REJECTED (in Section 8.1) is used
+#    to indicate that a request was not processed.  Otherwise, not
+#    applicable because QUIC handles stream management.
+# 
+# CANCEL (0x08):  H3_REQUEST_CANCELLED in Section 8.1.
+# 
+# COMPRESSION_ERROR (0x09):  Multiple error codes are defined in
+#    [QPACK].
+# 
+# CONNECT_ERROR (0x0a):  H3_CONNECT_ERROR in Section 8.1.
+# 
+# ENHANCE_YOUR_CALM (0x0b):  H3_EXCESSIVE_LOAD in Section 8.1.
+# 
+# INADEQUATE_SECURITY (0x0c):  Not applicable, since QUIC is assumed to
+#    provide sufficient security on all connections.
+# 
+# HTTP_1_1_REQUIRED (0x0d):  H3_VERSION_FALLBACK in Section 8.1.
+# 
+# Error codes need to be defined for HTTP/2 and HTTP/3 separately.  See
+# Section 11.2.3.
+
+[[spec]]
+level = "MUST"
+quote = '''
+HTTP_1_1_REQUIRED (0x0d):  H3_VERSION_FALLBACK in Section 8.1.
+'''
+

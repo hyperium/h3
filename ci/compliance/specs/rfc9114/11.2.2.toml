@@ -1,0 +1,106 @@
+target = "ci/compliance/specs/rfc9114.txt#11.2.2"
+
+# 11.2.2.  Settings Parameters
+#
+# This document establishes a registry for HTTP/3 settings.  The
+# "HTTP/3 Settings" registry governs a 62-bit space.  This registry
+# follows the QUIC registry policy; see Section 11.2.  Permanent
+# registrations in this registry are assigned using the Specification
+# Required policy ([RFC8126]), except for values between 0x00 and 0x3f
+# (in hexadecimal; inclusive), which are assigned using Standards
+# Action or IESG Approval as defined in Sections 4.9 and 4.10 of
+# [RFC8126].
+# 
+# While this registry is separate from the "HTTP/2 Settings" registry
+# defined in [HTTP/2], it is preferable that the assignments parallel
+# each other.  If an entry is present in only one registry, every
+# effort SHOULD be made to avoid assigning the corresponding value to
+# an unrelated operation.  Expert reviewers MAY reject unrelated
+# registrations that would conflict with the same value in the
+# corresponding registry.
+# 
+# In addition to common fields as described in Section 11.2, permanent
+# registrations in this registry MUST include the following fields:
+# 
+# Setting Name:  A symbolic name for the setting.  Specifying a setting
+#    name is optional.
+# 
+# Default:  The value of the setting unless otherwise indicated.  A
+#    default SHOULD be the most restrictive possible value.
+# 
+# The entries in Table 3 are registered by this document.
+# 
+#   +========================+=======+=================+===========+
+#   | Setting Name           | Value | Specification   | Default   |
+#   +========================+=======+=================+===========+
+#   | Reserved               |  0x00 | This document   | N/A       |
+#   +------------------------+-------+-----------------+-----------+
+#   | Reserved               |  0x02 | This document   | N/A       |
+#   +------------------------+-------+-----------------+-----------+
+#   | Reserved               |  0x03 | This document   | N/A       |
+#   +------------------------+-------+-----------------+-----------+
+#   | Reserved               |  0x04 | This document   | N/A       |
+#   +------------------------+-------+-----------------+-----------+
+#   | Reserved               |  0x05 | This document   | N/A       |
+#   +------------------------+-------+-----------------+-----------+
+#   | MAX_FIELD_SECTION_SIZE |  0x06 | Section 7.2.4.1 | Unlimited |
+#   +------------------------+-------+-----------------+-----------+
+# 
+#                   Table 3: Initial HTTP/3 Settings
+# 
+# For formatting reasons, setting names can be abbreviated by removing
+# the 'SETTINGS_' prefix.
+# 
+# Each code of the format 0x1f * N + 0x21 for non-negative integer
+# values of N (that is, 0x21, 0x40, ..., through 0x3ffffffffffffffe)
+# MUST NOT be assigned by IANA and MUST NOT appear in the listing of
+# assigned values.
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+If an entry is present in only one registry, every
+effort SHOULD be made to avoid assigning the corresponding value to
+an unrelated operation.
+'''
+
+[[spec]]
+level = "MAY"
+quote = '''
+Expert reviewers MAY reject unrelated
+registrations that would conflict with the same value in the
+corresponding registry.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+In addition to common fields as described in Section 11.2, permanent
+registrations in this registry MUST include the following fields:
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+A
+default SHOULD be the most restrictive possible value.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Each code of the format 0x1f * N + 0x21 for non-negative integer
+values of N (that is, 0x21, 0x40, ..., through 0x3ffffffffffffffe)
+MUST NOT be assigned by IANA and MUST NOT appear in the listing of
+assigned values.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Each code of the format 0x1f * N + 0x21 for non-negative integer
+values of N (that is, 0x21, 0x40, ..., through 0x3ffffffffffffffe)
+MUST NOT be assigned by IANA and MUST NOT appear in the listing of
+assigned values.
+'''
+

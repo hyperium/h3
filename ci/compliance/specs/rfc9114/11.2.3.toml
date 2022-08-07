@@ -1,0 +1,145 @@
+target = "ci/compliance/specs/rfc9114.txt#11.2.3"
+
+# 11.2.3.  Error Codes
+#
+# This document establishes a registry for HTTP/3 error codes.  The
+# "HTTP/3 Error Codes" registry manages a 62-bit space.  This registry
+# follows the QUIC registry policy; see Section 11.2.  Permanent
+# registrations in this registry are assigned using the Specification
+# Required policy ([RFC8126]), except for values between 0x00 and 0x3f
+# (in hexadecimal; inclusive), which are assigned using Standards
+# Action or IESG Approval as defined in Sections 4.9 and 4.10 of
+# [RFC8126].
+# 
+# Registrations for error codes are required to include a description
+# of the error code.  An expert reviewer is advised to examine new
+# registrations for possible duplication with existing error codes.
+# Use of existing registrations is to be encouraged, but not mandated.
+# Use of values that are registered in the "HTTP/2 Error Code" registry
+# is discouraged, and expert reviewers MAY reject such registrations.
+# 
+# In addition to common fields as described in Section 11.2, this
+# registry includes two additional fields.  Permanent registrations in
+# this registry MUST include the following field:
+# 
+# Name:  A name for the error code.
+# 
+# Description:  A brief description of the error code semantics.
+# 
+# The entries in Table 4 are registered by this document.  These error
+# codes were selected from the range that operates on a Specification
+# Required policy to avoid collisions with HTTP/2 error codes.
+# 
+# +===========================+========+==============+===============+
+# | Name                      | Value  | Description  | Specification |
+# +===========================+========+==============+===============+
+# | H3_NO_ERROR               | 0x0100 | No error     | Section 8.1   |
+# +---------------------------+--------+--------------+---------------+
+# | H3_GENERAL_PROTOCOL_ERROR | 0x0101 | General      | Section 8.1   |
+# |                           |        | protocol     |               |
+# |                           |        | error        |               |
+# +---------------------------+--------+--------------+---------------+
+# | H3_INTERNAL_ERROR         | 0x0102 | Internal     | Section 8.1   |
+# |                           |        | error        |               |
+# +---------------------------+--------+--------------+---------------+
+# | H3_STREAM_CREATION_ERROR  | 0x0103 | Stream       | Section 8.1   |
+# |                           |        | creation     |               |
+# |                           |        | error        |               |
+# +---------------------------+--------+--------------+---------------+
+# | H3_CLOSED_CRITICAL_STREAM | 0x0104 | Critical     | Section 8.1   |
+# |                           |        | stream was   |               |
+# |                           |        | closed       |               |
+# +---------------------------+--------+--------------+---------------+
+# | H3_FRAME_UNEXPECTED       | 0x0105 | Frame not    | Section 8.1   |
+# |                           |        | permitted    |               |
+# |                           |        | in the       |               |
+# |                           |        | current      |               |
+# |                           |        | state        |               |
+# +---------------------------+--------+--------------+---------------+
+# | H3_FRAME_ERROR            | 0x0106 | Frame        | Section 8.1   |
+# |                           |        | violated     |               |
+# |                           |        | layout or    |               |
+# |                           |        | size rules   |               |
+# +---------------------------+--------+--------------+---------------+
+# | H3_EXCESSIVE_LOAD         | 0x0107 | Peer         | Section 8.1   |
+# |                           |        | generating   |               |
+# |                           |        | excessive    |               |
+# |                           |        | load         |               |
+# +---------------------------+--------+--------------+---------------+
+# | H3_ID_ERROR               | 0x0108 | An           | Section 8.1   |
+# |                           |        | identifier   |               |
+# |                           |        | was used     |               |
+# |                           |        | incorrectly  |               |
+# +---------------------------+--------+--------------+---------------+
+# | H3_SETTINGS_ERROR         | 0x0109 | SETTINGS     | Section 8.1   |
+# |                           |        | frame        |               |
+# |                           |        | contained    |               |
+# |                           |        | invalid      |               |
+# |                           |        | values       |               |
+# +---------------------------+--------+--------------+---------------+
+# | H3_MISSING_SETTINGS       | 0x010a | No SETTINGS  | Section 8.1   |
+# |                           |        | frame        |               |
+# |                           |        | received     |               |
+# +---------------------------+--------+--------------+---------------+
+# | H3_REQUEST_REJECTED       | 0x010b | Request not  | Section 8.1   |
+# |                           |        | processed    |               |
+# +---------------------------+--------+--------------+---------------+
+# | H3_REQUEST_CANCELLED      | 0x010c | Data no      | Section 8.1   |
+# |                           |        | longer       |               |
+# |                           |        | needed       |               |
+# +---------------------------+--------+--------------+---------------+
+# | H3_REQUEST_INCOMPLETE     | 0x010d | Stream       | Section 8.1   |
+# |                           |        | terminated   |               |
+# |                           |        | early        |               |
+# +---------------------------+--------+--------------+---------------+
+# | H3_MESSAGE_ERROR          | 0x010e | Malformed    | Section 8.1   |
+# |                           |        | message      |               |
+# +---------------------------+--------+--------------+---------------+
+# | H3_CONNECT_ERROR          | 0x010f | TCP reset    | Section 8.1   |
+# |                           |        | or error on  |               |
+# |                           |        | CONNECT      |               |
+# |                           |        | request      |               |
+# +---------------------------+--------+--------------+---------------+
+# | H3_VERSION_FALLBACK       | 0x0110 | Retry over   | Section 8.1   |
+# |                           |        | HTTP/1.1     |               |
+# +---------------------------+--------+--------------+---------------+
+# 
+#                  Table 4: Initial HTTP/3 Error Codes
+# 
+# Each code of the format 0x1f * N + 0x21 for non-negative integer
+# values of N (that is, 0x21, 0x40, ..., through 0x3ffffffffffffffe)
+# MUST NOT be assigned by IANA and MUST NOT appear in the listing of
+# assigned values.
+
+[[spec]]
+level = "MAY"
+quote = '''
+Use of values that are registered in the "HTTP/2 Error Code" registry
+is discouraged, and expert reviewers MAY reject such registrations.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Permanent registrations in
+this registry MUST include the following field:
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Each code of the format 0x1f * N + 0x21 for non-negative integer
+values of N (that is, 0x21, 0x40, ..., through 0x3ffffffffffffffe)
+MUST NOT be assigned by IANA and MUST NOT appear in the listing of
+assigned values.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Each code of the format 0x1f * N + 0x21 for non-negative integer
+values of N (that is, 0x21, 0x40, ..., through 0x3ffffffffffffffe)
+MUST NOT be assigned by IANA and MUST NOT appear in the listing of
+assigned values.
+'''
+

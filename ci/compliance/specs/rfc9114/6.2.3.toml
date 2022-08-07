@@ -1,0 +1,47 @@
+target = "ci/compliance/specs/rfc9114.txt#6.2.3"
+
+# 6.2.3.  Reserved Stream Types
+#
+# Stream types of the format 0x1f * N + 0x21 for non-negative integer
+# values of N are reserved to exercise the requirement that unknown
+# types be ignored.  These streams have no semantics, and they can be
+# sent when application-layer padding is desired.  They MAY also be
+# sent on connections where no data is currently being transferred.
+# Endpoints MUST NOT consider these streams to have any meaning upon
+# receipt.
+# 
+# The payload and length of the stream are selected in any manner the
+# sending implementation chooses.  When sending a reserved stream type,
+# the implementation MAY either terminate the stream cleanly or reset
+# it.  When resetting the stream, either the H3_NO_ERROR error code or
+# a reserved error code (Section 8.1) SHOULD be used.
+
+[[spec]]
+level = "MAY"
+quote = '''
+They MAY also be
+sent on connections where no data is currently being transferred.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Endpoints MUST NOT consider these streams to have any meaning upon
+receipt.
+'''
+
+[[spec]]
+level = "MAY"
+quote = '''
+When sending a reserved stream type,
+the implementation MAY either terminate the stream cleanly or reset
+it.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+When resetting the stream, either the H3_NO_ERROR error code or
+a reserved error code (Section 8.1) SHOULD be used.
+'''
+

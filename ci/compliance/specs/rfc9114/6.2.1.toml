@@ -1,0 +1,88 @@
+target = "ci/compliance/specs/rfc9114.txt#6.2.1"
+
+# 6.2.1.  Control Streams
+#
+# A control stream is indicated by a stream type of 0x00.  Data on this
+# stream consists of HTTP/3 frames, as defined in Section 7.2.
+# 
+# Each side MUST initiate a single control stream at the beginning of
+# the connection and send its SETTINGS frame as the first frame on this
+# stream.  If the first frame of the control stream is any other frame
+# type, this MUST be treated as a connection error of type
+# H3_MISSING_SETTINGS.  Only one control stream per peer is permitted;
+# receipt of a second stream claiming to be a control stream MUST be
+# treated as a connection error of type H3_STREAM_CREATION_ERROR.  The
+# sender MUST NOT close the control stream, and the receiver MUST NOT
+# request that the sender close the control stream.  If either control
+# stream is closed at any point, this MUST be treated as a connection
+# error of type H3_CLOSED_CRITICAL_STREAM.  Connection errors are
+# described in Section 8.
+# 
+# Because the contents of the control stream are used to manage the
+# behavior of other streams, endpoints SHOULD provide enough flow-
+# control credit to keep the peer's control stream from becoming
+# blocked.
+# 
+# A pair of unidirectional streams is used rather than a single
+# bidirectional stream.  This allows either peer to send data as soon
+# as it is able.  Depending on whether 0-RTT is available on the QUIC
+# connection, either client or server might be able to send stream data
+# first.
+
+[[spec]]
+level = "MUST"
+quote = '''
+Each side MUST initiate a single control stream at the beginning of
+the connection and send its SETTINGS frame as the first frame on this
+stream.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+If the first frame of the control stream is any other frame
+type, this MUST be treated as a connection error of type
+H3_MISSING_SETTINGS.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Only one control stream per peer is permitted;
+receipt of a second stream claiming to be a control stream MUST be
+treated as a connection error of type H3_STREAM_CREATION_ERROR.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+The
+sender MUST NOT close the control stream, and the receiver MUST NOT
+request that the sender close the control stream.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+The
+sender MUST NOT close the control stream, and the receiver MUST NOT
+request that the sender close the control stream.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+If either control
+stream is closed at any point, this MUST be treated as a connection
+error of type H3_CLOSED_CRITICAL_STREAM.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+Because the contents of the control stream are used to manage the
+behavior of other streams, endpoints SHOULD provide enough flow-
+control credit to keep the peer's control stream from becoming
+blocked.
+'''
+

@@ -1,0 +1,229 @@
+target = "ci/compliance/specs/rfc9114.txt#4.1"
+
+# 4.1.  HTTP Message Framing
+#
+# A client sends an HTTP request on a request stream, which is a
+# client-initiated bidirectional QUIC stream; see Section 6.1.  A
+# client MUST send only a single request on a given stream.  A server
+# sends zero or more interim HTTP responses on the same stream as the
+# request, followed by a single final HTTP response, as detailed below.
+# See Section 15 of [HTTP] for a description of interim and final HTTP
+# responses.
+# 
+# Pushed responses are sent on a server-initiated unidirectional QUIC
+# stream; see Section 6.2.2.  A server sends zero or more interim HTTP
+# responses, followed by a single final HTTP response, in the same
+# manner as a standard response.  Push is described in more detail in
+# Section 4.6.
+# 
+# On a given stream, receipt of multiple requests or receipt of an
+# additional HTTP response following a final HTTP response MUST be
+# treated as malformed.
+# 
+# An HTTP message (request or response) consists of:
+# 
+# 1.  the header section, including message control data, sent as a
+#     single HEADERS frame,
+# 
+# 2.  optionally, the content, if present, sent as a series of DATA
+#     frames, and
+# 
+# 3.  optionally, the trailer section, if present, sent as a single
+#     HEADERS frame.
+# 
+# Header and trailer sections are described in Sections 6.3 and 6.5 of
+# [HTTP]; the content is described in Section 6.4 of [HTTP].
+# 
+# Receipt of an invalid sequence of frames MUST be treated as a
+# connection error of type H3_FRAME_UNEXPECTED.  In particular, a DATA
+# frame before any HEADERS frame, or a HEADERS or DATA frame after the
+# trailing HEADERS frame, is considered invalid.  Other frame types,
+# especially unknown frame types, might be permitted subject to their
+# own rules; see Section 9.
+# 
+# A server MAY send one or more PUSH_PROMISE frames before, after, or
+# interleaved with the frames of a response message.  These
+# PUSH_PROMISE frames are not part of the response; see Section 4.6 for
+# more details.  PUSH_PROMISE frames are not permitted on push streams;
+# a pushed response that includes PUSH_PROMISE frames MUST be treated
+# as a connection error of type H3_FRAME_UNEXPECTED.
+# 
+# Frames of unknown types (Section 9), including reserved frames
+# (Section 7.2.8) MAY be sent on a request or push stream before,
+# after, or interleaved with other frames described in this section.
+# 
+# The HEADERS and PUSH_PROMISE frames might reference updates to the
+# QPACK dynamic table.  While these updates are not directly part of
+# the message exchange, they must be received and processed before the
+# message can be consumed.  See Section 4.2 for more details.
+# 
+# Transfer codings (see Section 7 of [HTTP/1.1]) are not defined for
+# HTTP/3; the Transfer-Encoding header field MUST NOT be used.
+# 
+# A response MAY consist of multiple messages when and only when one or
+# more interim responses (1xx; see Section 15.2 of [HTTP]) precede a
+# final response to the same request.  Interim responses do not contain
+# content or trailer sections.
+# 
+# An HTTP request/response exchange fully consumes a client-initiated
+# bidirectional QUIC stream.  After sending a request, a client MUST
+# close the stream for sending.  Unless using the CONNECT method (see
+# Section 4.4), clients MUST NOT make stream closure dependent on
+# receiving a response to their request.  After sending a final
+# response, the server MUST close the stream for sending.  At this
+# point, the QUIC stream is fully closed.
+# 
+# When a stream is closed, this indicates the end of the final HTTP
+# message.  Because some messages are large or unbounded, endpoints
+# SHOULD begin processing partial HTTP messages once enough of the
+# message has been received to make progress.  If a client-initiated
+# stream terminates without enough of the HTTP message to provide a
+# complete response, the server SHOULD abort its response stream with
+# the error code H3_REQUEST_INCOMPLETE.
+# 
+# A server can send a complete response prior to the client sending an
+# entire request if the response does not depend on any portion of the
+# request that has not been sent and received.  When the server does
+# not need to receive the remainder of the request, it MAY abort
+# reading the request stream, send a complete response, and cleanly
+# close the sending part of the stream.  The error code H3_NO_ERROR
+# SHOULD be used when requesting that the client stop sending on the
+# request stream.  Clients MUST NOT discard complete responses as a
+# result of having their request terminated abruptly, though clients
+# can always discard responses at their discretion for other reasons.
+# If the server sends a partial or complete response but does not abort
+# reading the request, clients SHOULD continue sending the content of
+# the request and close the stream normally.
+
+[[spec]]
+level = "MUST"
+quote = '''
+A
+client MUST send only a single request on a given stream.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+On a given stream, receipt of multiple requests or receipt of an
+additional HTTP response following a final HTTP response MUST be
+treated as malformed.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Receipt of an invalid sequence of frames MUST be treated as a
+connection error of type H3_FRAME_UNEXPECTED.
+'''
+
+[[spec]]
+level = "MAY"
+quote = '''
+A server MAY send one or more PUSH_PROMISE frames before, after, or
+interleaved with the frames of a response message.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+PUSH_PROMISE frames are not permitted on push streams;
+a pushed response that includes PUSH_PROMISE frames MUST be treated
+as a connection error of type H3_FRAME_UNEXPECTED.
+'''
+
+[[spec]]
+level = "MAY"
+quote = '''
+Frames of unknown types (Section 9), including reserved frames
+(Section 7.2.8) MAY be sent on a request or push stream before,
+after, or interleaved with other frames described in this section.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Transfer codings (see Section 7 of [HTTP/1.1]) are not defined for
+HTTP/3; the Transfer-Encoding header field MUST NOT be used.
+'''
+
+[[spec]]
+level = "MAY"
+quote = '''
+A response MAY consist of multiple messages when and only when one or
+more interim responses (1xx; see Section 15.2 of [HTTP]) precede a
+final response to the same request.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+After sending a request, a client MUST
+close the stream for sending.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Unless using the CONNECT method (see
+Section 4.4), clients MUST NOT make stream closure dependent on
+receiving a response to their request.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+After sending a final
+response, the server MUST close the stream for sending.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+Because some messages are large or unbounded, endpoints
+SHOULD begin processing partial HTTP messages once enough of the
+message has been received to make progress.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+If a client-initiated
+stream terminates without enough of the HTTP message to provide a
+complete response, the server SHOULD abort its response stream with
+the error code H3_REQUEST_INCOMPLETE.
+'''
+
+[[spec]]
+level = "MAY"
+quote = '''
+When the server does
+not need to receive the remainder of the request, it MAY abort
+reading the request stream, send a complete response, and cleanly
+close the sending part of the stream.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+The error code H3_NO_ERROR
+SHOULD be used when requesting that the client stop sending on the
+request stream.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Clients MUST NOT discard complete responses as a
+result of having their request terminated abruptly, though clients
+can always discard responses at their discretion for other reasons.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+If the server sends a partial or complete response but does not abort
+reading the request, clients SHOULD continue sending the content of
+the request and close the stream normally.
+'''
+

@@ -1,0 +1,40 @@
+target = "ci/compliance/specs/rfc9114.txt#4.2.2"
+
+# 4.2.2.  Header Size Constraints
+#
+# An HTTP/3 implementation MAY impose a limit on the maximum size of
+# the message header it will accept on an individual HTTP message.  A
+# server that receives a larger header section than it is willing to
+# handle can send an HTTP 431 (Request Header Fields Too Large) status
+# code ([RFC6585]).  A client can discard responses that it cannot
+# process.  The size of a field list is calculated based on the
+# uncompressed size of fields, including the length of the name and
+# value in bytes plus an overhead of 32 bytes for each field.
+# 
+# If an implementation wishes to advise its peer of this limit, it can
+# be conveyed as a number of bytes in the
+# SETTINGS_MAX_FIELD_SECTION_SIZE parameter.  An implementation that
+# has received this parameter SHOULD NOT send an HTTP message header
+# that exceeds the indicated size, as the peer will likely refuse to
+# process it.  However, an HTTP message can traverse one or more
+# intermediaries before reaching the origin server; see Section 3.7 of
+# [HTTP].  Because this limit is applied separately by each
+# implementation that processes the message, messages below this limit
+# are not guaranteed to be accepted.
+
+[[spec]]
+level = "MAY"
+quote = '''
+An HTTP/3 implementation MAY impose a limit on the maximum size of
+the message header it will accept on an individual HTTP message.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+An implementation that
+has received this parameter SHOULD NOT send an HTTP message header
+that exceeds the indicated size, as the peer will likely refuse to
+process it.
+'''
+

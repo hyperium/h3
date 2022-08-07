@@ -172,3 +172,15 @@ jobs:
         with:
           command: +nightly
           args: fuzz run fuzz_varint -- -runs=1
+
+  compliance:
+    name: Check spec compliance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v1
+
+      - name: Generate report
+        uses: ./.github/actions/compliance
+        with:
+          report-script: ${{ github.workspace }}/ci/compliance/report.sh

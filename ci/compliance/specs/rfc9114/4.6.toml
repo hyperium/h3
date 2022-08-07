@@ -1,0 +1,231 @@
+target = "ci/compliance/specs/rfc9114.txt#4.6"
+
+# 4.6.  Server Push
+#
+# Server push is an interaction mode that permits a server to push a
+# request-response exchange to a client in anticipation of the client
+# making the indicated request.  This trades off network usage against
+# a potential latency gain.  HTTP/3 server push is similar to what is
+# described in Section 8.2 of [HTTP/2], but it uses different
+# mechanisms.
+# 
+# Each server push is assigned a unique push ID by the server.  The
+# push ID is used to refer to the push in various contexts throughout
+# the lifetime of the HTTP/3 connection.
+# 
+# The push ID space begins at zero and ends at a maximum value set by
+# the MAX_PUSH_ID frame.  In particular, a server is not able to push
+# until after the client sends a MAX_PUSH_ID frame.  A client sends
+# MAX_PUSH_ID frames to control the number of pushes that a server can
+# promise.  A server SHOULD use push IDs sequentially, beginning from
+# zero.  A client MUST treat receipt of a push stream as a connection
+# error of type H3_ID_ERROR when no MAX_PUSH_ID frame has been sent or
+# when the stream references a push ID that is greater than the maximum
+# push ID.
+# 
+# The push ID is used in one or more PUSH_PROMISE frames that carry the
+# control data and header fields of the request message.  These frames
+# are sent on the request stream that generated the push.  This allows
+# the server push to be associated with a client request.  When the
+# same push ID is promised on multiple request streams, the
+# decompressed request field sections MUST contain the same fields in
+# the same order, and both the name and the value in each field MUST be
+# identical.
+# 
+# The push ID is then included with the push stream that ultimately
+# fulfills those promises.  The push stream identifies the push ID of
+# the promise that it fulfills, then contains a response to the
+# promised request as described in Section 4.1.
+# 
+# Finally, the push ID can be used in CANCEL_PUSH frames; see
+# Section 7.2.3.  Clients use this frame to indicate they do not wish
+# to receive a promised resource.  Servers use this frame to indicate
+# they will not be fulfilling a previous promise.
+# 
+# Not all requests can be pushed.  A server MAY push requests that have
+# the following properties:
+# 
+# *  cacheable; see Section 9.2.3 of [HTTP]
+# 
+# *  safe; see Section 9.2.1 of [HTTP]
+# 
+# *  does not include request content or a trailer section
+# 
+# The server MUST include a value in the :authority pseudo-header field
+# for which the server is authoritative.  If the client has not yet
+# validated the connection for the origin indicated by the pushed
+# request, it MUST perform the same verification process it would do
+# before sending a request for that origin on the connection; see
+# Section 3.3.  If this verification fails, the client MUST NOT
+# consider the server authoritative for that origin.
+# 
+# Clients SHOULD send a CANCEL_PUSH frame upon receipt of a
+# PUSH_PROMISE frame carrying a request that is not cacheable, is not
+# known to be safe, that indicates the presence of request content, or
+# for which it does not consider the server authoritative.  Any
+# corresponding responses MUST NOT be used or cached.
+# 
+# Each pushed response is associated with one or more client requests.
+# The push is associated with the request stream on which the
+# PUSH_PROMISE frame was received.  The same server push can be
+# associated with additional client requests using a PUSH_PROMISE frame
+# with the same push ID on multiple request streams.  These
+# associations do not affect the operation of the protocol, but they
+# MAY be considered by user agents when deciding how to use pushed
+# resources.
+# 
+# Ordering of a PUSH_PROMISE frame in relation to certain parts of the
+# response is important.  The server SHOULD send PUSH_PROMISE frames
+# prior to sending HEADERS or DATA frames that reference the promised
+# responses.  This reduces the chance that a client requests a resource
+# that will be pushed by the server.
+# 
+# Due to reordering, push stream data can arrive before the
+# corresponding PUSH_PROMISE frame.  When a client receives a new push
+# stream with an as-yet-unknown push ID, both the associated client
+# request and the pushed request header fields are unknown.  The client
+# can buffer the stream data in expectation of the matching
+# PUSH_PROMISE.  The client can use stream flow control (Section 4.1 of
+# [QUIC-TRANSPORT]) to limit the amount of data a server may commit to
+# the pushed stream.  Clients SHOULD abort reading and discard data
+# already read from push streams if no corresponding PUSH_PROMISE frame
+# is processed in a reasonable amount of time.
+# 
+# Push stream data can also arrive after a client has cancelled a push.
+# In this case, the client can abort reading the stream with an error
+# code of H3_REQUEST_CANCELLED.  This asks the server not to transfer
+# additional data and indicates that it will be discarded upon receipt.
+# 
+# Pushed responses that are cacheable (see Section 3 of [HTTP-CACHING])
+# can be stored by the client, if it implements an HTTP cache.  Pushed
+# responses are considered successfully validated on the origin server
+# (e.g., if the "no-cache" cache response directive is present; see
+# Section 5.2.2.4 of [HTTP-CACHING]) at the time the pushed response is
+# received.
+# 
+# Pushed responses that are not cacheable MUST NOT be stored by any
+# HTTP cache.  They MAY be made available to the application
+# separately.
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+A server SHOULD use push IDs sequentially, beginning from
+zero.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+A client MUST treat receipt of a push stream as a connection
+error of type H3_ID_ERROR when no MAX_PUSH_ID frame has been sent or
+when the stream references a push ID that is greater than the maximum
+push ID.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+When the
+same push ID is promised on multiple request streams, the
+decompressed request field sections MUST contain the same fields in
+the same order, and both the name and the value in each field MUST be
+identical.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+When the
+same push ID is promised on multiple request streams, the
+decompressed request field sections MUST contain the same fields in
+the same order, and both the name and the value in each field MUST be
+identical.
+'''
+
+[[spec]]
+level = "MAY"
+quote = '''
+A server MAY push requests that have
+the following properties:
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+The server MUST include a value in the :authority pseudo-header field
+for which the server is authoritative.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+If the client has not yet
+validated the connection for the origin indicated by the pushed
+request, it MUST perform the same verification process it would do
+before sending a request for that origin on the connection; see
+Section 3.3.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+If this verification fails, the client MUST NOT
+consider the server authoritative for that origin.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+Clients SHOULD send a CANCEL_PUSH frame upon receipt of a
+PUSH_PROMISE frame carrying a request that is not cacheable, is not
+known to be safe, that indicates the presence of request content, or
+for which it does not consider the server authoritative.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Any
+corresponding responses MUST NOT be used or cached.
+'''
+
+[[spec]]
+level = "MAY"
+quote = '''
+These
+associations do not affect the operation of the protocol, but they
+MAY be considered by user agents when deciding how to use pushed
+resources.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+The server SHOULD send PUSH_PROMISE frames
+prior to sending HEADERS or DATA frames that reference the promised
+responses.
+'''
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+Clients SHOULD abort reading and discard data
+already read from push streams if no corresponding PUSH_PROMISE frame
+is processed in a reasonable amount of time.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Pushed responses that are not cacheable MUST NOT be stored by any
+HTTP cache.
+'''
+
+[[spec]]
+level = "MAY"
+quote = '''
+They MAY be made available to the application
+separately.
+'''
+

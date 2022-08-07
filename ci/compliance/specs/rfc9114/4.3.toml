@@ -1,0 +1,79 @@
+target = "ci/compliance/specs/rfc9114.txt#4.3"
+
+# 4.3.  HTTP Control Data
+#
+# Like HTTP/2, HTTP/3 employs a series of pseudo-header fields, where
+# the field name begins with the : character (ASCII 0x3a).  These
+# pseudo-header fields convey message control data; see Section 6.2 of
+# [HTTP].
+# 
+# Pseudo-header fields are not HTTP fields.  Endpoints MUST NOT
+# generate pseudo-header fields other than those defined in this
+# document.  However, an extension could negotiate a modification of
+# this restriction; see Section 9.
+# 
+# Pseudo-header fields are only valid in the context in which they are
+# defined.  Pseudo-header fields defined for requests MUST NOT appear
+# in responses; pseudo-header fields defined for responses MUST NOT
+# appear in requests.  Pseudo-header fields MUST NOT appear in trailer
+# sections.  Endpoints MUST treat a request or response that contains
+# undefined or invalid pseudo-header fields as malformed.
+# 
+# All pseudo-header fields MUST appear in the header section before
+# regular header fields.  Any request or response that contains a
+# pseudo-header field that appears in a header section after a regular
+# header field MUST be treated as malformed.
+
+[[spec]]
+level = "MUST"
+quote = '''
+Endpoints MUST NOT
+generate pseudo-header fields other than those defined in this
+document.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Pseudo-header fields defined for requests MUST NOT appear
+in responses; pseudo-header fields defined for responses MUST NOT
+appear in requests.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Pseudo-header fields defined for requests MUST NOT appear
+in responses; pseudo-header fields defined for responses MUST NOT
+appear in requests.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Pseudo-header fields MUST NOT appear in trailer
+sections.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Endpoints MUST treat a request or response that contains
+undefined or invalid pseudo-header fields as malformed.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+All pseudo-header fields MUST appear in the header section before
+regular header fields.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Any request or response that contains a
+pseudo-header field that appears in a header section after a regular
+header field MUST be treated as malformed.
+'''
+

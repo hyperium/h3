@@ -1,0 +1,120 @@
+target = "ci/compliance/specs/rfc9114.txt#7.2.4"
+
+# 7.2.4.  SETTINGS
+#
+# The SETTINGS frame (type=0x04) conveys configuration parameters that
+# affect how endpoints communicate, such as preferences and constraints
+# on peer behavior.  Individually, a SETTINGS parameter can also be
+# referred to as a "setting"; the identifier and value of each setting
+# parameter can be referred to as a "setting identifier" and a "setting
+# value".
+# 
+# SETTINGS frames always apply to an entire HTTP/3 connection, never a
+# single stream.  A SETTINGS frame MUST be sent as the first frame of
+# each control stream (see Section 6.2.1) by each peer, and it MUST NOT
+# be sent subsequently.  If an endpoint receives a second SETTINGS
+# frame on the control stream, the endpoint MUST respond with a
+# connection error of type H3_FRAME_UNEXPECTED.
+# 
+# SETTINGS frames MUST NOT be sent on any stream other than the control
+# stream.  If an endpoint receives a SETTINGS frame on a different
+# stream, the endpoint MUST respond with a connection error of type
+# H3_FRAME_UNEXPECTED.
+# 
+# SETTINGS parameters are not negotiated; they describe characteristics
+# of the sending peer that can be used by the receiving peer.  However,
+# a negotiation can be implied by the use of SETTINGS: each peer uses
+# SETTINGS to advertise a set of supported values.  The definition of
+# the setting would describe how each peer combines the two sets to
+# conclude which choice will be used.  SETTINGS does not provide a
+# mechanism to identify when the choice takes effect.
+# 
+# Different values for the same parameter can be advertised by each
+# peer.  For example, a client might be willing to consume a very large
+# response field section, while servers are more cautious about request
+# size.
+# 
+# The same setting identifier MUST NOT occur more than once in the
+# SETTINGS frame.  A receiver MAY treat the presence of duplicate
+# setting identifiers as a connection error of type H3_SETTINGS_ERROR.
+# 
+# The payload of a SETTINGS frame consists of zero or more parameters.
+# Each parameter consists of a setting identifier and a value, both
+# encoded as QUIC variable-length integers.
+# 
+# Setting {
+#   Identifier (i),
+#   Value (i),
+# }
+# 
+# SETTINGS Frame {
+#   Type (i) = 0x04,
+#   Length (i),
+#   Setting (..) ...,
+# }
+# 
+#                        Figure 7: SETTINGS Frame
+# 
+# An implementation MUST ignore any parameter with an identifier it
+# does not understand.
+
+[[spec]]
+level = "MUST"
+quote = '''
+A SETTINGS frame MUST be sent as the first frame of
+each control stream (see Section 6.2.1) by each peer, and it MUST NOT
+be sent subsequently.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+A SETTINGS frame MUST be sent as the first frame of
+each control stream (see Section 6.2.1) by each peer, and it MUST NOT
+be sent subsequently.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+If an endpoint receives a second SETTINGS
+frame on the control stream, the endpoint MUST respond with a
+connection error of type H3_FRAME_UNEXPECTED.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+SETTINGS frames MUST NOT be sent on any stream other than the control
+stream.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+If an endpoint receives a SETTINGS frame on a different
+stream, the endpoint MUST respond with a connection error of type
+H3_FRAME_UNEXPECTED.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+The same setting identifier MUST NOT occur more than once in the
+SETTINGS frame.
+'''
+
+[[spec]]
+level = "MAY"
+quote = '''
+A receiver MAY treat the presence of duplicate
+setting identifiers as a connection error of type H3_SETTINGS_ERROR.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+An implementation MUST ignore any parameter with an identifier it
+does not understand.
+'''
+

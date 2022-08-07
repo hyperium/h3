@@ -1,0 +1,58 @@
+target = "ci/compliance/specs/rfc9114.txt#7.2.4.1"
+
+# 7.2.4.1.  Defined SETTINGS Parameters
+#
+# The following settings are defined in HTTP/3:
+# 
+# SETTINGS_MAX_FIELD_SECTION_SIZE (0x06):  The default value is
+#    unlimited.  See Section 4.2.2 for usage.
+# 
+# Setting identifiers of the format 0x1f * N + 0x21 for non-negative
+# integer values of N are reserved to exercise the requirement that
+# unknown identifiers be ignored.  Such settings have no defined
+# meaning.  Endpoints SHOULD include at least one such setting in their
+# SETTINGS frame.  Endpoints MUST NOT consider such settings to have
+# any meaning upon receipt.
+# 
+# Because the setting has no defined meaning, the value of the setting
+# can be any value the implementation selects.
+# 
+# Setting identifiers that were defined in [HTTP/2] where there is no
+# corresponding HTTP/3 setting have also been reserved
+# (Section 11.2.2).  These reserved settings MUST NOT be sent, and
+# their receipt MUST be treated as a connection error of type
+# H3_SETTINGS_ERROR.
+# 
+# Additional settings can be defined by extensions to HTTP/3; see
+# Section 9 for more details.
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+Endpoints SHOULD include at least one such setting in their
+SETTINGS frame.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Endpoints MUST NOT consider such settings to have
+any meaning upon receipt.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+These reserved settings MUST NOT be sent, and
+their receipt MUST be treated as a connection error of type
+H3_SETTINGS_ERROR.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+These reserved settings MUST NOT be sent, and
+their receipt MUST be treated as a connection error of type
+H3_SETTINGS_ERROR.
+'''
+

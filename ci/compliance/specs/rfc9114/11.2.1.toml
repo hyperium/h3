@@ -1,0 +1,114 @@
+target = "ci/compliance/specs/rfc9114.txt#11.2.1"
+
+# 11.2.1.  Frame Types
+#
+# This document establishes a registry for HTTP/3 frame type codes.
+# The "HTTP/3 Frame Types" registry governs a 62-bit space.  This
+# registry follows the QUIC registry policy; see Section 11.2.
+# Permanent registrations in this registry are assigned using the
+# Specification Required policy ([RFC8126]), except for values between
+# 0x00 and 0x3f (in hexadecimal; inclusive), which are assigned using
+# Standards Action or IESG Approval as defined in Sections 4.9 and 4.10
+# of [RFC8126].
+# 
+# While this registry is separate from the "HTTP/2 Frame Type" registry
+# defined in [HTTP/2], it is preferable that the assignments parallel
+# each other where the code spaces overlap.  If an entry is present in
+# only one registry, every effort SHOULD be made to avoid assigning the
+# corresponding value to an unrelated operation.  Expert reviewers MAY
+# reject unrelated registrations that would conflict with the same
+# value in the corresponding registry.
+# 
+# In addition to common fields as described in Section 11.2, permanent
+# registrations in this registry MUST include the following field:
+# 
+# Frame Type:  A name or label for the frame type.
+# 
+# Specifications of frame types MUST include a description of the frame
+# layout and its semantics, including any parts of the frame that are
+# conditionally present.
+# 
+# The entries in Table 2 are registered by this document.
+# 
+#               +==============+=======+===============+
+#               | Frame Type   | Value | Specification |
+#               +==============+=======+===============+
+#               | DATA         |  0x00 | Section 7.2.1 |
+#               +--------------+-------+---------------+
+#               | HEADERS      |  0x01 | Section 7.2.2 |
+#               +--------------+-------+---------------+
+#               | Reserved     |  0x02 | This document |
+#               +--------------+-------+---------------+
+#               | CANCEL_PUSH  |  0x03 | Section 7.2.3 |
+#               +--------------+-------+---------------+
+#               | SETTINGS     |  0x04 | Section 7.2.4 |
+#               +--------------+-------+---------------+
+#               | PUSH_PROMISE |  0x05 | Section 7.2.5 |
+#               +--------------+-------+---------------+
+#               | Reserved     |  0x06 | This document |
+#               +--------------+-------+---------------+
+#               | GOAWAY       |  0x07 | Section 7.2.6 |
+#               +--------------+-------+---------------+
+#               | Reserved     |  0x08 | This document |
+#               +--------------+-------+---------------+
+#               | Reserved     |  0x09 | This document |
+#               +--------------+-------+---------------+
+#               | MAX_PUSH_ID  |  0x0d | Section 7.2.7 |
+#               +--------------+-------+---------------+
+# 
+#                 Table 2: Initial HTTP/3 Frame Types
+# 
+# Each code of the format 0x1f * N + 0x21 for non-negative integer
+# values of N (that is, 0x21, 0x40, ..., through 0x3ffffffffffffffe)
+# MUST NOT be assigned by IANA and MUST NOT appear in the listing of
+# assigned values.
+
+[[spec]]
+level = "SHOULD"
+quote = '''
+If an entry is present in
+only one registry, every effort SHOULD be made to avoid assigning the
+corresponding value to an unrelated operation.
+'''
+
+[[spec]]
+level = "MAY"
+quote = '''
+Expert reviewers MAY
+reject unrelated registrations that would conflict with the same
+value in the corresponding registry.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+In addition to common fields as described in Section 11.2, permanent
+registrations in this registry MUST include the following field:
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Specifications of frame types MUST include a description of the frame
+layout and its semantics, including any parts of the frame that are
+conditionally present.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Each code of the format 0x1f * N + 0x21 for non-negative integer
+values of N (that is, 0x21, 0x40, ..., through 0x3ffffffffffffffe)
+MUST NOT be assigned by IANA and MUST NOT appear in the listing of
+assigned values.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Each code of the format 0x1f * N + 0x21 for non-negative integer
+values of N (that is, 0x21, 0x40, ..., through 0x3ffffffffffffffe)
+MUST NOT be assigned by IANA and MUST NOT appear in the listing of
+assigned values.
+'''
+

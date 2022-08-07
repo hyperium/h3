@@ -1,0 +1,28 @@
+target = "ci/compliance/specs/rfc9114.txt#3.1.1"
+
+# 3.1.1.  HTTP Alternative Services
+#
+# An HTTP origin can advertise the availability of an equivalent HTTP/3
+# endpoint via the Alt-Svc HTTP response header field or the HTTP/2
+# ALTSVC frame ([ALTSVC]) using the "h3" ALPN token.
+# 
+# For example, an origin could indicate in an HTTP response that HTTP/3
+# was available on UDP port 50781 at the same hostname by including the
+# following header field:
+# 
+# Alt-Svc: h3=":50781"
+# 
+# On receipt of an Alt-Svc record indicating HTTP/3 support, a client
+# MAY attempt to establish a QUIC connection to the indicated host and
+# port; if this connection is successful, the client can send HTTP
+# requests using the mapping described in this document.
+
+[[spec]]
+level = "MAY"
+quote = '''
+On receipt of an Alt-Svc record indicating HTTP/3 support, a client
+MAY attempt to establish a QUIC connection to the indicated host and
+port; if this connection is successful, the client can send HTTP
+requests using the mapping described in this document.
+'''
+

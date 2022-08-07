@@ -1,0 +1,39 @@
+target = "ci/compliance/specs/rfc9114.txt#4.2.1"
+
+# 4.2.1.  Field Compression
+#
+# [QPACK] describes a variation of HPACK that gives an encoder some
+# control over how much head-of-line blocking can be caused by
+# compression.  This allows an encoder to balance compression
+# efficiency with latency.  HTTP/3 uses QPACK to compress header and
+# trailer sections, including the control data present in the header
+# section.
+# 
+# To allow for better compression efficiency, the Cookie header field
+# ([COOKIES]) MAY be split into separate field lines, each with one or
+# more cookie-pairs, before compression.  If a decompressed field
+# section contains multiple cookie field lines, these MUST be
+# concatenated into a single byte string using the two-byte delimiter
+# of "; " (ASCII 0x3b, 0x20) before being passed into a context other
+# than HTTP/2 or HTTP/3, such as an HTTP/1.1 connection, or a generic
+# HTTP server application.
+
+[[spec]]
+level = "MAY"
+quote = '''
+To allow for better compression efficiency, the Cookie header field
+([COOKIES]) MAY be split into separate field lines, each with one or
+more cookie-pairs, before compression.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+If a decompressed field
+section contains multiple cookie field lines, these MUST be
+concatenated into a single byte string using the two-byte delimiter
+of "; " (ASCII 0x3b, 0x20) before being passed into a context other
+than HTTP/2 or HTTP/3, such as an HTTP/1.1 connection, or a generic
+HTTP server application.
+'''
+

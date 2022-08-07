@@ -1,0 +1,35 @@
+target = "ci/compliance/specs/rfc9114.txt#10.3"
+
+# 10.3.  Intermediary-Encapsulation Attacks
+#
+# The HTTP/3 field encoding allows the expression of names that are not
+# valid field names in the syntax used by HTTP (Section 5.1 of [HTTP]).
+# Requests or responses containing invalid field names MUST be treated
+# as malformed.  Therefore, an intermediary cannot translate an HTTP/3
+# request or response containing an invalid field name into an HTTP/1.1
+# message.
+# 
+# Similarly, HTTP/3 can transport field values that are not valid.
+# While most values that can be encoded will not alter field parsing,
+# carriage return (ASCII 0x0d), line feed (ASCII 0x0a), and the null
+# character (ASCII 0x00) might be exploited by an attacker if they are
+# translated verbatim.  Any request or response that contains a
+# character not permitted in a field value MUST be treated as
+# malformed.  Valid characters are defined by the "field-content" ABNF
+# rule in Section 5.5 of [HTTP].
+
+[[spec]]
+level = "MUST"
+quote = '''
+Requests or responses containing invalid field names MUST be treated
+as malformed.
+'''
+
+[[spec]]
+level = "MUST"
+quote = '''
+Any request or response that contains a
+character not permitted in a field value MUST be treated as
+malformed.
+'''
+
