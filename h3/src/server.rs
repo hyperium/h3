@@ -143,9 +143,12 @@ where
                 )
             }
             Ok(Some(_)) => {
-                return Err(
-                    Code::H3_FRAME_UNEXPECTED.with_reason("first request frame is not headers")
-                )
+                // Close the connection if the first request frame is not headers
+                // https://httpwg.org/specs/rfc9114.html#request-response
+                return Err(self.inner.close(
+                    Code::H3_FRAME_UNEXPECTED,
+                    "first request frame is not headers",
+                ));
             }
             Err(e) => {
                 let err: Error = e.into();
