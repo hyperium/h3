@@ -56,7 +56,13 @@ runs:
       run: |
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
-        git checkout gh-pages
+
+        if  git rev-parse --verify --quiet gh-pages; then
+          git checkout gh-pages
+        else
+          git checkout -b gh-pages
+        fi
+
         git merge master -Xtheirs --no-edit
       shell: bash
 
