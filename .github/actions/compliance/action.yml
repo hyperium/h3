@@ -1,0 +1,93 @@
+name: 'Spec compliance'
+description: 'Use Duvet to generate spec compliance report'
+
+inputs:
+  extract-script:
+    description: 'Path to script that extract spec checks'
+    required: true
+  report-script:
+    description: 'Path to script that generates a Duvet report'
+    required: true
+  dir:
+    description: 'Path to the directory where h3 is cloned'
+    default: ${{ github.workspace }}
+    required: false
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/checkout@v3
+      with:
+        repository: aws/s2n-quic
+        path: s2n-quic
+        token: ${{ github.token }}
+
+    - uses: actions-rs/toolchain@v1.0.7
+      id: toolchain
+      with:
+        toolchain: stable
+        override: true
+
+    - uses: camshaft/rust-cache@v1
+
+    - name: Clean up cache
+      working-directory: ${{ inputs.dir }}
+      run: |
+        rm -f target/release/duvet
+        rm -f s2n-quic/common/duvet/target/release/duvet
+      shell: bash
+
+    - name: Cache duvet
+      uses: actions/cache@v3.0.3
+      continue-on-error: true
+      with:
+        path: ${{ inputs.dir }}/target/release/duvet
+        key: ${{ runner.os }}-${{ steps.toolchain.outputs.rustc_hash }}-${{ github.job }}-duvet-${{ hashFiles(format('{0}/Cargo.lock', inputs.dir)) }}-${{ hashFiles(format('{0}/s2n-quic/common/duvet/**', inputs.dir)) }}
+
+    - name: Install duvet
+      working-directory: ${{ inputs.dir }}/s2n-quic/common/duvet
+      run: |
+        if [ ! -f ../../../target/release/duvet ]; then
+          mkdir -p ../../../target/release
+          cargo build --release
+          cp target/release/duvet ../../../target/release/duvet
+        fi
+
+        echo "${{ inputs.dir }}/target/release" >> $GITHUB_PATH
+      shell: bash
+
+    - name: Checkout gh-pages
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+
+        if  git rev-parse --verify --quiet gh-pages; then
+          git checkout gh-pages
+        else
+          git checkout -b gh-pages
+        fi
+
+        git merge master -Xtheirs --no-edit
+      shell: bash
+
+    - name: Generate duvet report
+      working-directory: ${{ inputs.dir }}
+      run: |
+        ./ci/compliance/extract.sh
+        ${{ inputs.extract-script }}
+        ${{ inputs.report-script }} ${{ github.sha }}
+      shell: bash
+
+    - name: Commit
+      working-directory: ${{ inputs.dir }}
+      run: |
+        git add ci/compliance/*.html
+        git commit -m "${{ github.triggering_actor }}-${{ github.sha }}-${{ github.job }}#${{ github.run_number }}"
+      shell: bash
+
+    - name: Push to gh-pages
+      uses: ad-m/github-push-action@master
+      with:
+        github_token: ${{ github.token }}
+        branch: gh-pages
+        force: true
