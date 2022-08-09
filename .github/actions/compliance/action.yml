@@ -64,10 +64,9 @@ runs:
         if  git rev-parse --verify --quiet gh-pages; then
           git checkout gh-pages
         else
-          git checkout -b gh-pages
+          git checkout --orphan gh-pages
+          git reset
         fi
-
-        git merge master -Xtheirs --no-edit
       shell: bash
 
     - name: Generate duvet report
