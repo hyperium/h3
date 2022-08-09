@@ -3,7 +3,7 @@ description: 'Use Duvet to generate spec compliance report'
 
 inputs:
   extract-script:
-    description: 'Path to script that extract spec checks'
+    description: 'Path to script that extracts compliance checks'
     required: true
   report-script:
     description: 'Path to script that generates a Duvet report'
@@ -86,6 +86,7 @@ runs:
       shell: bash
 
     - name: Push to gh-pages
+      if: github.ref == 'refs/heads/master'
       uses: ad-m/github-push-action@master
       with:
         github_token: ${{ github.token }}
