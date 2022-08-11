@@ -88,16 +88,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let mut h3_conn = h3::server::Connection::new(h3_quinn::Connection::new(conn))
                         .await
                         .unwrap();
+                    loop {
+                        match h3_conn.accept().await {
+                            Ok(Some((req, stream))) => {
+                                let root = root.clone();
+                                debug!("New request: {:#?}", req);
 
-                    while let Some((req, stream)) = h3_conn.accept().await.unwrap() {
-                        let root = root.clone();
-                        debug!("New request: {:#?}", req);
-
-                        tokio::spawn(async {
-                            if let Err(e) = handle_request(req, stream, root).await {
-                                error!("request failed: {}", e);
+                                tokio::spawn(async {
+                                    if let Err(e) = handle_request(req, stream, root).await {
+                                        error!("request failed: {}", e);
+                                    }
+                                });
                             }
-                        });
+                            Ok(None) => {
+                                break;
+                            }
+                            Err(err) => match err.kind() {
+                                h3::error::Kind::Application { code, .. } => {
+                                    warn!("Error on accept, {}", err);
+                                    match code.level() {
+                                        h3::error::ErrorLevel::ConnectionError => break,
+                                        h3::error::ErrorLevel::StreamError => continue,
+                                    }
+                                }
+                                h3::error::Kind::HeaderTooBig { .. } => continue,
+                                _ => {
+                                    error!("Error on accept: {}", err);
+                                    break;
+                                }
+                            },
+                        }
                     }
                 }
                 Err(err) => {

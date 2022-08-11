@@ -143,8 +143,10 @@ where
                 )
             }
             Ok(Some(_)) => {
-                // Close the connection if the first request frame is not headers
-                // https://httpwg.org/specs/rfc9114.html#request-response
+                //= ci/compliance/specs/rfc9114.txt#4.1
+                //# Receipt of an invalid sequence of frames MUST be treated as a
+                //# connection error of type H3_FRAME_UNEXPECTED.
+                // Close if the first frame is not a header frame
                 return Err(self.inner.close(
                     Code::H3_FRAME_UNEXPECTED,
                     "first request frame is not headers",
@@ -192,8 +194,29 @@ where
                 Err(e) => return Err(e.into()),
             };
 
-        let (method, uri, headers) = Header::try_from(fields)?.into_request_parts()?;
-
+        // Parse the request headers
+        let (method, uri, headers) = match Header::try_from(fields) {
+            Ok(header) => match header.into_request_parts() {
+                Ok(parts) => parts,
+                Err(err) => {
+                    //= ci/compliance/specs/rfc9114.txt#4.1.2
+                    //# Malformed requests or responses that are
+                    //# detected MUST be treated as a stream error of type H3_MESSAGE_ERROR.
+                    let error: Error = err.into();
+                    request_stream.stop_stream(error.try_get_code().unwrap());
+                    return Err(error);
+                }
+            },
+            Err(err) => {
+                //= ci/compliance/specs/rfc9114.txt#4.1.2
+                //# Malformed requests or responses that are
+                //# detected MUST be treated as a stream error of type H3_MESSAGE_ERROR.
+                let error: Error = err.into();
+                request_stream.stop_stream(error.try_get_code().unwrap());
+                return Err(error);
+            }
+        };
+        //  request_stream.stop_stream(Code::H3_MESSAGE_ERROR).await;
         let mut req = http::Request::new(());
         *req.method_mut() = method;
         *req.uri_mut() = uri;
@@ -462,6 +485,11 @@ where
     /// Send data to the Client.
     pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
         self.inner.send_data(buf).await
+    }
+
+    /// Stops a stream with a error code
+    pub fn stop_stream(&mut self, error_code: Code) {
+        self.inner.stop_stream(error_code);
     }
 
     /// Send the Http-Trailers.

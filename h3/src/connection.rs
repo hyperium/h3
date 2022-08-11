@@ -497,6 +497,11 @@ where
         Ok(())
     }
 
+    /// Stops an stream with an error code
+    pub fn stop_stream(&mut self, code: Code) {
+        self.stream.reset(code.into());
+    }
+
     pub async fn finish(&mut self) -> Result<(), Error> {
         if self.send_grease_frame {
             // send a grease frame once per Connection

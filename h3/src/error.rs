@@ -17,17 +17,23 @@ pub struct Error {
 
 /// An HTTP/3 "application error code".
 #[derive(PartialEq, Eq, Hash, Clone, Copy)]
-pub struct Code(u64);
+pub struct Code {
+    code: u64,
+    level: ErrorLevel,
+}
 
 impl Code {
     pub fn value(&self) -> u64 {
-        self.0
+        self.code
+    }
+    pub fn level(&self) -> ErrorLevel {
+        self.level
     }
 }
 
 impl PartialEq<u64> for Code {
     fn eq(&self, other: &u64) -> bool {
-        *other == self.0
+        *other == self.code
     }
 }
 
@@ -35,6 +41,16 @@ impl PartialEq<u64> for Code {
 struct ErrorImpl {
     kind: Kind,
     cause: Option<Arc<Cause>>,
+}
+
+/// Some errors affect the hole connection, others only one Request or Stream.
+/// See [errors](https://httpwg.org/specs/rfc9114.html#errors) for mor details.
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
+pub enum ErrorLevel {
+    // connection error
+    ConnectionError,
+    // stream error
+    StreamError,
 }
 
 // Warning: this enum is public only for testing purposes. Do not use it in
@@ -69,19 +85,19 @@ macro_rules! codes {
     (
         $(
             $(#[$docs:meta])*
-            ($num:expr, $name:ident);
+            ($num:expr, $name:ident, $level:path);
         )+
     ) => {
         impl Code {
         $(
             $(#[$docs])*
-            pub const $name: Code = Code($num);
+            pub const $name: Code = Code{code: $num, level: $level};
         )+
         }
 
         impl fmt::Debug for Code {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                match self.0 {
+                match self.code {
                 $(
                     $num => f.write_str(stringify!($name)),
                 )+
@@ -95,78 +111,78 @@ macro_rules! codes {
 codes! {
     /// No error. This is used when the connection or stream needs to be
     /// closed, but there is no error to signal.
-    (0x100, H3_NO_ERROR);
+    (0x100, H3_NO_ERROR, ErrorLevel::ConnectionError);
 
     /// Peer violated protocol requirements in a way that does not match a more
     /// specific error code, or endpoint declines to use the more specific
     /// error code.
-    (0x101, H3_GENERAL_PROTOCOL_ERROR);
+    (0x101, H3_GENERAL_PROTOCOL_ERROR, ErrorLevel::ConnectionError);
 
     /// An internal error has occurred in the HTTP stack.
-    (0x102, H3_INTERNAL_ERROR);
+    (0x102, H3_INTERNAL_ERROR, ErrorLevel::ConnectionError);
 
     /// The endpoint detected that its peer created a stream that it will not
     /// accept.
-    (0x103, H3_STREAM_CREATION_ERROR);
+    (0x103, H3_STREAM_CREATION_ERROR,ErrorLevel::ConnectionError);
 
     /// A stream required by the HTTP/3 connection was closed or reset.
-    (0x104, H3_CLOSED_CRITICAL_STREAM);
+    (0x104, H3_CLOSED_CRITICAL_STREAM,ErrorLevel::ConnectionError);
 
     /// A frame was received that was not permitted in the current state or on
     /// the current stream.
-    (0x105, H3_FRAME_UNEXPECTED);
+    (0x105, H3_FRAME_UNEXPECTED,ErrorLevel::ConnectionError);
 
     /// A frame that fails to satisfy layout requirements or with an invalid
     /// size was received.
-    (0x106, H3_FRAME_ERROR);
+    (0x106, H3_FRAME_ERROR,ErrorLevel::ConnectionError);
 
     /// The endpoint detected that its peer is exhibiting a behavior that might
     /// be generating excessive load.
-    (0x107, H3_EXCESSIVE_LOAD);
+    (0x107, H3_EXCESSIVE_LOAD,ErrorLevel::ConnectionError);
 
     /// A Stream ID or Push ID was used incorrectly, such as exceeding a limit,
     /// reducing a limit, or being reused.
-    (0x108, H3_ID_ERROR);
+    (0x108, H3_ID_ERROR,ErrorLevel::ConnectionError);
 
     /// An endpoint detected an error in the payload of a SETTINGS frame.
-    (0x109, H3_SETTINGS_ERROR);
+    (0x109, H3_SETTINGS_ERROR,ErrorLevel::ConnectionError);
 
     /// No SETTINGS frame was received at the beginning of the control stream.
-    (0x10a, H3_MISSING_SETTINGS);
+    (0x10a, H3_MISSING_SETTINGS,ErrorLevel::ConnectionError);
 
     /// A server rejected a request without performing any application
     /// processing.
-    (0x10b, H3_REQUEST_REJECTED);
+    (0x10b, H3_REQUEST_REJECTED,ErrorLevel::ConnectionError);
 
     /// The request or its response (including pushed response) is cancelled.
-    (0x10c, H3_REQUEST_CANCELLED);
+    (0x10c, H3_REQUEST_CANCELLED,ErrorLevel::ConnectionError);
 
     /// The client's stream terminated without containing a fully-formed
     /// request.
-    (0x10d, H3_REQUEST_INCOMPLETE);
+    (0x10d, H3_REQUEST_INCOMPLETE,ErrorLevel::ConnectionError);
 
     /// An HTTP message was malformed and cannot be processed.
-    (0x10e, H3_MESSAGE_ERROR);
+    (0x10e, H3_MESSAGE_ERROR,ErrorLevel::StreamError);
 
     /// The TCP connection established in response to a CONNECT request was
     /// reset or abnormally closed.
-    (0x10f, H3_CONNECT_ERROR);
+    (0x10f, H3_CONNECT_ERROR,ErrorLevel::ConnectionError);
 
     /// The requested operation cannot be served over HTTP/3. The peer should
     /// retry over HTTP/1.1.
-    (0x110, H3_VERSION_FALLBACK);
+    (0x110, H3_VERSION_FALLBACK,ErrorLevel::ConnectionError);
 
     /// The decoder failed to interpret an encoded field section and is not
     /// able to continue decoding that field section.
-    (0x200, QPACK_DECOMPRESSION_FAILED);
+    (0x200, QPACK_DECOMPRESSION_FAILED,ErrorLevel::ConnectionError);
 
     /// The decoder failed to interpret an encoder instruction received on the
     /// encoder stream.
-    (0x201, QPACK_ENCODER_STREAM_ERROR);
+    (0x201, QPACK_ENCODER_STREAM_ERROR,ErrorLevel::ConnectionError);
 
     /// The encoder failed to interpret a decoder instruction received on the
     /// decoder stream.
-    (0x202, QPACK_DECODER_STREAM_ERROR);
+    (0x202, QPACK_DECODER_STREAM_ERROR,ErrorLevel::ConnectionError);
 }
 
 impl Code {
@@ -188,7 +204,7 @@ impl Code {
 
 impl From<Code> for u64 {
     fn from(code: Code) -> u64 {
-        code.0
+        code.code
     }
 }
 
@@ -198,6 +214,22 @@ impl Error {
     fn new(kind: Kind) -> Self {
         Error {
             inner: Box::new(ErrorImpl { kind, cause: None }),
+        }
+    }
+
+    /// Returns the error code from the error if available
+    pub fn try_get_code(&self) -> Option<Code> {
+        match self.inner.kind {
+            Kind::Application { code, .. } => Some(code),
+            _ => None,
+        }
+    }
+
+    /// Returns the [`ErrorLevel`] from the application error
+    pub fn try_get_level(&self) -> Option<ErrorLevel> {
+        match self.inner.kind {
+            Kind::Application { code, .. } => Some(code.level),
+            _ => None,
         }
     }
 
@@ -232,7 +264,6 @@ impl Error {
         matches!(&self.inner.kind, Kind::HeaderTooBig { .. })
     }
 
-    #[cfg(feature = "test_helpers")]
     pub fn kind(&self) -> Kind {
         self.inner.kind.clone()
     }
@@ -252,7 +283,9 @@ impl fmt::Debug for Error {
             Kind::Timeout => {
                 builder.field("timeout", &true);
             }
-            Kind::Application { code, ref reason } => {
+            Kind::Application {
+                code, ref reason, ..
+            } => {
                 builder.field("code", &code);
                 if let Some(reason) = reason {
                     builder.field("reason", reason);
@@ -380,7 +413,10 @@ where
         match quic_error.err_code() {
             Some(c) if Code::H3_NO_ERROR == c => Error::new(Kind::Closed),
             Some(c) => Error::new(Kind::Application {
-                code: Code(c),
+                code: Code {
+                    code: c,
+                    level: ErrorLevel::ConnectionError,
+                },
                 reason: None,
             }),
             None => Error::new(Kind::Transport(Arc::new(quic_error))),
