@@ -351,6 +351,17 @@ impl SettingId {
         )
     }
 
+    /// Returns if a Settings Identifier is forbidden
+    fn is_forbidden(&self) -> bool {
+        //= ci/compliance/specs/rfc9114.txt#7.2.4.1
+        //# their receipt MUST be treated as a connection error of type
+        //# H3_SETTINGS_ERROR.
+        matches!(
+            self,
+            SettingId(0x00) | SettingId(0x02) | SettingId(0x03) | SettingId(0x04) | SettingId(0x05)
+        )
+    }
+
     fn decode<B: Buf>(buf: &mut B) -> Result<Self, UnexpectedEnd> {
         Ok(SettingId(buf.get_var()?))
     }
@@ -449,7 +460,20 @@ impl Settings {
             let identifier = SettingId::decode(buf).map_err(|_| SettingsError::Malformed)?;
             let value = buf.get_var().map_err(|_| SettingsError::Malformed)?;
 
+            if identifier.is_forbidden() {
+                //= ci/compliance/specs/rfc9114.txt#7.2.4.1
+                //# These reserved settings MUST NOT be sent, and
+                //# their receipt MUST be treated as a connection error of type
+                //# H3_SETTINGS_ERROR.
+                return Err(SettingsError::InvalidSettingId(identifier.0));
+            }
+
             if identifier.is_supported() {
+                //= ci/compliance/specs/rfc9114.txt#7.2.4.1
+                //# Endpoints MUST NOT consider such settings to have
+                //# any meaning upon receipt.
+                // Only insert supported settings. 
+                // Ignore the rest.
                 settings.insert(identifier, value)?;
             }
         }

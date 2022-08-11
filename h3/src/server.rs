@@ -125,11 +125,20 @@ where
                 self.inner.shutdown(0).await?;
                 return Ok(None);
             }
-            Err(e) => {
-                if e.is_closed() {
-                    return Ok(None);
-                }
-                return Err(e);
+            Err(err) => {
+                match err.kind() {
+                    crate::error::Kind::Closed => return Ok(None),
+                    crate::error::Kind::Application { code, reason } => match code.level() {
+                        crate::error::ErrorLevel::ConnectionError => {
+                            return Err(self.inner.close(
+                                code,
+                                reason.unwrap_or(String::into_boxed_str(String::from(""))),
+                            ))
+                        }
+                        crate::error::ErrorLevel::StreamError => return Err(err),
+                    },
+                    _ => return Err(err),
+                };
             }
         };
 
@@ -203,7 +212,8 @@ where
                     //# Malformed requests or responses that are
                     //# detected MUST be treated as a stream error of type H3_MESSAGE_ERROR.
                     let error: Error = err.into();
-                    request_stream.stop_stream(error.try_get_code().unwrap());
+                    request_stream
+                        .stop_stream(error.try_get_code().unwrap_or(Code::H3_MESSAGE_ERROR));
                     return Err(error);
                 }
             },
@@ -212,7 +222,7 @@ where
                 //# Malformed requests or responses that are
                 //# detected MUST be treated as a stream error of type H3_MESSAGE_ERROR.
                 let error: Error = err.into();
-                request_stream.stop_stream(error.try_get_code().unwrap());
+                request_stream.stop_stream(error.try_get_code().unwrap_or(Code::H3_MESSAGE_ERROR));
                 return Err(error);
             }
         };

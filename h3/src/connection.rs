@@ -110,8 +110,10 @@ where
             .insert(SettingId::MAX_HEADER_LIST_SIZE, max_field_section_size)
             .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
 
-        // Grease Settings (https://httpwg.org/specs/rfc9114.html#rfc.section.7.2.4.1)
         if grease {
+            //= ci/compliance/specs/rfc9114.txt#7.2.4.1
+            //# Endpoints SHOULD include at least one such setting in their
+            //# SETTINGS frame.
             match settings.insert(SettingId::grease(), 0) {
                 Ok(_) => (),
                 Err(err) => warn!("Error when adding the grease Setting. Reason {}", err),
@@ -316,6 +318,8 @@ where
         self.last_accepted_stream = Some(id);
     }
 
+    /// Closes a stream with code and reason.
+    /// It returns an [`Error`] which can be returned.
     pub fn close<T: AsRef<str>>(&mut self, code: Code, reason: T) -> Error {
         self.shared.write("connection close err").error = Some(code.with_reason(reason.as_ref()));
         self.conn.close(code, reason.as_ref().as_bytes());
