@@ -225,7 +225,7 @@ where
                             crate::error::ErrorLevel::ConnectionError => {
                                 return Err(self.inner.close(
                                     code,
-                                reason.unwrap_or(String::into_boxed_str(String::from(""))),
+                                    reason.unwrap_or(String::into_boxed_str(String::from(""))),
                                 ))
                             }
                             crate::error::ErrorLevel::StreamError => return Err(err),
