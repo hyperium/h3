@@ -61,8 +61,10 @@ runs:
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
 
-        if  git rev-parse --verify --quiet gh-pages; then
-          git checkout gh-pages
+        if git ls-remote --exit-code --heads origin gh-pages; then
+          cp -r .github ci h3 target
+          git switch gh-pages
+          cp -r target/.github target/ci target/h3 .
         else
           git checkout --orphan gh-pages
           git reset
@@ -72,7 +74,6 @@ runs:
     - name: Generate duvet report
       working-directory: ${{ inputs.dir }}
       run: |
-        ./ci/compliance/extract.sh
         ${{ inputs.extract-script }}
         ${{ inputs.report-script }} ${{ github.sha }}
       shell: bash
@@ -81,6 +82,7 @@ runs:
       working-directory: ${{ inputs.dir }}
       run: |
         git add ci/compliance/*.html
+        git diff --staged --quiet || \
         git commit -m "${{ github.triggering_actor }}-${{ github.sha }}-${{ github.job }}#${{ github.run_number }}"
       shell: bash
 
