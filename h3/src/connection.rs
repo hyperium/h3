@@ -112,8 +112,11 @@ where
 
         if grease {
             //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
-            //# Endpoints SHOULD include at least one such setting in their
-            //# SETTINGS frame.
+            //# Setting identifiers that were defined in [HTTP/2] where there is no
+            //# corresponding HTTP/3 setting have also been reserved
+            //# (Section 11.2.2).  These reserved settings MUST NOT be sent, and
+            //# their receipt MUST be treated as a connection error of type
+            //# H3_SETTINGS_ERROR.
             match settings.insert(SettingId::grease(), 0) {
                 Ok(_) => (),
                 Err(err) => warn!("Error when adding the grease Setting. Reason {}", err),
