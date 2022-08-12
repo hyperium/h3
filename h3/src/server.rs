@@ -154,7 +154,7 @@ where
                 ))
             }
             Ok(Some(_)) => {
-                //= ci/compliance/specs/rfc9114.txt#4.1
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
                 //# Receipt of an invalid sequence of frames MUST be treated as a
                 //# connection error of type H3_FRAME_UNEXPECTED.
                 // Close if the first frame is not a header frame
@@ -222,7 +222,7 @@ where
             Ok(header) => match header.into_request_parts() {
                 Ok(parts) => parts,
                 Err(err) => {
-                    //= ci/compliance/specs/rfc9114.txt#4.1.2
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1.2
                     //# Malformed requests or responses that are
                     //# detected MUST be treated as a stream error of type H3_MESSAGE_ERROR.
                     let error: Error = err.into();
@@ -232,7 +232,7 @@ where
                 }
             },
             Err(err) => {
-                //= ci/compliance/specs/rfc9114.txt#4.1.2
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1.2
                 //# Malformed requests or responses that are
                 //# detected MUST be treated as a stream error of type H3_MESSAGE_ERROR.
                 let error: Error = err.into();

@@ -111,7 +111,7 @@ where
             .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
 
         if grease {
-            //= ci/compliance/specs/rfc9114.txt#7.2.4.1
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
             //# Endpoints SHOULD include at least one such setting in their
             //# SETTINGS frame.
             match settings.insert(SettingId::grease(), 0) {

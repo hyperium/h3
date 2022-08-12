@@ -353,7 +353,10 @@ impl SettingId {
 
     /// Returns if a Settings Identifier is forbidden
     fn is_forbidden(&self) -> bool {
-        //= ci/compliance/specs/rfc9114.txt#7.2.4.1
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
+        //# Setting identifiers that were defined in [HTTP/2] where there is no
+        //# corresponding HTTP/3 setting have also been reserved
+        //# (Section 11.2.2).  These reserved settings MUST NOT be sent, and
         //# their receipt MUST be treated as a connection error of type
         //# H3_SETTINGS_ERROR.
         matches!(
@@ -457,19 +460,22 @@ impl Settings {
             let value = buf.get_var().map_err(|_| SettingsError::Malformed)?;
 
             if identifier.is_forbidden() {
-                //= ci/compliance/specs/rfc9114.txt#7.2.4.1
-                //# These reserved settings MUST NOT be sent, and
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
+                //# Setting identifiers that were defined in [HTTP/2] where there is no
+                //# corresponding HTTP/3 setting have also been reserved
+                //# (Section 11.2.2).  These reserved settings MUST NOT be sent, and
                 //# their receipt MUST be treated as a connection error of type
                 //# H3_SETTINGS_ERROR.
                 return Err(SettingsError::InvalidSettingId(identifier.0));
             }
 
             if identifier.is_supported() {
-                //= ci/compliance/specs/rfc9114.txt#7.2.4.1
-                //# Endpoints MUST NOT consider such settings to have
-                //# any meaning upon receipt.
-                // Only insert supported settings.
-                // Ignore the rest.
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
+                //# Setting identifiers that were defined in [HTTP/2] where there is no
+                //# corresponding HTTP/3 setting have also been reserved
+                //# (Section 11.2.2).  These reserved settings MUST NOT be sent, and
+                //# their receipt MUST be treated as a connection error of type
+                //# H3_SETTINGS_ERROR.
                 settings.insert(identifier, value)?;
             }
         }
