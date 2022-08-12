@@ -372,22 +372,21 @@ impl From<proto::headers::Error> for Error {
     }
 }
 
-impl From<frame::Error> for Error {
-    fn from(e: frame::Error) -> Self {
+impl From<frame::FrameStreamError> for Error {
+    fn from(e: frame::FrameStreamError) -> Self {
         match e {
-            frame::Error::Quic(e) => e.into(),
-            frame::Error::UnexpectedEnd => {
+            frame::FrameStreamError::Quic(e) => e.into(),
+            frame::FrameStreamError::UnexpectedEnd => {
                 Code::H3_FRAME_ERROR.with_reason("received incomplete frame")
             }
-            frame::Error::Proto(e) => match e {
-                proto::frame::Error::InvalidStreamId(_) => Code::H3_ID_ERROR,
-                proto::frame::Error::Settings(_) => Code::H3_SETTINGS_ERROR,
-                proto::frame::Error::UnsupportedFrame(_) | proto::frame::Error::UnknownFrame(_) => {
-                    Code::H3_FRAME_UNEXPECTED
-                }
-                proto::frame::Error::Incomplete(_)
-                | proto::frame::Error::InvalidFrameValue
-                | proto::frame::Error::Malformed => Code::H3_FRAME_ERROR,
+            frame::FrameStreamError::Proto(e) => match e {
+                proto::frame::FrameError::InvalidStreamId(_) => Code::H3_ID_ERROR,
+                proto::frame::FrameError::Settings(_) => Code::H3_SETTINGS_ERROR,
+                proto::frame::FrameError::UnsupportedFrame(_)
+                | proto::frame::FrameError::UnknownFrame(_) => Code::H3_FRAME_UNEXPECTED,
+                proto::frame::FrameError::Incomplete(_)
+                | proto::frame::FrameError::InvalidFrameValue
+                | proto::frame::FrameError::Malformed => Code::H3_FRAME_ERROR,
             }
             .with_cause(e),
         }

@@ -51,7 +51,7 @@ where
     pub fn poll_next(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<Frame<PayloadLen>>, Error>> {
+    ) -> Poll<Result<Option<Frame<PayloadLen>>, FrameStreamError>> {
         assert!(
             self.remaining_data == 0,
             "There is still data to read, please call poll_data() until it returns None."
@@ -74,7 +74,7 @@ where
                         if self.bufs.has_remaining() {
                             // Reached the end of receive stream, but there is still some data:
                             // The frame is incomplete.
-                            Poll::Ready(Err(Error::UnexpectedEnd))
+                            Poll::Ready(Err(FrameStreamError::UnexpectedEnd))
                         } else {
                             Poll::Ready(Ok(None))
                         }
@@ -84,7 +84,10 @@ where
         }
     }
 
-    pub fn poll_data(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<impl Buf>, Error>> {
+    pub fn poll_data(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<impl Buf>, FrameStreamError>> {
         if self.remaining_data == 0 {
             return Poll::Ready(Ok(None));
         };
@@ -98,7 +101,7 @@ where
             (Some(d), true)
                 if d.remaining() < self.remaining_data && !self.bufs.has_remaining() =>
             {
-                Poll::Ready(Err(Error::UnexpectedEnd))
+                Poll::Ready(Err(FrameStreamError::UnexpectedEnd))
             }
             (Some(d), _) => {
                 self.remaining_data -= d.remaining();
@@ -119,12 +122,12 @@ where
         self.is_eos && !self.bufs.has_remaining()
     }
 
-    fn try_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<bool, Error>> {
+    fn try_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<bool, FrameStreamError>> {
         if self.is_eos {
             return Poll::Ready(Ok(true));
         }
         match self.stream.poll_data(cx) {
-            Poll::Ready(Err(e)) => Poll::Ready(Err(Error::Quic(e.into()))),
+            Poll::Ready(Err(e)) => Poll::Ready(Err(FrameStreamError::Quic(e.into()))),
             Poll::Pending => Poll::Pending,
             Poll::Ready(Ok(None)) => {
                 self.is_eos = true;
@@ -200,7 +203,10 @@ pub struct FrameDecoder {
 }
 
 impl FrameDecoder {
-    fn decode<B: Buf>(&mut self, src: &mut BufList<B>) -> Result<Option<Frame<PayloadLen>>, Error> {
+    fn decode<B: Buf>(
+        &mut self,
+        src: &mut BufList<B>,
+    ) -> Result<Option<Frame<PayloadLen>>, FrameStreamError> {
         // Decode in a loop since we ignore unknown frames, and there may be
         // other frames already in our BufList.
         loop {
@@ -221,13 +227,13 @@ impl FrameDecoder {
             };
 
             match decoded {
-                Err(frame::Error::UnknownFrame(ty)) => {
+                Err(frame::FrameError::UnknownFrame(ty)) => {
                     trace!("ignore unknown frame type {:#x}", ty);
                     src.advance(pos);
                     self.expected = None;
                     continue;
                 }
-                Err(frame::Error::Incomplete(min)) => {
+                Err(frame::FrameError::Incomplete(min)) => {
                     self.expected = Some(min);
                     return Ok(None);
                 }
@@ -243,15 +249,15 @@ impl FrameDecoder {
 }
 
 #[derive(Debug)]
-pub enum Error {
-    Proto(frame::Error),
+pub enum FrameStreamError {
+    Proto(frame::FrameError),
     Quic(TransportError),
     UnexpectedEnd,
 }
 
-impl From<frame::Error> for Error {
-    fn from(err: frame::Error) -> Self {
-        Error::Proto(err)
+impl From<frame::FrameError> for FrameStreamError {
+    fn from(err: frame::FrameError) -> Self {
+        FrameStreamError::Proto(err)
     }
 }
 
@@ -400,7 +406,7 @@ mod tests {
 
         assert_poll_matches!(
             |mut cx| stream.poll_next(&mut cx),
-            Err(Error::UnexpectedEnd)
+            Err(FrameStreamError::UnexpectedEnd)
         );
     }
 
@@ -474,7 +480,7 @@ mod tests {
         );
         assert_poll_matches!(
             |mut cx| to_bytes(stream.poll_data(&mut cx)),
-            Err(Error::UnexpectedEnd)
+            Err(FrameStreamError::UnexpectedEnd)
         );
     }
 
@@ -598,7 +604,9 @@ mod tests {
         }
     }
 
-    fn to_bytes(x: Poll<Result<Option<impl Buf>, Error>>) -> Poll<Result<Option<Bytes>, Error>> {
+    fn to_bytes(
+        x: Poll<Result<Option<impl Buf>, FrameStreamError>>,
+    ) -> Poll<Result<Option<Bytes>, FrameStreamError>> {
         x.map(|b| b.map(|b| b.map(|mut b| b.copy_to_bytes(b.remaining()))))
     }
 }
