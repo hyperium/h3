@@ -362,7 +362,10 @@ impl From<qpack::EncoderError> for Error {
 
 impl From<qpack::DecoderError> for Error {
     fn from(e: qpack::DecoderError) -> Self {
-        Self::from(Code::QPACK_DECODER_STREAM_ERROR).with_cause(e)
+        match e {
+            qpack::DecoderError::InvalidStaticIndex(_) => Self::from(Code::QPACK_DECOMPRESSION_FAILED).with_cause(e),
+            _ => Self::from(Code::QPACK_DECODER_STREAM_ERROR).with_cause(e)
+        }
     }
 }
 

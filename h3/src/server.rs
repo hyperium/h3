@@ -214,7 +214,25 @@ where
                     ));
                 }
                 Ok(decoded) => decoded,
-                Err(e) => return Err(e.into()),
+                Err(e) => {
+                    let err: Error = e.into();
+                    if err.is_closed() {
+                        return Ok(None);
+                    }
+                    match err.kind() {
+                        crate::error::Kind::Closed => return Ok(None),
+                        crate::error::Kind::Application { code, reason } => match code.level() {
+                            crate::error::ErrorLevel::ConnectionError => {
+                                return Err(self.inner.close(
+                                    code,
+                                reason.unwrap_or(String::into_boxed_str(String::from(""))),
+                                ))
+                            }
+                            crate::error::ErrorLevel::StreamError => return Err(err),
+                        },
+                        _ => return Err(err),
+                    };
+                }
             };
 
         // Parse the request headers
