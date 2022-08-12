@@ -117,6 +117,7 @@ where
     pub async fn accept(
         &mut self,
     ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
+        // Accept the incoming stream
         let mut stream = match future::poll_fn(|cx| self.poll_accept_request(cx)).await {
             Ok(Some(s)) => FrameStream::new(s),
             Ok(None) => {
@@ -147,9 +148,10 @@ where
         let mut encoded = match frame {
             Ok(Some(Frame::Headers(h))) => h,
             Ok(None) => {
-                return Err(
-                    Code::H3_REQUEST_INCOMPLETE.with_reason("request stream closed before headers")
-                )
+                return Err(self.inner.close(
+                    Code::H3_REQUEST_INCOMPLETE,
+                    "request stream closed before headers",
+                ))
             }
             Ok(Some(_)) => {
                 //= ci/compliance/specs/rfc9114.txt#4.1
@@ -166,7 +168,19 @@ where
                 if err.is_closed() {
                     return Ok(None);
                 }
-                return Err(err);
+                match err.kind() {
+                    crate::error::Kind::Closed => return Ok(None),
+                    crate::error::Kind::Application { code, reason } => match code.level() {
+                        crate::error::ErrorLevel::ConnectionError => {
+                            return Err(self.inner.close(
+                                code,
+                                reason.unwrap_or(String::into_boxed_str(String::from(""))),
+                            ))
+                        }
+                        crate::error::ErrorLevel::StreamError => return Err(err),
+                    },
+                    _ => return Err(err),
+                };
             }
         };
 
