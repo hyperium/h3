@@ -419,10 +419,6 @@ impl Settings {
             return Err(SettingsError::Exceeded);
         }
 
-        if !id.is_supported() {
-            return Ok(());
-        }
-
         if self.entries[..self.len].iter().any(|(i, _)| *i == id) {
             return Err(SettingsError::Repeated(id));
         }
