@@ -4,9 +4,9 @@ set -e
 
 ./target/release/duvet \
     extract \
-    ci/compliance/specs/rfc9114.txt \
+    https://www.rfc-editor.org/rfc/rfc9114 \
     --format "IETF" \
     --out "." \
     --extension "toml"
 
-echo "compliance checks available in 'ci/compliance/specs/rfc9114/'"
+echo "compliance checks available in 'specs/www.rfc-editor.org/rfc/rfc9114/'"
