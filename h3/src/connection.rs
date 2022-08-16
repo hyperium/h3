@@ -456,6 +456,9 @@ where
 
         let qpack::Decoded { fields, .. } =
             match qpack::decode_stateless(&mut trailers, self.max_field_section_size) {
+                //= https://www.rfc-editor.org/rfc/rfc9114#4.2.2
+                //# An HTTP/3 implementation MAY impose a limit on the maximum size of
+                //# the message header it will accept on an individual HTTP message.
                 Err(qpack::DecoderError::HeaderTooLong(cancel_size)) => {
                     return Err(Error::header_too_big(
                         cancel_size,
@@ -491,6 +494,10 @@ where
 
     /// Send a set of trailers to end the request.
     pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
+        //= https://www.rfc-editor.org/rfc/rfc9114#4.2
+        //= type=TODO
+        //# Characters in field names MUST be
+        //# converted to lowercase prior to their encoding.
         let mut block = BytesMut::new();
         let mem_size = qpack::encode_stateless(&mut block, Header::trailer(trailers))?;
         let max_mem_size = self

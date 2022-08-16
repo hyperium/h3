@@ -58,6 +58,12 @@ impl Header {
             uri = uri.scheme(scheme.as_str().as_bytes());
         }
 
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#4.3.1
+        //# If the :scheme pseudo-header field identifies a scheme that has a
+        //# mandatory authority component (including "http" and "https"), the
+        //# request MUST contain either an :authority pseudo-header field or a
+        //# Host header field.
         match (self.pseudo.authority, self.fields.get("host")) {
             (None, None) => return Err(Error::MissingAuthority),
             (Some(a), None) => uri = uri.authority(a.as_str().as_bytes()),
@@ -66,6 +72,11 @@ impl Header {
             (Some(_), Some(h)) => uri = uri.authority(h.as_bytes()),
         }
 
+        //= https://www.rfc-editor.org/rfc/rfc9114#4.3.1
+        //= type=TODO
+        //# All HTTP/3 requests MUST include exactly one value for the :method,
+        //# :scheme, and :path pseudo-header fields, unless the request is a
+        //# CONNECT request; see Section 4.4.
         Ok((
             self.pseudo.method.ok_or(Error::MissingMethod)?,
             uri.build().map_err(Error::InvalidRequest)?,
@@ -74,6 +85,10 @@ impl Header {
     }
 
     pub fn into_response_parts(self) -> Result<(StatusCode, HeaderMap), Error> {
+        //= https://www.rfc-editor.org/rfc/rfc9114#4.3.2
+        //# This pseudo-
+        //# header field MUST be included in all responses; otherwise, the
+        //# response is malformed (see Section 4.1.2).
         Ok((self.pseudo.status.ok_or(Error::MissingStatus)?, self.fields))
     }
 
@@ -117,6 +132,9 @@ impl Iterator for HeaderIter {
     type Item = HeaderField;
 
     fn next(&mut self) -> Option<Self::Item> {
+        //= https://www.rfc-editor.org/rfc/rfc9114#4.3
+        //# All pseudo-header fields MUST appear in the header section before
+        //# regular header fields.
         if let Some(ref mut pseudo) = self.pseudo {
             if let Some(method) = pseudo.method.take() {
                 return Some((":method", method.as_str()).into());
@@ -292,6 +310,10 @@ impl Pseudo {
 
         let len = 3 + if authority.is_some() { 1 } else { 0 };
 
+        //= https://www.rfc-editor.org/rfc/rfc9114#4.3
+        //# Pseudo-header fields defined for requests MUST NOT appear
+        //# in responses; pseudo-header fields defined for responses MUST NOT
+        //# appear in requests.
         Self {
             method: Some(method),
             scheme: scheme.or(Some(Scheme::HTTPS)),
@@ -303,6 +325,10 @@ impl Pseudo {
     }
 
     fn response(status: StatusCode) -> Self {
+        //= https://www.rfc-editor.org/rfc/rfc9114#4.3
+        //# Pseudo-header fields defined for requests MUST NOT appear
+        //# in responses; pseudo-header fields defined for responses MUST NOT
+        //# appear in requests.
         Pseudo {
             method: None,
             scheme: None,
@@ -377,6 +403,12 @@ mod tests {
     fn request_has_no_authority_nor_host() {
         let headers = Header::try_from(vec![(b":method", Method::GET.as_str()).into()]).unwrap();
         assert!(headers.pseudo.authority.is_none());
+        //= https://www.rfc-editor.org/rfc/rfc9114#4.3.1
+        //= type=test
+        //# If the :scheme pseudo-header field identifies a scheme that has a
+        //# mandatory authority component (including "http" and "https"), the
+        //# request MUST contain either an :authority pseudo-header field or a
+        //# Host header field.
         assert_matches!(headers.into_request_parts(), Err(Error::MissingAuthority));
     }
 
@@ -387,6 +419,12 @@ mod tests {
             (b":authority", b"test.com").into(),
         ])
         .unwrap();
+        //= https://www.rfc-editor.org/rfc/rfc9114#4.3.1
+        //= type=test
+        //# If the :scheme pseudo-header field identifies a scheme that has a
+        //# mandatory authority component (including "http" and "https"), the
+        //# request MUST contain either an :authority pseudo-header field or a
+        //# Host header field.
         assert_matches!(headers.into_request_parts(), Ok(_));
     }
 
@@ -397,6 +435,12 @@ mod tests {
             (b"host", b"test.com").into(),
         ])
         .unwrap();
+        //= https://www.rfc-editor.org/rfc/rfc9114#4.3.1
+        //= type=test
+        //# If the :scheme pseudo-header field identifies a scheme that has a
+        //# mandatory authority component (including "http" and "https"), the
+        //# request MUST contain either an :authority pseudo-header field or a
+        //# Host header field.
         assert!(headers.pseudo.authority.is_none());
         assert_matches!(headers.into_request_parts(), Ok(_));
     }
@@ -409,6 +453,9 @@ mod tests {
             (b"host", b"test.com").into(),
         ])
         .unwrap();
+        //= https://www.rfc-editor.org/rfc/rfc9114#4.3.1
+        //= type=test
+        //# If both fields are present, they MUST contain the same value.
         assert_matches!(headers.into_request_parts(), Ok(_));
     }
     #[test]
@@ -419,6 +466,9 @@ mod tests {
             (b"host", b"host.com").into(),
         ])
         .unwrap();
+        //= https://www.rfc-editor.org/rfc/rfc9114#4.3.1
+        //= type=test
+        //# If both fields are present, they MUST contain the same value.
         assert_matches!(
             headers.into_request_parts(),
             Err(Error::ContradictedAuthority)

@@ -76,6 +76,16 @@ where
             .await
             .map_err(|e| self.maybe_conn_err(e))?;
 
+        //= https://www.rfc-editor.org/rfc/rfc9114#4.2
+        //= type=TODO
+        //# Characters in field names MUST be
+        //# converted to lowercase prior to their encoding.
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#4.2.1
+        //= type=TODO
+        //# To allow for better compression efficiency, the Cookie header field
+        //# ([COOKIES]) MAY be split into separate field lines, each with one or
+        //# more cookie-pairs, before compression.
         let mut block = BytesMut::new();
         let mem_size = qpack::encode_stateless(&mut block, headers)?;
         if mem_size > peer_max_field_section_size {
@@ -300,6 +310,9 @@ where
 
         let decoded = if let Frame::Headers(ref mut encoded) = frame {
             match qpack::decode_stateless(encoded, self.inner.max_field_section_size) {
+                //= https://www.rfc-editor.org/rfc/rfc9114#4.2.2
+                //# An HTTP/3 implementation MAY impose a limit on the maximum size of
+                //# the message header it will accept on an individual HTTP message.
                 Err(qpack::DecoderError::HeaderTooLong(cancel_size)) => {
                     self.inner.stop_sending(Code::H3_REQUEST_CANCELLED);
                     return Err(Error::header_too_big(
