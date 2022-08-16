@@ -352,6 +352,12 @@ async fn missing_settings() {
     let server_fut = async {
         let conn = server.next().await;
         let mut incoming = server::Connection::new(conn).await.unwrap();
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#3.2
+        //= type=test
+        //# After the QUIC connection is
+        //# established, a SETTINGS frame MUST be sent by each endpoint as the
+        //# initial frame of their respective HTTP control stream.
         assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err().kind(),
             Kind::Application {

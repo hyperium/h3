@@ -153,6 +153,12 @@ where
 
         self.shared.write("graceful shutdown").closing = Some(max_id);
 
+        //= https://www.rfc-editor.org/rfc/rfc9114#3.3
+        //# When either endpoint chooses to close the HTTP/3
+        //# connection, the terminating endpoint SHOULD first send a GOAWAY frame
+        //# (Section 5.2) so that both endpoints can reliably determine whether
+        //# previously sent frames have been processed and gracefully complete or
+        //# terminate any necessary remaining tasks.
         stream::write(&mut self.control_send, Frame::Goaway(max_id)).await
     }
 
@@ -296,6 +302,10 @@ where
                         if self.got_peer_settings {
                             Ok(f)
                         } else {
+                            //= https://www.rfc-editor.org/rfc/rfc9114#3.2
+                            //# After the QUIC connection is
+                            //# established, a SETTINGS frame MUST be sent by each endpoint as the
+                            //# initial frame of their respective HTTP control stream.
                             Err(self.close(
                                 Code::H3_MISSING_SETTINGS,
                                 format!("received {:?} before settings on control stream", f),
