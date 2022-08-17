@@ -58,7 +58,6 @@ impl Header {
             uri = uri.scheme(scheme.as_str().as_bytes());
         }
 
-
         //= https://www.rfc-editor.org/rfc/rfc9114#4.3.1
         //# If the :scheme pseudo-header field identifies a scheme that has a
         //# mandatory authority component (including "http" and "https"), the
