@@ -1,9 +1,9 @@
-//! This module provides methods to create a http/3 Server.  
+//! This module provides methods to create a http/3 Server.
 //!
 //! It allows to accept incoming requests, and send responses.
 //!
 //! # Examples
-//!   
+//!
 //! ## Simple example
 //! ```rust
 //! async fn doc<C>(conn: C)
@@ -32,7 +32,7 @@
 //! ```
 //!
 //! ## File server
-//! A ready-to-use example of a file server is available [here](https://github.com/hyperium/h3/blob/master/examples/client.rs)  
+//! A ready-to-use example of a file server is available [here](https://github.com/hyperium/h3/blob/master/examples/client.rs)
 
 use std::{
     collections::HashSet,
@@ -65,9 +65,9 @@ pub fn builder() -> Builder {
 
 /// The [`Connection`] struct manages a connection from the http/3 Server.
 ///
-/// Create a new Instance with [`Connection::new()`].  
-/// Accept incoming requests with [`Connection::accept()`].  
-/// And shutdown a connection with [`Connection::shutdown()`].  
+/// Create a new Instance with [`Connection::new()`].
+/// Accept incoming requests with [`Connection::accept()`].
+/// And shutdown a connection with [`Connection::shutdown()`].
 pub struct Connection<C, B>
 where
     C: quic::Connection<B>,
@@ -98,7 +98,7 @@ where
     B: Buf,
 {
     /// This method creates a new Connection for Servers with default settings.
-    /// Use [`builder()`] to create a connection with different settings.   
+    /// Use [`builder()`] to create a connection with different settings.
     /// Provide a Connection which implements [`quic::Connection`].
     pub async fn new(conn: C) -> Result<Self, Error> {
         Ok(builder().build(conn).await?)
@@ -110,10 +110,10 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    /// This method accepts a http request from a Client.  
-    /// It returns a tuple with a [`http::Request`] and an [`RequestStream`].  
-    /// The [`http::Request`] is the received request from the client.  
-    /// The [`RequestStream`] can be used to send the response.  
+    /// This method accepts a http request from a Client.
+    /// It returns a tuple with a [`http::Request`] and an [`RequestStream`].
+    /// The [`http::Request`] is the received request from the client.
+    /// The [`RequestStream`] can be used to send the response.
     pub async fn accept(
         &mut self,
     ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
@@ -137,11 +137,21 @@ where
 
         let mut encoded = match frame {
             Ok(Some(Frame::Headers(h))) => h,
+
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+            //# If a client-initiated
+            //# stream terminates without enough of the HTTP message to provide a
+            //# complete response, the server SHOULD abort its response stream with
+            //# the error code H3_REQUEST_INCOMPLETE.
             Ok(None) => {
                 return Err(
                     Code::H3_REQUEST_INCOMPLETE.with_reason("request stream closed before headers")
                 )
             }
+
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+            //# Receipt of an invalid sequence of frames MUST be treated as a
+            //# connection error of type H3_FRAME_UNEXPECTED.
             Ok(Some(_)) => {
                 return Err(
                     Code::H3_FRAME_UNEXPECTED.with_reason("first request frame is not headers")
@@ -171,6 +181,9 @@ where
 
         let qpack::Decoded { fields, .. } =
             match qpack::decode_stateless(&mut encoded, self.max_field_section_size) {
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
+                //# An HTTP/3 implementation MAY impose a limit on the maximum size of
+                //# the message header it will accept on an individual HTTP message.
                 Err(qpack::DecoderError::HeaderTooLong(cancel_size)) => {
                     request_stream
                         .send_response(
@@ -202,8 +215,8 @@ where
         Ok(Some((req, request_stream)))
     }
 
-    /// This method stops the connection gracefully.  
-    /// See [Connection-Shutdown](https://httpwg.org/specs/rfc9114.html#connection-shutdown) for more information.  
+    /// This method stops the connection gracefully.
+    /// See [Connection-Shutdown](https://httpwg.org/specs/rfc9114.html#connection-shutdown) for more information.
     pub async fn shutdown(&mut self, max_requests: usize) -> Result<(), Error> {
         self.inner.shutdown(max_requests).await
     }
@@ -314,8 +327,8 @@ where
     }
 }
 
-/// Use this struct to create a new [`Connection`].  
-/// All the settings for the [`Connection`] can be provided here.  
+/// Use this struct to create a new [`Connection`].
+/// All the settings for the [`Connection`] can be provided here.
 ///
 /// # Example
 ///
@@ -340,7 +353,7 @@ pub struct Builder {
 }
 
 impl Builder {
-    /// Creates a new [`Builder`] with default settings.  
+    /// Creates a new [`Builder`] with default settings.
     pub(super) fn new() -> Self {
         Builder {
             max_field_section_size: VarInt::MAX.0,
@@ -348,14 +361,14 @@ impl Builder {
         }
     }
 
-    /// Set the `max_field_section_size` for the [`Builder`].  
-    /// See [Header size](https://httpwg.org/specs/rfc9114.html#header-size-constraints) for more information.  
+    /// Set the `max_field_section_size` for the [`Builder`].
+    /// See [Header size](https://httpwg.org/specs/rfc9114.html#header-size-constraints) for more information.
     pub fn max_field_section_size(&mut self, value: u64) -> &mut Self {
         self.max_field_section_size = value;
         self
     }
 
-    /// Send grease values to the Client.  
+    /// Send grease values to the Client.
     /// See [setting](https://httpwg.org/specs/rfc9114.html#settings-parameters), [frame](https://httpwg.org/specs/rfc9114.html#frame-reserved) and [stream](https://httpwg.org/specs/rfc9114.html#stream-grease) for more information.
     pub fn send_grease(&mut self, value: bool) -> &mut Self {
         self.send_grease = value;
@@ -364,7 +377,7 @@ impl Builder {
 }
 
 impl Builder {
-    /// This method creates a [`Connection`] instance with the settings in the [`Builder`].  
+    /// This method creates a [`Connection`] instance with the settings in the [`Builder`].
     pub async fn build<C, B>(&self, conn: C) -> Result<Connection<C, B>, Error>
     where
         C: quic::Connection<B>,
@@ -392,7 +405,7 @@ pub struct RequestEnd {
     stream_id: StreamId,
 }
 
-/// The [`RequestStream`] struct is to send and/or receive information from the client.  
+/// The [`RequestStream`] struct is to send and/or receive information from the client.
 pub struct RequestStream<S, B> {
     inner: connection::RequestStream<S, B>,
     request_end: Arc<RequestEnd>,
@@ -429,7 +442,7 @@ where
     S: quic::SendStream<B>,
     B: Buf,
 {
-    /// This method sends a Http-Response to the Client.  
+    /// This method sends a Http-Response to the Client.
     pub async fn send_response(&mut self, resp: Response<()>) -> Result<(), Error> {
         let (parts, _) = resp.into_parts();
         let response::Parts {
@@ -445,6 +458,12 @@ where
             .conn_state
             .read("send_response")
             .peer_max_field_section_size;
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
+        //# An implementation that
+        //# has received this parameter SHOULD NOT send an HTTP message header
+        //# that exceeds the indicated size, as the peer will likely refuse to
+        //# process it.
         if mem_size > max_mem_size {
             return Err(Error::header_too_big(mem_size, max_mem_size));
         }
@@ -500,8 +519,8 @@ where
     S: quic::BidiStream<B>,
     B: Buf,
 {
-    /// Splits the Request-Stream into send and receive.  
-    /// This can be used the send and receive data on different tasks.  
+    /// Splits the Request-Stream into send and receive.
+    /// This can be used the send and receive data on different tasks.
     pub fn split(
         self,
     ) -> (

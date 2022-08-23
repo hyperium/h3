@@ -312,6 +312,10 @@ where
                             ))
                         }
                     }
+
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+                    //# Receipt of an invalid sequence of frames MUST be treated as a
+                    //# connection error of type H3_FRAME_UNEXPECTED.
                     frame => Err(self.close(
                         Code::H3_FRAME_UNEXPECTED,
                         format!("on control stream: {:?}", frame),
@@ -416,6 +420,10 @@ where
                     self.trailers = Some(encoded);
                     return Ok(None);
                 }
+
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+                //# Receipt of an invalid sequence of frames MUST be treated as a
+                //# connection error of type H3_FRAME_UNEXPECTED.
                 Some(_) => return Err(Code::H3_FRAME_UNEXPECTED.into()),
                 None => return Ok(None),
             }
@@ -437,6 +445,10 @@ where
                 .map_err(|e| self.maybe_conn_err(e))?;
             match frame {
                 Some(Frame::Headers(encoded)) => encoded,
+
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+                //# Receipt of an invalid sequence of frames MUST be treated as a
+                //# connection error of type H3_FRAME_UNEXPECTED.
                 Some(_) => return Err(Code::H3_FRAME_UNEXPECTED.into()),
                 None => return Ok(None),
             }
@@ -456,6 +468,9 @@ where
 
         let qpack::Decoded { fields, .. } =
             match qpack::decode_stateless(&mut trailers, self.max_field_section_size) {
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
+                //# An HTTP/3 implementation MAY impose a limit on the maximum size of
+                //# the message header it will accept on an individual HTTP message.
                 Err(qpack::DecoderError::HeaderTooLong(cancel_size)) => {
                     return Err(Error::header_too_big(
                         cancel_size,
@@ -491,12 +506,23 @@ where
 
     /// Send a set of trailers to end the request.
     pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
+        //= type=TODO
+        //# Characters in field names MUST be
+        //# converted to lowercase prior to their encoding.
         let mut block = BytesMut::new();
+
         let mem_size = qpack::encode_stateless(&mut block, Header::trailer(trailers))?;
         let max_mem_size = self
             .conn_state
             .read("send_trailers shared state read")
             .peer_max_field_section_size;
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
+        //# An implementation that
+        //# has received this parameter SHOULD NOT send an HTTP message header
+        //# that exceeds the indicated size, as the peer will likely refuse to
+        //# process it.
         if mem_size > max_mem_size {
             return Err(Error::header_too_big(mem_size, max_mem_size));
         }

@@ -280,6 +280,10 @@ async fn header_too_big_response_from_server() {
 
     let server_fut = async {
         let conn = server.next().await;
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
+        //= type=test
+        //# An HTTP/3 implementation MAY impose a limit on the maximum size of
+        //# the message header it will accept on an individual HTTP message.
         let mut incoming_req = server::builder()
             .max_field_section_size(12)
             .build(conn)
@@ -340,6 +344,10 @@ async fn header_too_big_response_from_server_trailers() {
 
     let server_fut = async {
         let conn = server.next().await;
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
+        //= type=test
+        //# An HTTP/3 implementation MAY impose a limit on the maximum size of
+        //# the message header it will accept on an individual HTTP message.
         let mut incoming_req = server::builder()
             .max_field_section_size(207)
             .build(conn)
@@ -404,6 +412,10 @@ async fn header_too_big_client_error() {
 
     let server_fut = async {
         let conn = server.next().await;
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
+        //= type=test
+        //# An HTTP/3 implementation MAY impose a limit on the maximum size of
+        //# the message header it will accept on an individual HTTP message.
         server::builder()
             .max_field_section_size(12)
             .build(conn)
@@ -463,6 +475,10 @@ async fn header_too_big_client_error_trailer() {
 
     let server_fut = async {
         let conn = server.next().await;
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
+        //= type=test
+        //# An HTTP/3 implementation MAY impose a limit on the maximum size of
+        //# the message header it will accept on an individual HTTP message.
         let mut incoming_req = server::builder()
             .max_field_section_size(207)
             .build(conn)
@@ -488,6 +504,13 @@ async fn header_too_big_discard_from_client() {
     let mut server = pair.server();
 
     let client_fut = async {
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
+        //= type=test
+        //# An implementation that
+        //# has received this parameter SHOULD NOT send an HTTP message header
+        //# that exceeds the indicated size, as the peer will likely refuse to
+        //# process it.
+
         // Do not poll driver so client doesn't know about server's max_field section size setting
         let (_conn, mut client) = client::builder()
             .max_field_section_size(12)
@@ -566,6 +589,13 @@ async fn header_too_big_discard_from_client_trailers() {
     let mut server = pair.server();
 
     let client_fut = async {
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
+        //= type=test
+        //# An implementation that
+        //# has received this parameter SHOULD NOT send an HTTP message header
+        //# that exceeds the indicated size, as the peer will likely refuse to
+        //# process it.
+
         // Do not poll driver so client doesn't know about server's max_field section size setting
         let (mut driver, mut client) = client::builder()
             .max_field_section_size(200)
@@ -665,6 +695,13 @@ async fn header_too_big_server_error() {
 
         let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
 
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
+        //= type=test
+        //# An implementation that
+        //# has received this parameter SHOULD NOT send an HTTP message header
+        //# that exceeds the indicated size, as the peer will likely refuse to
+        //# process it.
+
         // pretend the server received a smaller max_field_section_size
         incoming_req
             .shared_state()
@@ -737,6 +774,13 @@ async fn header_too_big_server_error_trailers() {
             .send_data("wonderful hypertext".into())
             .await
             .expect("send_data");
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
+        //= type=test
+        //# An implementation that
+        //# has received this parameter SHOULD NOT send an HTTP message header
+        //# that exceeds the indicated size, as the peer will likely refuse to
+        //# process it.
 
         // pretend the server already received client's settings
         incoming_req
@@ -1096,8 +1140,10 @@ async fn request_valid_unkown_frame_after_trailers() {
     .await;
 }
 
-// [...]
-// Receipt of an invalid sequence of frames MUST be treated as a connection error of type H3_FRAME_UNEXPECTED
+//= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+//= type=test
+//# Receipt of an invalid sequence of frames MUST be treated as a
+//# connection error of type H3_FRAME_UNEXPECTED.
 fn invalid_request_frames() -> Vec<Frame<Bytes>> {
     vec![
         Frame::CancelPush(StreamId(0)),
@@ -1293,6 +1339,10 @@ where
     F: Fn(&mut BytesMut),
 {
     request_sequence_check(request, |err| {
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+        //= type=test
+        //# Receipt of an invalid sequence of frames MUST be treated as a
+        //# connection error of type H3_FRAME_UNEXPECTED.
         assert_matches!(
             err.unwrap_err().kind(),
             Kind::Application {

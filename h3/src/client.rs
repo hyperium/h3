@@ -78,12 +78,33 @@ where
         } = parts;
         let headers = Header::request(method, uri, headers)?;
 
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+        //= type=implication
+        //# A
+        //# client MUST send only a single request on a given stream.
         let mut stream = future::poll_fn(|cx| self.open.poll_open_bidi(cx))
             .await
             .map_err(|e| self.maybe_conn_err(e))?;
 
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
+        //= type=TODO
+        //# Characters in field names MUST be
+        //# converted to lowercase prior to their encoding.
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.1
+        //= type=TODO
+        //# To allow for better compression efficiency, the Cookie header field
+        //# ([COOKIES]) MAY be split into separate field lines, each with one or
+        //# more cookie-pairs, before compression.
+
         let mut block = BytesMut::new();
         let mem_size = qpack::encode_stateless(&mut block, headers)?;
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
+        //# An implementation that
+        //# has received this parameter SHOULD NOT send an HTTP message header
+        //# that exceeds the indicated size, as the peer will likely refuse to
+        //# process it.
         if mem_size > peer_max_field_section_size {
             return Err(Error::header_too_big(mem_size, peer_max_field_section_size));
         }
@@ -306,6 +327,9 @@ where
 
         let decoded = if let Frame::Headers(ref mut encoded) = frame {
             match qpack::decode_stateless(encoded, self.inner.max_field_section_size) {
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
+                //# An HTTP/3 implementation MAY impose a limit on the maximum size of
+                //# the message header it will accept on an individual HTTP message.
                 Err(qpack::DecoderError::HeaderTooLong(cancel_size)) => {
                     self.inner.stop_sending(Code::H3_REQUEST_CANCELLED);
                     return Err(Error::header_too_big(
