@@ -27,6 +27,12 @@ where
     C: quic::Connection<Bytes, OpenStreams = O>,
     O: quic::OpenStreams<Bytes>,
 {
+    //= https://www.rfc-editor.org/rfc/rfc9114#section-3.3
+    //= type=implication
+    //# Clients SHOULD NOT open more than one HTTP/3 connection to a given IP
+    //# address and UDP port, where the IP address and port might be derived
+    //# from a URI, a selected alternative service ([ALTSVC]), a configured
+    //# proxy, or name resolution of any of these.
     Builder::new().build(conn).await
 }
 
