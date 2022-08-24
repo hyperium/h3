@@ -101,6 +101,11 @@ where
         shared: SharedStateRef,
         grease: bool,
     ) -> Result<Self, Error> {
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
+        //# Endpoints SHOULD create the HTTP control stream as well as the
+        //# unidirectional streams required by mandatory extensions (such as the
+        //# QPACK encoder and decoder streams) first, and then create additional
+        //# streams as allowed by their peer.
         let mut control_send = future::poll_fn(|cx| conn.poll_open_send(cx))
             .await
             .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))?;
@@ -122,12 +127,22 @@ where
         //# After the QUIC connection is
         //# established, a SETTINGS frame MUST be sent by each endpoint as the
         //# initial frame of their respective HTTP control stream.
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
+        //# Each side MUST initiate a single control stream at the beginning of
+        //# the connection and send its SETTINGS frame as the first frame on this
+        //# stream.
         stream::write(
             &mut control_send,
             (StreamType::CONTROL, Frame::Settings(settings)),
         )
         .await?;
 
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
+        //= type=implication
+        //# The
+        //# sender MUST NOT close the control stream, and the receiver MUST NOT
+        //# request that the sender close the control stream.
         let mut conn_inner = Self {
             shared,
             conn,
@@ -211,11 +226,20 @@ where
         }
 
         for (removed, index) in resolved.into_iter().enumerate() {
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
+            //= type=implication
+            //# As certain stream types can affect connection state, a recipient
+            //# SHOULD NOT discard data from incoming unidirectional streams prior to
+            //# reading the stream type.
             let stream = self
                 .pending_recv_streams
                 .remove(index - removed)
                 .into_stream()?;
             match stream {
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
+                //# Only one control stream per peer is permitted;
+                //# receipt of a second stream claiming to be a control stream MUST be
+                //# treated as a connection error of type H3_STREAM_CREATION_ERROR.
                 AcceptedRecvStream::Control(s) => {
                     if self.control_recv.is_some() {
                         return Poll::Ready(Err(
@@ -238,6 +262,11 @@ where
                         ));
                     }
                 }
+
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
+                //= type=implication
+                //# Endpoints MUST NOT consider these streams to have any meaning upon
+                //# receipt.
                 _ => (),
             }
         }
@@ -266,6 +295,10 @@ where
             .poll_next(cx))?;
 
         let res = match recvd {
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
+            //# If either control
+            //# stream is closed at any point, this MUST be treated as a connection
+            //# error of type H3_CLOSED_CRITICAL_STREAM.
             None => Err(self.close(Code::H3_CLOSED_CRITICAL_STREAM, "control stream closed")),
             Some(frame) => {
                 match frame {
@@ -319,6 +352,10 @@ where
                         if self.got_peer_settings {
                             Ok(f)
                         } else {
+                            //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
+                            //# If the first frame of the control stream is any other frame
+                            //# type, this MUST be treated as a connection error of type
+                            //# H3_MISSING_SETTINGS.
                             Err(self.close(
                                 Code::H3_MISSING_SETTINGS,
                                 format!("received {:?} before settings on control stream", f),
@@ -363,7 +400,13 @@ where
             }
             Ok(grease) => grease,
         };
-        // send a frame over the stream
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
+        //# Stream types of the format 0x1f * N + 0x21 for non-negative integer
+        //# values of N are reserved to exercise the requirement that unknown
+        //# types be ignored.  These streams have no semantics, and they can be
+        //# sent when application-layer padding is desired.  They MAY also be
+        //# sent on connections where no data is currently being transferred.
         match stream::write(&mut grease_stream, (StreamType::grease(), Frame::Grease)).await {
             Ok(_) => (),
             Err(err) => {
@@ -371,7 +414,15 @@ where
                 return ();
             }
         }
-        // close the stream
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
+        //# When sending a reserved stream type,
+        //# the implementation MAY either terminate the stream cleanly or reset
+        //# it.
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
+        //# When resetting the stream, either the H3_NO_ERROR error code or
+        //# a reserved error code (Section 8.1) SHOULD be used.
         match future::poll_fn(|cx| grease_stream.poll_finish(cx))
             .await
             .map_err(|e| Code::H3_NO_ERROR.with_transport(e))

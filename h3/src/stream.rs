@@ -207,6 +207,25 @@ where
             StreamType::ENCODER => AcceptedRecvStream::Encoder(self.stream),
             StreamType::DECODER => AcceptedRecvStream::Decoder(self.stream),
             t if t.value() > 0x21 && (t.value() - 0x21) % 0x1f == 0 => AcceptedRecvStream::Reserved,
+
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
+            //# Recipients of unknown stream types MUST
+            //# either abort reading of the stream or discard incoming data without
+            //# further processing.
+
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
+            //# If reading is aborted, the recipient SHOULD use
+            //# the H3_STREAM_CREATION_ERROR error code or a reserved error code
+            //# (Section 8.1).
+
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
+            //# The recipient MUST NOT consider unknown stream types
+            //# to be a connection error of any kind.
+
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
+            //= type=implication
+            //# The recipient MUST NOT consider unknown stream types
+            //# to be a connection error of any kind.
             t => {
                 return Err(Code::H3_STREAM_CREATION_ERROR
                     .with_reason(format!("unknown stream type 0x{:x}", t.value())))

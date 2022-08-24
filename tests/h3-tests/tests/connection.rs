@@ -227,6 +227,13 @@ async fn client_error_on_bidi_recv() {
 
     let client_fut = async {
         let (mut conn, mut send) = client::new(pair.client().await).await.expect("client init");
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.1
+        //= type=test
+        //# Clients MUST treat
+        //# receipt of a server-initiated bidirectional stream as a connection
+        //# error of type H3_STREAM_CREATION_ERROR unless such an extension has
+        //# been negotiated.
         let driver = future::poll_fn(|cx| conn.poll_close(cx));
         check_err!(driver.await);
         check_err!(
@@ -265,6 +272,11 @@ async fn two_control_streams() {
     let client_fut = async {
         let new_connection = pair.client_inner().await;
 
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
+        //= type=test
+        //# Only one control stream per peer is permitted;
+        //# receipt of a second stream claiming to be a control stream MUST be
+        //# treated as a connection error of type H3_STREAM_CREATION_ERROR.
         for _ in 0..=1 {
             let mut control_stream = new_connection.connection.open_uni().await.unwrap();
             let mut buf = BytesMut::new();
@@ -303,6 +315,12 @@ async fn control_close_send_error() {
         let mut buf = BytesMut::new();
         StreamType::CONTROL.encode(&mut buf);
         control_stream.write_all(&buf[..]).await.unwrap();
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
+        //= type=test
+        //# If either control
+        //# stream is closed at any point, this MUST be treated as a connection
+        //# error of type H3_CLOSED_CRITICAL_STREAM.
         control_stream.finish().await.unwrap(); // close the client control stream immediately
 
         let (mut driver, _send) = client::new(h3_quinn::Connection::new(new_connection))
@@ -342,7 +360,12 @@ async fn missing_settings() {
 
         let mut buf = BytesMut::new();
         StreamType::CONTROL.encode(&mut buf);
-        // Send a non-settings frame before the mandatory Settings frame on control stream
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
+        //= type=test
+        //# If the first frame of the control stream is any other frame
+        //# type, this MUST be treated as a connection error of type
+        //# H3_MISSING_SETTINGS.
         Frame::<Bytes>::CancelPush(StreamId(0)).encode(&mut buf);
         control_stream.write_all(&buf[..]).await.unwrap();
 

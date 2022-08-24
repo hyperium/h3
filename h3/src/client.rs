@@ -243,6 +243,11 @@ where
             }
         }
 
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.1
+        //# Clients MUST treat
+        //# receipt of a server-initiated bidirectional stream as a connection
+        //# error of type H3_STREAM_CREATION_ERROR unless such an extension has
+        //# been negotiated.
         if self.inner.poll_accept_request(cx).is_ready() {
             return Poll::Ready(Err(self.inner.close(
                 Code::H3_STREAM_CREATION_ERROR,
