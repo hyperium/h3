@@ -282,15 +282,28 @@ where
                         let closing = self.shared.read("connection goaway read").closing;
                         match closing {
                             Some(closing_id) if closing_id.initiator() == id.initiator() => {
+                                //= https://www.rfc-editor.org/rfc/rfc9114#section-5.2
+                                //# An endpoint MAY send multiple GOAWAY frames indicating different
+                                //# identifiers, but the identifier in each frame MUST NOT be greater
+                                //# than the identifier in any previous frame, since clients might
+                                //# already have retried unprocessed requests on another HTTP connection.
+
+                                //= https://www.rfc-editor.org/rfc/rfc9114#section-5.2
+                                //# Like the server,
+                                //# the client MAY send subsequent GOAWAY frames so long as the specified
+                                //# push ID is no greater than any previously sent value.
                                 if id <= closing_id {
                                     self.shared.write("connection goaway overwrite").closing =
                                         Some(id);
                                     Ok(Frame::Goaway(id))
                                 } else {
+                                    //= https://www.rfc-editor.org/rfc/rfc9114#section-5.2
+                                    //# Receiving a GOAWAY containing a larger identifier than previously
+                                    //# received MUST be treated as a connection error of type H3_ID_ERROR.
                                     Err(self.close(
                                         Code::H3_ID_ERROR,
                                         format!("received a GoAway({}) greater than the former one ({})", id, closing_id)
-                                ))
+                                    ))
                                 }
                             }
                             // When closing initiator is different, the current side has already started to close
