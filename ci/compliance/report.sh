@@ -6,8 +6,9 @@ BLOB=${1:-master}
 
 ./target/release/duvet \
   report \
-  --spec-pattern 'ci/compliance/specs/**/*.toml' \
+  --spec-pattern 'specs/**/*.toml' \
   --source-pattern 'h3/**/*.rs' \
+  --source-pattern 'tests/**/*.rs' \
   --workspace \
   --exclude duvet \
   --require-tests false \
