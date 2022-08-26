@@ -397,6 +397,11 @@ async fn control_stream_frame_unexpected() {
         let new_connection = pair.client_inner().await;
         let mut control_stream = new_connection.connection.open_uni().await.unwrap();
 
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.1
+        //= type=test
+        //# If
+        //# a DATA frame is received on a control stream, the recipient MUST
+        //# respond with a connection error of type H3_FRAME_UNEXPECTED.
         let mut buf = BytesMut::new();
         StreamType::CONTROL.encode(&mut buf);
         Frame::Data(Bytes::from("")).encode(&mut buf);
@@ -458,6 +463,12 @@ async fn goaway_from_client_not_push_id() {
         let mut buf = BytesMut::new();
         StreamType::CONTROL.encode(&mut buf);
         Frame::<Bytes>::Settings(Settings::default()).encode(&mut buf);
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.6
+        //= type=test
+        //# A client MUST treat receipt of a GOAWAY frame containing a stream ID
+        //# of any other type as a connection error of type H3_ID_ERROR.
+
         // StreamId(index=0 << 2 | dir=Bi << 1 | initiator=Server as u64)
         Frame::<Bytes>::Goaway(StreamId(0u64 << 2 | 0 << 1 | 1)).encode(&mut buf);
         control_stream.write_all(&buf[..]).await.unwrap();
@@ -520,6 +531,12 @@ async fn goaway_from_server_not_request_id() {
         let mut buf = BytesMut::new();
         StreamType::CONTROL.encode(&mut buf);
         Frame::<Bytes>::Settings(Settings::default()).encode(&mut buf);
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.6
+        //= type=test
+        //# A client MUST treat receipt of a GOAWAY frame containing a stream ID
+        //# of any other type as a connection error of type H3_ID_ERROR.
+
         // StreamId(index=0 << 2 | dir=Uni << 1 | initiator=Server as u64)
         Frame::<Bytes>::Goaway(StreamId(0u64 << 2 | 0 << 1 | 1)).encode(&mut buf);
         control_stream.write_all(&buf[..]).await.unwrap();

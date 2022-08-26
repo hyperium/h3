@@ -152,6 +152,11 @@ where
             //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
             //# Receipt of an invalid sequence of frames MUST be treated as a
             //# connection error of type H3_FRAME_UNEXPECTED.
+
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.5
+            //# A server MUST treat the
+            //# receipt of a PUSH_PROMISE frame as a connection error of type
+            //# H3_FRAME_UNEXPECTED.
             Ok(Some(_)) => {
                 return Err(
                     Code::H3_FRAME_UNEXPECTED.with_reason("first request frame is not headers")
@@ -290,7 +295,25 @@ where
                 }
                 f @ Frame::MaxPushId(_) | f @ Frame::CancelPush(_) => {
                     warn!("Control frame ignored {:?}", f);
+
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
+                    //= type=TODO
+                    //# If a server receives a CANCEL_PUSH frame for a push
+                    //# ID that has not yet been mentioned by a PUSH_PROMISE frame, this MUST
+                    //# be treated as a connection error of type H3_ID_ERROR.
+
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.7
+                    //= type=TODO
+                    //# A MAX_PUSH_ID frame cannot reduce the maximum push
+                    //# ID; receipt of a MAX_PUSH_ID frame that contains a smaller value than
+                    //# previously received MUST be treated as a connection error of type
+                    //# H3_ID_ERROR.
                 }
+
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.5
+                //# A server MUST treat the
+                //# receipt of a PUSH_PROMISE frame as a connection error of type
+                //# H3_FRAME_UNEXPECTED.
                 frame => {
                     return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED
                         .with_reason(format!("on server control stream: {:?}", frame))))

@@ -115,6 +115,14 @@ where
             .insert(SettingId::MAX_HEADER_LIST_SIZE, max_field_section_size)
             .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
 
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
+        //= type=TODO
+        //# Setting identifiers of the format 0x1f * N + 0x21 for non-negative
+        //# integer values of N are reserved to exercise the requirement that
+        //# unknown identifiers be ignored.  Such settings have no defined
+        //# meaning.  Endpoints SHOULD include at least one such setting in their
+        //# SETTINGS frame.
+
         // Grease Settings (https://httpwg.org/specs/rfc9114.html#rfc.section.7.2.4.1)
         if grease {
             match settings.insert(SettingId::grease(), 0) {
@@ -132,6 +140,23 @@ where
         //# Each side MUST initiate a single control stream at the beginning of
         //# the connection and send its SETTINGS frame as the first frame on this
         //# stream.
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
+        //= type=implication
+        //# A SETTINGS frame MUST be sent as the first frame of
+        //# each control stream (see Section 6.2.1) by each peer, and it MUST NOT
+        //# be sent subsequently.
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
+        //= type=implication
+        //# SETTINGS frames MUST NOT be sent on any stream other than the control
+        //# stream.
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.2
+        //= type=implication
+        //# Endpoints MUST NOT require any data to be received from
+        //# the peer prior to sending the SETTINGS frame; settings MUST be sent
+        //# as soon as the transport is ready to send data.
         stream::write(
             &mut control_send,
             (StreamType::CONTROL, Frame::Settings(settings)),
@@ -157,6 +182,10 @@ where
         };
         // start a grease stream
         if grease {
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
+            //= type=implication
+            //# These frames have no semantics, and
+            //# they MAY be sent on any stream where frames are allowed to be sent.
             conn_inner.start_grease_stream().await;
         }
 
@@ -303,7 +332,30 @@ where
             Some(frame) => {
                 match frame {
                     Frame::Settings(settings) if !self.got_peer_settings => {
+                        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
+                        //= type=TODO
+                        //# A receiver MAY treat the presence of duplicate
+                        //# setting identifiers as a connection error of type H3_SETTINGS_ERROR.
+
+                        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
+                        //= type=TODO
+                        //# Setting identifiers that were defined in [HTTP/2] where there is no
+                        //# corresponding HTTP/3 setting have also been reserved
+                        //# (Section 11.2.2).  These reserved settings MUST NOT be sent, and
+                        //# their receipt MUST be treated as a connection error of type
+                        //# H3_SETTINGS_ERROR.
+
                         self.got_peer_settings = true;
+
+                        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
+                        //= type=implication
+                        //# An implementation MUST ignore any parameter with an identifier it
+                        //# does not understand.
+
+                        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
+                        //= type=implication
+                        //# Endpoints MUST NOT consider such settings to have
+                        //# any meaning upon receipt.
                         self.shared
                             .write("connection settings write")
                             .peer_max_field_section_size = settings
@@ -350,6 +402,13 @@ where
                     }
                     f @ Frame::CancelPush(_) | f @ Frame::MaxPushId(_) => {
                         if self.got_peer_settings {
+                            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
+                            //= type=TODO
+                            //# If a CANCEL_PUSH frame is received that
+                            //# references a push ID greater than currently allowed on the
+                            //# connection, this MUST be treated as a connection error of type
+                            //# H3_ID_ERROR.
+
                             Ok(f)
                         } else {
                             //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
@@ -365,6 +424,24 @@ where
 
                     //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
                     //# Receipt of an invalid sequence of frames MUST be treated as a
+                    //# connection error of type H3_FRAME_UNEXPECTED.
+
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.1
+                    //= type=implication
+                    //# DATA frames MUST be associated with an HTTP request or response.
+
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.1
+                    //# If
+                    //# a DATA frame is received on a control stream, the recipient MUST
+                    //# respond with a connection error of type H3_FRAME_UNEXPECTED.
+
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.2
+                    //# If a HEADERS frame is received on a control stream, the recipient
+                    //# MUST respond with a connection error of type H3_FRAME_UNEXPECTED.
+
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
+                    //# If an endpoint receives a second SETTINGS
+                    //# frame on the control stream, the endpoint MUST respond with a
                     //# connection error of type H3_FRAME_UNEXPECTED.
                     frame => Err(self.close(
                         Code::H3_FRAME_UNEXPECTED,
@@ -488,6 +565,25 @@ where
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
                 //# Receipt of an invalid sequence of frames MUST be treated as a
                 //# connection error of type H3_FRAME_UNEXPECTED.
+
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
+                //# Receiving a
+                //# CANCEL_PUSH frame on a stream other than the control stream MUST be
+                //# treated as a connection error of type H3_FRAME_UNEXPECTED.
+
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
+                //# If an endpoint receives a SETTINGS frame on a different
+                //# stream, the endpoint MUST respond with a connection error of type
+                //# H3_FRAME_UNEXPECTED.
+
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.6
+                //# A client MUST treat a GOAWAY frame on a stream other than
+                //# the control stream as a connection error of type H3_FRAME_UNEXPECTED.
+
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.7
+                //# The MAX_PUSH_ID frame is always sent on the control stream.  Receipt
+                //# of a MAX_PUSH_ID frame on any other stream MUST be treated as a
+                //# connection error of type H3_FRAME_UNEXPECTED.
                 Some(_) => return Err(Code::H3_FRAME_UNEXPECTED.into()),
                 None => return Ok(None),
             }
@@ -512,6 +608,25 @@ where
 
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
                 //# Receipt of an invalid sequence of frames MUST be treated as a
+                //# connection error of type H3_FRAME_UNEXPECTED.
+
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
+                //# Receiving a
+                //# CANCEL_PUSH frame on a stream other than the control stream MUST be
+                //# treated as a connection error of type H3_FRAME_UNEXPECTED.
+
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
+                //# If an endpoint receives a SETTINGS frame on a different
+                //# stream, the endpoint MUST respond with a connection error of type
+                //# H3_FRAME_UNEXPECTED.
+
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.6
+                //# A client MUST treat a GOAWAY frame on a stream other than
+                //# the control stream as a connection error of type H3_FRAME_UNEXPECTED.
+
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.7
+                //# The MAX_PUSH_ID frame is always sent on the control stream.  Receipt
+                //# of a MAX_PUSH_ID frame on any other stream MUST be treated as a
                 //# connection error of type H3_FRAME_UNEXPECTED.
                 Some(_) => return Err(Code::H3_FRAME_UNEXPECTED.into()),
                 None => return Ok(None),

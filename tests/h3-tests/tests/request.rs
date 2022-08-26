@@ -1155,6 +1155,28 @@ fn invalid_request_frames() -> Vec<Frame<Bytes>> {
 
 #[tokio::test]
 async fn request_invalid_frame_first() {
+    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
+    //= type=test
+    //# Receiving a
+    //# CANCEL_PUSH frame on a stream other than the control stream MUST be
+    //# treated as a connection error of type H3_FRAME_UNEXPECTED.
+
+    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
+    //= type=test
+    //# If an endpoint receives a SETTINGS frame on a different
+    //# stream, the endpoint MUST respond with a connection error of type
+    //# H3_FRAME_UNEXPECTED.
+
+    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.6
+    //= type=test
+    //# A client MUST treat a GOAWAY frame on a stream other than
+    //# the control stream as a connection error of type H3_FRAME_UNEXPECTED.
+
+    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.7
+    //= type=test
+    //# The MAX_PUSH_ID frame is always sent on the control stream.  Receipt
+    //# of a MAX_PUSH_ID frame on any other stream MUST be treated as a
+    //# connection error of type H3_FRAME_UNEXPECTED.
     for frame in invalid_request_frames() {
         request_sequence_unexpected(|mut buf| frame.encode(&mut buf)).await;
     }
@@ -1246,14 +1268,6 @@ async fn request_invalid_two_trailers() {
     .await;
 }
 
-// 7.1. Frame Layout
-// [...]
-// Each frame's payload MUST contain exactly the fields identified in its
-// description. A frame payload that contains additional bytes after the
-// identified fields or a frame payload that terminates before the end of the
-// identified fields MUST be treated as a connection error of type
-// H3_FRAME_ERROR; see Section 8.
-
 #[tokio::test]
 async fn request_invalid_trailing_byte() {
     request_sequence_frame_error(|mut buf| {
@@ -1265,6 +1279,13 @@ async fn request_invalid_trailing_byte() {
         let mut trailers = HeaderMap::new();
         trailers.insert("trailer", "value".parse().unwrap());
         trailers_encode(buf, trailers);
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.1
+        //= type=test
+        //# A frame payload that contains additional bytes
+        //# after the identified fields or a frame payload that terminates before
+        //# the end of the identified fields MUST be treated as a connection
+        //# error of type H3_FRAME_ERROR.
         buf.put_u8(255);
     })
     .await;
@@ -1278,8 +1299,14 @@ async fn request_invalid_data_frame_length_too_large() {
             Request::post("http://localhost/salut").body(()).unwrap(),
         );
         FrameType::DATA.encode(&mut buf);
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.1
+        //= type=test
+        //# In particular, redundant length
+        //# encodings MUST be verified to be self-consistent; see Section 10.8.
         VarInt::from(5u32).encode(&mut buf);
         buf.put_slice(b"fada");
+
         let mut trailers = HeaderMap::new();
         trailers.insert("trailer", "value".parse().unwrap());
         trailers_encode(buf, trailers);
@@ -1295,11 +1322,17 @@ async fn request_invalid_data_frame_length_too_short() {
             Request::post("http://localhost/salut").body(()).unwrap(),
         );
         FrameType::DATA.encode(&mut buf);
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.1
+        //= type=test
+        //# In particular, redundant length
+        //# encodings MUST be verified to be self-consistent; see Section 10.8.
         VarInt::from(3u32).encode(&mut buf);
         buf.put_slice(b"fada");
     })
     .await;
 }
+
 // Helpers
 
 fn request_encode<B: BufMut>(buf: &mut B, req: http::Request<()>) {

@@ -208,8 +208,33 @@ where
     pub fn poll_close(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         while let Poll::Ready(result) = self.inner.poll_control(cx) {
             match result {
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.2
+                //= type=TODO
+                //# When a 0-RTT QUIC connection is being used, the initial value of each
+                //# server setting is the value used in the previous session.  Clients
+                //# SHOULD store the settings the server provided in the HTTP/3
+                //# connection where resumption information was provided, but they MAY
+                //# opt not to store settings in certain cases (e.g., if the session
+                //# ticket is received before the SETTINGS frame).
+
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.2
+                //= type=TODO
+                //# A client MUST comply
+                //# with stored settings -- or default values if no values are stored --
+                //# when attempting 0-RTT.
+
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.2
+                //= type=TODO
+                //# Once a server has provided new settings,
+                //# clients MUST comply with those values.
                 Ok(Frame::Settings(_)) => trace!("Got settings"),
                 Ok(Frame::Goaway(id)) => {
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.6
+                    //# The GOAWAY frame is always sent on the control stream.  In the
+                    //# server-to-client direction, it carries a QUIC stream ID for a client-
+                    //# initiated bidirectional stream encoded as a variable-length integer.
+                    //# A client MUST treat receipt of a GOAWAY frame containing a stream ID
+                    //# of any other type as a connection error of type H3_ID_ERROR.
                     if !id.is_request() {
                         return Poll::Ready(Err(Code::H3_ID_ERROR.with_reason(format!(
                             "non-request StreamId in a GoAway frame: {}",
@@ -218,6 +243,15 @@ where
                     }
                     info!("Server initiated graceful shutdown, last: StreamId({})", id);
                 }
+
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.5
+                //# If a PUSH_PROMISE frame is received on the control stream, the client
+                //# MUST respond with a connection error of type H3_FRAME_UNEXPECTED.
+
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.7
+                //# A client MUST treat the
+                //# receipt of a MAX_PUSH_ID frame as a connection error of type
+                //# H3_FRAME_UNEXPECTED.
                 Ok(frame) => {
                     return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED
                         .with_reason(format!("on client control stream: {:?}", frame))))
@@ -335,6 +369,19 @@ where
             .ok_or_else(|| {
                 Code::H3_GENERAL_PROTOCOL_ERROR.with_reason("Did not receive response headers")
             })?;
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.5
+        //= type=TODO
+        //# A client MUST treat
+        //# receipt of a PUSH_PROMISE frame that contains a larger push ID than
+        //# the client has advertised as a connection error of H3_ID_ERROR.
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.5
+        //= type=TODO
+        //# If a client
+        //# receives a push ID that has already been promised and detects a
+        //# mismatch, it MUST respond with a connection error of type
+        //# H3_GENERAL_PROTOCOL_ERROR.
 
         let decoded = if let Frame::Headers(ref mut encoded) = frame {
             match qpack::decode_stateless(encoded, self.inner.max_field_section_size) {
