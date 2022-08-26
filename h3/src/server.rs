@@ -356,6 +356,19 @@ where
     }
 }
 
+//= https://www.rfc-editor.org/rfc/rfc9114#section-6.1
+//= type=TODO
+//# In order to
+//# permit these streams to open, an HTTP/3 server SHOULD configure non-
+//# zero minimum values for the number of permitted streams and the
+//# initial stream flow-control window.
+
+//= https://www.rfc-editor.org/rfc/rfc9114#section-6.1
+//= type=TODO
+//# So as to not unnecessarily limit
+//# parallelism, at least 100 request streams SHOULD be permitted at a
+//# time.
+
 /// Use this struct to create a new [`Connection`].
 /// All the settings for the [`Connection`] can be provided here.
 ///
@@ -379,19 +392,6 @@ where
 pub struct Builder {
     pub(super) max_field_section_size: u64,
     pub(super) send_grease: bool,
-
-    //= https://www.rfc-editor.org/rfc/rfc9114#section-6.1
-    //= type=TODO
-    //# In order to
-    //# permit these streams to open, an HTTP/3 server SHOULD configure non-
-    //# zero minimum values for the number of permitted streams and the
-    //# initial stream flow-control window.
-
-    //= https://www.rfc-editor.org/rfc/rfc9114#section-6.1
-    //= type=TODO
-    //# So as to not unnecessarily limit
-    //# parallelism, at least 100 request streams SHOULD be permitted at a
-    //# time.
 }
 
 impl Builder {
