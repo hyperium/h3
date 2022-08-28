@@ -219,7 +219,6 @@ where
             //# (Section 8.1).
 
             //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
-            //= type=implication
             //# The recipient MUST NOT consider unknown stream types
             //# to be a connection error of any kind.
             t => {
