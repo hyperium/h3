@@ -193,12 +193,6 @@ where
 {
     pub async fn shutdown(&mut self, max_requests: usize) -> Result<(), Error> {
         self.inner.shutdown(max_requests).await
-
-        //= https://www.rfc-editor.org/rfc/rfc9114#section-5.2
-        //= type=TODO
-        //# An endpoint that completes a
-        //# graceful shutdown SHOULD use the H3_NO_ERROR error code when closing
-        //# the connection.
     }
 
     pub async fn wait_idle(&mut self) -> Result<(), Error> {

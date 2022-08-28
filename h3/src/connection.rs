@@ -142,7 +142,6 @@ where
         //# stream.
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
-        //= type=implication
         //# A SETTINGS frame MUST be sent as the first frame of
         //# each control stream (see Section 6.2.1) by each peer, and it MUST NOT
         //# be sent subsequently.
@@ -184,7 +183,9 @@ where
         if grease {
             //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
             //= type=implication
-            //# These frames have no semantics, and
+            //# Frame types of the format 0x1f * N + 0x21 for non-negative integer
+            //# values of N are reserved to exercise the requirement that unknown
+            //# types be ignored (Section 9).  These frames have no semantics, and
             //# they MAY be sent on any stream where frames are allowed to be sent.
             conn_inner.start_grease_stream().await;
         }
