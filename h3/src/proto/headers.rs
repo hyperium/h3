@@ -231,6 +231,15 @@ impl Field {
             return Err(Error::InvalidHeaderName("name is empty".into()));
         }
 
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-10.3
+        //# Requests or responses containing invalid field names MUST be treated
+        //# as malformed.
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-10.3
+        //# Any request or response that contains a
+        //# character not permitted in a field value MUST be treated as
+        //# malformed.
+
         if name[0] != b':' {
             return Ok(Field::Header((
                 HeaderName::from_bytes(name).map_err(|_| Error::invalid_name(name))?,
