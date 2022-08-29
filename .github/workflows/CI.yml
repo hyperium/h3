@@ -51,7 +51,7 @@ jobs:
           - stable
           - beta
           - nightly
-          - "1.57"
+          - "1.59"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -79,7 +79,7 @@ jobs:
           - stable
           - beta
           - nightly
-          - "1.57"
+          - "1.59"
 
     runs-on: ubuntu-latest
 
