@@ -18,8 +18,8 @@ runs:
   steps:
     - uses: actions/checkout@v3
       with:
-        repository: aws/s2n-quic
-        path: s2n-quic
+        repository: awslabs/duvet
+        path: duvet
         token: ${{ github.token }}
 
     - uses: actions-rs/toolchain@v1.0.7
@@ -34,7 +34,7 @@ runs:
       working-directory: ${{ inputs.dir }}
       run: |
         rm -f target/release/duvet
-        rm -f s2n-quic/common/duvet/target/release/duvet
+        rm -f duvet/target/release/duvet
       shell: bash
 
     - name: Cache duvet
@@ -42,15 +42,15 @@ runs:
       continue-on-error: true
       with:
         path: ${{ inputs.dir }}/target/release/duvet
-        key: ${{ runner.os }}-${{ steps.toolchain.outputs.rustc_hash }}-${{ github.job }}-duvet-${{ hashFiles(format('{0}/Cargo.lock', inputs.dir)) }}-${{ hashFiles(format('{0}/s2n-quic/common/duvet/**', inputs.dir)) }}
+        key: ${{ runner.os }}-${{ steps.toolchain.outputs.rustc_hash }}-${{ github.job }}-duvet-${{ hashFiles(format('{0}/Cargo.lock', inputs.dir)) }}-${{ hashFiles(format('{0}/duvet/**', inputs.dir)) }}
 
     - name: Install duvet
-      working-directory: ${{ inputs.dir }}/s2n-quic/common/duvet
+      working-directory: ${{ inputs.dir }}/duvet
       run: |
-        if [ ! -f ../../../target/release/duvet ]; then
-          mkdir -p ../../../target/release
+        if [ ! -f ../target/release/duvet ]; then
+          mkdir -p ../target/release
           cargo build --release
-          cp target/release/duvet ../../../target/release/duvet
+          cp target/release/duvet ../target/release/duvet
         fi
 
         echo "${{ inputs.dir }}/target/release" >> $GITHUB_PATH
@@ -62,9 +62,9 @@ runs:
         git config --local user.name "github-actions[bot]"
 
         if git ls-remote --exit-code --heads origin gh-pages; then
-          cp -r .github ci h3 tests target
+          mv .github ci h3 tests target
           git switch gh-pages
-          cp -r target/.github target/ci target/h3 target/tests .
+          mv target/.github target/ci target/h3 target/tests .
         else
           git checkout --orphan gh-pages
           git reset
