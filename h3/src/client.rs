@@ -28,6 +28,7 @@ where
     O: quic::OpenStreams<Bytes>,
 {
     //= https://www.rfc-editor.org/rfc/rfc9114#section-3.3
+    //= type=implication
     //# Clients SHOULD NOT open more than one HTTP/3 connection to a given IP
     //# address and UDP port, where the IP address and port might be derived
     //# from a URI, a selected alternative service ([ALTSVC]), a configured
@@ -78,6 +79,7 @@ where
         let headers = Header::request(method, uri, headers)?;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+        //= type=implication
         //# A
         //# client MUST send only a single request on a given stream.
         let mut stream = future::poll_fn(|cx| self.open.poll_open_bidi(cx))

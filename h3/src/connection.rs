@@ -147,10 +147,12 @@ where
         //# be sent subsequently.
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
+        //= type=implication
         //# SETTINGS frames MUST NOT be sent on any stream other than the control
         //# stream.
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.2
+        //= type=implication
         //# Endpoints MUST NOT require any data to be received from
         //# the peer prior to sending the SETTINGS frame; settings MUST be sent
         //# as soon as the transport is ready to send data.
@@ -161,6 +163,7 @@ where
         .await?;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
+        //= type=implication
         //# The
         //# sender MUST NOT close the control stream, and the receiver MUST NOT
         //# request that the sender close the control stream.
@@ -179,6 +182,7 @@ where
         // start a grease stream
         if grease {
             //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
+            //= type=implication
             //# Frame types of the format 0x1f * N + 0x21 for non-negative integer
             //# values of N are reserved to exercise the requirement that unknown
             //# types be ignored (Section 9).  These frames have no semantics, and
@@ -253,6 +257,7 @@ where
 
         for (removed, index) in resolved.into_iter().enumerate() {
             //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
+            //= type=implication
             //# As certain stream types can affect connection state, a recipient
             //# SHOULD NOT discard data from incoming unidirectional streams prior to
             //# reading the stream type.
@@ -289,6 +294,7 @@ where
                 }
 
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
+                //= type=implication
                 //# Endpoints MUST NOT consider these streams to have any meaning upon
                 //# receipt.
                 _ => (),
@@ -343,10 +349,12 @@ where
                         self.got_peer_settings = true;
 
                         //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
+                        //= type=implication
                         //# An implementation MUST ignore any parameter with an identifier it
                         //# does not understand.
 
                         //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
+                        //= type=implication
                         //# Endpoints MUST NOT consider such settings to have
                         //# any meaning upon receipt.
                         self.shared
@@ -420,6 +428,7 @@ where
                     //# connection error of type H3_FRAME_UNEXPECTED.
 
                     //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.1
+                    //= type=implication
                     //# DATA frames MUST be associated with an HTTP request or response.
 
                     //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.1

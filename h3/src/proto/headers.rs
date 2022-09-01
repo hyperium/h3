@@ -85,7 +85,9 @@ impl Header {
 
     pub fn into_response_parts(self) -> Result<(StatusCode, HeaderMap), Error> {
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3.2
-        //# This pseudo-
+        //= type=implication
+        //# For responses, a single ":status" pseudo-header field is defined that
+        //# carries the HTTP status code; see Section 15 of [HTTP].  This pseudo-
         //# header field MUST be included in all responses; otherwise, the
         //# response is malformed (see Section 4.1.2).
         Ok((self.pseudo.status.ok_or(Error::MissingStatus)?, self.fields))
@@ -284,6 +286,7 @@ where
 #[cfg_attr(test, derive(PartialEq, Clone))]
 struct Pseudo {
     //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3
+    //= type=implication
     //# Endpoints MUST NOT
     //# generate pseudo-header fields other than those defined in this
     //# document.
@@ -311,6 +314,7 @@ impl Pseudo {
         } = uri::Parts::from(uri);
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3.1
+        //= type=implication
         //# This pseudo-header field MUST NOT be empty for "http" or "https"
         //# URIs; "http" or "https" URIs that do not contain a path component
         //# MUST include a value of / (ASCII 0x2f).
@@ -328,11 +332,13 @@ impl Pseudo {
         let len = 3 + if authority.is_some() { 1 } else { 0 };
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3
+        //= type=implication
         //# Pseudo-header fields defined for requests MUST NOT appear
         //# in responses; pseudo-header fields defined for responses MUST NOT
         //# appear in requests.
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3.1
+        //= type=implication
         //# All HTTP/3 requests MUST include exactly one value for the :method,
         //# :scheme, and :path pseudo-header fields, unless the request is a
         //# CONNECT request; see Section 4.4.
@@ -348,6 +354,7 @@ impl Pseudo {
 
     fn response(status: StatusCode) -> Self {
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3
+        //= type=implication
         //# Pseudo-header fields defined for requests MUST NOT appear
         //# in responses; pseudo-header fields defined for responses MUST NOT
         //# appear in requests.
