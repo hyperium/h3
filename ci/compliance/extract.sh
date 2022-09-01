@@ -2,7 +2,7 @@
 
 set -e
 
-./target/release/duvet \
+duvet \
     extract \
     https://www.rfc-editor.org/rfc/rfc9114 \
     --format "IETF" \

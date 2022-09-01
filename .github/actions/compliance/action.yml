@@ -16,13 +16,7 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - uses: actions/checkout@v3
-      with:
-        repository: aws/s2n-quic
-        path: s2n-quic
-        token: ${{ github.token }}
-
-    - uses: actions-rs/toolchain@v1.0.7
+    - uses: actions-rs/toolchain@v1
       id: toolchain
       with:
         toolchain: stable
@@ -30,27 +24,28 @@ runs:
 
     - uses: camshaft/rust-cache@v1
 
-    - name: Clean up cache
+    - name: Purge & prep
       working-directory: ${{ inputs.dir }}
       run: |
         rm -f target/release/duvet
-        rm -f s2n-quic/common/duvet/target/release/duvet
+        export latest_version="$(cargo search duvet | grep -Eo '^duvet *= *"[0-9\.]+"' | grep -Eo '[0-9\.]+')"
+        echo "DUVET_LV=${latest_version}" >> $GITHUB_ENV
       shell: bash
 
-    - name: Cache duvet
-      uses: actions/cache@v3.0.3
+    - name: Cache & restore duvet
+      uses: actions/cache@v3
       continue-on-error: true
       with:
         path: ${{ inputs.dir }}/target/release/duvet
-        key: ${{ runner.os }}-${{ steps.toolchain.outputs.rustc_hash }}-${{ github.job }}-duvet-${{ hashFiles(format('{0}/Cargo.lock', inputs.dir)) }}-${{ hashFiles(format('{0}/s2n-quic/common/duvet/**', inputs.dir)) }}
+        key: ${{ runner.os }}-${{ steps.toolchain.outputs.rustc_hash }}-${{ github.job }}-${{ hashFiles(format('{0}/Cargo.toml', inputs.dir)) }}-duvet@${{ env.DUVET_LV }}
 
     - name: Install duvet
-      working-directory: ${{ inputs.dir }}/s2n-quic/common/duvet
+      working-directory: ${{ inputs.dir }}
       run: |
-        if [ ! -f ../../../target/release/duvet ]; then
-          mkdir -p ../../../target/release
-          cargo build --release
-          cp target/release/duvet ../../../target/release/duvet
+        if [ ! -x target/release/duvet ]; then
+          cargo install duvet
+          mkdir -p target/release
+          cp $HOME/.cargo/bin/duvet target/release/duvet
         fi
 
         echo "${{ inputs.dir }}/target/release" >> $GITHUB_PATH
