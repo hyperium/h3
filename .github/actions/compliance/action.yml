@@ -16,12 +16,6 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - uses: actions/checkout@v3
-      with:
-        repository: aws/s2n-quic
-        path: s2n-quic
-        token: ${{ github.token }}
-
     - uses: actions-rs/toolchain@v1.0.7
       id: toolchain
       with:
@@ -30,31 +24,9 @@ runs:
 
     - uses: camshaft/rust-cache@v1
 
-    - name: Clean up cache
-      working-directory: ${{ inputs.dir }}
-      run: |
-        rm -f target/release/duvet
-        rm -f s2n-quic/common/duvet/target/release/duvet
-      shell: bash
-
-    - name: Cache duvet
-      uses: actions/cache@v3.0.3
-      continue-on-error: true
+    - uses: camshaft/install@v1
       with:
-        path: ${{ inputs.dir }}/target/release/duvet
-        key: ${{ runner.os }}-${{ steps.toolchain.outputs.rustc_hash }}-${{ github.job }}-duvet-${{ hashFiles(format('{0}/Cargo.lock', inputs.dir)) }}-${{ hashFiles(format('{0}/s2n-quic/common/duvet/**', inputs.dir)) }}
-
-    - name: Install duvet
-      working-directory: ${{ inputs.dir }}/s2n-quic/common/duvet
-      run: |
-        if [ ! -f ../../../target/release/duvet ]; then
-          mkdir -p ../../../target/release
-          cargo build --release
-          cp target/release/duvet ../../../target/release/duvet
-        fi
-
-        echo "${{ inputs.dir }}/target/release" >> $GITHUB_PATH
-      shell: bash
+        crate: duvet
 
     - name: Checkout gh-pages
       run: |
