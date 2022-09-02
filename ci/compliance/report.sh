@@ -4,7 +4,7 @@ set -e
 
 BLOB=${1:-master}
 
-./target/release/duvet \
+duvet \
   report \
   --spec-pattern 'specs/**/*.toml' \
   --source-pattern 'h3/**/*.rs' \
