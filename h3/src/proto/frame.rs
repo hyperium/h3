@@ -422,6 +422,9 @@ impl Settings {
             return Err(SettingsError::Exceeded);
         }
 
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
+        //# The same setting identifier MUST NOT occur more than once in the
+        //# SETTINGS frame.
         if self.entries[..self.len].iter().any(|(i, _)| *i == id) {
             return Err(SettingsError::Repeated(id));
         }

@@ -381,14 +381,26 @@ impl From<frame::FrameStreamError> for Error {
     fn from(e: frame::FrameStreamError) -> Self {
         match e {
             frame::FrameStreamError::Quic(e) => e.into(),
+
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.1
+            //# When a stream terminates cleanly, if the last frame on the stream was
+            //# truncated, this MUST be treated as a connection error of type
+            //# H3_FRAME_ERROR.
             frame::FrameStreamError::UnexpectedEnd => {
                 Code::H3_FRAME_ERROR.with_reason("received incomplete frame")
             }
+
             frame::FrameStreamError::Proto(e) => match e {
                 proto::frame::FrameError::InvalidStreamId(_) => Code::H3_ID_ERROR,
                 proto::frame::FrameError::Settings(_) => Code::H3_SETTINGS_ERROR,
                 proto::frame::FrameError::UnsupportedFrame(_)
                 | proto::frame::FrameError::UnknownFrame(_) => Code::H3_FRAME_UNEXPECTED,
+
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.1
+                //# A frame payload that contains additional bytes
+                //# after the identified fields or a frame payload that terminates before
+                //# the end of the identified fields MUST be treated as a connection
+                //# error of type H3_FRAME_ERROR.
                 proto::frame::FrameError::Incomplete(_)
                 | proto::frame::FrameError::InvalidFrameValue
                 | proto::frame::FrameError::Malformed => Code::H3_FRAME_ERROR,
