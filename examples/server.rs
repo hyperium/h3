@@ -8,7 +8,7 @@ use structopt::StructOpt;
 use tokio::{fs::File, io::AsyncReadExt};
 use tracing::{debug, error, info, trace_span, warn};
 
-use h3::{quic::BidiStream, server::RequestStream, error::ErrorLevel};
+use h3::{error::ErrorLevel, quic::BidiStream, server::RequestStream};
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "server")]
