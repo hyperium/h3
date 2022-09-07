@@ -49,7 +49,7 @@ use tokio::sync::mpsc;
 
 use crate::{
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
-    error::{Code, Error},
+    error::{Code, Error, ErrorLevel},
     frame::FrameStream,
     proto::{frame::Frame, headers::Header, varint::VarInt},
     qpack,
@@ -129,15 +129,16 @@ where
             Err(err) => {
                 match err.kind() {
                     crate::error::Kind::Closed => return Ok(None),
-                    crate::error::Kind::Application { code, reason } => match code.level() {
-                        crate::error::ErrorLevel::ConnectionError => {
-                            return Err(self.inner.close(
-                                code,
-                                reason.unwrap_or(String::into_boxed_str(String::from(""))),
-                            ))
-                        }
-                        crate::error::ErrorLevel::StreamError => return Err(err),
-                    },
+                    crate::error::Kind::Application {
+                        code,
+                        reason,
+                        level: ErrorLevel::ConnectionError,
+                    } => {
+                        return Err(self.inner.close(
+                            code,
+                            reason.unwrap_or(String::into_boxed_str(String::from(""))),
+                        ))
+                    }
                     _ => return Err(err),
                 };
             }
@@ -185,15 +186,24 @@ where
                 }
                 match err.kind() {
                     crate::error::Kind::Closed => return Ok(None),
-                    crate::error::Kind::Application { code, reason } => match code.level() {
-                        crate::error::ErrorLevel::ConnectionError => {
-                            return Err(self.inner.close(
-                                code,
-                                reason.unwrap_or(String::into_boxed_str(String::from(""))),
-                            ))
-                        }
-                        crate::error::ErrorLevel::StreamError => return Err(err),
-                    },
+                    crate::error::Kind::Application {
+                        code,
+                        reason,
+                        level: ErrorLevel::ConnectionError,
+                    } => {
+                        return Err(self.inner.close(
+                            code,
+                            reason.unwrap_or(String::into_boxed_str(String::from(""))),
+                        ))
+                    }
+                    crate::error::Kind::Application {
+                        code,
+                        reason: _,
+                        level: ErrorLevel::StreamError,
+                    } => {
+                        stream.reset(code.into());
+                        return Err(err);
+                    }
                     _ => return Err(err),
                 };
             }
@@ -239,15 +249,24 @@ where
                     }
                     match err.kind() {
                         crate::error::Kind::Closed => return Ok(None),
-                        crate::error::Kind::Application { code, reason } => match code.level() {
-                            crate::error::ErrorLevel::ConnectionError => {
-                                return Err(self.inner.close(
-                                    code,
-                                    reason.unwrap_or(String::into_boxed_str(String::from(""))),
-                                ))
-                            }
-                            crate::error::ErrorLevel::StreamError => return Err(err),
-                        },
+                        crate::error::Kind::Application {
+                            code,
+                            reason,
+                            level: ErrorLevel::ConnectionError,
+                        } => {
+                            return Err(self.inner.close(
+                                code,
+                                reason.unwrap_or(String::into_boxed_str(String::from(""))),
+                            ))
+                        }
+                        crate::error::Kind::Application {
+                            code,
+                            reason: _,
+                            level: ErrorLevel::StreamError,
+                        } => {
+                            request_stream.stop_stream(code);
+                            return Err(err);
+                        }
                         _ => return Err(err),
                     };
                 }
@@ -351,8 +370,10 @@ where
                 Frame::Settings(_) => trace!("Got settings"),
                 Frame::Goaway(id) => {
                     if !id.is_push() {
-                        return Poll::Ready(Err(Code::H3_ID_ERROR
-                            .with_reason(format!("non-push StreamId in a GoAway frame: {}", id))));
+                        return Poll::Ready(Err(Code::H3_ID_ERROR.with_reason(
+                            format!("non-push StreamId in a GoAway frame: {}", id),
+                            ErrorLevel::ConnectionError,
+                        )));
                     }
                 }
                 f @ Frame::MaxPushId(_) | f @ Frame::CancelPush(_) => {
@@ -377,8 +398,10 @@ where
                 //# receipt of a PUSH_PROMISE frame as a connection error of type
                 //# H3_FRAME_UNEXPECTED.
                 frame => {
-                    return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED
-                        .with_reason(format!("on server control stream: {:?}", frame))))
+                    return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED.with_reason(
+                        format!("on server control stream: {:?}", frame),
+                        ErrorLevel::ConnectionError,
+                    )))
                 }
             }
         }

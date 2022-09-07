@@ -8,7 +8,7 @@ use structopt::StructOpt;
 use tokio::{fs::File, io::AsyncReadExt};
 use tracing::{debug, error, info, trace_span, warn};
 
-use h3::{quic::BidiStream, server::RequestStream};
+use h3::{quic::BidiStream, server::RequestStream, error::ErrorLevel};
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "server")]
@@ -104,12 +104,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 break;
                             }
                             Err(err) => match err.kind() {
-                                h3::error::Kind::Application { code, .. } => {
+                                h3::error::Kind::Application {
+                                    code: _,
+                                    reason: _,
+                                    level: ErrorLevel::ConnectionError,
+                                    ..
+                                } => {
                                     warn!("Error on accept, {}", err);
-                                    match code.level() {
-                                        h3::error::ErrorLevel::ConnectionError => break,
-                                        h3::error::ErrorLevel::StreamError => continue,
-                                    }
+                                    break;
+                                }
+                                h3::error::Kind::Application {
+                                    code: _,
+                                    reason: _,
+                                    level: ErrorLevel::StreamError,
+                                    ..
+                                } => {
+                                    warn!("Error on accept, {}", err);
+                                    continue;
                                 }
                                 h3::error::Kind::HeaderTooBig { .. } => continue,
                                 _ => {

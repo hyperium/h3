@@ -232,9 +232,10 @@ where
                     .pending_recv_streams
                     .push(AcceptRecvStream::new(stream)),
                 Poll::Ready(None) => {
-                    return Poll::Ready(Err(
-                        Code::H3_GENERAL_PROTOCOL_ERROR.with_reason("Connection closed unexpected")
-                    ))
+                    return Poll::Ready(Err(Code::H3_GENERAL_PROTOCOL_ERROR.with_reason(
+                        "Connection closed unexpected",
+                        crate::error::ErrorLevel::ConnectionError,
+                    )))
                 }
                 Poll::Pending => break,
             }
@@ -447,12 +448,13 @@ where
         self.last_accepted_stream = Some(id);
     }
 
-    /// Closes a stream with code and reason.
+    /// Closes a Connection with code and reason.
     /// It returns an [`Error`] which can be returned.
     pub fn close<T: AsRef<str>>(&mut self, code: Code, reason: T) -> Error {
-        self.shared.write("connection close err").error = Some(code.with_reason(reason.as_ref()));
+        self.shared.write("connection close err").error =
+            Some(code.with_reason(reason.as_ref(), crate::error::ErrorLevel::ConnectionError));
         self.conn.close(code, reason.as_ref().as_bytes());
-        code.with_reason(reason.as_ref())
+        code.with_reason(reason.as_ref(), crate::error::ErrorLevel::ConnectionError)
     }
 
     /// starts an grease stream
