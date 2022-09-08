@@ -223,6 +223,20 @@ impl Error {
         }
     }
 
+    /// returns the [`ErrorLevel`] of an [`Error`]
+    /// This indicates weather a accept loop should continue.
+    pub fn get_error_level(&self) -> ErrorLevel {
+        match self.inner.kind {
+            Kind::Application {
+                code: _,
+                reason: _,
+                level,
+            } => level,
+            // return Connection error on other kinds
+            _ => ErrorLevel::ConnectionError,
+        }
+    }
+
     pub(crate) fn header_too_big(actual_size: u64, max_size: u64) -> Self {
         Error::new(Kind::HeaderTooBig {
             actual_size,
@@ -254,6 +268,7 @@ impl Error {
         matches!(&self.inner.kind, Kind::HeaderTooBig { .. })
     }
 
+    #[cfg(feature = "test_helpers")]
     pub fn kind(&self) -> Kind {
         self.inner.kind.clone()
     }

@@ -103,31 +103,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             Ok(None) => {
                                 break;
                             }
-                            Err(err) => match err.kind() {
-                                h3::error::Kind::Application {
-                                    code: _,
-                                    reason: _,
-                                    level: ErrorLevel::ConnectionError,
-                                    ..
-                                } => {
-                                    warn!("Error on accept, {}", err);
-                                    break;
+                            Err(err) => {
+                                warn!("error on accept {}", err);
+                                match err.get_error_level() {
+                                    ErrorLevel::ConnectionError => break,
+                                    ErrorLevel::StreamError => continue,
                                 }
-                                h3::error::Kind::Application {
-                                    code: _,
-                                    reason: _,
-                                    level: ErrorLevel::StreamError,
-                                    ..
-                                } => {
-                                    warn!("Error on accept, {}", err);
-                                    continue;
-                                }
-                                h3::error::Kind::HeaderTooBig { .. } => continue,
-                                _ => {
-                                    error!("Error on accept: {}", err);
-                                    break;
-                                }
-                            },
+                            }
                         }
                     }
                 }
