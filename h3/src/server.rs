@@ -127,7 +127,7 @@ where
                 return Ok(None);
             }
             Err(err) => {
-                match err.kind() {
+                match err.inner.kind {
                     crate::error::Kind::Closed => return Ok(None),
                     crate::error::Kind::Application {
                         code,
@@ -184,7 +184,7 @@ where
                 if err.is_closed() {
                     return Ok(None);
                 }
-                match err.kind() {
+                match err.inner.kind {
                     crate::error::Kind::Closed => return Ok(None),
                     crate::error::Kind::Application {
                         code,
@@ -247,7 +247,7 @@ where
                     if err.is_closed() {
                         return Ok(None);
                     }
-                    match err.kind() {
+                    match err.inner.kind {
                         crate::error::Kind::Closed => return Ok(None),
                         crate::error::Kind::Application {
                             code,
