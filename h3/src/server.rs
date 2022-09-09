@@ -509,7 +509,7 @@ impl Builder {
     }
 
     /// Send grease values to the Client.
-    /// See [setting](https://httpwg.org/specs/rfc9114.html#settings-parameters), [frame](https://httpwg.org/specs/rfc9114.html#frame-reserved) and [stream](https://httpwg.org/specs/rfc9114.html#stream-grease) for more information.
+    /// See [setting](https://www.rfc-editor.org/rfc/rfc9114.html#settings-parameters), [frame](https://www.rfc-editor.org/rfc/rfc9114.html#frame-reserved) and [stream](https://www.rfc-editor.org/rfc/rfc9114.html#stream-grease) for more information.
     pub fn send_grease(&mut self, value: bool) -> &mut Self {
         self.send_grease = value;
         self

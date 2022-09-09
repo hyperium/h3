@@ -314,7 +314,7 @@ mod tests {
     use super::*;
 
     /**
-     * https://tools.ietf.org/html/draft-ietf-quic-qpack-05
+     * https://www.rfc-editor.org/rfc/rfc9204.html#name-static-table
      *  3.1.  Static Table
      *  [...]
      *  Note the QPACK static table is indexed from 0, whereas the HPACK

@@ -491,7 +491,7 @@ impl Builder {
     ///
     /// See [header size constraints] section of the specification for details.
     ///
-    /// [header size constraints]: https://quicwg.org/base-drafts/draft-ietf-quic-http.html#name-header-size-constraints
+    /// [header size constraints]: https://www.rfc-editor.org/rfc/rfc9114.html#name-header-size-constraints
     pub fn max_field_section_size(&mut self, value: u64) -> &mut Self {
         self.max_field_section_size = value;
         self

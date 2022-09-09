@@ -44,7 +44,7 @@ pub(crate) struct ErrorImpl {
 }
 
 /// Some errors affect the whole connection, others only one Request or Stream.
-/// See [errors](https://httpwg.org/specs/rfc9114.html#errors) for mor details.
+/// See [errors](https://www.rfc-editor.org/rfc/rfc9114.html#errors) for mor details.
 #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
 pub enum ErrorLevel {
     /// Error that will close the whole connection

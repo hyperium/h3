@@ -115,8 +115,15 @@ where
             .insert(SettingId::MAX_HEADER_LIST_SIZE, max_field_section_size)
             .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
 
-        // Grease Settings (https://httpwg.org/specs/rfc9114.html#rfc.section.7.2.4.1)
         if grease {
+            //  Grease Settings (https://www.rfc-editor.org/rfc/rfc9114.html#name-defined-settings-parameters)
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
+            //# Setting identifiers of the format 0x1f * N + 0x21 for non-negative
+            //# integer values of N are reserved to exercise the requirement that
+            //# unknown identifiers be ignored.  Such settings have no defined
+            //# meaning.  Endpoints SHOULD include at least one such setting in their
+            //# SETTINGS frame.
+
             //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
             //# Setting identifiers that were defined in [HTTP/2] where there is no
             //# corresponding HTTP/3 setting have also been reserved
@@ -458,7 +465,7 @@ where
     }
 
     /// starts an grease stream
-    /// https://httpwg.org/specs/rfc9114.html#stream-grease
+    /// https://www.rfc-editor.org/rfc/rfc9114.html#stream-grease
     async fn start_grease_stream(&mut self) {
         // start the stream
         let mut grease_stream = match future::poll_fn(|cx| self.conn.poll_open_send(cx))

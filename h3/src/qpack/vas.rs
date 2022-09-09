@@ -1,6 +1,7 @@
 /**
- * https://tools.ietf.org/html/draft-ietf-quic-qpack-01#section-2.2.1
- * https://tools.ietf.org/html/draft-ietf-quic-qpack-01#section-2.2.2
+ * https://www.rfc-editor.org/rfc/rfc9204.html#name-absolute-indexing
+ * https://www.rfc-editor.org/rfc/rfc9204.html#name-relative-indexing
+ * https://www.rfc-editor.org/rfc/rfc9204.html#name-post-base-indexing
  */
 
 /*
