@@ -1,0 +1,33 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-11.2.4"
+
+[[exception]]
+quote = '''
+In addition to common fields as described in Section 11.2, permanent
+registrations in this registry MUST include the following fields:
+
+Stream Type:  A name or label for the stream type.
+'''
+reason = '''
+The requirement applies to IANA registration.
+'''
+
+[[exception]]
+quote = '''
+Specifications for permanent registrations MUST include a description
+of the stream type, including the layout and semantics of the stream
+contents.
+'''
+reason = '''
+The requirement applies to IANA registration.
+'''
+
+[[exception]]
+quote = '''
+Each code of the format 0x1f * N + 0x21 for non-negative integer
+values of N (that is, 0x21, 0x40, ..., through 0x3ffffffffffffffe)
+MUST NOT be assigned by IANA and MUST NOT appear in the listing of
+assigned values.
+'''
+reason = '''
+The requirement applies to IANA registration.
+'''

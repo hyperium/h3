@@ -1,0 +1,21 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-10.6"
+
+[[exception]]
+quote = '''
+Implementations communicating on a secure channel MUST NOT compress
+content that includes both confidential and attacker-controlled data
+unless separate compression contexts are used for each source of
+data.
+'''
+reason = '''
+h3 is unable to determine exactly which part of the content is confidential, this will have to be handled by the user.
+'''
+
+[[exception]]
+quote = '''
+Compression MUST NOT be used if the source of data cannot be
+reliably determined.
+'''
+reason = '''
+This will have to determined by the user.
+'''

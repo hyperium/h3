@@ -1,0 +1,10 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-3.1.2"
+
+[[exception]]
+quote = '''
+Prior to making requests for an origin whose scheme is not "https",
+the client MUST ensure the server is willing to serve that scheme.
+'''
+reason = '''
+The requirement applies to the high-level implementation.
+'''

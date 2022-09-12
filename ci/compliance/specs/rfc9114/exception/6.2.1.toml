@@ -1,0 +1,12 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1"
+
+[[exception]]
+quote = '''
+Because the contents of the control stream are used to manage the
+behavior of other streams, endpoints SHOULD provide enough flow-
+control credit to keep the peer's control stream from becoming
+blocked.
+'''
+reason = '''
+h3 does not handle flow control credit acquiring.
+'''

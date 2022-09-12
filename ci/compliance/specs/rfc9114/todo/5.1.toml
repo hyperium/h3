@@ -1,0 +1,16 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-5.1"
+
+[[TODO]]
+quote = '''
+HTTP/3 implementations will need to open a new HTTP/3
+connection for new requests if the existing connection has been idle
+for longer than the idle timeout negotiated during the QUIC
+handshake, and they SHOULD do so if approaching the idle timeout; see
+Section 10.1 of [QUIC-TRANSPORT].
+'''
+
+[[TODO]]
+quote = '''
+Servers SHOULD
+NOT actively keep connections open.
+'''

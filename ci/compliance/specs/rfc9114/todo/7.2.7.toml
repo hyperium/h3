@@ -1,0 +1,6 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-7.2.7"
+
+[[TODO]]
+quote = '''
+A server MUST NOT send a MAX_PUSH_ID frame.
+'''

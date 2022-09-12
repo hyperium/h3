@@ -1,0 +1,38 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-7.2.5"
+
+[[TODO]]
+quote = '''
+A server MUST NOT use a push ID that is larger than the client has
+provided in a MAX_PUSH_ID frame (Section 7.2.7).
+'''
+
+[[TODO]]
+quote = '''
+A server MAY use the same push ID in multiple PUSH_PROMISE frames.
+If so, the decompressed request header sets MUST contain the same
+fields in the same order, and both the name and the value in each
+field MUST be exact matches.
+'''
+
+[[TODO]]
+quote = '''
+Clients SHOULD compare the request
+header sections for resources promised multiple times.  If a client
+receives a push ID that has already been promised and detects a
+mismatch, it MUST respond with a connection error of type
+H3_GENERAL_PROTOCOL_ERROR.  If the decompressed field sections match
+exactly, the client SHOULD associate the pushed content with each
+stream on which a PUSH_PROMISE frame was received.
+'''
+
+[[TODO]]
+quote = '''
+Allowing duplicate references to the same push ID is primarily to
+reduce duplication caused by concurrent requests.  A server SHOULD
+avoid reusing a push ID over a long period.
+'''
+
+[[TODO]]
+quote = '''
+A client MUST NOT send a PUSH_PROMISE frame.
+'''

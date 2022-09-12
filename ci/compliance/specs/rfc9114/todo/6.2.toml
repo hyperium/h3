@@ -1,0 +1,21 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-6.2"
+
+[[TODO]]
+quote = '''
+Implementations MAY send stream types before knowing whether the peer
+supports them.
+'''
+
+[[TODO]]
+quote = '''
+However, stream types that could modify the state or
+semantics of existing protocol components, including QPACK or other
+extensions, MUST NOT be sent until the peer is known to support them.
+'''
+
+[[TODO]]
+quote = '''
+A receiver MUST tolerate unidirectional streams being
+closed or reset prior to the reception of the unidirectional stream
+header.
+'''

@@ -1,0 +1,101 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-4.1.1"
+
+[[exception]]
+quote = '''
+Once a request stream has been opened, the request MAY be cancelled
+by either endpoint.
+'''
+reason = '''
+h3 will enable the high-level implementation to cancel a request, but it cannot decide when to do it.
+'''
+
+[[exception]]
+quote = '''
+servers cancel requests if they are unable to or
+choose not to respond.  When possible, it is RECOMMENDED that servers
+send an HTTP response with an appropriate status code rather than
+cancelling a request it has already begun processing.
+'''
+reason = '''
+h3 cannot determine whether the processing has begun, so this should be left to the high-level implementation.
+'''
+
+[[exception]]
+quote = '''
+When the server cancels a request without performing any application
+processing, the request is considered "rejected".  The server SHOULD
+abort its response stream with the error code H3_REQUEST_REJECTED.
+'''
+reason = '''
+h3 cannot determine whether the processing has begun, so this should be left to the high-level implementation.
+'''
+
+[[exception]]
+quote = '''
+Servers MUST NOT use the H3_REQUEST_REJECTED error code for requests
+that were partially or fully processed.
+'''
+reason = '''
+h3 cannot determine whether the processing has begun, so this should be left to the high-level implementation.
+'''
+
+[[exception]]
+quote = '''
+When a server abandons a
+response after partial processing, it SHOULD abort its response
+stream with the error code H3_REQUEST_CANCELLED.
+'''
+reason = '''
+h3 cannot determine whether the processing has begun, so this should be left to the high-level implementation.
+'''
+
+[[exception]]
+quote = '''
+Client SHOULD use the error code H3_REQUEST_CANCELLED to cancel
+requests.
+'''
+reason = '''
+h3 cannot decide when to cancel a request, so this should be left to the high-level implementation.
+'''
+
+[[exception]]
+quote = '''
+Upon receipt of this error code, a server MAY abruptly
+terminate the response using the error code H3_REQUEST_REJECTED if no
+processing was performed.
+'''
+reason = '''
+h3 cannot determine whether the processing has begun, so this should be left to the high-level implementation.
+'''
+
+[[exception]]
+quote = '''
+If a stream is cancelled after receiving a complete response, the
+client MAY ignore the cancellation and use the response.
+'''
+reason = '''
+This should be left to the high-level implementation to decide.
+'''
+
+[[exception]]
+quote = '''
+However, if
+a stream is cancelled after receiving a partial response, the
+response SHOULD NOT be used.
+'''
+reason = '''
+h3 is unable to determine whether a response is complete, so this should be left to the high-level implementation.
+'''
+
+[[exception]]
+quote = '''
+Only idempotent actions such as GET,
+PUT, or DELETE can be safely retried; a client SHOULD NOT
+automatically retry a request with a non-idempotent method unless it
+has some means to know that the request semantics are idempotent
+independent of the method or some means to detect that the original
+request was never applied.
+'''
+reason = '''
+This should be left to the high-level implementation to decide.
+'''

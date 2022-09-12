@@ -1,0 +1,56 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-3.1"
+
+[[exception]]
+quote = '''
+Upon receiving a
+server certificate in the TLS handshake, the client MUST verify that
+the certificate is an acceptable match for the URI's origin server
+using the process described in Section 4.3.4 of [HTTP].
+'''
+reason = '''
+h3 does not inspect the certificate messages, so this will have to be enforced by the TLS implementation.
+'''
+
+[[exception]]
+quote = '''
+If the
+certificate cannot be verified with respect to the URI's origin
+server, the client MUST NOT consider the server authoritative for
+that origin.
+'''
+reason = '''
+h3 does not inspect the certificate messages, so this will have to be enforced by the TLS implementation.
+'''
+
+[[exception]]
+quote = '''
+A client MAY attempt access to a resource with an "https" URI by
+resolving the host identifier to an IP address, establishing a QUIC
+connection to that address on the indicated port (including
+validation of the server certificate as described above), and sending
+an HTTP/3 request message targeting the URI to the server over that
+secured connection.
+'''
+reason = '''
+h3 does not need to anything specific, as this is simply a description of the expected behavior of a full-fledged HTTP/3 client.
+'''
+
+[[exception]]
+quote = '''
+Connectivity problems (e.g., blocking UDP) can result in a failure to
+establish a QUIC connection; clients SHOULD attempt to use TCP-based
+versions of HTTP in this case.
+'''
+reason = '''
+h3 is focused on the QUIC-based HTTP implementation, so this will have to be fulfilled by the high-level client implementation that utilizes h3.
+'''
+
+[[exception]]
+quote = '''
+Servers MAY serve HTTP/3 on any UDP port; an alternative service
+advertisement always includes an explicit port, and URIs contain
+either an explicit port or a default port associated with the scheme.
+'''
+reason = '''
+h3 is focused on the QUIC-based HTTP implementation.  Since this happens prior to establishing a QUIC connection, it will have to be done in the high-level server implementation.
+'''

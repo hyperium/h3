@@ -1,0 +1,12 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-3.1.1"
+
+[[exception]]
+quote = '''
+On receipt of an Alt-Svc record indicating HTTP/3 support, a client
+MAY attempt to establish a QUIC connection to the indicated host and
+port; if this connection is successful, the client can send HTTP
+requests using the mapping described in this document.
+'''
+reason = '''
+Since this happens prior to establishing a QUIC connection, it will have to be done in the high-level client implementation.
+'''

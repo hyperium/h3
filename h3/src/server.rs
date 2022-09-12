@@ -653,6 +653,14 @@ where
     pub async fn finish(&mut self) -> Result<(), Error> {
         self.inner.finish().await
     }
+
+    //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1.1
+    //= type=TODO
+    //# Implementations SHOULD cancel requests by abruptly terminating any
+    //# directions of a stream that are still open.  To do so, an
+    //# implementation resets the sending parts of streams and aborts reading
+    //# on the receiving parts of streams; see Section 2.4 of
+    //# [QUIC-TRANSPORT].
 }
 
 impl<S, B> RequestStream<S, B>

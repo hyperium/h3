@@ -1,0 +1,61 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-4.6"
+
+[[TODO]]
+quote = '''
+A server SHOULD use push IDs sequentially, beginning from
+zero.
+'''
+
+[[TODO]]
+quote = '''
+A client MUST treat receipt of a push stream as a connection
+error of type H3_ID_ERROR when no MAX_PUSH_ID frame has been sent or
+when the stream references a push ID that is greater than the maximum
+push ID.
+'''
+
+[[TODO]]
+quote = '''
+When the
+same push ID is promised on multiple request streams, the
+decompressed request field sections MUST contain the same fields in
+the same order, and both the name and the value in each field MUST be
+identical.
+'''
+
+[[TODO]]
+quote = '''
+Not all requests can be pushed.  A server MAY push requests that have
+the following properties:
+
+*  cacheable; see Section 9.2.3 of [HTTP]
+*  safe; see Section 9.2.1 of [HTTP]
+*  does not include request content or a trailer section
+'''
+
+[[TODO]]
+quote = '''
+The server MUST include a value in the :authority pseudo-header field
+for which the server is authoritative.
+'''
+
+[[TODO]]
+quote = '''
+The server MUST include a value in the :authority pseudo-header field
+for which the server is authoritative.
+'''
+
+[[TODO]]
+quote = '''
+The server SHOULD send PUSH_PROMISE frames
+prior to sending HEADERS or DATA frames that reference the promised
+responses.  This reduces the chance that a client requests a resource
+that will be pushed by the server.
+'''
+
+[[TODO]]
+quote = '''
+Clients SHOULD abort reading and discard data
+already read from push streams if no corresponding PUSH_PROMISE frame
+is processed in a reasonable amount of time.
+'''

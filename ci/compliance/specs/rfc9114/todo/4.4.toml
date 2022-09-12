@@ -1,0 +1,61 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-4.4"
+
+[[TODO]]
+quote = '''
+A CONNECT request MUST be constructed as follows:
+
+*  The :method pseudo-header field is set to "CONNECT"
+*  The :scheme and :path pseudo-header fields are omitted
+*  The :authority pseudo-header field contains the host and port to connect to (equivalent to the authority-form of the request-target of CONNECT requests; see Section 7.1 of [HTTP]).
+'''
+
+[[TODO]]
+quote = '''
+Once the CONNECT method has completed, only DATA frames are permitted
+to be sent on the stream.  Extension frames MAY be used if
+specifically permitted by the definition of the extension.
+'''
+
+[[TODO]]
+quote = '''
+Receipt
+of any other known frame type MUST be treated as a connection error
+of type H3_FRAME_UNEXPECTED.
+'''
+
+[[TODO]]
+quote = '''
+TCP connections that remain half closed in a single
+direction are not invalid, but are often handled poorly by servers,
+so clients SHOULD NOT close a stream for sending while they still
+expect to receive data from the target of the CONNECT.
+'''
+
+[[TODO]]
+quote = '''
+Correspondingly, if a proxy detects an error with the stream or the
+QUIC connection, it MUST close the TCP connection.
+'''
+
+[[TODO]]
+quote = '''
+If the proxy
+detects that the client has reset the stream or aborted reading from
+the stream, it MUST close the TCP connection.
+'''
+
+[[TODO]]
+quote = '''
+If the stream is reset
+or reading is aborted by the client, a proxy SHOULD perform the same
+operation on the other direction in order to ensure that both
+directions of the stream are cancelled.
+'''
+
+[[TODO]]
+quote = '''
+Since CONNECT creates a tunnel to an arbitrary server, proxies that
+support CONNECT SHOULD restrict its use to a set of known ports or a
+list of safe request targets; see Section 9.3.6 of [HTTP] for more
+details.
+'''

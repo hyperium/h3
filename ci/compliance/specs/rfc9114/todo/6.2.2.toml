@@ -1,0 +1,28 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-6.2.2"
+
+[[TODO]]
+quote = '''
+Only servers can push; if a server receives a client-initiated push
+stream, this MUST be treated as a connection error of type
+H3_STREAM_CREATION_ERROR.
+'''
+
+[[TODO]]
+quote = '''
+A client SHOULD NOT abort reading on a push stream prior to reading
+the push stream header, as this could lead to disagreement between
+client and server on which push IDs have already been consumed.
+'''
+
+[[TODO]]
+quote = '''
+Each push ID MUST only be used once in a push stream header.
+'''
+
+[[TODO]]
+quote = '''
+If a
+client detects that a push stream header includes a push ID that was
+used in another push stream header, the client MUST treat this as a
+connection error of type H3_ID_ERROR.
+'''

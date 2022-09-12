@@ -1,0 +1,55 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-4.6"
+
+[[exception]]
+quote = '''
+If the client has not yet
+validated the connection for the origin indicated by the pushed
+request, it MUST perform the same verification process it would do
+before sending a request for that origin on the connection; see
+Section 3.3.
+'''
+reason = '''
+h3 is not aware of connection establishment details.
+'''
+
+[[exception]]
+quote = '''
+If this verification fails, the client MUST NOT
+consider the server authoritative for that origin.
+'''
+reason = '''
+h3 is not aware of connection establishment details.
+'''
+
+[[exception]]
+quote = '''
+Clients SHOULD send a CANCEL_PUSH frame upon receipt of a
+PUSH_PROMISE frame carrying a request that is not cacheable, is not
+known to be safe, that indicates the presence of request content, or
+for which it does not consider the server authoritative.  Any
+corresponding responses MUST NOT be used or cached.
+'''
+reason = '''
+This should be left to the high-level implementation to decide.
+'''
+
+[[exception]]
+quote = '''
+These
+associations do not affect the operation of the protocol, but they
+MAY be considered by user agents when deciding how to use pushed
+resources.
+'''
+reason = '''
+For maximum flexibility, h3 should not decide how to use pushed resources.
+'''
+
+[[exception]]
+quote = '''
+Pushed responses that are not cacheable MUST NOT be stored by any
+HTTP cache.  They MAY be made available to the application
+separately.
+'''
+reason = '''
+h3 does not handle caching.
+'''

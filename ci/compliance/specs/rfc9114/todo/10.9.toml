@@ -1,0 +1,8 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-10.9"
+
+[[TODO]]
+quote = '''
+The use of 0-RTT with HTTP/3 creates an exposure to replay attack.
+The anti-replay mitigations in [HTTP-REPLAY] MUST be applied when
+using HTTP/3 with 0-RTT.
+'''

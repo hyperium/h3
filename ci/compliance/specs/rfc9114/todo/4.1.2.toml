@@ -1,0 +1,19 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-4.1.2"
+
+[[TODO]]
+quote = '''
+Malformed requests or responses that are
+detected MUST be treated as a stream error of type H3_MESSAGE_ERROR.
+'''
+
+[[TODO]]
+quote = '''
+For malformed requests, a server MAY send an HTTP response indicating
+the error prior to closing or resetting the stream.
+'''
+
+[[TODO]]
+quote = '''
+Clients MUST NOT
+accept a malformed response.
+'''

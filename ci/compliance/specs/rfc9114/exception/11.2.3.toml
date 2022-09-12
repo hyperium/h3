@@ -1,0 +1,32 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-11.2.3"
+
+[[exception]]
+quote = '''
+Use of values that are registered in the "HTTP/2 Error Code" registry
+is discouraged, and expert reviewers MAY reject such registrations.
+'''
+reason = '''
+The requirement applies to IANA registration.
+'''
+
+[[exception]]
+quote = '''
+Permanent registrations in
+this registry MUST include the following field:
+
+Name:  A name for the error code.
+'''
+reason = '''
+The requirement applies to IANA registration.
+'''
+
+[[exception]]
+quote = '''
+Each code of the format 0x1f * N + 0x21 for non-negative integer
+values of N (that is, 0x21, 0x40, ..., through 0x3ffffffffffffffe)
+MUST NOT be assigned by IANA and MUST NOT appear in the listing of
+assigned values.
+'''
+reason = '''
+The requirement applies to IANA registration.
+'''

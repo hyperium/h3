@@ -1,0 +1,43 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-5.2"
+
+[[exception]]
+quote = '''
+The server sends a client-
+initiated bidirectional stream ID; the client sends a push ID.
+Requests or pushes with the indicated identifier or greater are
+rejected (Section 4.1.1) by the sender of the GOAWAY.  This
+identifier MAY be zero if no requests or pushes were processed.
+'''
+reason = '''
+This is left to the high-level implementation to decide.
+'''
+
+[[exception]]
+quote = '''
+Clients
+MAY establish a new connection to send additional requests.
+'''
+reason = '''
+This is left to the high-level implementation to decide.
+'''
+
+[[exception]]
+quote = '''
+Servers SHOULD send a GOAWAY frame when the closing of a connection
+is known in advance, even if the advance notice is small, so that the
+remote peer can know whether or not a request has been partially
+processed.
+'''
+reason = '''
+h3 cannot anticipate when to close a connection, so this needs to be initiated by the high-level implementation.
+'''
+
+[[exception]]
+quote = '''
+Once all accepted requests and pushes have been processed, the
+endpoint can permit the connection to become idle, or it MAY initiate
+an immediate closure of the connection.
+'''
+reason = '''
+h3 is not aware of the processing status of requests or pushes, so this needs to be initiated by the high-level implementation.
+'''

@@ -1,0 +1,45 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3"
+
+[[TODO]]
+quote = '''
+When a client sends a CANCEL_PUSH frame, it is indicating that it
+does not wish to receive the promised resource.  The server SHOULD
+abort sending the resource, but the mechanism to do so depends on the
+state of the corresponding push stream.
+'''
+
+[[TODO]]
+quote = '''
+If the push stream is
+open, the server SHOULD abruptly terminate that stream.
+'''
+
+[[TODO]]
+quote = '''
+If the push
+stream has already ended, the server MAY still abruptly terminate the
+stream or MAY take no action.
+'''
+
+[[TODO]]
+quote = '''
+Regardless of
+whether a push stream has been opened, a server SHOULD send a
+CANCEL_PUSH frame when it determines that promise will not be
+fulfilled.
+'''
+
+[[TODO]]
+quote = '''
+A client SHOULD NOT send a CANCEL_PUSH frame
+when it has already received a corresponding push stream.
+'''
+
+[[TODO]]
+quote = '''
+A push
+stream could arrive after a client has sent a CANCEL_PUSH frame,
+because a server might not have processed the CANCEL_PUSH.  The
+client SHOULD abort reading the stream with an error code of
+H3_REQUEST_CANCELLED.
+'''

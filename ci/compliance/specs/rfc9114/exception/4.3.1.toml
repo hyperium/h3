@@ -1,0 +1,33 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-4.3.1"
+
+[[exception]]
+quote = '''
+To ensure that the HTTP/1.1 request line can be reproduced
+accurately, this pseudo-header field MUST be omitted when
+translating from an HTTP/1.1 request that has a request target in
+a method-specific form; see Section 7.1 of [HTTP].
+'''
+reason = '''
+h3 is not meant to be used for an intermediary.
+'''
+
+[[exception]]
+quote = '''
+Clients that
+generate HTTP/3 requests directly SHOULD use the :authority
+pseudo-header field instead of the Host header field.
+'''
+reason = '''
+h3 does not generate requests directly.
+'''
+
+[[exception]]
+quote = '''
+An
+intermediary that converts an HTTP/3 request to HTTP/1.1 MUST
+create a Host field if one is not present in a request by copying
+the value of the :authority pseudo-header field.
+'''
+reason = '''
+h3 is not meant to be used for an intermediary.
+'''

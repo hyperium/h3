@@ -66,6 +66,17 @@ impl Header {
         //# mandatory authority component (including "http" and "https"), the
         //# request MUST contain either an :authority pseudo-header field or a
         //# Host header field.
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3.1
+        //= type=TODO
+        //# If these fields are present, they MUST NOT be
+        //# empty.
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3.1
+        //= type=TODO
+        //# If the scheme does not have a mandatory authority component and none
+        //# is provided in the request target, the request MUST NOT contain the
+        //# :authority pseudo-header or Host header fields.
         match (self.pseudo.authority, self.fields.get("host")) {
             (None, None) => return Err(HeaderError::MissingAuthority),
             (Some(a), None) => uri = uri.authority(a.as_str().as_bytes()),
