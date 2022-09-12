@@ -115,16 +115,14 @@ where
             .insert(SettingId::MAX_HEADER_LIST_SIZE, max_field_section_size)
             .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
 
-        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
-        //= type=TODO
-        //# Setting identifiers of the format 0x1f * N + 0x21 for non-negative
-        //# integer values of N are reserved to exercise the requirement that
-        //# unknown identifiers be ignored.  Such settings have no defined
-        //# meaning.  Endpoints SHOULD include at least one such setting in their
-        //# SETTINGS frame.
-
         // Grease Settings (https://httpwg.org/specs/rfc9114.html#rfc.section.7.2.4.1)
         if grease {
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
+            //# Setting identifiers that were defined in [HTTP/2] where there is no
+            //# corresponding HTTP/3 setting have also been reserved
+            //# (Section 11.2.2).  These reserved settings MUST NOT be sent, and
+            //# their receipt MUST be treated as a connection error of type
+            //# H3_SETTINGS_ERROR.
             match settings.insert(SettingId::grease(), 0) {
                 Ok(_) => (),
                 Err(err) => warn!("Error when adding the grease Setting. Reason {}", err),
@@ -234,9 +232,10 @@ where
                     .pending_recv_streams
                     .push(AcceptRecvStream::new(stream)),
                 Poll::Ready(None) => {
-                    return Poll::Ready(Err(
-                        Code::H3_GENERAL_PROTOCOL_ERROR.with_reason("Connection closed unexpected")
-                    ))
+                    return Poll::Ready(Err(Code::H3_GENERAL_PROTOCOL_ERROR.with_reason(
+                        "Connection closed unexpected",
+                        crate::error::ErrorLevel::ConnectionError,
+                    )))
                 }
                 Poll::Pending => break,
             }
@@ -449,10 +448,13 @@ where
         self.last_accepted_stream = Some(id);
     }
 
+    /// Closes a Connection with code and reason.
+    /// It returns an [`Error`] which can be returned.
     pub fn close<T: AsRef<str>>(&mut self, code: Code, reason: T) -> Error {
-        self.shared.write("connection close err").error = Some(code.with_reason(reason.as_ref()));
+        self.shared.write("connection close err").error =
+            Some(code.with_reason(reason.as_ref(), crate::error::ErrorLevel::ConnectionError));
         self.conn.close(code, reason.as_ref().as_bytes());
-        code.with_reason(reason.as_ref())
+        code.with_reason(reason.as_ref(), crate::error::ErrorLevel::ConnectionError)
     }
 
     /// starts an grease stream
@@ -702,6 +704,11 @@ where
             .map_err(|e| self.maybe_conn_err(e))?;
 
         Ok(())
+    }
+
+    /// Stops an stream with an error code
+    pub fn stop_stream(&mut self, code: Code) {
+        self.stream.reset(code.into());
     }
 
     pub async fn finish(&mut self) -> Result<(), Error> {

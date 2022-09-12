@@ -12,7 +12,7 @@ use tracing::{info, trace};
 
 use crate::{
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
-    error::{Code, Error},
+    error::{Code, Error, ErrorLevel},
     frame::FrameStream,
     proto::{frame::Frame, headers::Header, varint::VarInt},
     qpack, quic, stream,
@@ -228,10 +228,10 @@ where
                     //# A client MUST treat receipt of a GOAWAY frame containing a stream ID
                     //# of any other type as a connection error of type H3_ID_ERROR.
                     if !id.is_request() {
-                        return Poll::Ready(Err(Code::H3_ID_ERROR.with_reason(format!(
-                            "non-request StreamId in a GoAway frame: {}",
-                            id
-                        ))));
+                        return Poll::Ready(Err(Code::H3_ID_ERROR.with_reason(
+                            format!("non-request StreamId in a GoAway frame: {}", id),
+                            ErrorLevel::ConnectionError,
+                        )));
                     }
                     info!("Server initiated graceful shutdown, last: StreamId({})", id);
                 }
@@ -245,8 +245,10 @@ where
                 //# receipt of a MAX_PUSH_ID frame as a connection error of type
                 //# H3_FRAME_UNEXPECTED.
                 Ok(frame) => {
-                    return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED
-                        .with_reason(format!("on client control stream: {:?}", frame))))
+                    return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED.with_reason(
+                        format!("on client control stream: {:?}", frame),
+                        ErrorLevel::ConnectionError,
+                    )))
                 }
                 Err(e) => {
                     let connection_error = self
@@ -359,7 +361,10 @@ where
             .await
             .map_err(|e| self.maybe_conn_err(e))?
             .ok_or_else(|| {
-                Code::H3_GENERAL_PROTOCOL_ERROR.with_reason("Did not receive response headers")
+                Code::H3_GENERAL_PROTOCOL_ERROR.with_reason(
+                    "Did not receive response headers",
+                    ErrorLevel::ConnectionError,
+                )
             })?;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.5
@@ -391,9 +396,10 @@ where
                 Err(e) => return Err(e.into()),
             }
         } else {
-            return Err(
-                Code::H3_FRAME_UNEXPECTED.with_reason("First response frame is not headers")
-            );
+            return Err(Code::H3_FRAME_UNEXPECTED.with_reason(
+                "First response frame is not headers",
+                ErrorLevel::ConnectionError,
+            ));
         };
 
         let qpack::Decoded { fields, .. } = decoded;

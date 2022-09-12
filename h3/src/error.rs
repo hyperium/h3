@@ -12,29 +12,41 @@ pub(crate) type TransportError = Box<dyn quic::Error>;
 /// A general error that can occur when handling the HTTP/3 protocol.
 #[derive(Clone)]
 pub struct Error {
-    inner: Box<ErrorImpl>,
+    pub(crate) inner: Box<ErrorImpl>,
 }
 
 /// An HTTP/3 "application error code".
 #[derive(PartialEq, Eq, Hash, Clone, Copy)]
-pub struct Code(u64);
+pub struct Code {
+    code: u64,
+}
 
 impl Code {
     pub fn value(&self) -> u64 {
-        self.0
+        self.code
     }
 }
 
 impl PartialEq<u64> for Code {
     fn eq(&self, other: &u64) -> bool {
-        *other == self.0
+        *other == self.code
     }
 }
 
 #[derive(Clone)]
-struct ErrorImpl {
-    kind: Kind,
+pub(crate) struct ErrorImpl {
+    pub(crate) kind: Kind,
     cause: Option<Arc<Cause>>,
+}
+
+/// Some errors affect the hole connection, others only one Request or Stream.
+/// See [errors](https://httpwg.org/specs/rfc9114.html#errors) for mor details.
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
+pub enum ErrorLevel {
+    // connection error
+    ConnectionError,
+    // stream error
+    StreamError,
 }
 
 // Warning: this enum is public only for testing purposes. Do not use it in
@@ -47,6 +59,7 @@ pub enum Kind {
     Application {
         code: Code,
         reason: Option<Box<str>>,
+        level: ErrorLevel,
     },
     #[non_exhaustive]
     HeaderTooBig {
@@ -75,13 +88,13 @@ macro_rules! codes {
         impl Code {
         $(
             $(#[$docs])*
-            pub const $name: Code = Code($num);
+            pub const $name: Code = Code{code: $num};
         )+
         }
 
         impl fmt::Debug for Code {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                match self.0 {
+                match self.code {
                 $(
                     $num => f.write_str(stringify!($name)),
                 )+
@@ -170,10 +183,11 @@ codes! {
 }
 
 impl Code {
-    pub(crate) fn with_reason<S: Into<Box<str>>>(self, reason: S) -> Error {
+    pub(crate) fn with_reason<S: Into<Box<str>>>(self, reason: S, level: ErrorLevel) -> Error {
         Error::new(Kind::Application {
             code: self,
             reason: Some(reason.into()),
+            level,
         })
     }
 
@@ -188,7 +202,7 @@ impl Code {
 
 impl From<Code> for u64 {
     fn from(code: Code) -> u64 {
-        code.0
+        code.code
     }
 }
 
@@ -198,6 +212,28 @@ impl Error {
     fn new(kind: Kind) -> Self {
         Error {
             inner: Box::new(ErrorImpl { kind, cause: None }),
+        }
+    }
+
+    /// Returns the error code from the error if available
+    pub fn try_get_code(&self) -> Option<Code> {
+        match self.inner.kind {
+            Kind::Application { code, .. } => Some(code),
+            _ => None,
+        }
+    }
+
+    /// returns the [`ErrorLevel`] of an [`Error`]
+    /// This indicates weather a accept loop should continue.
+    pub fn get_error_level(&self) -> ErrorLevel {
+        match self.inner.kind {
+            Kind::Application {
+                code: _,
+                reason: _,
+                level,
+            } => level,
+            // return Connection error on other kinds
+            _ => ErrorLevel::ConnectionError,
         }
     }
 
@@ -252,7 +288,9 @@ impl fmt::Debug for Error {
             Kind::Timeout => {
                 builder.field("timeout", &true);
             }
-            Kind::Application { code, ref reason } => {
+            Kind::Application {
+                code, ref reason, ..
+            } => {
                 builder.field("code", &code);
                 if let Some(reason) = reason {
                     builder.field("reason", reason);
@@ -286,7 +324,9 @@ impl fmt::Display for Error {
             Kind::Closing => write!(f, "connection is gracefully closing")?,
             Kind::Transport(ref e) => write!(f, "quic transport error: {}", e)?,
             Kind::Timeout => write!(f, "timeout",)?,
-            Kind::Application { code, ref reason } => {
+            Kind::Application {
+                code, ref reason, ..
+            } => {
                 if let Some(reason) = reason {
                     write!(f, "application error: {}", reason)?
                 } else {
@@ -317,7 +357,11 @@ impl std::error::Error for Error {
 
 impl From<Code> for Error {
     fn from(code: Code) -> Error {
-        Error::new(Kind::Application { code, reason: None })
+        Error::new(Kind::Application {
+            code,
+            reason: None,
+            level: ErrorLevel::ConnectionError,
+        })
     }
 }
 
@@ -329,44 +373,52 @@ impl From<qpack::EncoderError> for Error {
 
 impl From<qpack::DecoderError> for Error {
     fn from(e: qpack::DecoderError) -> Self {
-        Self::from(Code::QPACK_DECODER_STREAM_ERROR).with_cause(e)
-    }
-}
-
-impl From<proto::headers::Error> for Error {
-    fn from(e: proto::headers::Error) -> Self {
-        Self::from(Code::H3_MESSAGE_ERROR).with_cause(e)
-    }
-}
-
-impl From<frame::Error> for Error {
-    fn from(e: frame::Error) -> Self {
         match e {
-            frame::Error::Quic(e) => e.into(),
+            qpack::DecoderError::InvalidStaticIndex(_) => {
+                Self::from(Code::QPACK_DECOMPRESSION_FAILED).with_cause(e)
+            }
+            _ => Self::from(Code::QPACK_DECODER_STREAM_ERROR).with_cause(e),
+        }
+    }
+}
+
+impl From<proto::headers::HeaderError> for Error {
+    fn from(e: proto::headers::HeaderError) -> Self {
+        Error::new(Kind::Application {
+            code: Code::H3_MESSAGE_ERROR,
+            reason: None,
+            level: ErrorLevel::StreamError,
+        })
+        .with_cause(e)
+    }
+}
+
+impl From<frame::FrameStreamError> for Error {
+    fn from(e: frame::FrameStreamError) -> Self {
+        match e {
+            frame::FrameStreamError::Quic(e) => e.into(),
 
             //= https://www.rfc-editor.org/rfc/rfc9114#section-7.1
             //# When a stream terminates cleanly, if the last frame on the stream was
             //# truncated, this MUST be treated as a connection error of type
             //# H3_FRAME_ERROR.
-            frame::Error::UnexpectedEnd => {
-                Code::H3_FRAME_ERROR.with_reason("received incomplete frame")
-            }
+            frame::FrameStreamError::UnexpectedEnd => Code::H3_FRAME_ERROR
+                .with_reason("received incomplete frame", ErrorLevel::ConnectionError),
 
-            frame::Error::Proto(e) => match e {
-                proto::frame::Error::InvalidStreamId(_) => Code::H3_ID_ERROR,
-                proto::frame::Error::Settings(_) => Code::H3_SETTINGS_ERROR,
-                proto::frame::Error::UnsupportedFrame(_) | proto::frame::Error::UnknownFrame(_) => {
-                    Code::H3_FRAME_UNEXPECTED
-                }
+            frame::FrameStreamError::Proto(e) => match e {
+                proto::frame::FrameError::InvalidStreamId(_) => Code::H3_ID_ERROR,
+                proto::frame::FrameError::Settings(_) => Code::H3_SETTINGS_ERROR,
+                proto::frame::FrameError::UnsupportedFrame(_)
+                | proto::frame::FrameError::UnknownFrame(_) => Code::H3_FRAME_UNEXPECTED,
 
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-7.1
                 //# A frame payload that contains additional bytes
                 //# after the identified fields or a frame payload that terminates before
                 //# the end of the identified fields MUST be treated as a connection
                 //# error of type H3_FRAME_ERROR.
-                proto::frame::Error::Incomplete(_)
-                | proto::frame::Error::InvalidFrameValue
-                | proto::frame::Error::Malformed => Code::H3_FRAME_ERROR,
+                proto::frame::FrameError::Incomplete(_)
+                | proto::frame::FrameError::InvalidFrameValue
+                | proto::frame::FrameError::Malformed => Code::H3_FRAME_ERROR,
             }
             .with_cause(e),
         }
@@ -392,8 +444,9 @@ where
         match quic_error.err_code() {
             Some(c) if Code::H3_NO_ERROR == c => Error::new(Kind::Closed),
             Some(c) => Error::new(Kind::Application {
-                code: Code(c),
+                code: Code { code: c },
                 reason: None,
+                level: ErrorLevel::ConnectionError,
             }),
             None => Error::new(Kind::Transport(Arc::new(quic_error))),
         }

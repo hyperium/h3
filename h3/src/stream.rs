@@ -6,7 +6,7 @@ use quic::RecvStream;
 
 use crate::{
     buf::BufList,
-    error::Code,
+    error::{Code, ErrorLevel},
     frame::FrameStream,
     proto::{
         coding::{BufExt, Decode as _, Encode},
@@ -222,8 +222,10 @@ where
             //# The recipient MUST NOT consider unknown stream types
             //# to be a connection error of any kind.
             t => {
-                return Err(Code::H3_STREAM_CREATION_ERROR
-                    .with_reason(format!("unknown stream type 0x{:x}", t.value())))
+                return Err(Code::H3_STREAM_CREATION_ERROR.with_reason(
+                    format!("unknown stream type 0x{:x}", t.value()),
+                    crate::error::ErrorLevel::ConnectionError,
+                ))
             }
         })
     }
@@ -239,8 +241,10 @@ where
             match ready!(self.stream.poll_data(cx))? {
                 Some(mut b) => self.buf.push_bytes(&mut b),
                 None => {
-                    return Poll::Ready(Err(Code::H3_STREAM_CREATION_ERROR
-                        .with_reason("Stream closed before type received")))
+                    return Poll::Ready(Err(Code::H3_STREAM_CREATION_ERROR.with_reason(
+                        "Stream closed before type received",
+                        ErrorLevel::ConnectionError,
+                    )));
                 }
             };
 
@@ -259,14 +263,20 @@ where
             if self.ty.is_none() {
                 // Parse StreamType
                 self.ty = Some(StreamType::decode(&mut self.buf).map_err(|_| {
-                    Code::H3_INTERNAL_ERROR.with_reason("Unexpected end parsing stream type")
+                    Code::H3_INTERNAL_ERROR.with_reason(
+                        "Unexpected end parsing stream type",
+                        ErrorLevel::ConnectionError,
+                    )
                 })?);
                 // Get the next VarInt for PUSH_ID on the next iteration
                 self.expected = None;
             } else {
                 // Parse PUSH_ID
                 self.push_id = Some(self.buf.get_var().map_err(|_| {
-                    Code::H3_INTERNAL_ERROR.with_reason("Unexpected end parsing stream type")
+                    Code::H3_INTERNAL_ERROR.with_reason(
+                        "Unexpected end parsing stream type",
+                        ErrorLevel::ConnectionError,
+                    )
                 })?);
             }
         }

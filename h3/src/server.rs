@@ -49,7 +49,7 @@ use tokio::sync::mpsc;
 
 use crate::{
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
-    error::{Code, Error},
+    error::{Code, Error, ErrorLevel},
     frame::FrameStream,
     proto::{frame::Frame, headers::Header, varint::VarInt},
     qpack,
@@ -117,6 +117,7 @@ where
     pub async fn accept(
         &mut self,
     ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
+        // Accept the incoming stream
         let mut stream = match future::poll_fn(|cx| self.poll_accept_request(cx)).await {
             Ok(Some(s)) => FrameStream::new(s),
             Ok(None) => {
@@ -125,11 +126,21 @@ where
                 self.inner.shutdown(0).await?;
                 return Ok(None);
             }
-            Err(e) => {
-                if e.is_closed() {
-                    return Ok(None);
-                }
-                return Err(e);
+            Err(err) => {
+                match err.inner.kind {
+                    crate::error::Kind::Closed => return Ok(None),
+                    crate::error::Kind::Application {
+                        code,
+                        reason,
+                        level: ErrorLevel::ConnectionError,
+                    } => {
+                        return Err(self.inner.close(
+                            code,
+                            reason.unwrap_or(String::into_boxed_str(String::from(""))),
+                        ))
+                    }
+                    _ => return Err(err),
+                };
             }
         };
 
@@ -144,9 +155,10 @@ where
             //# complete response, the server SHOULD abort its response stream with
             //# the error code H3_REQUEST_INCOMPLETE.
             Ok(None) => {
-                return Err(
-                    Code::H3_REQUEST_INCOMPLETE.with_reason("request stream closed before headers")
-                )
+                return Err(self.inner.close(
+                    Code::H3_REQUEST_INCOMPLETE,
+                    "request stream closed before headers",
+                ))
             }
 
             //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
@@ -158,16 +170,42 @@ where
             //# receipt of a PUSH_PROMISE frame as a connection error of type
             //# H3_FRAME_UNEXPECTED.
             Ok(Some(_)) => {
-                return Err(
-                    Code::H3_FRAME_UNEXPECTED.with_reason("first request frame is not headers")
-                )
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+                //# Receipt of an invalid sequence of frames MUST be treated as a
+                //# connection error of type H3_FRAME_UNEXPECTED.
+                // Close if the first frame is not a header frame
+                return Err(self.inner.close(
+                    Code::H3_FRAME_UNEXPECTED,
+                    "first request frame is not headers",
+                ));
             }
             Err(e) => {
                 let err: Error = e.into();
                 if err.is_closed() {
                     return Ok(None);
                 }
-                return Err(err);
+                match err.inner.kind {
+                    crate::error::Kind::Closed => return Ok(None),
+                    crate::error::Kind::Application {
+                        code,
+                        reason,
+                        level: ErrorLevel::ConnectionError,
+                    } => {
+                        return Err(self.inner.close(
+                            code,
+                            reason.unwrap_or(String::into_boxed_str(String::from(""))),
+                        ))
+                    }
+                    crate::error::Kind::Application {
+                        code,
+                        reason: _,
+                        level: ErrorLevel::StreamError,
+                    } => {
+                        stream.reset(code.into());
+                        return Err(err);
+                    }
+                    _ => return Err(err),
+                };
             }
         };
 
@@ -204,11 +242,60 @@ where
                     ));
                 }
                 Ok(decoded) => decoded,
-                Err(e) => return Err(e.into()),
+                Err(e) => {
+                    let err: Error = e.into();
+                    if err.is_closed() {
+                        return Ok(None);
+                    }
+                    match err.inner.kind {
+                        crate::error::Kind::Closed => return Ok(None),
+                        crate::error::Kind::Application {
+                            code,
+                            reason,
+                            level: ErrorLevel::ConnectionError,
+                        } => {
+                            return Err(self.inner.close(
+                                code,
+                                reason.unwrap_or(String::into_boxed_str(String::from(""))),
+                            ))
+                        }
+                        crate::error::Kind::Application {
+                            code,
+                            reason: _,
+                            level: ErrorLevel::StreamError,
+                        } => {
+                            request_stream.stop_stream(code);
+                            return Err(err);
+                        }
+                        _ => return Err(err),
+                    };
+                }
             };
 
-        let (method, uri, headers) = Header::try_from(fields)?.into_request_parts()?;
-
+        // Parse the request headers
+        let (method, uri, headers) = match Header::try_from(fields) {
+            Ok(header) => match header.into_request_parts() {
+                Ok(parts) => parts,
+                Err(err) => {
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1.2
+                    //# Malformed requests or responses that are
+                    //# detected MUST be treated as a stream error of type H3_MESSAGE_ERROR.
+                    let error: Error = err.into();
+                    request_stream
+                        .stop_stream(error.try_get_code().unwrap_or(Code::H3_MESSAGE_ERROR));
+                    return Err(error);
+                }
+            },
+            Err(err) => {
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1.2
+                //# Malformed requests or responses that are
+                //# detected MUST be treated as a stream error of type H3_MESSAGE_ERROR.
+                let error: Error = err.into();
+                request_stream.stop_stream(error.try_get_code().unwrap_or(Code::H3_MESSAGE_ERROR));
+                return Err(error);
+            }
+        };
+        //  request_stream.stop_stream(Code::H3_MESSAGE_ERROR).await;
         let mut req = http::Request::new(());
         *req.method_mut() = method;
         *req.uri_mut() = uri;
@@ -283,8 +370,10 @@ where
                 Frame::Settings(_) => trace!("Got settings"),
                 Frame::Goaway(id) => {
                     if !id.is_push() {
-                        return Poll::Ready(Err(Code::H3_ID_ERROR
-                            .with_reason(format!("non-push StreamId in a GoAway frame: {}", id))));
+                        return Poll::Ready(Err(Code::H3_ID_ERROR.with_reason(
+                            format!("non-push StreamId in a GoAway frame: {}", id),
+                            ErrorLevel::ConnectionError,
+                        )));
                     }
                 }
                 f @ Frame::MaxPushId(_) | f @ Frame::CancelPush(_) => {
@@ -309,8 +398,10 @@ where
                 //# receipt of a PUSH_PROMISE frame as a connection error of type
                 //# H3_FRAME_UNEXPECTED.
                 frame => {
-                    return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED
-                        .with_reason(format!("on server control stream: {:?}", frame))))
+                    return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED.with_reason(
+                        format!("on server control stream: {:?}", frame),
+                        ErrorLevel::ConnectionError,
+                    )))
                 }
             }
         }
@@ -514,6 +605,11 @@ where
     /// Send data to the Client.
     pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
         self.inner.send_data(buf).await
+    }
+
+    /// Stops a stream with a error code
+    pub fn stop_stream(&mut self, error_code: Code) {
+        self.inner.stop_stream(error_code);
     }
 
     /// Send the Http-Trailers.

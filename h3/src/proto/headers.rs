@@ -22,10 +22,10 @@ pub struct Header {
 
 #[allow(clippy::len_without_is_empty)]
 impl Header {
-    pub fn request(method: Method, uri: Uri, fields: HeaderMap) -> Result<Self, Error> {
+    pub fn request(method: Method, uri: Uri, fields: HeaderMap) -> Result<Self, HeaderError> {
         match (uri.authority(), fields.get("host")) {
-            (None, None) => Err(Error::MissingAuthority),
-            (Some(a), Some(h)) if a.as_str() != h => Err(Error::ContradictedAuthority),
+            (None, None) => Err(HeaderError::MissingAuthority),
+            (Some(a), Some(h)) if a.as_str() != h => Err(HeaderError::ContradictedAuthority),
             _ => Ok(Self {
                 pseudo: Pseudo::request(method, uri),
                 fields,
@@ -50,7 +50,7 @@ impl Header {
         }
     }
 
-    pub fn into_request_parts(self) -> Result<(Method, Uri, HeaderMap), Error> {
+    pub fn into_request_parts(self) -> Result<(Method, Uri, HeaderMap), HeaderError> {
         let mut uri = Uri::builder();
 
         if let Some(path) = self.pseudo.path {
@@ -67,28 +67,33 @@ impl Header {
         //# request MUST contain either an :authority pseudo-header field or a
         //# Host header field.
         match (self.pseudo.authority, self.fields.get("host")) {
-            (None, None) => return Err(Error::MissingAuthority),
+            (None, None) => return Err(HeaderError::MissingAuthority),
             (Some(a), None) => uri = uri.authority(a.as_str().as_bytes()),
             (None, Some(h)) => uri = uri.authority(h.as_bytes()),
             //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3.1
             //# If both fields are present, they MUST contain the same value.
-            (Some(a), Some(h)) if a.as_str() != h => return Err(Error::ContradictedAuthority),
+            (Some(a), Some(h)) if a.as_str() != h => {
+                return Err(HeaderError::ContradictedAuthority)
+            }
             (Some(_), Some(h)) => uri = uri.authority(h.as_bytes()),
         }
 
         Ok((
-            self.pseudo.method.ok_or(Error::MissingMethod)?,
-            uri.build().map_err(Error::InvalidRequest)?,
+            self.pseudo.method.ok_or(HeaderError::MissingMethod)?,
+            uri.build().map_err(HeaderError::InvalidRequest)?,
             self.fields,
         ))
     }
 
-    pub fn into_response_parts(self) -> Result<(StatusCode, HeaderMap), Error> {
+    pub fn into_response_parts(self) -> Result<(StatusCode, HeaderMap), HeaderError> {
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3.2
         //# This pseudo-
         //# header field MUST be included in all responses; otherwise, the
         //# response is malformed (see Section 4.1.2).
-        Ok((self.pseudo.status.ok_or(Error::MissingStatus)?, self.fields))
+        Ok((
+            self.pseudo.status.ok_or(HeaderError::MissingStatus)?,
+            self.fields,
+        ))
     }
 
     pub fn into_fields(self) -> HeaderMap {
@@ -172,7 +177,7 @@ impl Iterator for HeaderIter {
 }
 
 impl TryFrom<Vec<HeaderField>> for Header {
-    type Error = Error;
+    type Error = HeaderError;
     fn try_from(headers: Vec<HeaderField>) -> Result<Self, Self::Error> {
         let mut fields = HeaderMap::with_capacity(headers.len());
         let mut pseudo = Pseudo::default();
@@ -220,14 +225,14 @@ enum Field {
 }
 
 impl Field {
-    fn parse<N, V>(name: N, value: V) -> Result<Self, Error>
+    fn parse<N, V>(name: N, value: V) -> Result<Self, HeaderError>
     where
         N: AsRef<[u8]>,
         V: AsRef<[u8]>,
     {
         let name = name.as_ref();
         if name.is_empty() {
-            return Err(Error::InvalidHeaderName("name is empty".into()));
+            return Err(HeaderError::InvalidHeaderName("name is empty".into()));
         }
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-10.3
@@ -241,9 +246,9 @@ impl Field {
 
         if name[0] != b':' {
             return Ok(Field::Header((
-                HeaderName::from_bytes(name).map_err(|_| Error::invalid_name(name))?,
+                HeaderName::from_bytes(name).map_err(|_| HeaderError::invalid_name(name))?,
                 HeaderValue::from_bytes(value.as_ref())
-                    .map_err(|_| Error::invalid_value(name, value))?,
+                    .map_err(|_| HeaderError::invalid_value(name, value))?,
             )));
         }
 
@@ -253,26 +258,26 @@ impl Field {
             b":path" => Field::Path(try_value(name, value)?),
             b":method" => Field::Method(
                 Method::from_bytes(value.as_ref())
-                    .map_err(|_| Error::invalid_value(name, value))?,
+                    .map_err(|_| HeaderError::invalid_value(name, value))?,
             ),
             b":status" => Field::Status(
                 StatusCode::from_bytes(value.as_ref())
-                    .map_err(|_| Error::invalid_value(name, value))?,
+                    .map_err(|_| HeaderError::invalid_value(name, value))?,
             ),
-            _ => return Err(Error::invalid_name(name)),
+            _ => return Err(HeaderError::invalid_name(name)),
         })
     }
 }
 
-fn try_value<N, V, R>(name: N, value: V) -> Result<R, Error>
+fn try_value<N, V, R>(name: N, value: V) -> Result<R, HeaderError>
 where
     N: AsRef<[u8]>,
     V: AsRef<[u8]>,
     R: FromStr,
 {
     let (name, value) = (name.as_ref(), value.as_ref());
-    let s = std::str::from_utf8(value).map_err(|_| Error::invalid_value(name, value))?;
-    R::from_str(s).map_err(|_| Error::invalid_value(name, value))
+    let s = std::str::from_utf8(value).map_err(|_| HeaderError::invalid_value(name, value))?;
+    R::from_str(s).map_err(|_| HeaderError::invalid_value(name, value))
 }
 
 /// Pseudo-header fields have the same purpose as data from the first line of HTTP/1.X,
@@ -367,7 +372,7 @@ impl Pseudo {
 }
 
 #[derive(Debug)]
-pub enum Error {
+pub enum HeaderError {
     InvalidHeaderName(String),
     InvalidHeaderValue(String),
     InvalidRequest(http::Error),
@@ -377,12 +382,12 @@ pub enum Error {
     ContradictedAuthority,
 }
 
-impl Error {
+impl HeaderError {
     fn invalid_name<N>(name: N) -> Self
     where
         N: AsRef<[u8]>,
     {
-        Error::InvalidHeaderName(format!("{:?}", name.as_ref()))
+        HeaderError::InvalidHeaderName(format!("{:?}", name.as_ref()))
     }
 
     fn invalid_value<N, V>(name: N, value: V) -> Self
@@ -390,7 +395,7 @@ impl Error {
         N: AsRef<[u8]>,
         V: AsRef<[u8]>,
     {
-        Error::InvalidHeaderValue(format!(
+        HeaderError::InvalidHeaderValue(format!(
             "{:?} {:?}",
             String::from_utf8_lossy(name.as_ref()),
             value.as_ref()
@@ -398,18 +403,18 @@ impl Error {
     }
 }
 
-impl std::error::Error for Error {}
+impl std::error::Error for HeaderError {}
 
-impl fmt::Display for Error {
+impl fmt::Display for HeaderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::InvalidHeaderName(h) => write!(f, "invalid header name: {}", h),
-            Error::InvalidHeaderValue(v) => write!(f, "invalid header value: {}", v),
-            Error::InvalidRequest(r) => write!(f, "invalid request: {}", r),
-            Error::MissingMethod => write!(f, "missing method in request headers"),
-            Error::MissingStatus => write!(f, "missing status in response headers"),
-            Error::MissingAuthority => write!(f, "missing authority"),
-            Error::ContradictedAuthority => {
+            HeaderError::InvalidHeaderName(h) => write!(f, "invalid header name: {}", h),
+            HeaderError::InvalidHeaderValue(v) => write!(f, "invalid header value: {}", v),
+            HeaderError::InvalidRequest(r) => write!(f, "invalid request: {}", r),
+            HeaderError::MissingMethod => write!(f, "missing method in request headers"),
+            HeaderError::MissingStatus => write!(f, "missing status in response headers"),
+            HeaderError::MissingAuthority => write!(f, "missing authority"),
+            HeaderError::ContradictedAuthority => {
                 write!(f, "uri and authority field are in contradiction")
             }
         }
@@ -431,7 +436,10 @@ mod tests {
         //# Host header field.
         let headers = Header::try_from(vec![(b":method", Method::GET.as_str()).into()]).unwrap();
         assert!(headers.pseudo.authority.is_none());
-        assert_matches!(headers.into_request_parts(), Err(Error::MissingAuthority));
+        assert_matches!(
+            headers.into_request_parts(),
+            Err(HeaderError::MissingAuthority)
+        );
     }
 
     #[test]
@@ -493,7 +501,7 @@ mod tests {
         .unwrap();
         assert_matches!(
             headers.into_request_parts(),
-            Err(Error::ContradictedAuthority)
+            Err(HeaderError::ContradictedAuthority)
         );
     }
 

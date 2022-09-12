@@ -99,6 +99,10 @@ jobs:
         with:
           command: test
 
+      - name: h3Spec
+        run: ./ci/h3spec.sh
+        if: matrix.rust == 'stable'
+
   doc:
     name: Build docs
     needs: [style, test]

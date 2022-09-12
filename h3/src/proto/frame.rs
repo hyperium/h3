@@ -9,7 +9,7 @@ use super::{
 };
 
 #[derive(Debug, PartialEq)]
-pub enum Error {
+pub enum FrameError {
     Malformed,
     UnsupportedFrame(u64), // Known frames that should generate an error
     UnknownFrame(u64),     // Unknown frames that should be ignored
@@ -19,18 +19,18 @@ pub enum Error {
     InvalidStreamId(InvalidStreamId),
 }
 
-impl std::error::Error for Error {}
+impl std::error::Error for FrameError {}
 
-impl fmt::Display for Error {
+impl fmt::Display for FrameError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::Malformed => write!(f, "frame is malformed"),
-            Error::UnsupportedFrame(c) => write!(f, "frame 0x{:x} is not allowed h3", c),
-            Error::UnknownFrame(c) => write!(f, "frame 0x{:x} ignored", c),
-            Error::InvalidFrameValue => write!(f, "frame value is invalid"),
-            Error::Incomplete(x) => write!(f, "internal error: frame incomplete {}", x),
-            Error::Settings(x) => write!(f, "invalid settings: {}", x),
-            Error::InvalidStreamId(x) => write!(f, "invalid stream id: {}", x),
+            FrameError::Malformed => write!(f, "frame is malformed"),
+            FrameError::UnsupportedFrame(c) => write!(f, "frame 0x{:x} is not allowed h3", c),
+            FrameError::UnknownFrame(c) => write!(f, "frame 0x{:x} ignored", c),
+            FrameError::InvalidFrameValue => write!(f, "frame value is invalid"),
+            FrameError::Incomplete(x) => write!(f, "internal error: frame incomplete {}", x),
+            FrameError::Settings(x) => write!(f, "invalid settings: {}", x),
+            FrameError::InvalidStreamId(x) => write!(f, "invalid stream id: {}", x),
         }
     }
 }
@@ -61,19 +61,19 @@ impl From<usize> for PayloadLen {
 impl Frame<PayloadLen> {
     pub const MAX_ENCODED_SIZE: usize = VarInt::MAX_SIZE * 3;
 
-    pub fn decode<T: Buf>(buf: &mut T) -> Result<Self, Error> {
+    pub fn decode<T: Buf>(buf: &mut T) -> Result<Self, FrameError> {
         let remaining = buf.remaining();
-        let ty = FrameType::decode(buf).map_err(|_| Error::Incomplete(remaining + 1))?;
+        let ty = FrameType::decode(buf).map_err(|_| FrameError::Incomplete(remaining + 1))?;
         let len = buf
             .get_var()
-            .map_err(|_| Error::Incomplete(remaining + 1))?;
+            .map_err(|_| FrameError::Incomplete(remaining + 1))?;
 
         if ty == FrameType::DATA {
             return Ok(Frame::Data((len as usize).into()));
         }
 
         if buf.remaining() < len as usize {
-            return Err(Error::Incomplete(2 + len as usize));
+            return Err(FrameError::Incomplete(2 + len as usize));
         }
 
         let mut payload = buf.take(len as usize);
@@ -87,10 +87,10 @@ impl Frame<PayloadLen> {
             FrameType::H2_PRIORITY
             | FrameType::H2_PING
             | FrameType::H2_WINDOW_UPDATE
-            | FrameType::H2_CONTINUATION => Err(Error::UnsupportedFrame(ty.0)),
+            | FrameType::H2_CONTINUATION => Err(FrameError::UnsupportedFrame(ty.0)),
             _ => {
                 buf.advance(len as usize);
-                Err(Error::UnknownFrame(ty.0))
+                Err(FrameError::UnknownFrame(ty.0))
             }
         };
         if let Ok(frame) = &frame {
@@ -351,6 +351,20 @@ impl SettingId {
         )
     }
 
+    /// Returns if a Settings Identifier is forbidden
+    fn is_forbidden(&self) -> bool {
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
+        //# Setting identifiers that were defined in [HTTP/2] where there is no
+        //# corresponding HTTP/3 setting have also been reserved
+        //# (Section 11.2.2).  These reserved settings MUST NOT be sent, and
+        //# their receipt MUST be treated as a connection error of type
+        //# H3_SETTINGS_ERROR.
+        matches!(
+            self,
+            SettingId(0x00) | SettingId(0x02) | SettingId(0x03) | SettingId(0x04) | SettingId(0x05)
+        )
+    }
+
     fn decode<B: Buf>(buf: &mut B) -> Result<Self, UnexpectedEnd> {
         Ok(SettingId(buf.get_var()?))
     }
@@ -408,10 +422,6 @@ impl Settings {
             return Err(SettingsError::Exceeded);
         }
 
-        if !id.is_supported() {
-            return Ok(());
-        }
-
         //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
         //# The same setting identifier MUST NOT occur more than once in the
         //# SETTINGS frame.
@@ -452,7 +462,23 @@ impl Settings {
             let identifier = SettingId::decode(buf).map_err(|_| SettingsError::Malformed)?;
             let value = buf.get_var().map_err(|_| SettingsError::Malformed)?;
 
+            if identifier.is_forbidden() {
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
+                //# Setting identifiers that were defined in [HTTP/2] where there is no
+                //# corresponding HTTP/3 setting have also been reserved
+                //# (Section 11.2.2).  These reserved settings MUST NOT be sent, and
+                //# their receipt MUST be treated as a connection error of type
+                //# H3_SETTINGS_ERROR.
+                return Err(SettingsError::InvalidSettingId(identifier.0));
+            }
+
             if identifier.is_supported() {
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
+                //# Setting identifiers that were defined in [HTTP/2] where there is no
+                //# corresponding HTTP/3 setting have also been reserved
+                //# (Section 11.2.2).  These reserved settings MUST NOT be sent, and
+                //# their receipt MUST be treated as a connection error of type
+                //# H3_SETTINGS_ERROR.
                 settings.insert(identifier, value)?;
             }
         }
@@ -488,21 +514,21 @@ impl fmt::Display for SettingsError {
     }
 }
 
-impl From<SettingsError> for Error {
+impl From<SettingsError> for FrameError {
     fn from(e: SettingsError) -> Self {
         Self::Settings(e)
     }
 }
 
-impl From<UnexpectedEnd> for Error {
+impl From<UnexpectedEnd> for FrameError {
     fn from(e: UnexpectedEnd) -> Self {
-        Error::Incomplete(e.0)
+        FrameError::Incomplete(e.0)
     }
 }
 
-impl From<InvalidStreamId> for Error {
+impl From<InvalidStreamId> for FrameError {
     fn from(e: InvalidStreamId) -> Self {
-        Error::InvalidStreamId(e)
+        FrameError::InvalidStreamId(e)
     }
 }
 
@@ -515,7 +541,7 @@ mod tests {
     #[test]
     fn unknown_frame_type() {
         let mut buf = Cursor::new(&[22, 4, 0, 255, 128, 0, 3, 1, 2]);
-        assert_matches!(Frame::decode(&mut buf), Err(Error::UnknownFrame(22)));
+        assert_matches!(Frame::decode(&mut buf), Err(FrameError::UnknownFrame(22)));
         assert_matches!(Frame::decode(&mut buf), Ok(Frame::CancelPush(StreamId(2))));
     }
 
@@ -523,21 +549,21 @@ mod tests {
     fn len_unexpected_end() {
         let mut buf = Cursor::new(&[0, 255]);
         let decoded = Frame::decode(&mut buf);
-        assert_matches!(decoded, Err(Error::Incomplete(3)));
+        assert_matches!(decoded, Err(FrameError::Incomplete(3)));
     }
 
     #[test]
     fn type_unexpected_end() {
         let mut buf = Cursor::new(&[255]);
         let decoded = Frame::decode(&mut buf);
-        assert_matches!(decoded, Err(Error::Incomplete(2)));
+        assert_matches!(decoded, Err(FrameError::Incomplete(2)));
     }
 
     #[test]
     fn buffer_too_short() {
         let mut buf = Cursor::new(&[4, 4, 0, 255, 128]);
         let decoded = Frame::decode(&mut buf);
-        assert_matches!(decoded, Err(Error::Incomplete(6)));
+        assert_matches!(decoded, Err(FrameError::Incomplete(6)));
     }
 
     fn codec_frame_check(mut frame: Frame<Bytes>, wire: &[u8], check_frame: Frame<Bytes>) {
@@ -642,6 +668,6 @@ mod tests {
         raw.extend(&[6, 0, 255, 128, 0, 250, 218]);
         let mut buf = Cursor::new(&raw);
         let decoded = Frame::decode(&mut buf);
-        assert_matches!(decoded, Err(Error::UnknownFrame(95)));
+        assert_matches!(decoded, Err(FrameError::UnknownFrame(95)));
     }
 }

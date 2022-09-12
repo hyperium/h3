@@ -8,7 +8,7 @@ use structopt::StructOpt;
 use tokio::{fs::File, io::AsyncReadExt};
 use tracing::{debug, error, info, trace_span, warn};
 
-use h3::{quic::BidiStream, server::RequestStream};
+use h3::{error::ErrorLevel, quic::BidiStream, server::RequestStream};
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "server")]
@@ -88,16 +88,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let mut h3_conn = h3::server::Connection::new(h3_quinn::Connection::new(conn))
                         .await
                         .unwrap();
+                    loop {
+                        match h3_conn.accept().await {
+                            Ok(Some((req, stream))) => {
+                                let root = root.clone();
+                                debug!("New request: {:#?}", req);
 
-                    while let Some((req, stream)) = h3_conn.accept().await.unwrap() {
-                        let root = root.clone();
-                        debug!("New request: {:#?}", req);
-
-                        tokio::spawn(async {
-                            if let Err(e) = handle_request(req, stream, root).await {
-                                error!("request failed: {}", e);
+                                tokio::spawn(async {
+                                    if let Err(e) = handle_request(req, stream, root).await {
+                                        error!("request failed: {}", e);
+                                    }
+                                });
                             }
-                        });
+                            Ok(None) => {
+                                break;
+                            }
+                            Err(err) => {
+                                warn!("error on accept {}", err);
+                                match err.get_error_level() {
+                                    ErrorLevel::ConnectionError => break,
+                                    ErrorLevel::StreamError => continue,
+                                }
+                            }
+                        }
                     }
                 }
                 Err(err) => {
