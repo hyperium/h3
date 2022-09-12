@@ -45,7 +45,7 @@ where
 /// to the server. Then a [`RequestStream`] will be returned to send a request body (for
 /// POST, PUT methods) and receive a response. After the whole body is sent, it is necessary
 /// to call [`RequestStream::finish()`] to let the server know the request transfer is complete.
-/// This includes the cases where no nody is sent at all.
+/// This includes the cases where no body is sent at all.
 ///
 /// This struct is cloneable so multiple requests can be sent concurrently.
 ///

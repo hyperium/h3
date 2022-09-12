@@ -24,7 +24,10 @@ The eventual goal is to use `h3` as an internal dependency of [hyper][].
 * HTTP/3 client and server implementation
 * Async only API
 * QUIC transport abstraction via traits in the [`quic`](https://github.com/hyperium/h3/h3/src/quic.rs) module
-* The only supported QUIC implementation to date is [Quinn](https://github.com/quinn-rs/quinn)
+* Supported QUIC implementations to date are
+  [Quinn](https://github.com/quinn-rs/quinn) ([h3-quinn](/h3-quinn/))
+  and [s2n-quic](https://github.com/aws/s2n-quic)
+  ([s2n-quic-h3](https://github.com/aws/s2n-quic/tree/main/quic/s2n-quic-h3))
 
 ## Overview
 
@@ -54,7 +57,7 @@ while let Some((req, stream)) = h3_conn.accept().await? {
 endpoint.wait_idle();
 ```
 
-You can find a full server examples in [`examples/server.rs`](https://github.com/hyperium/h3/examples/server.rs)
+You can find a full server example in [`examples/server.rs`](https://github.com/hyperium/h3/examples/server.rs)
 
 ### Client
 
@@ -98,15 +101,14 @@ You can find a full client example in [`examples/client.rs`](https://github.com/
 
 As mentioned, the goal of this library is to be generic over a QUIC implementation. To that effect, integrations with QUIC libraries exist:
 
-- `h3-quinn`: in this same repository.
+- [`h3-quinn`](/h3-quinn/): in this same repository.
 - [`s2n-quic-h3`](https://github.com/aws/s2n-quic/tree/main/quic/s2n-quic-h3)
 
 ## Interoperability
 
-This crate as well as the quic implementation are [tested](https://github.com/quinn-rs/quinn-interop) for interoperability and performance in the [quic-interop-runner](https://github.com/marten-seemann/quic-interop-runner).
+This crate as well as the quic implementations are tested ([quinn](https://github.com/quinn-rs/quinn-interop), [s2n-quic](https://github.com/aws/s2n-quic/tree/main/scripts/interop)) for interoperability and performance in the [quic-interop-runner](https://github.com/marten-seemann/quic-interop-runner).
 You can see the results at (https://interop.seemann.io/).
 
 ## License
 
 h3 is provided under the MIT license. See [LICENSE](LICENSE).
-
