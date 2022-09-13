@@ -7,7 +7,7 @@ use super::{field::HeaderField, static_::StaticTable};
 use crate::qpack::vas::{self, VirtualAddressSpace};
 
 /**
- * https://httpwg.org/specs/rfc9204.html#maximum-dynamic-table-capacity
+ * https://www.rfc-editor.org/rfc/rfc9204.html#maximum-dynamic-table-capacity
  */
 const SETTINGS_MAX_TABLE_CAPACITY_MAX: usize = 1_073_741_823; // 2^30 -1
 const SETTINGS_MAX_BLOCKED_STREAMS_MAX: usize = 65_535; // 2^16 - 1
@@ -562,11 +562,12 @@ mod tests {
     }
 
     /**
-     * https://tools.ietf.org/html/draft-ietf-quic-qpack-01#section-2.2
-     * "The decoder determines the maximum size that the encoder is permitted
-     *  to use for the dynamic table.  In HTTP/QUIC, this value is determined
-     *  by the SETTINGS_HEADER_TABLE_SIZE setting (see Section 4.2.5.2 of
-     *  [QUIC-HTTP])."
+     * https://www.rfc-editor.org/rfc/rfc9204.html#name-maximum-dynamic-table-capac
+     * "To bound the memory requirements of the decoder, the decoder
+     * limits the maximum value the encoder is permitted to set for the
+     * dynamic table capacity. In HTTP/3, this limit is determined by
+     * the value of SETTINGS_QPACK_MAX_TABLE_CAPACITY sent by the
+     * decoder; see Section 5."
      */
     #[test]
     fn test_try_set_too_large_maximum_table_size() {
@@ -577,7 +578,7 @@ mod tests {
     }
 
     /**
-     * https://tools.ietf.org/html/draft-ietf-quic-qpack-01#section-2.2
+     * https://www.rfc-editor.org/rfc/rfc9204.html#name-dynamic-table-capacity-and-
      * "This mechanism can be used to completely clear entries from the
      *  dynamic table by setting a maximum size of 0, which can subsequently
      *  be restored."
@@ -591,11 +592,12 @@ mod tests {
     }
 
     /**
-     * https://tools.ietf.org/html/draft-ietf-quic-qpack-01#section-2.2
-     * "The decoder determines the maximum size that the encoder is permitted
-     *  to use for the dynamic table.  In HTTP/QUIC, this value is determined
-     *  by the SETTINGS_HEADER_TABLE_SIZE setting (see Section 4.2.5.2 of
-     *  [QUIC-HTTP])."
+     * https://www.rfc-editor.org/rfc/rfc9204.html#name-maximum-dynamic-table-capac
+     * "To bound the memory requirements of the decoder, the decoder
+     * limits the maximum value the encoder is permitted to set for the
+     * dynamic table capacity. In HTTP/3, this limit is determined by
+     * the value of SETTINGS_QPACK_MAX_TABLE_CAPACITY sent by the
+     * decoder; see Section 5."
      */
     #[test]
     fn test_maximum_table_size_can_reach_maximum() {
@@ -608,7 +610,7 @@ mod tests {
     // Test duplicated fields
 
     /**
-     * https://tools.ietf.org/html/draft-ietf-quic-qpack-01#section-2.2
+     * https://www.rfc-editor.org/rfc/rfc9204.html#name-dynamic-table
      * "The dynamic table can contain duplicate entries (i.e., entries with
      *  the same name and same value).  Therefore, duplicate entries MUST NOT
      *  be treated as an error by a decoder."
@@ -643,7 +645,7 @@ mod tests {
     }
 
     /**
-     * https://tools.ietf.org/html/draft-ietf-quic-qpack-01#section-2.2
+     * https://www.rfc-editor.org/rfc/rfc9204.html#name-dynamic-table-capacity-and-
      * "Before a new entry is added to the dynamic table, entries are evicted
      *  from the end of the dynamic table until the size of the dynamic table
      *  is less than or equal to (maximum size - new entry size) or until the
@@ -669,10 +671,10 @@ mod tests {
     }
 
     /**
-     * https://tools.ietf.org/html/draft-ietf-quic-qpack-01#section-2.2
-     * "If the size of the new entry is less than or equal to the maximum
-     *  size, that entry is added to the table.  It is an error to attempt to
-     *  add an entry that is larger than the maximum size;"
+     * https://www.rfc-editor.org/rfc/rfc9204.html#name-dynamic-table-capacity-and-
+     * "It is an error if the encoder attempts to add an entry that is
+     * larger than the dynamic table capacity; the decoder MUST treat
+     * this as a connection error of type QPACK_ENCODER_STREAM_ERROR."
      */
     #[test]
     fn test_try_add_field_larger_than_maximum_size() {
@@ -693,7 +695,7 @@ mod tests {
     }
 
     /**
-     * https://tools.ietf.org/html/draft-ietf-quic-qpack-01#section-2.2
+     * https://www.rfc-editor.org/rfc/rfc9204.html#name-dynamic-table-capacity-and-
      * "This mechanism can be used to completely clear entries from the
      *  dynamic table by setting a maximum size of 0, which can subsequently
      *  be restored."

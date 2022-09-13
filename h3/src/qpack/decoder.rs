@@ -80,7 +80,8 @@ pub struct Decoder {
 }
 
 impl Decoder {
-    // Decode a header bloc received on Request of Push stream. (draft: 4.5)
+    // Decode field lines received on Request of Push stream.
+    // https://www.rfc-editor.org/rfc/rfc9204.html#name-field-line-representations
     pub fn decode_header<T: Buf>(&self, buf: &mut T) -> Result<Decoded, Error> {
         let (required_ref, base) = HeaderPrefix::decode(buf)?
             .get(self.table.total_inserted(), self.table.max_mem_size())?;
@@ -206,7 +207,8 @@ impl Decoder {
     }
 }
 
-// Decode a header bloc received on Request or Push stream. (draft: 4.5)
+// Decode field lines received on Request or Push stream.
+// https://www.rfc-editor.org/rfc/rfc9204.html#name-field-line-representations
 pub fn decode_stateless<T: Buf>(buf: &mut T, max_size: u64) -> Result<Decoded, Error> {
     let (required_ref, _base) = HeaderPrefix::decode(buf)?.get(0, 0)?;
 
@@ -344,8 +346,8 @@ mod tests {
     }
 
     /**
-     * https://tools.ietf.org/html/draft-ietf-quic-qpack-00
-     * 4.3.1.  Insert With Name Reference
+     * https://www.rfc-editor.org/rfc/rfc9204.html#name-insert-with-name-reference
+     * 4.3.2.  Insert With Name Reference
      */
     #[test]
     fn test_insert_field_with_name_ref_into_dynamic_table() {
@@ -371,8 +373,8 @@ mod tests {
     }
 
     /**
-     * https://tools.ietf.org/html/draft-ietf-quic-qpack-00
-     * 4.3.1.  Insert With Name Reference
+     * https://www.rfc-editor.org/rfc/rfc9204.html#name-insert-with-name-reference
+     * 4.3.2.  Insert With Name Reference
      */
     #[test]
     fn test_insert_field_with_wrong_name_index_from_static_table() {
@@ -387,8 +389,8 @@ mod tests {
     }
 
     /**
-     * https://tools.ietf.org/html/draft-ietf-quic-qpack-00
-     * 4.3.1.  Insert With Name Reference
+     * https://www.rfc-editor.org/rfc/rfc9204.html#name-insert-with-name-referencehtml
+     * 4.3.2.  Insert With Name Reference
      */
     #[test]
     fn test_insert_field_with_wrong_name_index_from_dynamic_table() {
@@ -411,8 +413,8 @@ mod tests {
     }
 
     /**
-     * https://tools.ietf.org/html/draft-ietf-quic-qpack-00
-     * 4.3.2.  Insert Without Name Reference
+     * https://www.rfc-editor.org/rfc/rfc9204.html#name-insert-with-literal-name
+     * 4.3.3.  Insert with Literal Name
      */
     #[test]
     fn test_insert_field_without_name_ref() {
@@ -445,8 +447,8 @@ mod tests {
     }
 
     /**
-     * https://tools.ietf.org/html/draft-ietf-quic-qpack-00
-     * 4.3.3.  Duplicate
+     * https://www.rfc-editor.org/rfc/rfc9204.html#name-duplicate
+     * 4.3.4.  Duplicate
      */
     #[test]
     fn test_duplicate_field() {
@@ -474,8 +476,8 @@ mod tests {
     }
 
     /**
-     * https://tools.ietf.org/html/draft-ietf-quic-qpack-00
-     * 4.3.4.  Dynamic Table Size Update
+     * https://www.rfc-editor.org/rfc/rfc9204.html#name-set-dynamic-table-capacity
+     * 4.3.1.  Set Dynamic Table Capacity
      */
     #[test]
     fn test_dynamic_table_size_update() {

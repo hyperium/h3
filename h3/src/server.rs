@@ -58,12 +58,17 @@ use crate::{
 };
 use tracing::{error, trace, warn};
 
-/// This function creates a [`Builder`] for the Server.
+/// Create a builder of HTTP/3 server connections
+///
+/// This function creates a [`Builder`] that carries settings that can
+/// be shared between server connections.
 pub fn builder() -> Builder {
     Builder::new()
 }
 
-/// The [`Connection`] struct manages a connection from the http/3 Server.
+/// Server connection driver
+///
+/// The [`Connection`] struct manages a connection from the side of the HTTP/3 server
 ///
 /// Create a new Instance with [`Connection::new()`].
 /// Accept incoming requests with [`Connection::accept()`].
@@ -97,8 +102,10 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    /// This method creates a new Connection for Servers with default settings.
-    /// Use [`builder()`] to create a connection with different settings.
+    /// Create a new HTTP/3 server connection with default settings
+    ///
+    /// Use a custom [`Builder`] with [`builder()`] to create a connection
+    /// with different settings.
     /// Provide a Connection which implements [`quic::Connection`].
     pub async fn new(conn: C) -> Result<Self, Error> {
         Ok(builder().build(conn).await?)
@@ -110,7 +117,8 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    /// This method accepts a http request from a Client.
+    /// Accept an incoming request.
+    ///
     /// It returns a tuple with a [`http::Request`] and an [`RequestStream`].
     /// The [`http::Request`] is the received request from the client.
     /// The [`RequestStream`] can be used to send the response.
@@ -307,8 +315,9 @@ where
         Ok(Some((req, request_stream)))
     }
 
-    /// This method stops the connection gracefully.
-    /// See [Connection-Shutdown](https://httpwg.org/specs/rfc9114.html#connection-shutdown) for more information.
+    /// Itiniate a graceful shutdown, accepting `max_request` potentially still in-flight
+    ///
+    /// See [connection shutdown](https://www.rfc-editor.org/rfc/rfc9114.html#connection-shutdown) for more information.
     pub async fn shutdown(&mut self, max_requests: usize) -> Result<(), Error> {
         self.inner.shutdown(max_requests).await
     }
@@ -454,8 +463,10 @@ where
 //# parallelism, at least 100 request streams SHOULD be permitted at a
 //# time.
 
+/// Builder of HTTP/3 server connections.
+///
 /// Use this struct to create a new [`Connection`].
-/// All the settings for the [`Connection`] can be provided here.
+/// Settings for the [`Connection`] can be provided here.
 ///
 /// # Example
 ///
@@ -487,16 +498,18 @@ impl Builder {
             send_grease: true,
         }
     }
-
-    /// Set the `max_field_section_size` for the [`Builder`].
-    /// See [Header size](https://httpwg.org/specs/rfc9114.html#header-size-constraints) for more information.
+    /// Set the maximum header size this client is willing to accept
+    ///
+    /// See [header size constraints] section of the specification for details.
+    ///
+    /// [header size constraints]: https://www.rfc-editor.org/rfc/rfc9114.html#name-header-size-constraints
     pub fn max_field_section_size(&mut self, value: u64) -> &mut Self {
         self.max_field_section_size = value;
         self
     }
 
     /// Send grease values to the Client.
-    /// See [setting](https://httpwg.org/specs/rfc9114.html#settings-parameters), [frame](https://httpwg.org/specs/rfc9114.html#frame-reserved) and [stream](https://httpwg.org/specs/rfc9114.html#stream-grease) for more information.
+    /// See [setting](https://www.rfc-editor.org/rfc/rfc9114.html#settings-parameters), [frame](https://www.rfc-editor.org/rfc/rfc9114.html#frame-reserved) and [stream](https://www.rfc-editor.org/rfc/rfc9114.html#stream-grease) for more information.
     pub fn send_grease(&mut self, value: bool) -> &mut Self {
         self.send_grease = value;
         self
@@ -504,6 +517,8 @@ impl Builder {
 }
 
 impl Builder {
+    /// Build an HTTP/3 connection from a QUIC connection
+    ///
     /// This method creates a [`Connection`] instance with the settings in the [`Builder`].
     pub async fn build<C, B>(&self, conn: C) -> Result<Connection<C, B>, Error>
     where
@@ -527,12 +542,15 @@ impl Builder {
     }
 }
 
-pub struct RequestEnd {
+struct RequestEnd {
     request_end: mpsc::UnboundedSender<StreamId>,
     stream_id: StreamId,
 }
 
-/// The [`RequestStream`] struct is to send and/or receive information from the client.
+/// Manage request and response transfer for an incoming request
+///
+/// The [`RequestStream`] struct is used to send and/or receive
+/// information from the client.
 pub struct RequestStream<S, B> {
     inner: connection::RequestStream<S, B>,
     request_end: Arc<RequestEnd>,
@@ -554,11 +572,12 @@ impl<S, B> RequestStream<S, B>
 where
     S: quic::RecvStream,
 {
-    /// Receives data, sent from the Client.
+    /// Receive data sent from the client
     pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
         self.inner.recv_data().await
     }
 
+    /// Tell the peer to stop sending into the underlying QUIC stream
     pub fn stop_sending(&mut self, error_code: crate::error::Code) {
         self.inner.stream.stop_sending(error_code)
     }
@@ -569,7 +588,10 @@ where
     S: quic::SendStream<B>,
     B: Buf,
 {
-    /// This method sends a Http-Response to the Client.
+    /// Send the HTTP/3 response
+    ///
+    /// This should be called before trying to send any data with
+    /// [`RequestStream::send_data`].
     pub async fn send_response(&mut self, resp: Response<()>) -> Result<(), Error> {
         let (parts, _) = resp.into_parts();
         let response::Parts {
@@ -602,22 +624,32 @@ where
         Ok(())
     }
 
-    /// Send data to the Client.
+    /// Send some data on the response body.
     pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
         self.inner.send_data(buf).await
     }
 
-    /// Stops a stream with a error code
+    /// Stop a stream with an error code
+    ///
+    /// The code can be [`Code::H3_NO_ERROR`].
     pub fn stop_stream(&mut self, error_code: Code) {
         self.inner.stop_stream(error_code);
     }
 
-    /// Send the Http-Trailers.
+    /// Send a set of trailers to end the response.
+    ///
+    /// Either [`RequestStream::finish`] or
+    /// [`RequestStream::send_trailers`] must be called to finalize a
+    /// request.
     pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
         self.inner.send_trailers(trailers).await
     }
 
-    // Closes the Stream when all data is sent.
+    /// End the response without trailers.
+    ///
+    /// Either [`RequestStream::finish`] or
+    /// [`RequestStream::send_trailers`] must be called to finalize a
+    /// request.
     pub async fn finish(&mut self) -> Result<(), Error> {
         self.inner.finish().await
     }
@@ -628,7 +660,7 @@ where
     S: quic::RecvStream + quic::SendStream<B>,
     B: Buf,
 {
-    /// Receives Http-Trailers from the Client.
+    /// Receive an optional set of trailers for the request.
     pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
         let res = self.inner.recv_trailers().await;
         if let Err(ref e) = res {

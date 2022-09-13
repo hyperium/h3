@@ -22,6 +22,10 @@ pub struct Code {
 }
 
 impl Code {
+    /// Numerical error code
+    ///
+    /// See <https://www.rfc-editor.org/rfc/rfc9114.html#errors>
+    /// and <https://www.rfc-editor.org/rfc/rfc9000.html#error-codes>
     pub fn value(&self) -> u64 {
         self.code
     }
@@ -39,13 +43,13 @@ pub(crate) struct ErrorImpl {
     cause: Option<Arc<Cause>>,
 }
 
-/// Some errors affect the hole connection, others only one Request or Stream.
-/// See [errors](https://httpwg.org/specs/rfc9114.html#errors) for mor details.
+/// Some errors affect the whole connection, others only one Request or Stream.
+/// See [errors](https://www.rfc-editor.org/rfc/rfc9114.html#errors) for mor details.
 #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
 pub enum ErrorLevel {
-    // connection error
+    /// Error that will close the whole connection
     ConnectionError,
-    // stream error
+    /// Error scoped to a single stream
     StreamError,
 }
 
@@ -269,6 +273,7 @@ impl Error {
     }
 
     #[cfg(feature = "test_helpers")]
+    #[doc(hidden)]
     pub fn kind(&self) -> Kind {
         self.inner.kind.clone()
     }

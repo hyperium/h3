@@ -82,9 +82,9 @@ HTTP/3 is a new networking protocol that defines HTTP semantics specifically ove
 - **QPACK dynamic table**: the dynamic table is a performance optimization, but has the potential to block streams waiting on dynamic table updates. To reduce initial complexity, and to not require figuring out the correct heuristic, we can delay integrating the dynamic table till later. HTTP/3 even defaults to expecting zero space in the dynamic table unless the peer opts-in.
 - **Server Push**
 - **HTTP CONNECT** to tunnel over a single QUIC stream
-- **Prioritization**: Stream priorities were defined in HTTP/2, and are especially useful for browsers to improve page load speeds. However, they are not specifically defined in QUIC or HTTP/3. There is a [different proposal][http-prio] that we should consider once stabilized.
+- **Prioritization**: Stream priorities were defined in HTTP/2, and are especially useful for browsers to improve page load speeds. However, they are not specifically defined in QUIC or HTTP/3. There is a [later RFC][http-prio] that we should consider instead.
 
-[http-prio]: https://tools.ietf.org/html/draft-ietf-httpbis-priority-01
+[http-prio]: https://www.rfc-editor.org/rfc/rfc9218.html
 
 
 ## 4. Public API
@@ -299,7 +299,7 @@ trait BidiStream<B>: SendStream<B> + RecvStream {
 
 ## 6. Security Considerations
 
-The HTTP/3 draft mentions several [security considerations](https://quicwg.org/base-drafts/draft-ietf-quic-http.html#name-security-considerations), this explains how each are handled.
+The HTTP/3 RFC mentions several [security considerations](https://www.rfc-editor.org/rfc/rfc9114.html#name-security-considerations), this explains how each are handled.
 
 
 1. **Server authority**: deciding if a server should accept a given authority is punted to the user of the library.
