@@ -1,3 +1,5 @@
+//! Client implementation of the HTTP/3 protocol
+
 use std::{
     convert::TryFrom,
     marker::PhantomData,
@@ -485,7 +487,7 @@ impl Builder {
         }
     }
 
-    /// Set the maximum header size this client is willing to accepte
+    /// Set the maximum header size this client is willing to accept
     ///
     /// See [header size constraints] section of the specification for details.
     ///
@@ -662,12 +664,13 @@ where
         Ok(resp)
     }
 
-    ///
+    /// Receive some of the request body.
     // TODO what if called before recv_response ?
     pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
         self.inner.recv_data().await
     }
 
+    /// Receive an optional set of trailers for the response.
     pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
         let res = self.inner.recv_trailers().await;
         if let Err(ref e) = res {
@@ -678,6 +681,7 @@ where
         res
     }
 
+    /// Tell the peer to stop sending into the underlying QUIC stream
     pub fn stop_sending(&mut self, error_code: crate::error::Code) {
         // TODO take by value to prevent any further call as this request is cancelled
         // rename `cancel()` ?
@@ -690,14 +694,25 @@ where
     S: quic::SendStream<B>,
     B: Buf,
 {
+    /// Send some data on the request body.
     pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
         self.inner.send_data(buf).await
     }
 
+    /// Send a set of trailers to end the request.
+    ///
+    /// Either [`RequestStream::finish`] or
+    /// [`RequestStream::send_trailers`] must be called to finalize a
+    /// request.
     pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
         self.inner.send_trailers(trailers).await
     }
 
+    /// End the request without trailers.
+    ///
+    /// Either [`RequestStream::finish`] or
+    /// [`RequestStream::send_trailers`] must be called to finalize a
+    /// request.
     pub async fn finish(&mut self) -> Result<(), Error> {
         self.inner.finish().await
     }
@@ -708,6 +723,7 @@ where
     S: quic::BidiStream<B>,
     B: Buf,
 {
+    /// Split this stream into two halves that can be driven independently.
     pub fn split(
         self,
     ) -> (
