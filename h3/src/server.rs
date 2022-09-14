@@ -14,20 +14,36 @@
 //!     let mut server_builder = h3::server::builder();
 //!     // Build the Connection
 //!     let mut h3_conn = server_builder.build(conn).await.unwrap();
-//!     // Accept incoming requests
-//!     while let Some((req, mut stream)) = h3_conn.accept().await.unwrap() {
-//!         // spawn a new task to handle the request
-//!         tokio::spawn(async move {
-//!             // build a http response
-//!             let response = http::Response::builder().status(http::StatusCode::OK).body(()).unwrap();
-//!             // send the response to the wire
-//!             stream.send_response(response).await.unwrap();
-//!             // send some date
-//!             stream.send_data(bytes::Bytes::from("test")).await.unwrap();
-//!             // finnish the stream
-//!             stream.finish().await.unwrap();
-//!         });
-//!     };
+//!     loop {
+//!         // Accept incoming requests
+//!         match h3_conn.accept().await {
+//!             Ok(Some((req, mut stream))) => {
+//!                 // spawn a new task to handle the request
+//!                 tokio::spawn(async move {
+//!                     // build a http response
+//!                     let response = http::Response::builder().status(http::StatusCode::OK).body(()).unwrap();
+//!                     // send the response to the wire
+//!                     stream.send_response(response).await.unwrap();
+//!                     // send some date
+//!                     stream.send_data(bytes::Bytes::from("test")).await.unwrap();
+//!                     // finnish the stream
+//!                     stream.finish().await.unwrap();
+//!                 });            
+//!             }
+//!             Ok(None) => {
+//!                 // break if no Request is accepted
+//!                 break;
+//!             }
+//!             Err(err) => {
+//!                 match err.get_error_level() {
+//!                     // break on connection errors
+//!                     h3::error::ErrorLevel::ConnectionError => break,
+//!                     // continue on stream errors
+//!                     h3::error::ErrorLevel::StreamError => continue,
+//!                 }
+//!             }
+//!         }
+//!     }
 //! }
 //! ```
 //!
