@@ -47,13 +47,27 @@ The [examples](./examples) directory can help get started in two ways:
 let (endpoint, mut incoming) = h3_quinn::quinn::Endpoint::server(server_config, "[::]:443".parse()?)?;
 
 while let Some((req, stream)) = h3_conn.accept().await? {
-   let resp = http::Response::builder().status(Status::OK).body(())?;
-   stream.send_response(resp).await?;
+    loop {
+        match h3_conn.accept().await {
+            Ok(Some((req, mut stream))) => {
+                let resp = http::Response::builder().status(Status::OK).body(())?;
+                stream.send_response(resp).await?;
 
-   stream.send_data(Bytes::new("It works!")).await?;
-   stream.finish().await?;
+                stream.send_data(Bytes::new("It works!")).await?;
+                stream.finish().await?;
+            }
+            Ok(None) => {
+                 break;
+            }
+            Err(err) => {
+                match err.get_error_level() {
+                    ErrorLevel::ConnectionError => break,
+                    ErrorLevel::StreamError => continue,
+                }
+            }
+        }
+    }
 }
-
 endpoint.wait_idle();
 ```
 
