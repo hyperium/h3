@@ -7,6 +7,7 @@ BLOB=${1:-master}
 duvet \
   report \
   --spec-pattern 'specs/**/*.toml' \
+  --spec-pattern 'ci/compliance/specs/**/*.toml' \
   --source-pattern 'h3/**/*.rs' \
   --source-pattern 'tests/**/*.rs' \
   --workspace \

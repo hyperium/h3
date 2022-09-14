@@ -1,0 +1,35 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-5.2"
+
+[[TODO]]
+quote = '''
+Upon sending a GOAWAY frame, the endpoint
+SHOULD explicitly cancel (see Sections 4.1.1 and 7.2.3) any requests
+or pushes that have identifiers greater than or equal to the one
+indicated, in order to clean up transport state for the affected
+streams.
+'''
+
+[[TODO]]
+quote = '''
+The endpoint SHOULD continue to do so as more requests or
+pushes arrive.
+'''
+
+[[TODO]]
+quote = '''
+Endpoints MUST NOT initiate new requests or promise new pushes on the
+connection after receipt of a GOAWAY frame from the peer.
+'''
+
+[[TODO]]
+quote = '''
+Servers MAY reject individual requests on streams below the
+indicated ID if these requests were not processed.
+'''
+
+[[TODO]]
+quote = '''
+An endpoint that completes a
+graceful shutdown SHOULD use the H3_NO_ERROR error code when closing
+the connection.
+'''

@@ -1,0 +1,11 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-4.1.2"
+
+[[exception]]
+quote = '''
+Intermediaries that process HTTP requests or responses (i.e., any
+intermediary not acting as a tunnel) MUST NOT forward a malformed
+request or response.
+'''
+reason = '''
+h3 is not meant to be used for an intermediary.
+'''

@@ -1,0 +1,42 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-3.2"
+
+[[exception]]
+quote = '''
+The use
+of other QUIC transport versions with HTTP/3 MAY be defined by future
+specifications.
+'''
+reason = '''
+This is a suggestion of future spec development and does not apply to implementations.
+'''
+
+[[exception]]
+quote = '''
+HTTP/3 clients MUST support a mechanism to indicate the
+target host to the server during the TLS handshake.
+'''
+reason = '''
+h3 does not inspect TLS messages, so this will have to be enforced by the TLS implementation.
+'''
+
+[[exception]]
+quote = '''
+If the server is
+identified by a domain name ([DNS-TERMS]), clients MUST send the
+Server Name Indication (SNI; [RFC6066]) TLS extension unless an
+alternative mechanism to indicate the target host is used.
+'''
+reason = '''
+This is related to TLS connection establishment, which is out of scope for h3.
+'''
+
+[[exception]]
+quote = '''
+During connection establishment, HTTP/3 support is indicated by
+selecting the ALPN token "h3" in the TLS handshake.  Support for
+other application-layer protocols MAY be offered in the same
+handshake.
+'''
+reason = '''
+This is related to protocol negotiation over TLS, which is out of scope for h3.
+'''

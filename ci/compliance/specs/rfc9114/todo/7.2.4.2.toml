@@ -1,0 +1,81 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.2"
+
+[[TODO]]
+quote = '''
+An HTTP implementation MUST NOT send frames or requests that would be
+invalid based on its current understanding of the peer's settings.
+'''
+
+[[TODO]]
+quote = '''
+Each endpoint SHOULD use
+these initial values to send messages before the peer's SETTINGS
+frame has arrived, as packets carrying the settings can be lost or
+delayed.
+'''
+
+[[TODO]]
+quote = '''
+Clients SHOULD
+NOT wait indefinitely for SETTINGS to arrive before sending requests,
+but they SHOULD process received datagrams in order to increase the
+likelihood of processing SETTINGS before sending the first request.
+'''
+
+[[TODO]]
+quote = '''
+A client MUST comply
+with stored settings -- or default values if no values are stored --
+when attempting 0-RTT.
+'''
+
+[[TODO]]
+quote = '''
+Once a server has provided new settings,
+clients MUST comply with those values.
+'''
+
+[[TODO]]
+quote = '''
+If the
+server cannot determine that the settings remembered by a client are
+compatible with its current settings, it MUST NOT accept 0-RTT data.
+Remembered settings are compatible if a client complying with those
+settings would not violate the server's current settings.
+'''
+
+[[TODO]]
+quote = '''
+A server MAY accept 0-RTT and subsequently provide different settings
+in its SETTINGS frame.
+'''
+
+[[TODO]]
+quote = '''
+If 0-RTT data is accepted by the server, its
+SETTINGS frame MUST NOT reduce any limits or alter any values that
+might be violated by the client with its 0-RTT data.
+'''
+
+[[TODO]]
+quote = '''
+The server MUST
+include all settings that differ from their default values.
+'''
+
+[[TODO]]
+quote = '''
+If a
+server accepts 0-RTT but then sends settings that are not compatible
+with the previously specified settings, this MUST be treated as a
+connection error of type H3_SETTINGS_ERROR.
+'''
+
+[[TODO]]
+quote = '''
+If a server accepts
+0-RTT but then sends a SETTINGS frame that omits a setting value that
+the client understands (apart from reserved setting identifiers) that
+was previously specified to have a non-default value, this MUST be
+treated as a connection error of type H3_SETTINGS_ERROR.
+'''

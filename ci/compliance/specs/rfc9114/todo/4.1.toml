@@ -1,0 +1,60 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-4.1"
+
+[[TODO]]
+quote = '''
+On a given stream, receipt of multiple requests or receipt of an
+additional HTTP response following a final HTTP response MUST be
+treated as malformed.
+'''
+
+[[TODO]]
+quote = '''
+A server MAY send one or more PUSH_PROMISE frames before, after, or
+interleaved with the frames of a response message.
+'''
+
+[[TODO]]
+quote = '''
+PUSH_PROMISE frames are not permitted on push streams;
+a pushed response that includes PUSH_PROMISE frames MUST be treated
+as a connection error of type H3_FRAME_UNEXPECTED.
+'''
+
+[[TODO]]
+quote = '''
+Frames of unknown types (Section 9), including reserved frames
+(Section 7.2.8) MAY be sent on a request or push stream before,
+after, or interleaved with other frames described in this section.
+'''
+
+[[TODO]]
+quote = '''
+Transfer codings (see Section 7 of [HTTP/1.1]) are not defined for
+HTTP/3; the Transfer-Encoding header field MUST NOT be used.
+'''
+
+[[TODO]]
+quote = '''
+A response MAY consist of multiple messages when and only when one or
+more interim responses (1xx; see Section 15.2 of [HTTP]) precede a
+final response to the same request.
+'''
+
+[[TODO]]
+quote = '''
+After sending a request, a client MUST
+close the stream for sending.
+'''
+
+[[TODO]]
+quote = '''
+Unless using the CONNECT method (see
+Section 4.4), clients MUST NOT make stream closure dependent on
+receiving a response to their request.
+'''
+
+[[TODO]]
+quote = '''
+After sending a final
+response, the server MUST close the stream for sending.
+'''

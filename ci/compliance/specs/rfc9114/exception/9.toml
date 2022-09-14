@@ -1,0 +1,20 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-9"
+
+[[exception]]
+quote = '''
+Extensions that could change the semantics of existing protocol
+components MUST be negotiated before being used.
+'''
+reason = '''
+h3 does not handle protocol negotiation, so the high-level implementation will have to ensure the order is correct.
+'''
+
+[[exception]]
+quote = '''
+If a setting is used for extension negotiation, the default
+value MUST be defined in such a fashion that the extension is
+disabled if the setting is omitted.
+'''
+reason = '''
+The default value is up to the extension specification or the high-level implementation to decide.
+'''

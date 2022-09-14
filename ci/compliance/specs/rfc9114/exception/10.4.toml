@@ -1,0 +1,10 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-10.4"
+
+[[exception]]
+quote = '''
+Where multiple tenants share space on the same server, that server
+MUST ensure that tenants are not able to push representations of
+resources that they do not have authority over.
+'''
+reason = '''
+'''

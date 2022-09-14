@@ -1,0 +1,44 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-4.1"
+
+[[exception]]
+quote = '''
+Because some messages are large or unbounded, endpoints
+SHOULD begin processing partial HTTP messages once enough of the
+message has been received to make progress.
+'''
+reason = '''
+h3 cannot determine when the received data is enough, so this should be initiated by the high-level implementation.
+'''
+
+[[exception]]
+quote = '''
+When the server does
+not need to receive the remainder of the request, it MAY abort
+reading the request stream, send a complete response, and cleanly
+close the sending part of the stream.  The error code H3_NO_ERROR
+SHOULD be used when requesting that the client stop sending on the
+request stream.
+'''
+reason = '''
+h3 cannot determine if the remainder of the request is needed, so this should be initiated by the high-level implementation.
+'''
+
+[[exception]]
+quote = '''
+Clients MUST NOT discard complete responses as a
+result of having their request terminated abruptly, though clients
+can always discard responses at their discretion for other reasons.
+'''
+reason = '''
+h3 does not need to do anything specific.
+'''
+
+[[exception]]
+quote = '''
+If the server sends a partial or complete response but does not abort
+reading the request, clients SHOULD continue sending the content of
+the request and close the stream normally.
+'''
+reason = '''
+h3 does not need to do anything specific.
+'''

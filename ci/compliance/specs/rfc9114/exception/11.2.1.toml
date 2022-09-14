@@ -1,0 +1,53 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-11.2.1"
+
+[[exception]]
+quote = '''
+If an entry is present in
+only one registry, every effort SHOULD be made to avoid assigning the
+corresponding value to an unrelated operation.
+'''
+reason = '''
+The requirement applies to IANA registration.
+'''
+
+[[exception]]
+quote = '''
+Expert reviewers MAY
+reject unrelated registrations that would conflict with the same
+value in the corresponding registry.
+'''
+reason = '''
+The requirement applies to IANA registration.
+'''
+
+[[exception]]
+quote = '''
+In addition to common fields as described in Section 11.2, permanent
+registrations in this registry MUST include the following field:
+
+Frame Type:  A name or label for the frame type.
+'''
+reason = '''
+The requirement applies to IANA registration.
+'''
+
+[[exception]]
+quote = '''
+Specifications of frame types MUST include a description of the frame
+layout and its semantics, including any parts of the frame that are
+conditionally present.
+'''
+reason = '''
+The requirement applies to IANA registration.
+'''
+
+[[exception]]
+quote = '''
+Each code of the format 0x1f * N + 0x21 for non-negative integer
+values of N (that is, 0x21, 0x40, ..., through 0x3ffffffffffffffe)
+MUST NOT be assigned by IANA and MUST NOT appear in the listing of
+assigned values.
+'''
+reason = '''
+The requirement applies to IANA registration.
+'''

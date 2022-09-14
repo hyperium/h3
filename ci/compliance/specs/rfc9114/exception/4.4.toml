@@ -1,0 +1,22 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-4.4"
+
+[[exception]]
+quote = '''
+TCP connections that remain half closed in a single
+direction are not invalid, but are often handled poorly by servers,
+so clients SHOULD NOT close a stream for sending while they still
+expect to receive data from the target of the CONNECT.
+'''
+reason = '''
+h3 is not meant to be used for handling proxy.
+'''
+
+[[exception]]
+quote = '''
+In all these cases, if the
+underlying TCP implementation permits it, the proxy SHOULD send a TCP
+segment with the RST bit set.
+'''
+reason = '''
+h3 is not meant to be used for handling proxy.
+'''

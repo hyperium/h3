@@ -1,0 +1,11 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-5.4"
+
+[[exception]]
+quote = '''
+If a connection terminates without a GOAWAY frame, clients MUST
+assume that any request that was sent, whether in whole or in part,
+might have been processed.
+'''
+reason = '''
+h3 does not need to do anything specific.
+'''

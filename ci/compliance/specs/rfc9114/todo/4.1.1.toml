@@ -1,0 +1,8 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-4.1.1"
+
+[[TODO]]
+quote = '''
+Clients MUST NOT use the
+H3_REQUEST_REJECTED error code, except when a server has requested
+closure of the request stream with this error code.
+'''

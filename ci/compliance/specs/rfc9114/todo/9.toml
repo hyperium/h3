@@ -1,0 +1,22 @@
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-9"
+
+[[TODO]]
+quote = '''
+Implementations MUST ignore unknown or unsupported values in all
+extensible protocol elements.
+'''
+
+[[TODO]]
+quote = '''
+Implementations MUST discard data or
+abort reading on unidirectional streams that have unknown or
+unsupported types.
+'''
+
+[[TODO]]
+quote = '''
+However, where a known frame type is required to be in
+a specific location, such as the SETTINGS frame as the first frame of
+the control stream (see Section 6.2.1), an unknown frame type does
+not satisfy that requirement and SHOULD be treated as an error.
+'''
