@@ -82,6 +82,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     tls_config.enable_early_data = true;
     tls_config.alpn_protocols = vec![ALPN.into()];
+
+    // Write all Keys to a file if SSLKEYLOGFILE is set
+    tls_config.key_log = Arc::new(rustls::KeyLogFile::new());
     let client_config = quinn::ClientConfig::new(Arc::new(tls_config));
 
     let mut client_endpoint = h3_quinn::quinn::Endpoint::client("[::]:0".parse().unwrap())?;
