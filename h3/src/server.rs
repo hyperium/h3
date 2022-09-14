@@ -38,7 +38,7 @@
 //!                 match err.get_error_level() {
 //!                     // break on connection errors
 //!                     h3::error::ErrorLevel::ConnectionError => break,
-//!                     // continue on stream errors 
+//!                     // continue on stream errors
 //!                     h3::error::ErrorLevel::StreamError => continue,
 //!                 }
 //!             }
