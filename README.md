@@ -19,6 +19,17 @@ The eventual goal is to use `h3` as an internal dependency of [hyper][].
 
 [hyper]: https://hyper.rs
 
+### Duvet
+This create uses the [duvet crate][] to check compliance of the [spec][].  
+The generated [report][] displays the current status of the requirements of the spec.  
+
+For more information see [duvet][]
+
+[duvet crate]: https://crates.io/crates/duvet
+[spec]: https://www.rfc-editor.org/rfc/rfc9114
+[report]: https://hyper.rs/h3/ci/compliance/report.html#/
+[duvet]: DUVET.md
+
 ## Features
 
 * HTTP/3 client and server implementation
