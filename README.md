@@ -111,7 +111,8 @@ You can see the results at (https://interop.seemann.io/).
 
 ## Debugging
 The example [example client](https://github.com/hyperium/h3/examples/client.rs) can generate a `SSLKEYLOGFILE` to see the traffic unencrypted in tools like Wireshark.  
-To set this up just set the `SSLKEYLOGFILE` environment variable to a file path and follow this [tutorial](https://wiki.wireshark.org/TLS#using-the-pre-master-secret)
+To set this up just set the `SSLKEYLOGFILE` environment variable to a file path and follow this [tutorial](https://wiki.wireshark.org/TLS#using-the-pre-master-secret).
+Then use the example client with the `--keylogfile=true` option to enable this.
 
 
 ## License
