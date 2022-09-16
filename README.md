@@ -109,12 +109,6 @@ As mentioned, the goal of this library is to be generic over a QUIC implementati
 This crate as well as the quic implementations are tested ([quinn](https://github.com/quinn-rs/quinn-interop), [s2n-quic](https://github.com/aws/s2n-quic/tree/main/scripts/interop)) for interoperability and performance in the [quic-interop-runner](https://github.com/marten-seemann/quic-interop-runner).
 You can see the results at (https://interop.seemann.io/).
 
-## Debugging
-The example [example client](https://github.com/hyperium/h3/examples/client.rs) can generate a `SSLKEYLOGFILE` to see the traffic unencrypted in tools like Wireshark.  
-To set this up just set the `SSLKEYLOGFILE` environment variable to a file path and follow this [tutorial](https://wiki.wireshark.org/TLS#using-the-pre-master-secret).
-Then use the example client with the `--keylogfile=true` option to enable this.
-
-
 ## License
 
 h3 is provided under the MIT license. See [LICENSE](LICENSE).
