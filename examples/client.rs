@@ -18,6 +18,9 @@ struct Opt {
     #[structopt(long)]
     pub insecure: bool,
 
+    #[structopt(name = "keylogfile", long)]
+    pub key_log_file: bool,
+
     #[structopt()]
     pub uri: String,
 }
@@ -82,6 +85,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     tls_config.enable_early_data = true;
     tls_config.alpn_protocols = vec![ALPN.into()];
+
+    if opt.key_log_file {
+        // Write all Keys to a file if SSLKEYLOGFILE is set
+        // WARNING, we enable this for the example, you should think carefully about enabling in your own code
+        tls_config.key_log = Arc::new(rustls::KeyLogFile::new());
+    }
+
     let client_config = quinn::ClientConfig::new(Arc::new(tls_config));
 
     let mut client_endpoint = h3_quinn::quinn::Endpoint::client("[::]:0".parse().unwrap())?;
