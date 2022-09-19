@@ -51,6 +51,6 @@ Then run chromium and force it to use Quic.
 Now you can navigate to files in the `root` folder for example `https://localhost:4433/index.html`.
 
 ## Debugging
-The example [example client](../examples/client.rs) can generate a `SSLKEYLOGFILE` to see the traffic unencrypted in tools like Wireshark.  
+The example [example client](client.rs) can generate a `SSLKEYLOGFILE` to see the traffic unencrypted in tools like Wireshark.  
 To set this up just set the `SSLKEYLOGFILE` environment variable to a file path and follow this [tutorial](https://wiki.wireshark.org/TLS#using-the-pre-master-secret).
 Then use the example client with the `--keylogfile=true` option to enable this.
