@@ -7,10 +7,6 @@ edition = "2018"
 [dependencies]
 h3 = { path = "../h3" }
 bytes = "1"
+futures-util = { version = "0.3", default-features = false, features = ["io"] }
 quinn = { version = "0.8.0", default-features = false }
 quinn-proto = { version = "0.8.0", default-features = false }
-futures-util = { version = "0.3", default-features = false, features = ["io"] }
-
-[dev-dependencies]
-http = "0.2"
-tokio = "1"
