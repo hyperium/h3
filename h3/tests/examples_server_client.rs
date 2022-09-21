@@ -7,7 +7,7 @@ use std::{
 fn server_and_client_should_connect_successfully() {
     // A little hack since CARGO_BIN_EXE_<name> is not set for examples
     let mut command = PathBuf::from(std::env!("CARGO_MANIFEST_DIR"));
-    command.push("../../target/debug/examples/server");
+    command.push("../target/debug/examples/server");
 
     let mut server = Command::new(command.as_path())
         .arg("--listen=[::]:4433")
