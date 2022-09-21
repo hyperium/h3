@@ -89,19 +89,20 @@ impl fmt::Display for StreamId {
 }
 
 impl StreamId {
-    pub fn first_request() -> Self {
+    pub(crate) fn first_request() -> Self {
         Self::new(0, Dir::Bi, Side::Client)
     }
 
+    /// Is this a client-initiated request?
     pub fn is_request(&self) -> bool {
         self.dir() == Dir::Bi && self.initiator() == Side::Client
     }
 
+    /// Is this a server push?
     pub fn is_push(&self) -> bool {
         self.dir() == Dir::Uni && self.initiator() == Side::Server
     }
 
-    /// Create a new StreamId
     /// Which side of a connection initiated the stream
     pub(crate) fn initiator(self) -> Side {
         if self.0 & 0x1 == 0 {
@@ -111,6 +112,7 @@ impl StreamId {
         }
     }
 
+    /// Create a new StreamId
     fn new(index: u64, dir: Dir, initiator: Side) -> Self {
         StreamId((index as u64) << 2 | (dir as u64) << 1 | initiator as u64)
     }
@@ -140,6 +142,7 @@ impl TryFrom<u64> for StreamId {
     }
 }
 
+/// Invalid StreamId, for example because it's too large
 #[derive(Debug, PartialEq)]
 pub struct InvalidStreamId(u64);
 

@@ -1,11 +1,9 @@
 //! HTTP/3 client and server
-#[deny(missing_docs)]
+#![deny(missing_docs)]
+
 pub mod client;
-#[deny(missing_docs)]
 pub mod error;
-#[deny(missing_docs)]
 pub mod quic;
-#[deny(missing_docs)]
 pub mod server;
 
 pub use error::Error;
