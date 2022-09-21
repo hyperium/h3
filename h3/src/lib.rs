@@ -18,15 +18,8 @@ mod proto;
 mod qpack;
 mod stream;
 
-#[cfg(feature = "test_helpers")]
-#[doc(hidden)]
-pub mod test_helpers {
-    pub mod qpack {
-        pub use crate::qpack::*;
-    }
-    pub mod proto {
-        pub use crate::proto::*;
-    }
+#[cfg(test)]
+mod tests;
 
-    pub use super::connection::ConnectionState;
-}
+#[cfg(test)]
+extern crate self as h3;

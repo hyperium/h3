@@ -272,7 +272,7 @@ impl Error {
         matches!(&self.inner.kind, Kind::HeaderTooBig { .. })
     }
 
-    #[cfg(feature = "test_helpers")]
+    #[cfg(test)]
     #[doc(hidden)]
     pub fn kind(&self) -> Kind {
         self.inner.kind.clone()

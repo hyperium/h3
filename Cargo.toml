@@ -5,5 +5,4 @@ members = [
 
     # Internal
     "examples",
-    "tests/h3-tests",
 ]

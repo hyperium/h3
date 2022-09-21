@@ -34,9 +34,9 @@ runs:
         git config --local user.name "github-actions[bot]"
 
         if git ls-remote --exit-code --heads origin gh-pages; then
-          cp -r .github ci h3 tests target
+          cp -r .github ci h3 target
           git switch gh-pages
-          cp -r target/.github target/ci target/h3 target/tests .
+          cp -r target/.github target/ci target/h3 .
         else
           git checkout --orphan gh-pages
           git reset

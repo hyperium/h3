@@ -2,25 +2,24 @@ use std::{borrow::BorrowMut, time::Duration};
 
 use assert_matches::assert_matches;
 use bytes::{Buf, Bytes, BytesMut};
-use futures::{future, StreamExt};
+use futures_util::{future, StreamExt};
 use http::{Request, Response, StatusCode};
 
-use h3::{
+use crate::{
     client::{self, SendRequest},
-    error::{Code, Kind},
+    connection::ConnectionState,
+    error::{Code, Error, Kind},
+    proto::{
+        coding::Encode as _,
+        frame::{Frame, Settings},
+        stream::{StreamId, StreamType},
+    },
     quic::{self, SendStream},
     server,
-    test_helpers::{
-        proto::{
-            coding::Encode as _,
-            frame::{Frame, Settings},
-            stream::{StreamId, StreamType},
-        },
-        ConnectionState,
-    },
 };
-use h3_quinn::quinn;
-use h3_tests::Pair;
+
+use super::h3_quinn;
+use super::{init_tracing, Pair};
 
 #[tokio::test]
 async fn connect() {
@@ -129,7 +128,7 @@ async fn client_close_only_on_last_sender_drop() {
 
 #[tokio::test]
 async fn settings_exchange_client() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -172,7 +171,7 @@ async fn settings_exchange_client() {
 
 #[tokio::test]
 async fn settings_exchange_server() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -265,7 +264,7 @@ async fn client_error_on_bidi_recv() {
 
 #[tokio::test]
 async fn two_control_streams() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -304,7 +303,7 @@ async fn two_control_streams() {
 
 #[tokio::test]
 async fn control_close_send_error() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -350,7 +349,7 @@ async fn control_close_send_error() {
 
 #[tokio::test]
 async fn missing_settings() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -389,7 +388,7 @@ async fn missing_settings() {
 
 #[tokio::test]
 async fn control_stream_frame_unexpected() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -427,7 +426,7 @@ async fn control_stream_frame_unexpected() {
 
 #[tokio::test]
 async fn timeout_on_control_frame_read() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     pair.with_timeout(Duration::from_millis(10));
 
@@ -452,7 +451,7 @@ async fn timeout_on_control_frame_read() {
 
 #[tokio::test]
 async fn goaway_from_client_not_push_id() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -494,7 +493,7 @@ async fn goaway_from_client_not_push_id() {
 
 #[tokio::test]
 async fn goaway_from_server_not_request_id() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     let (_, mut server) = pair.server_inner();
 
@@ -549,7 +548,7 @@ async fn goaway_from_server_not_request_id() {
 
 #[tokio::test]
 async fn graceful_shutdown_server_rejects() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -592,7 +591,7 @@ async fn graceful_shutdown_server_rejects() {
 
 #[tokio::test]
 async fn graceful_shutdown_grace_interval() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -648,7 +647,7 @@ async fn graceful_shutdown_grace_interval() {
 
 #[tokio::test]
 async fn graceful_shutdown_closes_when_idle() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -694,7 +693,7 @@ async fn graceful_shutdown_closes_when_idle() {
     };
 }
 
-async fn request<T, O, B>(mut send_request: T) -> Result<Response<()>, h3::Error>
+async fn request<T, O, B>(mut send_request: T) -> Result<Response<()>, Error>
 where
     T: BorrowMut<SendRequest<O, B>>,
     O: quic::OpenStreams<B>,

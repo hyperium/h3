@@ -155,7 +155,7 @@ where
         }
     }
 
-    #[cfg(any(test, feature = "test_helpers"))]
+    #[cfg(test)]
     pub fn encode_with_payload<T: BufMut>(&mut self, buf: &mut T) {
         self.encode(buf);
         match self {
@@ -227,7 +227,7 @@ impl<T, U> PartialEq<Frame<T>> for Frame<U> {
     }
 }
 
-#[cfg(any(test, feature = "test_helpers"))]
+#[cfg(test)]
 impl Frame<Bytes> {
     pub fn headers<T: Into<Bytes>>(block: T) -> Self {
         Frame::Headers(block.into())

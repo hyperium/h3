@@ -2,31 +2,29 @@ use std::time::Duration;
 
 use assert_matches::assert_matches;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use futures::future;
-use h3_quinn::ReadError;
+use futures_util::future;
 use http::{request, HeaderMap, Request, Response, StatusCode};
 
-use h3::{
+use crate::{
     client,
-    error::{Code, Kind},
-    server,
-    test_helpers::{
-        proto::{
-            coding::Encode,
-            frame::{self, Frame, FrameType},
-            headers::Header,
-            stream::StreamId,
-            varint::VarInt,
-        },
-        qpack, ConnectionState,
+    connection::ConnectionState,
+    error::{Code, Error, Kind},
+    proto::{
+        coding::Encode,
+        frame::{self, Frame, FrameType},
+        headers::Header,
+        stream::StreamId,
+        varint::VarInt,
     },
+    qpack, server,
 };
 
-use h3_tests::Pair;
+use super::h3_quinn;
+use super::{init_tracing, Pair};
 
 #[tokio::test]
 async fn get() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -78,7 +76,7 @@ async fn get() {
 
 #[tokio::test]
 async fn get_with_trailers_unknown_content_type() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -140,7 +138,7 @@ async fn get_with_trailers_unknown_content_type() {
 
 #[tokio::test]
 async fn get_with_trailers_known_content_type() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -202,7 +200,7 @@ async fn get_with_trailers_known_content_type() {
 
 #[tokio::test]
 async fn post() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -255,7 +253,7 @@ async fn post() {
 
 #[tokio::test]
 async fn header_too_big_response_from_server() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -307,7 +305,7 @@ async fn header_too_big_response_from_server() {
 
 #[tokio::test]
 async fn header_too_big_response_from_server_trailers() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -377,7 +375,7 @@ async fn header_too_big_response_from_server_trailers() {
 
 #[tokio::test]
 async fn header_too_big_client_error() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -428,7 +426,7 @@ async fn header_too_big_client_error() {
 
 #[tokio::test]
 async fn header_too_big_client_error_trailer() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -499,7 +497,7 @@ async fn header_too_big_client_error_trailer() {
 
 #[tokio::test]
 async fn header_too_big_discard_from_client() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -584,7 +582,7 @@ async fn header_too_big_discard_from_client() {
 
 #[tokio::test]
 async fn header_too_big_discard_from_client_trailers() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -668,7 +666,7 @@ async fn header_too_big_discard_from_client_trailers() {
 
 #[tokio::test]
 async fn header_too_big_server_error() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -735,7 +733,7 @@ async fn header_too_big_server_error() {
 
 #[tokio::test]
 async fn header_too_big_server_error_trailers() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -810,7 +808,7 @@ async fn header_too_big_server_error_trailers() {
 
 #[tokio::test]
 async fn get_timeout_client_recv_response() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     pair.with_timeout(Duration::from_millis(100));
     let mut server = pair.server();
@@ -824,12 +822,12 @@ async fn get_timeout_client_recv_response() {
                 .expect("request");
 
             let response = request_stream.recv_response().await;
-            assert_matches!(response.unwrap_err().kind(), h3::error::Kind::Timeout);
+            assert_matches!(response.unwrap_err().kind(), Kind::Timeout);
         };
 
         let drive_fut = async move {
             let result = future::poll_fn(|cx| conn.poll_close(cx)).await;
-            assert_matches!(result.unwrap_err().kind(), h3::error::Kind::Timeout);
+            assert_matches!(result.unwrap_err().kind(), Kind::Timeout);
         };
 
         tokio::join!(drive_fut, request_fut);
@@ -850,7 +848,7 @@ async fn get_timeout_client_recv_response() {
 
 #[tokio::test]
 async fn get_timeout_client_recv_data() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     pair.with_timeout(Duration::from_millis(200));
     let mut server = pair.server();
@@ -865,15 +863,12 @@ async fn get_timeout_client_recv_data() {
 
             let _ = request_stream.recv_response().await.unwrap();
             let data = request_stream.recv_data().await;
-            assert_matches!(
-                data.map(|_| ()).unwrap_err().kind(),
-                h3::error::Kind::Timeout
-            );
+            assert_matches!(data.map(|_| ()).unwrap_err().kind(), Kind::Timeout);
         };
 
         let drive_fut = async move {
             let result = future::poll_fn(|cx| conn.poll_close(cx)).await;
-            assert_matches!(result.unwrap_err().kind(), h3::error::Kind::Timeout);
+            assert_matches!(result.unwrap_err().kind(), Kind::Timeout);
         };
 
         tokio::join!(drive_fut, request_fut);
@@ -901,7 +896,7 @@ async fn get_timeout_client_recv_data() {
 
 #[tokio::test]
 async fn get_timeout_server_accept() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     pair.with_timeout(Duration::from_millis(200));
     let mut server = pair.server();
@@ -914,7 +909,7 @@ async fn get_timeout_server_accept() {
 
         let drive_fut = async move {
             let result = future::poll_fn(|cx| conn.poll_close(cx)).await;
-            assert_matches!(result.unwrap_err().kind(), h3::error::Kind::Timeout);
+            assert_matches!(result.unwrap_err().kind(), Kind::Timeout);
         };
 
         tokio::join!(drive_fut, request_fut);
@@ -926,7 +921,7 @@ async fn get_timeout_server_accept() {
 
         assert_matches!(
             incoming_req.accept().await.map(|_| ()).unwrap_err().kind(),
-            h3::error::Kind::Timeout
+            Kind::Timeout
         );
     };
 
@@ -935,7 +930,7 @@ async fn get_timeout_server_accept() {
 
 #[tokio::test]
 async fn post_timeout_server_recv_data() {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     pair.with_timeout(Duration::from_millis(100));
     let mut server = pair.server();
@@ -956,7 +951,7 @@ async fn post_timeout_server_recv_data() {
         let (_, mut req_stream) = incoming_req.accept().await.expect("accept").unwrap();
         assert_matches!(
             req_stream.recv_data().await.map(|_| ()).unwrap_err().kind(),
-            h3::error::Kind::Timeout
+            Kind::Timeout
         );
     };
 
@@ -1406,9 +1401,9 @@ where
 async fn request_sequence_check<F, FC>(request: F, check: FC)
 where
     F: Fn(&mut BytesMut),
-    FC: Fn(Result<(), h3::Error>),
+    FC: Fn(Result<(), Error>),
 {
-    h3_tests::init_tracing();
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -1424,8 +1419,8 @@ where
         let res = req_recv
             .read(&mut buf)
             .await
-            .map_err(Into::<ReadError>::into)
-            .map_err(Into::<h3::Error>::into)
+            .map_err(Into::<h3_quinn::ReadError>::into)
+            .map_err(Into::<Error>::into)
             .map(|_| ());
         check(res);
 
@@ -1435,7 +1430,7 @@ where
 
         let res = future::poll_fn(|cx| driver.poll_close(cx))
             .await
-            .map_err(Into::<h3::Error>::into)
+            .map_err(Into::<Error>::into)
             .map(|_| ());
         check(res);
     };
@@ -1449,7 +1444,7 @@ where
             .expect("request stream end unexpected");
         while stream.recv_data().await?.is_some() {}
         stream.recv_trailers().await?;
-        Result::<(), h3::Error>::Ok(())
+        Result::<(), Error>::Ok(())
     };
 
     tokio::select! { res = server_fut => check(res)

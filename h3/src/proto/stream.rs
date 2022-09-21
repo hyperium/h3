@@ -66,10 +66,7 @@ impl fmt::Display for StreamType {
 
 /// Identifier for a stream
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct StreamId(
-    #[cfg(not(any(test, feature = "test_helpers")))] u64,
-    #[cfg(any(test, feature = "test_helpers"))] pub u64,
-);
+pub struct StreamId(#[cfg(not(test))] u64, #[cfg(test)] pub(crate) u64);
 
 impl fmt::Display for StreamId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

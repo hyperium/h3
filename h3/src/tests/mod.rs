@@ -1,16 +1,28 @@
+// This is to avoid an import loop:
+// h3 tests depend on having private access to the crate.
+// They must be part of the crate so as not to break privacy.
+// They also depend on h3_quinn which depends on the crate.
+// Having a dev-dependency on h3_quinn would work as far as cargo is
+// concerned, but quic traits wouldn't match between the "h3" crate that
+// comes before h3_quinn and the one that comes after and runs the tests
+#[path = "../../../h3-quinn/src/lib.rs"]
+mod h3_quinn;
+
+mod connection;
+mod request;
+
 use std::{
     convert::TryInto,
     net::{Ipv6Addr, ToSocketAddrs},
     sync::Arc,
-    task::Poll,
     time::Duration,
 };
 
-use bytes::{Buf, Bytes};
-use futures::StreamExt;
+use bytes::Bytes;
+use futures_util::StreamExt;
 use rustls::{Certificate, PrivateKey};
 
-use h3::quic;
+use crate::quic;
 use h3_quinn::{
     quinn::{Incoming, NewConnection, TransportConfig},
     Connection,
@@ -133,8 +145,4 @@ pub fn build_certs() -> (Certificate, PrivateKey) {
     let key = PrivateKey(cert.serialize_private_key_der());
     let cert = Certificate(cert.serialize_der().unwrap());
     (cert, key)
-}
-
-pub fn to_bytes<E>(x: Poll<Result<Option<impl Buf>, E>>) -> Poll<Result<Option<Bytes>, E>> {
-    x.map(|b| b.map(|b| b.map(|mut b| b.copy_to_bytes(b.remaining()))))
 }
