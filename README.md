@@ -23,9 +23,9 @@ The eventual goal is to use `h3` as an internal dependency of [hyper][].
 
 * HTTP/3 client and server implementation
 * Async only API
-* QUIC transport abstraction via traits in the [`quic`](https://github.com/hyperium/h3/h3/src/quic.rs) module
+* QUIC transport abstraction via traits in the [`quic`](./h3/src/quic.rs) module
 * Supported QUIC implementations to date are
-  [Quinn](https://github.com/quinn-rs/quinn) ([h3-quinn](/h3-quinn/))
+  [Quinn](https://github.com/quinn-rs/quinn) ([h3-quinn](./h3-quinn/))
   and [s2n-quic](https://github.com/aws/s2n-quic)
   ([s2n-quic-h3](https://github.com/aws/s2n-quic/tree/main/quic/s2n-quic-h3))
 
@@ -71,7 +71,7 @@ while let Some((req, stream)) = h3_conn.accept().await? {
 endpoint.wait_idle();
 ```
 
-You can find a full server example in [`examples/server.rs`](https://github.com/hyperium/h3/examples/server.rs)
+You can find a full server example in [`examples/server.rs`](./examples/server.rs)
 
 ### Client
 
@@ -109,13 +109,13 @@ drive_res?;
 client_endpoint.wait_idle().await;
 ```
 
-You can find a full client example in [`examples/client.rs`](https://github.com/hyperium/h3/examples/client.rs)
+You can find a full client example in [`examples/client.rs`](./examples/client.rs)
 
 ## QUIC Generic
 
 As mentioned, the goal of this library is to be generic over a QUIC implementation. To that effect, integrations with QUIC libraries exist:
 
-- [`h3-quinn`](/h3-quinn/): in this same repository.
+- [`h3-quinn`](./h3-quinn/): in this same repository.
 - [`s2n-quic-h3`](https://github.com/aws/s2n-quic/tree/main/quic/s2n-quic-h3)
 
 ## Interoperability
