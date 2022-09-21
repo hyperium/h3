@@ -1,6 +1,8 @@
 //! QUIC Transport implementation with Quinn
 //!
 //! This module implements QUIC traits with Quinn.
+#![deny(missing_docs)]
+
 use std::{
     convert::TryInto,
     fmt::{self, Display},
@@ -22,6 +24,9 @@ pub use quinn::{
 
 use h3::quic::{self, Error, StreamId, WriteBuf};
 
+/// A QUIC connection backed by Quinn
+///
+/// Implements a [`quic::Connection`] backed by a [`quinn::Connection`].
 pub struct Connection {
     conn: quinn::Connection,
     incoming_bi: IncomingBiStreams,
@@ -31,6 +36,7 @@ pub struct Connection {
 }
 
 impl Connection {
+    /// Create a [`Connection`] from a [`quinn::NewConnection`]
     pub fn new(new_conn: NewConnection) -> Self {
         let NewConnection {
             uni_streams,
@@ -49,6 +55,9 @@ impl Connection {
     }
 }
 
+/// The error type for [`Connection`]
+///
+/// Wraps reasons a Quinn connection might be lost.
 #[derive(Debug)]
 pub struct ConnectionError(quinn::ConnectionError);
 
@@ -160,6 +169,10 @@ where
     }
 }
 
+/// Stream opener backed by a Quinn connection
+///
+/// Implements [`quic::OpenStreams`] using [`quinn::Connection`],
+/// [`quinn::OpenBi`], [`quinn::OpenUni`].
 pub struct OpenStreams {
     conn: quinn::Connection,
     opening_bi: Option<OpenBi>,
@@ -220,6 +233,10 @@ impl Clone for OpenStreams {
     }
 }
 
+/// Quinn-backed bidirectional stream
+///
+/// Implements [`quic::BidiStream`] which allows the stream to be split
+/// into two structs each implementing one direction.
 pub struct BidiStream<B>
 where
     B: Buf,
@@ -286,6 +303,9 @@ where
     }
 }
 
+/// Quinn-backed receive stream
+///
+/// Implements a [`quic::RecvStream`] backed by a [`quinn::RecvStream`].
 pub struct RecvStream {
     stream: quinn::RecvStream,
 }
@@ -318,6 +338,9 @@ impl quic::RecvStream for RecvStream {
     }
 }
 
+/// The error type for [`RecvStream`]
+///
+/// Wraps errors that occur when reading from a receive stream.
 #[derive(Debug)]
 pub struct ReadError(quinn::ReadError);
 
@@ -360,6 +383,9 @@ impl Error for ReadError {
     }
 }
 
+/// Quinn-backed send stream
+///
+/// Implements a [`quic::SendStream`] backed by a [`quinn::SendStream`].
 pub struct SendStream<B: Buf> {
     stream: quinn::SendStream,
     writing: Option<WriteBuf<B>>,
@@ -435,9 +461,15 @@ where
     }
 }
 
+/// The error type for [`SendStream`]
+///
+/// Wraps errors that can happen writing to or polling a send stream.
 #[derive(Debug)]
 pub enum SendStreamError {
+    /// Errors when writing, wrapping a [`quinn::WriteError`]
     Write(WriteError),
+    /// Error when the stream is not ready, because it is still sending
+    /// data from a previous call
     NotReady,
 }
 
