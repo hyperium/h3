@@ -483,7 +483,7 @@ where
         {
             Err(err) => {
                 warn!("grease stream creation failed with {}", err);
-                return ();
+                return;
             }
             Ok(grease) => grease,
         };
@@ -495,10 +495,10 @@ where
         //# sent when application-layer padding is desired.  They MAY also be
         //# sent on connections where no data is currently being transferred.
         match stream::write(&mut grease_stream, (StreamType::grease(), Frame::Grease)).await {
-            Ok(_) => (),
+            Ok(()) => (),
             Err(err) => {
                 warn!("write data on grease stream failed with {}", err);
-                return ();
+                return;
             }
         }
 
@@ -514,13 +514,9 @@ where
             .await
             .map_err(|e| Code::H3_NO_ERROR.with_transport(e))
         {
-            Err(err) => {
-                warn!("grease stream error on close {}", err);
-                return ();
-            }
-            Ok(_) => (),
-        }
-        ()
+            Ok(()) => (),
+            Err(err) => warn!("grease stream error on close {}", err),
+        };
     }
 }
 

@@ -124,7 +124,7 @@ where
     /// with different settings.
     /// Provide a Connection which implements [`quic::Connection`].
     pub async fn new(conn: C) -> Result<Self, Error> {
-        Ok(builder().build(conn).await?)
+        builder().build(conn).await
     }
 }
 
@@ -160,7 +160,7 @@ where
                     } => {
                         return Err(self.inner.close(
                             code,
-                            reason.unwrap_or(String::into_boxed_str(String::from(""))),
+                            reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
                         ))
                     }
                     _ => return Err(err),
@@ -217,7 +217,7 @@ where
                     } => {
                         return Err(self.inner.close(
                             code,
-                            reason.unwrap_or(String::into_boxed_str(String::from(""))),
+                            reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
                         ))
                     }
                     crate::error::Kind::Application {
@@ -280,7 +280,7 @@ where
                         } => {
                             return Err(self.inner.close(
                                 code,
-                                reason.unwrap_or(String::into_boxed_str(String::from(""))),
+                                reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
                             ))
                         }
                         crate::error::Kind::Application {

@@ -137,7 +137,7 @@ where
         None => (StatusCode::OK, None),
         Some(_) if req.uri().path().contains("..") => (StatusCode::NOT_FOUND, None),
         Some(root) => {
-            let to_serve = root.join(req.uri().path().strip_prefix("/").unwrap_or(""));
+            let to_serve = root.join(req.uri().path().strip_prefix('/').unwrap_or(""));
             match File::open(&to_serve).await {
                 Ok(file) => (StatusCode::OK, Some(file)),
                 Err(e) => {

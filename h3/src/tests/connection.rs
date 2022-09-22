@@ -1,3 +1,6 @@
+// identity_op: we write out how test values are computed
+#![allow(clippy::identity_op)]
+
 use std::{borrow::BorrowMut, time::Duration};
 
 use assert_matches::assert_matches;
@@ -655,7 +658,7 @@ async fn graceful_shutdown_closes_when_idle() {
         let (mut driver, mut send_request) = client::new(pair.client().await).await.unwrap();
 
         // Make continuous requests, ignoring GoAway because the connection is not driven
-        while let Ok(_) = request(&mut send_request).await {
+        while request(&mut send_request).await.is_ok() {
             tokio::task::yield_now().await;
         }
         assert_matches!(
@@ -675,10 +678,8 @@ async fn graceful_shutdown_closes_when_idle() {
         let mut count = 0;
 
         while let Ok(Some((_, stream))) = incoming.accept().await {
-            if count < 3 {
-                count += 1;
-            } else if count == 3 {
-                count += 1;
+            count += 1;
+            if count == 4 {
                 incoming.shutdown(2).await.unwrap();
             }
 
