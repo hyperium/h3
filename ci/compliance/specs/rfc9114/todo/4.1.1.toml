@@ -6,3 +6,10 @@ Clients MUST NOT use the
 H3_REQUEST_REJECTED error code, except when a server has requested
 closure of the request stream with this error code.
 '''
+
+[[TODO]]
+quote = '''
+However, if
+a stream is cancelled after receiving a partial response, the
+response SHOULD NOT be used.
+'''

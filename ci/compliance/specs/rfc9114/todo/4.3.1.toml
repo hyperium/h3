@@ -6,3 +6,10 @@ The authority MUST NOT include the
 deprecated userinfo subcomponent for URIs of scheme "http" or
 "https".
 '''
+
+[[TODO]]
+quote = '''
+Clients that
+generate HTTP/3 requests directly SHOULD use the :authority
+pseudo-header field instead of the Host header field.
+'''

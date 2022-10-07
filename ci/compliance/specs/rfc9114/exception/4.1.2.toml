@@ -7,5 +7,5 @@ intermediary not acting as a tunnel) MUST NOT forward a malformed
 request or response.
 '''
 reason = '''
-h3 is not meant to be used for an intermediary.
+h3 is not meant to be used for intermediaries.
 '''

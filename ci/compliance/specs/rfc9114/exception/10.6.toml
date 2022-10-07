@@ -8,7 +8,8 @@ unless separate compression contexts are used for each source of
 data.
 '''
 reason = '''
-h3 is unable to determine exactly which part of the content is confidential, this will have to be handled by the user.
+This should be enforced by the user, as h3 may not be able to
+determine the nature of the content.
 '''
 
 [[exception]]
@@ -17,5 +18,5 @@ Compression MUST NOT be used if the source of data cannot be
 reliably determined.
 '''
 reason = '''
-This will have to determined by the user.
+This is up to the user to decide.
 '''
