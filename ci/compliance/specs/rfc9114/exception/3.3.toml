@@ -6,7 +6,8 @@ Once a connection to a server endpoint exists, this connection MAY be
 reused for requests with multiple different URI authority components.
 '''
 reason = '''
-h3 does not have to do anything specific, as we cannot anticipate when will the client decide to reuse a connection.
+h3 does not have to do anything specific, as we cannot anticipate when
+will the client decide to reuse a connection.
 '''
 
 [[exception]]
@@ -16,7 +17,8 @@ the certificate presented by the server for the new origin server
 using the process described in Section 4.3.4 of [HTTP].
 '''
 reason = '''
-h3 does not inspect the certificate messages, so this will have to be enforced by the high-level implementation.
+This should be handled by the user, as h3 does not inspect certificate
+messages.
 '''
 
 [[exception]]
@@ -26,7 +28,8 @@ for any reason, the connection MUST NOT be reused and a new
 connection SHOULD be established for the new origin.
 '''
 reason = '''
-The requirement applies to the high-level implementation.
+This should be handled by the user, as h3 does not inspect certificate
+messages.
 '''
 
 [[exception]]
@@ -37,7 +40,8 @@ already associated with the connection, the client SHOULD revalidate
 the server certificate for those origins.
 '''
 reason = '''
-The requirement applies to the high-level implementation.
+This should be handled by the user, as h3 does not inspect certificate
+messages.
 '''
 
 [[exception]]
@@ -48,5 +52,5 @@ different transport or TLS configurations but SHOULD avoid creating
 multiple connections with the same configuration.
 '''
 reason = '''
-The requirement applies to the high-level implementation.
+This pertains to the user of h3.
 '''

@@ -6,5 +6,5 @@ Prior to making requests for an origin whose scheme is not "https",
 the client MUST ensure the server is willing to serve that scheme.
 '''
 reason = '''
-The requirement applies to the high-level implementation.
+The requirement pertains to the high-level implementation.
 '''

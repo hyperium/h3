@@ -12,5 +12,6 @@ provide at least 1,024 bytes of flow-control credit to each
 unidirectional stream.
 '''
 reason = '''
-h3 does not handle connection establishment, so these should be fulfilled by the high-level implementation.
+The user should ensure that the transport parameters satisfy the
+requirements, as h3 does not handle connection establishment.
 '''

@@ -6,7 +6,8 @@ Extensions that could change the semantics of existing protocol
 components MUST be negotiated before being used.
 '''
 reason = '''
-h3 does not handle protocol negotiation, so the high-level implementation will have to ensure the order is correct.
+The user should ensure that the order is correct, as h3 does not
+handle protocol negotiations.
 '''
 
 [[exception]]
@@ -16,5 +17,5 @@ value MUST be defined in such a fashion that the extension is
 disabled if the setting is omitted.
 '''
 reason = '''
-The default value is up to the extension specification or the high-level implementation to decide.
+The requirement applies to extension specifications.
 '''

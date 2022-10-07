@@ -7,7 +7,8 @@ SHOULD begin processing partial HTTP messages once enough of the
 message has been received to make progress.
 '''
 reason = '''
-h3 cannot determine when the received data is enough, so this should be initiated by the high-level implementation.
+This should be initiated by the user, as h3 cannot determine when the
+received message is enough.
 '''
 
 [[exception]]
@@ -20,7 +21,8 @@ SHOULD be used when requesting that the client stop sending on the
 request stream.
 '''
 reason = '''
-h3 cannot determine if the remainder of the request is needed, so this should be initiated by the high-level implementation.
+This should be initiated by the user, as h3 cannot determine if the
+remainder of the request is needed.
 '''
 
 [[exception]]
@@ -30,7 +32,8 @@ result of having their request terminated abruptly, though clients
 can always discard responses at their discretion for other reasons.
 '''
 reason = '''
-h3 does not need to do anything specific.
+h3 does not discard complete responses, but h3 has no control over
+whether the user will do.
 '''
 
 [[exception]]
