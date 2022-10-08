@@ -178,16 +178,15 @@ jobs:
           args: fuzz run fuzz_varint -- -runs=1
 
   compliance:
-    name: Check spec compliance
+    name: Compliance report
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
         with:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Generate report
+      - name: Generate compliance report
         uses: ./.github/actions/compliance
         with:
           extract-script: ${{ github.workspace }}/ci/compliance/extract.sh

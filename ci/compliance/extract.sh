@@ -2,11 +2,17 @@
 
 set -e
 
-duvet \
-    extract \
-    https://www.rfc-editor.org/rfc/rfc9114 \
-    --format "IETF" \
-    --out "." \
-    --extension "toml"
+specs=(
+    'https://www.rfc-editor.org/rfc/rfc9114'
+)
 
-echo "compliance checks available in 'specs/www.rfc-editor.org/rfc/rfc9114/'"
+for spec in "${specs[@]}"
+do
+    duvet extract \
+        $spec \
+        --format 'IETF' \
+        --out '.' \
+        --extension 'toml'
+done
+
+echo "compliance checks available in 'specs/'"

@@ -1,37 +1,46 @@
-name: 'Spec compliance'
-description: 'Use Duvet to generate spec compliance report'
+name: 'Spec compliance report'
+description: 'Generate compliance report and publish on Github pages'
 
 inputs:
   extract-script:
-    description: 'Path to script that extracts compliance checks'
+    description: 'Path to script that extracts compliance requirements'
     required: true
   report-script:
-    description: 'Path to script that generates a Duvet report'
+    description: 'Path to script that generates a compliance report'
     required: true
-  dir:
+  h3-dir:
     description: 'Path to the directory where h3 is cloned'
-    default: ${{ github.workspace }}
     required: false
+    default: ${{ github.workspace }}
 
 runs:
   using: "composite"
   steps:
-    - uses: actions-rs/toolchain@v1.0.7
-      id: toolchain
+    - name: Install Rust toolchain
+      uses: actions-rs/toolchain@v1
       with:
         toolchain: stable
         override: true
 
-    - uses: camshaft/rust-cache@v1
+    - name: Cache builds
+      uses: camshaft/rust-cache@v1
 
-    - uses: camshaft/install@v1
+    - name: Install Duvet w/ caching
+      uses: camshaft/install@v1
       with:
         crate: duvet
 
-    - name: Checkout gh-pages
+    - name: Set variables
+      shell: bash
       run: |
-        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        echo "SHA=`git rev-parse --short HEAD`" >> $GITHUB_ENV
+
+    # create gh-pages as an orphan branch if branch does not exist
+    - name: Checkout gh-pages
+      shell: bash
+      run: |
         git config --local user.name "github-actions[bot]"
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
 
         if git ls-remote --exit-code --heads origin gh-pages; then
           cp -r .github ci h3 target
@@ -41,23 +50,24 @@ runs:
           git checkout --orphan gh-pages
           git reset
         fi
-      shell: bash
 
-    - name: Generate duvet report
-      working-directory: ${{ inputs.dir }}
+    - name: Generate report
+      working-directory: ${{ inputs.h3-dir }}
+      shell: bash
       run: |
         ${{ inputs.extract-script }}
-        ${{ inputs.report-script }} ${{ github.sha }}
-      shell: bash
+        ${{ inputs.report-script }} $SHA
 
-    - name: Commit
-      working-directory: ${{ inputs.dir }}
+    # commit only when there are changes
+    - name: Commit report changes
+      working-directory: ${{ inputs.h3-dir }}
+      shell: bash
       run: |
         git add ci/compliance/*.html
         git diff --staged --quiet || \
-        git commit -m "${{ github.triggering_actor }}-${{ github.sha }}-${{ github.job }}#${{ github.run_number }}"
-      shell: bash
+        git commit -m "${{ github.triggering_actor }}-${SHA}-${{ github.job }}#${{ github.run_number }}"
 
+    # publish report only when pushing to master
     - name: Push to gh-pages
       if: github.ref == 'refs/heads/master'
       uses: ad-m/github-push-action@master
