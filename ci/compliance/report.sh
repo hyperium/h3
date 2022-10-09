@@ -2,8 +2,6 @@
 
 set -e
 
-BLOB=${1:-master}
-
 duvet report \
     --spec-pattern 'specs/**/*.toml' \
     --spec-pattern 'ci/compliance/specs/**/*.toml' \
@@ -11,7 +9,7 @@ duvet report \
     --workspace \
     --exclude duvet \
     --require-tests false \
-    --blob-link "https://github.com/hyperium/h3/blob/$BLOB" \
+    --blob-link "https://github.com/hyperium/h3/blob/master" \
     --issue-link 'https://github.com/hyperium/h3/issues' \
     --no-cargo \
     --html ci/compliance/report.html
