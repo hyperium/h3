@@ -56,7 +56,7 @@ runs:
       shell: bash
       run: |
         ${{ inputs.extract-script }}
-        ${{ inputs.report-script }} $SHA
+        ${{ inputs.report-script }}
 
     # commit only when there are changes
     - name: Commit report changes
