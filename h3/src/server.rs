@@ -28,7 +28,7 @@
 //!                     stream.send_data(bytes::Bytes::from("test")).await.unwrap();
 //!                     // finnish the stream
 //!                     stream.finish().await.unwrap();
-//!                 });            
+//!                 });
 //!             }
 //!             Ok(None) => {
 //!                 // break if no Request is accepted
@@ -593,6 +593,11 @@ where
         self.inner.recv_data().await
     }
 
+    /// Receive an optional set of trailers for the request
+    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
+        self.inner.recv_trailers().await
+    }
+
     /// Tell the peer to stop sending into the underlying QUIC stream
     pub fn stop_sending(&mut self, error_code: crate::error::Code) {
         self.inner.stream.stop_sending(error_code)
@@ -677,29 +682,6 @@ where
     //# implementation resets the sending parts of streams and aborts reading
     //# on the receiving parts of streams; see Section 2.4 of
     //# [QUIC-TRANSPORT].
-}
-
-impl<S, B> RequestStream<S, B>
-where
-    S: quic::RecvStream + quic::SendStream<B>,
-    B: Buf,
-{
-    /// Receive an optional set of trailers for the request.
-    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
-        let res = self.inner.recv_trailers().await;
-        if let Err(ref e) = res {
-            if e.is_header_too_big() {
-                self.send_response(
-                    http::Response::builder()
-                        .status(StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE)
-                        .body(())
-                        .expect("header too big response"),
-                )
-                .await?;
-            }
-        }
-        res
-    }
 }
 
 impl<S, B> RequestStream<S, B>

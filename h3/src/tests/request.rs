@@ -330,12 +330,6 @@ async fn header_too_big_response_from_server_trailers() {
                 .await
                 .expect("send trailers");
             request_stream.finish().await.expect("client finish");
-
-            let response = request_stream.recv_response().await.unwrap();
-            assert_eq!(
-                response.status(),
-                StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
-            );
         };
         tokio::select! {biased; _ = req_fut => (), _ = drive_fut => () }
     };
