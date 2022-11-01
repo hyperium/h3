@@ -334,7 +334,7 @@ async fn control_close_send_error() {
         let mut incoming = server::Connection::new(conn).await.unwrap();
         // Driver detects that the recieving side of the control stream has been closed
         assert_matches!(
-        incoming.accept().await.map(|_| ()).unwrap_err().kind(),
+            incoming.accept().await.map(|_| ()).unwrap_err().kind(),
             Kind::Application { reason: Some(reason), code: Code::H3_CLOSED_CRITICAL_STREAM, .. }
             if *reason == *"control stream closed");
         // Poll it once again returns the previously stored error
