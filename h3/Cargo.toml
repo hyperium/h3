@@ -20,11 +20,12 @@ fastrand = "1.7.0"
 assert_matches = "1.3.0"
 futures-util = { version = "0.3", default-features = false, features = ["io"] }
 proptest = "1"
-quinn = { version = "0.8.0", default-features = false, features = [
-    "tls-rustls",
+quinn = { version = "0.9.0", default-features = false, features = [
     "ring",
+    "runtime-tokio",
+    "tls-rustls",
 ] }
-quinn-proto = { version = "0.8.0", default-features = false }
+quinn-proto = { version = "0.9.0", default-features = false }
 rcgen = "0.9"
 rustls = "0.20"
 tokio = { version = "1", features = ["rt", "macros", "io-util", "io-std"] }
