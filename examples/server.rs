@@ -1,7 +1,6 @@
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use bytes::{Bytes, BytesMut};
-use futures::StreamExt;
 use http::{Request, StatusCode};
 use rustls::{Certificate, PrivateKey};
 use structopt::StructOpt;
@@ -72,11 +71,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let crypto = load_crypto(opt.certs).await?;
     let server_config = h3_quinn::quinn::ServerConfig::with_crypto(Arc::new(crypto));
-    let (endpoint, mut incoming) = h3_quinn::quinn::Endpoint::server(server_config, opt.listen)?;
+    let endpoint = h3_quinn::quinn::Endpoint::server(server_config, opt.listen)?;
 
     info!("Listening on {}", opt.listen);
 
-    while let Some(new_conn) = incoming.next().await {
+    while let Some(new_conn) = endpoint.accept().await {
         trace_span!("New connection being attempted");
 
         let root = root.clone();
