@@ -110,7 +110,8 @@ impl Pair {
         crypto.enable_early_data = true;
         crypto.alpn_protocols = vec![b"h3".to_vec()];
 
-        let client_config = quinn::ClientConfig::new(Arc::new(crypto));
+        let mut client_config = quinn::ClientConfig::new(Arc::new(crypto));
+        client_config.transport_config(self.config.clone());
 
         let mut client_endpoint = quinn::Endpoint::client("[::]:0".parse().unwrap()).unwrap();
         client_endpoint.set_default_client_config(client_config);

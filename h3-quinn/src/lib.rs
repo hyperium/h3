@@ -241,12 +241,11 @@ impl<B: Buf> quic::SendStream<B> for SendStream<B> {
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         if let Some(ref mut data) = self.writing {
             while data.has_remaining() {
-                let mut write_fut = Box::pin(self.stream.write(data.chunk()));
-                match ready!(write_fut.poll_unpin(cx)) {
-                    Ok(cnt) => {
-                        drop(write_fut);
-                        data.advance(cnt);
-                    }
+                match ready!({
+                    let mut write_fut = Box::pin(self.stream.write(data.chunk()));
+                    write_fut.poll_unpin(cx)
+                }) {
+                    Ok(cnt) => data.advance(cnt),
                     Err(e) => return Poll::Ready(Err(Self::Error::Write(e))),
                 }
             }

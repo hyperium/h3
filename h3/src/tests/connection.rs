@@ -213,7 +213,7 @@ async fn settings_exchange_server() {
 #[tokio::test]
 async fn client_error_on_bidi_recv() {
     let mut pair = Pair::default();
-    let mut server = pair.server();
+    let server = pair.server();
 
     macro_rules! check_err {
         ($e:expr) => {
@@ -494,7 +494,7 @@ async fn goaway_from_client_not_push_id() {
 async fn goaway_from_server_not_request_id() {
     init_tracing();
     let mut pair = Pair::default();
-    let mut server = pair.server_inner();
+    let server = pair.server_inner();
 
     let client_fut = async {
         let connection = pair.client_inner().await;
@@ -558,10 +558,13 @@ async fn graceful_shutdown_server_rejects() {
             .send_request(Request::get("http://no.way").body(()).unwrap())
             .await
             .unwrap();
+
         let mut rejected = send_request
             .send_request(Request::get("http://no.way").body(()).unwrap())
             .await
             .unwrap();
+        rejected.finish().await.unwrap();
+
         let first = first.recv_response().await;
         let rejected = rejected.recv_response().await;
 
@@ -602,11 +605,15 @@ async fn graceful_shutdown_grace_interval() {
             .send_request(Request::get("http://no.way").body(()).unwrap())
             .await
             .unwrap();
+        first.finish().await.unwrap();
+
         // Sent as the connection is shutting down, but GoAway has not been received yet
         let mut in_flight = send_request
             .send_request(Request::get("http://no.way").body(()).unwrap())
             .await
             .unwrap();
+        in_flight.finish().await.unwrap();
+
         let first = first.recv_response().await;
         let in_flight = in_flight.recv_response().await;
 
@@ -702,6 +709,7 @@ where
         .borrow_mut()
         .send_request(Request::get("http://no.way").body(()).unwrap())
         .await?;
+    request_stream.finish().await?;
     request_stream.recv_response().await
 }
 
