@@ -298,6 +298,7 @@ mod tests {
 
     use crate::qpack::tests::helpers::{build_table, TABLE_SIZE};
 
+    #[allow(clippy::type_complexity)]
     fn check_encode_field(
         init_fields: &[HeaderField],
         field: &[HeaderField],
@@ -308,6 +309,7 @@ mod tests {
         check_encode_field_table(&mut table, init_fields, field, 1, check);
     }
 
+    #[allow(clippy::type_complexity)]
     fn check_encode_field_table(
         table: &mut DynamicTable,
         init_fields: &[HeaderField],

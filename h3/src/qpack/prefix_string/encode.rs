@@ -398,15 +398,19 @@ impl HpackStringEncode for Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::identity_op)]
+
     use super::*;
 
     #[test]
     fn test_set_bits() {
         let mut buf = [0b1111_1111; 16];
-        let mut pos = BitWindow::default();
-
         // Write a full 8 bits into a single byte
-        pos.count = 8;
+        let mut pos = BitWindow {
+            count: 8,
+            ..Default::default()
+        };
+
         write_bits(&mut buf, &pos, 0b1_0101);
         assert_eq!(&buf[..1], &[0b1_0101]);
         pos.byte += 1;
