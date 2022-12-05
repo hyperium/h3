@@ -13,7 +13,7 @@ use crate::{
     error::{Code, Error},
     frame::FrameStream,
     proto::{
-        frame::{Frame, PayloadLen, SettingId, Settings},
+        frame::{Frame, PayloadLen, Settings},
         headers::Header,
         stream::{StreamId, StreamType},
         varint::VarInt,
@@ -112,7 +112,7 @@ where
 
         let mut settings = Settings::default();
         settings
-            .insert(SettingId::MAX_HEADER_LIST_SIZE, max_field_section_size)
+            .insert(Settings::MAX_HEADER_LIST_SIZE, max_field_section_size)
             .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
 
         if grease {
@@ -130,7 +130,7 @@ where
             //# (Section 11.2.2).  These reserved settings MUST NOT be sent, and
             //# their receipt MUST be treated as a connection error of type
             //# H3_SETTINGS_ERROR.
-            match settings.insert(SettingId::grease(), 0) {
+            match settings.insert_grease(0) {
                 Ok(_) => (),
                 Err(err) => warn!("Error when adding the grease Setting. Reason {}", err),
             }
@@ -366,7 +366,7 @@ where
                         self.shared
                             .write("connection settings write")
                             .peer_max_field_section_size = settings
-                            .get(SettingId::MAX_HEADER_LIST_SIZE)
+                            .get(Settings::MAX_HEADER_LIST_SIZE)
                             .unwrap_or(VarInt::MAX.0);
                         Ok(Frame::Settings(settings))
                     }
