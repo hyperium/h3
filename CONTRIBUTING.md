@@ -28,7 +28,7 @@ There are different citation types with different meanings.
 Standard citation in the source code where the requirement is implemented.
 
 ### Implication
-Citation where the related code is self-evident.
+Citation where the related code is self-evident. This means no Test is required.
 
 ### Test
 Indicates that the related code is a test for the requirement.
