@@ -67,7 +67,8 @@ use crate::{
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
     error::{Code, Error, ErrorLevel},
     frame::FrameStream,
-    proto::{frame::Frame, headers::Header, varint::VarInt},
+    params::Params,
+    proto::{frame::Frame, headers::Header},
     qpack,
     quic::{self, RecvStream as _, SendStream as _},
     stream,
@@ -79,7 +80,7 @@ use tracing::{error, trace, warn};
 /// This function creates a [`Builder`] that carries settings that can
 /// be shared between server connections.
 pub fn builder() -> Builder {
-    Builder::new()
+    Builder::new(Default::default())
 }
 
 /// Server connection driver
@@ -492,43 +493,24 @@ where
 /// C: h3::quic::Connection<B>,
 /// B: bytes::Buf,
 /// {
-///     let mut server_builder = h3::server::builder();
-///     // Set the maximum header size
-///     server_builder.max_field_section_size(1000);
-///     // do not send grease types
-///     server_builder.send_grease(false);
+///     let params = h3::params::Params::default()
+///         // Set the maximum header size
+///         .max_field_section_size(1000)
+///         // do not send grease types
+///         .grease(false);
+///     let mut server_builder = h3::server::Builder::new(params);
 ///     // Build the Connection
 ///     let mut h3_conn = server_builder.build(conn);
 /// }
 /// ```
 pub struct Builder {
-    pub(super) max_field_section_size: u64,
-    pub(super) send_grease: bool,
+    pub(super) params: Params,
 }
 
 impl Builder {
-    /// Creates a new [`Builder`] with default settings.
-    pub(super) fn new() -> Self {
-        Builder {
-            max_field_section_size: VarInt::MAX.0,
-            send_grease: true,
-        }
-    }
-    /// Set the maximum header size this client is willing to accept
-    ///
-    /// See [header size constraints] section of the specification for details.
-    ///
-    /// [header size constraints]: https://www.rfc-editor.org/rfc/rfc9114.html#name-header-size-constraints
-    pub fn max_field_section_size(&mut self, value: u64) -> &mut Self {
-        self.max_field_section_size = value;
-        self
-    }
-
-    /// Send grease values to the Client.
-    /// See [setting](https://www.rfc-editor.org/rfc/rfc9114.html#settings-parameters), [frame](https://www.rfc-editor.org/rfc/rfc9114.html#frame-reserved) and [stream](https://www.rfc-editor.org/rfc/rfc9114.html#stream-grease) for more information.
-    pub fn send_grease(&mut self, value: bool) -> &mut Self {
-        self.send_grease = value;
-        self
+    /// Create a new HTTP/3 server [`Builder`]
+    pub fn new(params: Params) -> Self {
+        Self { params }
     }
 }
 
@@ -545,12 +527,12 @@ impl Builder {
         Ok(Connection {
             inner: ConnectionInner::new(
                 conn,
-                self.max_field_section_size,
+                self.params.max_field_section_size,
                 SharedStateRef::default(),
-                self.send_grease,
+                self.params.grease,
             )
             .await?,
-            max_field_section_size: self.max_field_section_size,
+            max_field_section_size: self.params.max_field_section_size,
             request_end_send: sender,
             request_end_recv: receiver,
             ongoing_streams: HashSet::new(),

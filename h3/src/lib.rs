@@ -4,6 +4,7 @@
 
 pub mod client;
 pub mod error;
+pub mod params;
 pub mod quic;
 pub mod server;
 

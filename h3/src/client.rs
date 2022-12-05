@@ -16,13 +16,14 @@ use crate::{
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
     error::{Code, Error, ErrorLevel},
     frame::FrameStream,
-    proto::{frame::Frame, headers::Header, varint::VarInt},
+    params::Params,
+    proto::{frame::Frame, headers::Header},
     qpack, quic, stream,
 };
 
-/// Start building a new HTTP/3 client
+/// Start building a new HTTP/3 client with default params
 pub fn builder() -> Builder {
-    Builder::new()
+    Builder::new(Default::default())
 }
 
 /// Create a new HTTP/3 client with default settings
@@ -37,7 +38,7 @@ where
     //# address and UDP port, where the IP address and port might be derived
     //# from a URI, a selected alternative service ([ALTSVC]), a configured
     //# proxy, or name resolution of any of these.
-    Builder::new().build(conn).await
+    Builder::new(Default::default()).build(conn).await
 }
 
 /// HTTP/3 request sender
@@ -469,34 +470,22 @@ where
 /// #   O: quic::OpenStreams<B>,
 /// #   B: bytes::Buf,
 /// # {
-/// let h3_conn = h3::client::builder()
-///     .max_field_section_size(8192)
+/// let params = h3::params::Params::default()
+///     .max_field_section_size(8192);
+/// let h3_conn = h3::client::Builder::new(params)
 ///     .build(quic)
 ///     .await
 ///     .expect("Failed to build connection");
 /// # }
 /// ```
 pub struct Builder {
-    max_field_section_size: u64,
-    send_grease: bool,
+    params: Params,
 }
 
 impl Builder {
-    pub(super) fn new() -> Self {
-        Builder {
-            max_field_section_size: VarInt::MAX.0,
-            send_grease: true,
-        }
-    }
-
-    /// Set the maximum header size this client is willing to accept
-    ///
-    /// See [header size constraints] section of the specification for details.
-    ///
-    /// [header size constraints]: https://www.rfc-editor.org/rfc/rfc9114.html#name-header-size-constraints
-    pub fn max_field_section_size(&mut self, value: u64) -> &mut Self {
-        self.max_field_section_size = value;
-        self
+    /// Create a HTTP/3 client builder
+    pub fn new(params: Params) -> Self {
+        Self { params }
     }
 
     /// Create a new HTTP/3 client from a `quic` connection
@@ -518,9 +507,9 @@ impl Builder {
             Connection {
                 inner: ConnectionInner::new(
                     quic,
-                    self.max_field_section_size,
+                    self.params.max_field_section_size,
                     conn_state.clone(),
-                    self.send_grease,
+                    self.params.grease,
                 )
                 .await?,
             },
@@ -528,10 +517,10 @@ impl Builder {
                 open,
                 conn_state,
                 conn_waker,
-                max_field_section_size: self.max_field_section_size,
+                max_field_section_size: self.params.max_field_section_size,
                 sender_count: Arc::new(AtomicUsize::new(1)),
                 _buf: PhantomData,
-                send_grease_frame: self.send_grease,
+                send_grease_frame: self.params.grease,
             },
         ))
     }

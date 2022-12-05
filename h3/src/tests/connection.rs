@@ -12,6 +12,7 @@ use crate::{
     client::{self, SendRequest},
     connection::ConnectionState,
     error::{Code, Error, Kind},
+    params::Params,
     proto::{
         coding::Encode as _,
         frame::{Frame, Settings},
@@ -161,11 +162,8 @@ async fn settings_exchange_client() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::builder()
-            .max_field_section_size(12)
-            .build(conn)
-            .await
-            .unwrap();
+        let params = Params::default().max_field_section_size(12);
+        let mut incoming = server::Builder::new(params).build(conn).await.unwrap();
         incoming.accept().await.unwrap()
     };
 
@@ -179,8 +177,8 @@ async fn settings_exchange_server() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut conn, _client) = client::builder()
-            .max_field_section_size(12)
+        let params = Params::default().max_field_section_size(12);
+        let (mut conn, _client) = client::Builder::new(params)
             .build::<_, _, Bytes>(pair.client().await)
             .await
             .expect("client init");
