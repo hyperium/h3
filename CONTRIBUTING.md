@@ -1,5 +1,7 @@
+Thank you for the interest in contributing to `h3`. All important information are below.
+
 # Duvet
-This is a guide to explain how [duvet][] is used in h3.
+In `h3` the [duvet][] crate is used in to check compliance of the [spec][]. 
 
 [duvet]: https://crates.io/crates/duvet
 
