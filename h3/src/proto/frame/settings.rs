@@ -35,7 +35,7 @@ impl FrameHeader for Settings {
 
 impl Settings {
     pub const QPACK_MAX_TABLE_CAPACITY: u64 = 0x1;
-    pub const MAX_HEADER_LIST_SIZE: u64 = 0x6;
+    pub const MAX_FIELD_SECTION_SIZE: u64 = 0x6;
     pub const QPACK_MAX_BLOCKED_STREAMS: u64 = 0x7;
     pub const ENABLE_WEBTRANSPORT: u64 = 0x2b603742;
 
@@ -110,7 +110,7 @@ impl Settings {
         matches!(
             id,
             Self::QPACK_MAX_TABLE_CAPACITY
-                | Self::MAX_HEADER_LIST_SIZE
+                | Self::MAX_FIELD_SECTION_SIZE
                 | Self::QPACK_MAX_BLOCKED_STREAMS
                 | Self::ENABLE_WEBTRANSPORT
         )
@@ -210,7 +210,7 @@ mod tests {
             Frame::Settings(Settings {
                 len: 4,
                 buf: [
-                    (Settings::MAX_HEADER_LIST_SIZE, 0xfad1),
+                    (Settings::MAX_FIELD_SECTION_SIZE, 0xfad1),
                     (Settings::QPACK_MAX_TABLE_CAPACITY, 0xfad2),
                     (Settings::QPACK_MAX_BLOCKED_STREAMS, 0xfad3),
                     (95, 0),
@@ -223,7 +223,7 @@ mod tests {
             Frame::Settings(Settings {
                 len: 3,
                 buf: [
-                    (Settings::MAX_HEADER_LIST_SIZE, 0xfad1),
+                    (Settings::MAX_FIELD_SECTION_SIZE, 0xfad1),
                     (Settings::QPACK_MAX_TABLE_CAPACITY, 0xfad2),
                     (Settings::QPACK_MAX_BLOCKED_STREAMS, 0xfad3),
                     // check without the Grease setting because this is ignored

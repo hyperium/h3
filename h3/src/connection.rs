@@ -112,7 +112,7 @@ where
 
         let mut settings = Settings::default();
         settings
-            .insert(Settings::MAX_HEADER_LIST_SIZE, max_field_section_size)
+            .insert(Settings::MAX_FIELD_SECTION_SIZE, max_field_section_size)
             .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
 
         if grease {
@@ -366,7 +366,7 @@ where
                         self.shared
                             .write("connection settings write")
                             .peer_max_field_section_size = settings
-                            .get(Settings::MAX_HEADER_LIST_SIZE)
+                            .get(Settings::MAX_FIELD_SECTION_SIZE)
                             .unwrap_or(VarInt::MAX.0);
                         Ok(Frame::Settings(settings))
                     }
