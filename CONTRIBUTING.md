@@ -1,7 +1,9 @@
 Thank you for the interest in contributing to `h3`. All important information are below.
 
 # Duvet
-In `h3` the [duvet][] crate is used in to check compliance of the [spec][]. 
+The [`duvet`][] crate is used in `h3` to track [spec][] compliance.
+`duvet` does that via spec citations in the code, as customized comments.
+The comments should be kept up-to-date with the code.
 
 [duvet]: https://crates.io/crates/duvet
 
