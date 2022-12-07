@@ -10,9 +10,9 @@ use http::{Request, Response, StatusCode};
 
 use crate::{
     client::{self, SendRequest},
+    config::Config,
     connection::ConnectionState,
     error::{Code, Error, Kind},
-    params::Params,
     proto::{
         coding::Encode as _,
         frame::{Frame, Settings},
@@ -162,7 +162,7 @@ async fn settings_exchange_client() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let params = Params::default().max_field_section_size(12);
+        let params = Config::new().max_field_section_size(12);
         let mut incoming = server::Builder::new(params).build(conn).await.unwrap();
         incoming.accept().await.unwrap()
     };
@@ -177,7 +177,7 @@ async fn settings_exchange_server() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let params = Params::default().max_field_section_size(12);
+        let params = Config::new().max_field_section_size(12);
         let (mut conn, _client) = client::Builder::new(params)
             .build::<_, _, Bytes>(pair.client().await)
             .await

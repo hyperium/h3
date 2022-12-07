@@ -3,11 +3,12 @@
 #![allow(clippy::derive_partial_eq_without_eq)]
 
 pub mod client;
+pub mod config;
 pub mod error;
-pub mod params;
 pub mod quic;
 pub mod server;
 
+pub use config::Config;
 pub use error::Error;
 
 mod buf;

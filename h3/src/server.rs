@@ -64,10 +64,10 @@ use quic::StreamId;
 use tokio::sync::mpsc;
 
 use crate::{
+    config::Config,
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
     error::{Code, Error, ErrorLevel},
     frame::FrameStream,
-    params::Params,
     proto::{frame::Frame, headers::Header},
     qpack,
     quic::{self, RecvStream as _, SendStream as _},
@@ -493,24 +493,24 @@ where
 /// C: h3::quic::Connection<B>,
 /// B: bytes::Buf,
 /// {
-///     let params = h3::params::Params::default()
+///     let config = h3::Config::new()
 ///         // Set the maximum header size
 ///         .max_field_section_size(1000)
 ///         // do not send grease types
-///         .grease(false);
-///     let mut server_builder = h3::server::Builder::new(params);
+///         .disable_grease();
+///     let mut server_builder = h3::server::Builder::new(config);
 ///     // Build the Connection
 ///     let mut h3_conn = server_builder.build(conn);
 /// }
 /// ```
 pub struct Builder {
-    pub(super) params: Params,
+    pub(super) config: Config,
 }
 
 impl Builder {
     /// Create a new HTTP/3 server [`Builder`]
-    pub fn new(params: Params) -> Self {
-        Self { params }
+    pub fn new(config: Config) -> Self {
+        Self { config }
     }
 }
 
@@ -527,12 +527,12 @@ impl Builder {
         Ok(Connection {
             inner: ConnectionInner::new(
                 conn,
-                self.params.max_field_section_size,
+                self.config.max_field_section_size,
                 SharedStateRef::default(),
-                self.params.grease,
+                self.config.grease,
             )
             .await?,
-            max_field_section_size: self.params.max_field_section_size,
+            max_field_section_size: self.config.max_field_section_size,
             request_end_send: sender,
             request_end_recv: receiver,
             ongoing_streams: HashSet::new(),

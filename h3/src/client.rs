@@ -13,15 +13,15 @@ use http::{request, HeaderMap, Response};
 use tracing::{info, trace};
 
 use crate::{
+    config::Config,
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
     error::{Code, Error, ErrorLevel},
     frame::FrameStream,
-    params::Params,
     proto::{frame::Frame, headers::Header},
     qpack, quic, stream,
 };
 
-/// Start building a new HTTP/3 client with default params
+/// Start building a new HTTP/3 client with default config
 pub fn builder() -> Builder {
     Builder::new(Default::default())
 }
@@ -470,22 +470,22 @@ where
 /// #   O: quic::OpenStreams<B>,
 /// #   B: bytes::Buf,
 /// # {
-/// let params = h3::params::Params::default()
+/// let config = h3::Config::new()
 ///     .max_field_section_size(8192);
-/// let h3_conn = h3::client::Builder::new(params)
+/// let h3_conn = h3::client::Builder::new(config)
 ///     .build(quic)
 ///     .await
 ///     .expect("Failed to build connection");
 /// # }
 /// ```
 pub struct Builder {
-    params: Params,
+    config: Config,
 }
 
 impl Builder {
     /// Create a HTTP/3 client builder
-    pub fn new(params: Params) -> Self {
-        Self { params }
+    pub fn new(config: Config) -> Self {
+        Self { config }
     }
 
     /// Create a new HTTP/3 client from a `quic` connection
@@ -507,9 +507,9 @@ impl Builder {
             Connection {
                 inner: ConnectionInner::new(
                     quic,
-                    self.params.max_field_section_size,
+                    self.config.max_field_section_size,
                     conn_state.clone(),
-                    self.params.grease,
+                    self.config.grease,
                 )
                 .await?,
             },
@@ -517,10 +517,10 @@ impl Builder {
                 open,
                 conn_state,
                 conn_waker,
-                max_field_section_size: self.params.max_field_section_size,
+                max_field_section_size: self.config.max_field_section_size,
                 sender_count: Arc::new(AtomicUsize::new(1)),
                 _buf: PhantomData,
-                send_grease_frame: self.params.grease,
+                send_grease_frame: self.config.grease,
             },
         ))
     }

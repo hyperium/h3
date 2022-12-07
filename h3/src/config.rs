@@ -2,13 +2,13 @@
 
 /// HTTP/3 connection parameters builder
 #[derive(Debug)]
-pub struct Params {
+pub struct Config {
     pub(crate) enable_webtransport: bool,
     pub(crate) grease: bool,
     pub(crate) max_field_section_size: u64,
 }
 
-impl Default for Params {
+impl Default for Config {
     fn default() -> Self {
         Self {
             enable_webtransport: false,
@@ -18,9 +18,14 @@ impl Default for Params {
     }
 }
 
-impl Params {
+impl Config {
     /// Default max header size
     pub const DEFAULT_MAX_FIELD_SECTION_SIZE: u64 = (1 << 62) - 1;
+
+    /// Start to create config
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     /// Enable WebTransport
     pub fn enable_webtransport(mut self) -> Self {

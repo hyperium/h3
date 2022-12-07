@@ -7,9 +7,9 @@ use http::{request, HeaderMap, Request, Response, StatusCode};
 
 use crate::{
     client,
+    config::Config,
     connection::ConnectionState,
     error::{Code, Error, Kind},
-    params::Params,
     proto::{
         coding::Encode,
         frame::{self, Frame, FrameType},
@@ -283,8 +283,8 @@ async fn header_too_big_response_from_server() {
         //= type=test
         //# An HTTP/3 implementation MAY impose a limit on the maximum size of
         //# the message header it will accept on an individual HTTP message.
-        let params = Params::default().max_field_section_size(12);
-        let mut incoming_req = server::Builder::new(params).build(conn).await.unwrap();
+        let config = Config::new().max_field_section_size(12);
+        let mut incoming_req = server::Builder::new(config).build(conn).await.unwrap();
 
         let err_kind = incoming_req.accept().await.map(|_| ()).unwrap_err().kind();
         assert_matches!(
@@ -338,8 +338,8 @@ async fn header_too_big_response_from_server_trailers() {
         //= type=test
         //# An HTTP/3 implementation MAY impose a limit on the maximum size of
         //# the message header it will accept on an individual HTTP message.
-        let params = Params::default().max_field_section_size(207);
-        let mut incoming_req = server::Builder::new(params).build(conn).await.unwrap();
+        let config = Config::new().max_field_section_size(207);
+        let mut incoming_req = server::Builder::new(config).build(conn).await.unwrap();
 
         let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
         let _ = request_stream
@@ -403,8 +403,8 @@ async fn header_too_big_client_error() {
         //= type=test
         //# An HTTP/3 implementation MAY impose a limit on the maximum size of
         //# the message header it will accept on an individual HTTP message.
-        let params = Params::default().max_field_section_size(12);
-        server::Builder::new(params).build(conn).await.unwrap();
+        let config = Config::new().max_field_section_size(12);
+        server::Builder::new(config).build(conn).await.unwrap();
     };
 
     tokio::join!(server_fut, client_fut);
@@ -463,8 +463,8 @@ async fn header_too_big_client_error_trailer() {
         //= type=test
         //# An HTTP/3 implementation MAY impose a limit on the maximum size of
         //# the message header it will accept on an individual HTTP message.
-        let params = Params::default().max_field_section_size(207);
-        let mut incoming_req = server::Builder::new(params).build(conn).await.unwrap();
+        let config = Config::new().max_field_section_size(207);
+        let mut incoming_req = server::Builder::new(config).build(conn).await.unwrap();
 
         let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
         let _ = request_stream
@@ -493,8 +493,8 @@ async fn header_too_big_discard_from_client() {
         //# process it.
 
         // Do not poll driver so client doesn't know about server's max_field section size setting
-        let params = Params::default().max_field_section_size(12);
-        let (_conn, mut client) = client::Builder::new(params)
+        let config = Config::new().max_field_section_size(12);
+        let (_conn, mut client) = client::Builder::new(config)
             .build::<_, _, Bytes>(pair.client().await)
             .await
             .expect("client init");
@@ -578,7 +578,7 @@ async fn header_too_big_discard_from_client_trailers() {
         //# process it.
 
         // Do not poll driver so client doesn't know about server's max_field section size setting
-        let params = Params::default().max_field_section_size(200);
+        let params = Config::new().max_field_section_size(200);
         let (mut driver, mut client) = client::Builder::new(params)
             .build::<_, _, Bytes>(pair.client().await)
             .await
