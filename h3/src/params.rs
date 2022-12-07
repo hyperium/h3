@@ -1,6 +1,7 @@
 //! HTTP/3 connection parameters
 
 /// HTTP/3 connection parameters builder
+#[derive(Debug)]
 pub struct Params {
     pub(crate) enable_webtransport: bool,
     pub(crate) grease: bool,
@@ -21,15 +22,15 @@ impl Params {
     /// Default max header size
     pub const DEFAULT_MAX_FIELD_SECTION_SIZE: u64 = (1 << 62) - 1;
 
-    /// Set whether WebTransport is supported
-    pub fn enable_webtransport(mut self, val: bool) -> Self {
-        self.enable_webtransport = val;
+    /// Enable WebTransport
+    pub fn enable_webtransport(mut self) -> Self {
+        self.enable_webtransport = true;
         self
     }
 
-    /// Set wether to send GREASE
-    pub fn grease(mut self, val: bool) -> Self {
-        self.grease = val;
+    /// Disable grease in SETTINGS
+    pub fn disable_grease(mut self) -> Self {
+        self.grease = false;
         self
     }
 
