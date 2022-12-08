@@ -11,6 +11,8 @@ fn server_and_client_should_connect_successfully() {
 
     let mut server = Command::new(command.as_path())
         .arg("--listen=[::]:4433")
+        .arg("--cert=../examples/cert.crt")
+        .arg("--key=../examples/cert.key")
         .spawn()
         .expect("Failed to run server example");
     assert!(server.stderr.is_none(), "Failed to listen on localhost");
@@ -19,7 +21,7 @@ fn server_and_client_should_connect_successfully() {
     command.push("client");
     assert!(
         Command::new(command)
-            .args(["https://localhost:4433", "--insecure"])
+            .args(["https://localhost:4433"])
             .stderr(Stdio::null())
             .status()
             .expect("Failed to run client example")
