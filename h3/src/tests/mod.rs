@@ -19,12 +19,11 @@ use std::{
 };
 
 use bytes::Bytes;
-use futures_util::StreamExt;
 use rustls::{Certificate, PrivateKey};
 
 use crate::quic;
 use h3_quinn::{
-    quinn::{Incoming, NewConnection, TransportConfig},
+    quinn::{self, TransportConfig},
     Connection,
 };
 
@@ -66,7 +65,7 @@ impl Pair {
             .initial_rtt(Duration::from_millis(10));
     }
 
-    pub fn server_inner(&mut self) -> (h3_quinn::Endpoint, Incoming) {
+    pub fn server_inner(&mut self) -> quinn::Endpoint {
         let mut crypto = rustls::ServerConfig::builder()
             .with_safe_default_cipher_suites()
             .with_safe_default_kx_groups()
@@ -78,22 +77,21 @@ impl Pair {
         crypto.max_early_data_size = u32::MAX;
         crypto.alpn_protocols = vec![b"h3".to_vec()];
 
-        let mut server_config = h3_quinn::quinn::ServerConfig::with_crypto(crypto.into());
+        let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(crypto));
         server_config.transport = self.config.clone();
-        let (endpoint, incoming) =
-            h3_quinn::quinn::Endpoint::server(server_config, "[::]:0".parse().unwrap()).unwrap();
+        let endpoint = quinn::Endpoint::server(server_config, "[::]:0".parse().unwrap()).unwrap();
 
         self.port = endpoint.local_addr().unwrap().port();
 
-        (endpoint, incoming)
+        endpoint
     }
 
     pub fn server(&mut self) -> Server {
-        let (endpoint, incoming) = self.server_inner();
-        Server { endpoint, incoming }
+        let endpoint = self.server_inner();
+        Server { endpoint }
     }
 
-    pub async fn client_inner(&self) -> NewConnection {
+    pub async fn client_inner(&self) -> quinn::Connection {
         let addr = (Ipv6Addr::LOCALHOST, self.port)
             .to_socket_addrs()
             .unwrap()
@@ -112,10 +110,10 @@ impl Pair {
         crypto.enable_early_data = true;
         crypto.alpn_protocols = vec![b"h3".to_vec()];
 
-        let client_config = h3_quinn::quinn::ClientConfig::new(Arc::new(crypto));
+        let mut client_config = quinn::ClientConfig::new(Arc::new(crypto));
+        client_config.transport_config(self.config.clone());
 
-        let mut client_endpoint =
-            h3_quinn::quinn::Endpoint::client("[::]:0".parse().unwrap()).unwrap();
+        let mut client_endpoint = quinn::Endpoint::client("[::]:0".parse().unwrap()).unwrap();
         client_endpoint.set_default_client_config(client_config);
         client_endpoint
             .connect(addr, "localhost")
@@ -130,13 +128,12 @@ impl Pair {
 }
 
 pub struct Server {
-    pub endpoint: h3_quinn::Endpoint,
-    pub incoming: Incoming,
+    pub endpoint: quinn::Endpoint,
 }
 
 impl Server {
     pub async fn next(&mut self) -> impl quic::Connection<Bytes> {
-        Connection::new(self.incoming.next().await.unwrap().await.unwrap())
+        Connection::new(self.endpoint.accept().await.unwrap().await.unwrap())
     }
 }
 
