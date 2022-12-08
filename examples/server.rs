@@ -6,7 +6,7 @@ use http::{Request, StatusCode};
 use rustls::{Certificate, PrivateKey};
 use structopt::StructOpt;
 use tokio::{fs::File, io::AsyncReadExt};
-use tracing::{debug, error, info, trace_span, warn};
+use tracing::{error, info, trace_span};
 
 use h3::{error::ErrorLevel, quic::BidiStream, server::RequestStream};
 use h3_quinn::quinn;
@@ -40,7 +40,7 @@ pub struct Certs {
     #[structopt(
         long,
         short,
-        default_value = "examples/cert.crt",
+        default_value = "examples/server.cert",
         help = "Certificate for TLS. If present, `--key` is mandatory."
     )]
     pub cert: PathBuf,
@@ -48,7 +48,7 @@ pub struct Certs {
     #[structopt(
         long,
         short,
-        default_value = "examples/cert.key",
+        default_value = "examples/server.key",
         help = "Private key for the certificate."
     )]
     pub key: PathBuf,
@@ -62,6 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_span_events(tracing_subscriber::fmt::format::FmtSpan::FULL)
         .with_writer(std::io::stderr)
+        .with_max_level(tracing::Level::INFO)
         .init();
 
     // process cli arguments
@@ -87,7 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cert = Certificate(std::fs::read(cert)?);
     let key = PrivateKey(std::fs::read(key)?);
 
-    let mut crypto = rustls::ServerConfig::builder()
+    let mut tls_config = rustls::ServerConfig::builder()
         .with_safe_default_cipher_suites()
         .with_safe_default_kx_groups()
         .with_protocol_versions(&[&rustls::version::TLS13])
@@ -95,13 +96,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_no_client_auth()
         .with_single_cert(vec![cert], key)?;
 
-    crypto.max_early_data_size = u32::MAX;
-    crypto.alpn_protocols = vec![ALPN.into()];
+    tls_config.max_early_data_size = u32::MAX;
+    tls_config.alpn_protocols = vec![ALPN.into()];
 
-    let server_config = quinn::ServerConfig::with_crypto(Arc::new(crypto));
+    let server_config = quinn::ServerConfig::with_crypto(Arc::new(tls_config));
     let (endpoint, mut incoming) = quinn::Endpoint::server(server_config, opt.listen)?;
 
-    info!("Listening on {}", opt.listen);
+    info!("listening on {}", opt.listen);
 
     // handle incoming connections and requests
 
@@ -113,7 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tokio::spawn(async move {
             match new_conn.await {
                 Ok(conn) => {
-                    debug!("new connection established");
+                    info!("new connection established");
 
                     let mut h3_conn = h3::server::Connection::new(h3_quinn::Connection::new(conn))
                         .await
@@ -122,13 +123,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     loop {
                         match h3_conn.accept().await {
                             Ok(Some((req, stream))) => {
-                                debug!("new request: {:#?}", req);
+                                info!("new request: {:#?}", req);
 
                                 let root = root.clone();
 
                                 tokio::spawn(async {
                                     if let Err(e) = handle_request(req, stream, root).await {
-                                        error!("request failed: {}", e);
+                                        error!("handling request failed: {}", e);
                                     }
                                 });
                             }
@@ -139,7 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
 
                             Err(err) => {
-                                warn!("error on accept {}", err);
+                                error!("error on accept {}", err);
                                 match err.get_error_level() {
                                     ErrorLevel::ConnectionError => break,
                                     ErrorLevel::StreamError => continue,
@@ -149,7 +150,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 Err(err) => {
-                    warn!("accepting connection failed: {:?}", err);
+                    error!("accepting connection failed: {:?}", err);
                 }
             }
         });
@@ -178,7 +179,7 @@ where
             match File::open(&to_serve).await {
                 Ok(file) => (StatusCode::OK, Some(file)),
                 Err(e) => {
-                    debug!("failed to open: \"{}\": {}", to_serve.to_string_lossy(), e);
+                    error!("failed to open: \"{}\": {}", to_serve.to_string_lossy(), e);
                     (StatusCode::NOT_FOUND, None)
                 }
             }
@@ -189,7 +190,7 @@ where
 
     match stream.send_response(resp).await {
         Ok(_) => {
-            debug!("response to connection successful");
+            info!("successfully respond to connection");
         }
         Err(err) => {
             error!("unable to send response to connection peer: {:?}", err);
