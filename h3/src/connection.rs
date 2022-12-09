@@ -106,7 +106,8 @@ where
         //# unidirectional streams required by mandatory extensions (such as the
         //# QPACK encoder and decoder streams) first, and then create additional
         //# streams as allowed by their peer.
-        let mut control_send = future::poll_fn(|cx| conn.poll_open_send(cx))
+        let mut control_send = conn
+            .poll_open_send()
             .await
             .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))?;
 
@@ -227,106 +228,65 @@ where
         rec_stream.await.map_err(|e| e.into().into())
     }
 
-    pub fn poll_accept_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+    pub async fn poll_accept_recv(&mut self) -> Result<(), Error> {
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
-            return Poll::Ready(Err(e.clone()));
+            return Err(e.clone());
         }
 
-        loop {
-            match self.conn.poll_accept_recv(cx)? {
-                Poll::Ready(Some(stream)) => self
-                    .pending_recv_streams
-                    .push(AcceptRecvStream::new(stream)),
-                Poll::Ready(None) => {
-                    return Poll::Ready(Err(Code::H3_GENERAL_PROTOCOL_ERROR.with_reason(
-                        "Connection closed unexpected",
-                        crate::error::ErrorLevel::ConnectionError,
-                    )))
+        let stream = AcceptRecvStream::new(self.conn.poll_accept_recv().await?).into_stream()?;
+        let y = match stream {
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
+            //# Only one control stream per peer is permitted;
+            //# receipt of a second stream claiming to be a control stream MUST be
+            //# treated as a connection error of type H3_STREAM_CREATION_ERROR.
+            AcceptedRecvStream::Control(s) => {
+                if self.control_recv.is_some() {
+                    return Err(
+                        self.close(Code::H3_STREAM_CREATION_ERROR, "got two control streams")
+                    );
                 }
-                Poll::Pending => break,
+                self.control_recv = Some(s);
             }
-        }
-
-        let mut resolved = vec![];
-
-        for (index, pending) in self.pending_recv_streams.iter_mut().enumerate() {
-            match pending.poll_type(cx)? {
-                Poll::Ready(()) => resolved.push(index),
-                Poll::Pending => (),
+            enc @ AcceptedRecvStream::Encoder(_) => {
+                if let Some(_prev) = self.encoder_recv.replace(enc) {
+                    return Err(
+                        self.close(Code::H3_STREAM_CREATION_ERROR, "got two encoder streams")
+                    );
+                };
             }
-        }
-
-        for (removed, index) in resolved.into_iter().enumerate() {
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
+            dec @ AcceptedRecvStream::Decoder(_) => {
+                if let Some(_prev) = self.decoder_recv.replace(dec) {
+                    return Err(
+                        self.close(Code::H3_STREAM_CREATION_ERROR, "got two decoder streams")
+                    );
+                };
+            }
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
             //= type=implication
-            //# As certain stream types can affect connection state, a recipient
-            //# SHOULD NOT discard data from incoming unidirectional streams prior to
-            //# reading the stream type.
-            let stream = self
-                .pending_recv_streams
-                .remove(index - removed)
-                .into_stream()?;
-            match stream {
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
-                //# Only one control stream per peer is permitted;
-                //# receipt of a second stream claiming to be a control stream MUST be
-                //# treated as a connection error of type H3_STREAM_CREATION_ERROR.
-                AcceptedRecvStream::Control(s) => {
-                    if self.control_recv.is_some() {
-                        return Poll::Ready(Err(
-                            self.close(Code::H3_STREAM_CREATION_ERROR, "got two control streams")
-                        ));
-                    }
-                    self.control_recv = Some(s);
-                }
-                enc @ AcceptedRecvStream::Encoder(_) => {
-                    if let Some(_prev) = self.encoder_recv.replace(enc) {
-                        return Poll::Ready(Err(
-                            self.close(Code::H3_STREAM_CREATION_ERROR, "got two encoder streams")
-                        ));
-                    }
-                }
-                dec @ AcceptedRecvStream::Decoder(_) => {
-                    if let Some(_prev) = self.decoder_recv.replace(dec) {
-                        return Poll::Ready(Err(
-                            self.close(Code::H3_STREAM_CREATION_ERROR, "got two decoder streams")
-                        ));
-                    }
-                }
-
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
-                //= type=implication
-                //# Endpoints MUST NOT consider these streams to have any meaning upon
-                //# receipt.
-                _ => (),
-            }
-        }
-
-        Poll::Pending
+            //# Endpoints MUST NOT consider these streams to have any meaning upon
+            //# receipt.
+            _ => (),
+        };
+        Ok(())
     }
 
-    pub fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<Frame<PayloadLen>, Error>> {
-        println!("IM IN");
+    pub async fn poll_control(&mut self) -> Result<Frame<PayloadLen>, Error> {
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
-            return Poll::Ready(Err(e.clone()));
+            return Err(e.clone());
         }
 
-        loop {
-            match self.poll_accept_recv(cx) {
-                Poll::Ready(Ok(_)) => continue,
-                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
-                Poll::Pending if self.control_recv.is_none() => return Poll::Pending,
-                _ => break,
+        let stream = loop {
+            match &mut self.control_recv {
+                Some(stream) => break stream,
+                None => {
+                    self.poll_accept_recv().await?;
+                    continue;
+                }
             }
-        }
+        };
 
-        let recvd = ready!(self
-            .control_recv
-            .as_mut()
-            .expect("control_recv")
-            .poll_next(cx))?;
-
-        let res = match recvd {
+        let recv = future::poll_fn(|cx| stream.poll_next(cx)).await?;
+        match recv {
             //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
             //# If either control
             //# stream is closed at any point, this MUST be treated as a connection
@@ -452,8 +412,7 @@ where
                     )),
                 }
             }
-        };
-        Poll::Ready(res)
+        }
     }
 
     pub fn start_stream(&mut self, id: StreamId) {
@@ -473,7 +432,9 @@ where
     /// https://www.rfc-editor.org/rfc/rfc9114.html#stream-grease
     async fn start_grease_stream(&mut self) {
         // start the stream
-        let mut grease_stream = match future::poll_fn(|cx| self.conn.poll_open_send(cx))
+        let mut grease_stream = match self
+            .conn
+            .poll_open_send()
             .await
             .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))
         {

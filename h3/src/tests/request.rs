@@ -30,7 +30,7 @@ async fn get() {
 
     let client_fut = async {
         let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
-        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let drive_fut = async { driver.poll_close().await };
         let req_fut = async {
             let mut request_stream = client
                 .send_request(Request::get("http://localhost/salut").body(()).unwrap())
@@ -83,7 +83,7 @@ async fn get_with_trailers_unknown_content_type() {
 
     let client_fut = async {
         let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
-        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let drive_fut = async { driver.poll_close().await };
         let req_fut = async {
             let mut request_stream = client
                 .send_request(Request::get("http://localhost/salut").body(()).unwrap())
@@ -147,7 +147,7 @@ async fn get_with_trailers_known_content_type() {
 
     let client_fut = async {
         let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
-        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let drive_fut = async { driver.poll_close().await };
         let req_fut = async {
             let mut request_stream = client
                 .send_request(Request::get("http://localhost/salut").body(()).unwrap())
@@ -211,7 +211,7 @@ async fn post() {
 
     let client_fut = async {
         let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
-        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let drive_fut = async { driver.poll_close().await };
         let req_fut = async {
             let mut request_stream = client
                 .send_request(Request::get("http://localhost/salut").body(()).unwrap())
@@ -265,7 +265,7 @@ async fn header_too_big_response_from_server() {
     let client_fut = async {
         // Do not poll driver so client doesn't know about server's max_field section size setting
         let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
-        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let drive_fut = async { driver.poll_close().await };
         let req_fut = async {
             let mut request_stream = client
                 .send_request(Request::get("http://localhost/salut").body(()).unwrap())
@@ -317,7 +317,7 @@ async fn header_too_big_response_from_server_trailers() {
     let client_fut = async {
         // Do not poll driver so client doesn't know about server's max_field_section_size setting
         let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
-        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let drive_fut = async { driver.poll_close().await };
         let req_fut = async {
             let mut request_stream = client
                 .send_request(Request::get("http://localhost/salut").body(()).unwrap())
@@ -380,7 +380,7 @@ async fn header_too_big_client_error() {
 
     let client_fut = async {
         let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
-        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let drive_fut = async { driver.poll_close().await };
         let req_fut = async {
             // pretend client already received server's settings
             client
@@ -432,7 +432,7 @@ async fn header_too_big_client_error_trailer() {
     let client_fut = async {
         // Do not poll driver so client doesn't know about server's max_field_section_size setting
         let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
-        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let drive_fut = async { driver.poll_close().await };
         let req_fut = async {
             client
                 .shared_state()
@@ -599,7 +599,7 @@ async fn header_too_big_discard_from_client_trailers() {
             .build::<_, _, Bytes>(pair.client().await)
             .await
             .expect("client init");
-        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let drive_fut = async { driver.poll_close().await };
         let req_fut = async {
             let mut request_stream = client
                 .send_request(Request::get("http://localhost/salut").body(()).unwrap())
@@ -674,7 +674,7 @@ async fn header_too_big_server_error() {
         let (mut driver, mut client) = client::new(pair.client().await) // header size limit faked for brevity
             .await
             .expect("client init");
-        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let drive_fut = async { driver.poll_close().await };
         let req_fut = async {
             let req = Request::get("http://localhost/salut").body(()).unwrap();
             let mut request_stream = client.send_request(req).await.unwrap();
@@ -739,7 +739,7 @@ async fn header_too_big_server_error_trailers() {
         let (mut driver, mut client) = client::new(pair.client().await) // header size limit faked for brevity
             .await
             .expect("client init");
-        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let drive_fut = async { driver.poll_close().await };
         let req_fut = async {
             let req = Request::get("http://localhost/salut").body(()).unwrap();
             let mut request_stream = client.send_request(req).await.unwrap();
@@ -823,7 +823,7 @@ async fn get_timeout_client_recv_response() {
         };
 
         let drive_fut = async move {
-            let result = future::poll_fn(|cx| conn.poll_close(cx)).await;
+            let result = conn.poll_close().await;
             assert_matches!(result.unwrap_err().kind(), Kind::Timeout);
         };
 
@@ -865,7 +865,7 @@ async fn get_timeout_client_recv_data() {
         };
 
         let drive_fut = async move {
-            let result = future::poll_fn(|cx| conn.poll_close(cx)).await;
+            let result = conn.poll_close().await;
             assert_matches!(result.unwrap_err().kind(), Kind::Timeout);
         };
 
@@ -906,7 +906,7 @@ async fn get_timeout_server_accept() {
         };
 
         let drive_fut = async move {
-            let result = future::poll_fn(|cx| conn.poll_close(cx)).await;
+            let result = conn.poll_close().await;
             assert_matches!(result.unwrap_err().kind(), Kind::Timeout);
         };
 
@@ -1439,7 +1439,8 @@ where
             .await
             .unwrap();
 
-        let res = future::poll_fn(|cx| driver.poll_close(cx))
+        let res = driver
+            .poll_close()
             .await
             .map_err(Into::<Error>::into)
             .map(|_| ());

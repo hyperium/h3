@@ -342,13 +342,11 @@ where
 
     async fn poll_accept_request(&mut self) -> Result<Option<C::BidiStream>, Error> {
         println!("3");
-        let _ = future::poll_fn(|cx| self.poll_control(cx)).await;
+        let _ = self.poll_control().await;
         println!("2");
         let _ = future::poll_fn(|cx| self.poll_requests_completion(cx)).await;
         println!("1");
         let closing = self.shared_state().read("server accept").closing;
-
-
 
         println!("SERVER AC PO");
         let mut req_stream = self.inner.poll_accept_request().await.unwrap();
@@ -365,17 +363,16 @@ where
         return Ok(Some(req_stream));
     }
 
-    fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
-        println!("POLL CONTROL");
-        while let Poll::Ready(frame) = self.inner.poll_control(cx)? {
+    async fn poll_control(&mut self) -> Result<(), Error> {
+        while let frame = self.inner.poll_control().await? {
             match frame {
                 Frame::Settings(_) => println!("Got settings"),
                 Frame::Goaway(id) => {
                     if !id.is_push() {
-                        return Poll::Ready(Err(Code::H3_ID_ERROR.with_reason(
+                        return Err(Code::H3_ID_ERROR.with_reason(
                             format!("non-push StreamId in a GoAway frame: {}", id),
                             ErrorLevel::ConnectionError,
-                        )));
+                        ))
                     }
                 }
                 f @ Frame::MaxPushId(_) | f @ Frame::CancelPush(_) => {
@@ -400,15 +397,16 @@ where
                 //# receipt of a PUSH_PROMISE frame as a connection error of type
                 //# H3_FRAME_UNEXPECTED.
                 frame => {
-                    return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED.with_reason(
+                    return Err(Code::H3_FRAME_UNEXPECTED.with_reason(
                         format!("on server control stream: {:?}", frame),
                         ErrorLevel::ConnectionError,
-                    )))
+                    ));
                 }
             }
         }
-        Poll::Ready(Ok(()))
+        todo!();
     }
+
 
     fn poll_requests_completion(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         loop {

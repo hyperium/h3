@@ -58,6 +58,7 @@ impl<'a, B: Buf> Future for AcceptBidiStream<'a, B> {
     }
 }
 
+/// Todo
 #[pin_project]
 pub struct AcceptRecvStream<'a> {
     #[pin]
@@ -78,6 +79,7 @@ impl<'a> Future for AcceptRecvStream<'a> {
     }
 }
 
+/// Todo
 #[pin_project]
 pub struct OpenBidiStream<'a, B> {
     #[pin]
@@ -101,6 +103,7 @@ impl<'a, B: Buf> Future for OpenBidiStream<'a, B> {
     }
 }
 
+/// Todo
 #[pin_project]
 pub struct OpenSendStream<'a, B> {
     #[pin]
@@ -148,14 +151,14 @@ impl<B: Buf> quic::Connection<B> for Connection {
         }
     }
 
-    fn poll_accept_recv<'a>(&mut self) -> Self::AcceptRecvFuture<'a> {
+    fn poll_accept_recv<'a>(&'a mut self) -> Self::AcceptRecvFuture<'a> {
         let accept_recv = self.conn.accept_uni();
         AcceptRecvStream {
             uni_fut: accept_recv,
         }
     }
 
-    fn poll_open_bidi<'a>(&mut self) -> Self::OpenBidiFuture<'a> {
+    fn poll_open_bidi<'a>(&'a mut self) -> Self::OpenBidiFuture<'a> {
         let open_bidi = self.conn.open_bi();
         OpenBidiStream {
             uni_fut: open_bidi,
@@ -163,7 +166,7 @@ impl<B: Buf> quic::Connection<B> for Connection {
         }
     }
 
-    fn poll_open_send<'a>(&mut self) -> Self::OpenSendFuture<'a> {
+    fn poll_open_send<'a>(&'a mut self) -> Self::OpenSendFuture<'a> {
         OpenSendStream {
             uni_fut: self.conn.open_uni(),
             e: None,
