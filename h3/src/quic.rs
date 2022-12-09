@@ -44,34 +44,37 @@ pub trait Connection<B: Buf> {
     /// Error type yielded by this trait methods
     type Error: Into<Box<dyn Error>>;
     /// Future for poll_accept_bidi
-    type BidiStream1<'a>: Future<Output = Self::BidiStream>
+    type BidiStreamFuture<'a>: Future<Output = Result<Self::BidiStream, Self::Error>>
+    where
+        Self: 'a;
+    /// Future for accept_recv
+    type AcceptRecvFuture<'a>: Future<Output = Result<Self::RecvStream, Self::Error>>
+    where
+        Self: 'a;
+    /// Future for open_bidi
+    type OpenBidiFuture<'a>: Future<Output = Result<Self::BidiStream, Self::Error>>
+    where
+        Self: 'a;
+    /// Future for open_send
+    type OpenSendFuture<'a>: Future<Output = Result<Self::SendStream, Self::Error>>
     where
         Self: 'a;
 
     /// Accept an incoming unidirectional stream
     ///
     /// Returning `None` implies the connection is closing or closed.
-    fn poll_accept_recv(
-        &mut self,
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::RecvStream>, Self::Error>>;
+    fn poll_accept_recv<'a>(&mut self) -> Self::AcceptRecvFuture<'a>;
 
     /// Accept an incoming bidirectional stream
     ///
     /// Returning `None` implies the connection is closing or closed.
-    fn poll_accept_bidi<'a>(&'a mut self) -> Self::BidiStream1<'a>;
+    fn poll_accept_bidi<'a>(&'a mut self) -> Self::BidiStreamFuture<'a>;
 
     /// Poll the connection to create a new bidirectional stream.
-    fn poll_open_bidi(
-        &mut self,
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Self::BidiStream, Self::Error>>;
+    fn poll_open_bidi<'a>(&mut self) -> Self::OpenBidiFuture<'a>;
 
     /// Poll the connection to create a new unidirectional stream.
-    fn poll_open_send(
-        &mut self,
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Self::SendStream, Self::Error>>;
+    fn poll_open_send<'a>(&mut self) -> Self::OpenSendFuture<'a>;
 
     /// Get an object to open outgoing streams.
     fn opener(&self) -> Self::OpenStreams;

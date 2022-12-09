@@ -341,63 +341,35 @@ where
     }
 
     async fn poll_accept_request(&mut self) -> Result<Option<C::BidiStream>, Error> {
-        println!("DRIN1");
+        println!("3");
         let _ = future::poll_fn(|cx| self.poll_control(cx)).await;
-        println!("DRIN2");
+        println!("2");
         let _ = future::poll_fn(|cx| self.poll_requests_completion(cx)).await;
-        println!("DRIN3");
+        println!("1");
         let closing = self.shared_state().read("server accept").closing;
 
-        /*   loop {
-        match self.inner.poll_accept_request(cx) {
-            Err(x) => break Poll::Ready(Err(x)),
-            Poll::Ready(Ok(None)) => {
-                if self.poll_requests_completion(cx).is_ready() {
-                    break Poll::Ready(Ok(None));
-                } else {
-                    // Wait for all the requests to be finished, request_end_recv will wake
-                    // us on each request completion.
-                    break Poll::Pending;
-                }
-            }
-            Poll::Pending => {
-                if closing.is_some() && self.poll_requests_completion(cx).is_ready() {
-                    // The connection is now idle.
-                    break Poll::Ready(Ok(None));
-                } else {
-                    return Poll::Pending;
-                }
-            }
-            Poll::Ready(Ok(Some(mut s))) => {
-                // When the connection is in a graceful shutdown procedure, reject all
-                // incoming requests not belonging to the grace interval. It's possible that
-                // some acceptable request streams arrive after rejected requests.
-                if let Some(max_id) = closing {
-                    if s.id() > max_id {
-                        s.stop_sending(Code::H3_REQUEST_REJECTED.value());
-                        s.reset(Code::H3_REQUEST_REJECTED.value());
-                        if self.poll_requests_completion(cx).is_ready() {
-                            break Poll::Ready(Ok(None));
-                        }
-                        continue;
-                    }
-                }
-                self.inner.start_stream(s.id());
-                self.ongoing_streams.insert(s.id());
-                break Poll::Ready(Ok(Some(s)));
-            }
-        };*/
+
+
         println!("SERVER AC PO");
-        let s = self.inner.poll_accept_request().await.unwrap();
-        self.inner.start_stream(s.id());
-        self.ongoing_streams.insert(s.id());
-        return Ok(Some(s));
+        let mut req_stream = self.inner.poll_accept_request().await.unwrap();
+        if let Some(max_id) = closing {
+            if req_stream.id() > max_id {
+                req_stream.stop_sending(Code::H3_REQUEST_REJECTED.value());
+                req_stream.reset(Code::H3_REQUEST_REJECTED.value());
+                future::poll_fn(|cx| self.poll_requests_completion(cx)).await;
+                return Ok(None);
+            }
+        }
+        self.inner.start_stream(req_stream.id());
+        self.ongoing_streams.insert(req_stream.id());
+        return Ok(Some(req_stream));
     }
 
     fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+        println!("POLL CONTROL");
         while let Poll::Ready(frame) = self.inner.poll_control(cx)? {
             match frame {
-                Frame::Settings(_) => warn!("Got settings"),
+                Frame::Settings(_) => println!("Got settings"),
                 Frame::Goaway(id) => {
                     if !id.is_push() {
                         return Poll::Ready(Err(Code::H3_ID_ERROR.with_reason(
@@ -407,7 +379,7 @@ where
                     }
                 }
                 f @ Frame::MaxPushId(_) | f @ Frame::CancelPush(_) => {
-                    warn!("Control frame ignored {:?}", f);
+                    println!("Control frame ignored {:?}", f);
 
                     //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
                     //= type=TODO
@@ -435,7 +407,7 @@ where
                 }
             }
         }
-        Poll::Pending
+        Poll::Ready(Ok(()))
     }
 
     fn poll_requests_completion(&mut self, cx: &mut Context<'_>) -> Poll<()> {

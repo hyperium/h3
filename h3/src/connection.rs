@@ -222,15 +222,9 @@ where
             if let Some(ref e) = state.error {
                 return Err(e.clone());
             }
-            println!("D");
         }
-
-        // .into().into() converts the impl QuicError into crate::error::Error.
-        // The `?` operator doesn't work here for some reason.
-        // self.conn.poll_accept_bidi(cx).map_err(|e| e.into().into())
-
-        let c = self.conn.poll_accept_bidi();
-        Ok(c.await)
+        let rec_stream = self.conn.poll_accept_bidi();
+        rec_stream.await.map_err(|e| e.into().into())
     }
 
     pub fn poll_accept_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
@@ -312,6 +306,7 @@ where
     }
 
     pub fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<Frame<PayloadLen>, Error>> {
+        println!("IM IN");
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
             return Poll::Ready(Err(e.clone()));
         }
