@@ -216,20 +216,21 @@ where
         stream::write(&mut self.control_send, Frame::Goaway(max_id)).await
     }
 
-    pub fn poll_accept_request(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<C::BidiStream>, Error>> {
+    pub async fn poll_accept_request(&mut self) -> Result<C::BidiStream, Error> {
         {
             let state = self.shared.read("poll_accept_request");
             if let Some(ref e) = state.error {
-                return Poll::Ready(Err(e.clone()));
+                return Err(e.clone());
             }
+            println!("D");
         }
 
         // .into().into() converts the impl QuicError into crate::error::Error.
         // The `?` operator doesn't work here for some reason.
-        self.conn.poll_accept_bidi(cx).map_err(|e| e.into().into())
+        // self.conn.poll_accept_bidi(cx).map_err(|e| e.into().into())
+
+        let c = self.conn.poll_accept_bidi();
+        Ok(c.await)
     }
 
     pub fn poll_accept_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {

@@ -142,7 +142,9 @@ where
         &mut self,
     ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
         // Accept the incoming stream
-        let mut stream = match future::poll_fn(|cx| self.poll_accept_request(cx)).await {
+        // let mut stream = match future::poll_fn(|cx| self.poll_accept_request(cx)).await {
+        println!("ONLY ACCEPT");
+        let mut stream = match self.poll_accept_request().await {
             Ok(Some(s)) => FrameStream::new(s),
             Ok(None) => {
                 // We always send a last GoAway frame to the client, so it knows which was the last
@@ -167,7 +169,7 @@ where
                 };
             }
         };
-
+        println!("HÄ");
         let frame = future::poll_fn(|cx| stream.poll_next(cx)).await;
 
         let mut encoded = match frame {
@@ -338,61 +340,64 @@ where
         self.inner.shutdown(max_requests).await
     }
 
-    fn poll_accept_request(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<C::BidiStream>, Error>> {
-        let _ = self.poll_control(cx)?;
-        let _ = self.poll_requests_completion(cx);
-
+    async fn poll_accept_request(&mut self) -> Result<Option<C::BidiStream>, Error> {
+        println!("DRIN1");
+        let _ = future::poll_fn(|cx| self.poll_control(cx)).await;
+        println!("DRIN2");
+        let _ = future::poll_fn(|cx| self.poll_requests_completion(cx)).await;
+        println!("DRIN3");
         let closing = self.shared_state().read("server accept").closing;
 
-        loop {
-            match self.inner.poll_accept_request(cx) {
-                Poll::Ready(Err(x)) => break Poll::Ready(Err(x)),
-                Poll::Ready(Ok(None)) => {
-                    if self.poll_requests_completion(cx).is_ready() {
-                        break Poll::Ready(Ok(None));
-                    } else {
-                        // Wait for all the requests to be finished, request_end_recv will wake
-                        // us on each request completion.
-                        break Poll::Pending;
-                    }
+        /*   loop {
+        match self.inner.poll_accept_request(cx) {
+            Err(x) => break Poll::Ready(Err(x)),
+            Poll::Ready(Ok(None)) => {
+                if self.poll_requests_completion(cx).is_ready() {
+                    break Poll::Ready(Ok(None));
+                } else {
+                    // Wait for all the requests to be finished, request_end_recv will wake
+                    // us on each request completion.
+                    break Poll::Pending;
                 }
-                Poll::Pending => {
-                    if closing.is_some() && self.poll_requests_completion(cx).is_ready() {
-                        // The connection is now idle.
-                        break Poll::Ready(Ok(None));
-                    } else {
-                        return Poll::Pending;
-                    }
+            }
+            Poll::Pending => {
+                if closing.is_some() && self.poll_requests_completion(cx).is_ready() {
+                    // The connection is now idle.
+                    break Poll::Ready(Ok(None));
+                } else {
+                    return Poll::Pending;
                 }
-                Poll::Ready(Ok(Some(mut s))) => {
-                    // When the connection is in a graceful shutdown procedure, reject all
-                    // incoming requests not belonging to the grace interval. It's possible that
-                    // some acceptable request streams arrive after rejected requests.
-                    if let Some(max_id) = closing {
-                        if s.id() > max_id {
-                            s.stop_sending(Code::H3_REQUEST_REJECTED.value());
-                            s.reset(Code::H3_REQUEST_REJECTED.value());
-                            if self.poll_requests_completion(cx).is_ready() {
-                                break Poll::Ready(Ok(None));
-                            }
-                            continue;
+            }
+            Poll::Ready(Ok(Some(mut s))) => {
+                // When the connection is in a graceful shutdown procedure, reject all
+                // incoming requests not belonging to the grace interval. It's possible that
+                // some acceptable request streams arrive after rejected requests.
+                if let Some(max_id) = closing {
+                    if s.id() > max_id {
+                        s.stop_sending(Code::H3_REQUEST_REJECTED.value());
+                        s.reset(Code::H3_REQUEST_REJECTED.value());
+                        if self.poll_requests_completion(cx).is_ready() {
+                            break Poll::Ready(Ok(None));
                         }
+                        continue;
                     }
-                    self.inner.start_stream(s.id());
-                    self.ongoing_streams.insert(s.id());
-                    break Poll::Ready(Ok(Some(s)));
                 }
-            };
-        }
+                self.inner.start_stream(s.id());
+                self.ongoing_streams.insert(s.id());
+                break Poll::Ready(Ok(Some(s)));
+            }
+        };*/
+        println!("SERVER AC PO");
+        let s = self.inner.poll_accept_request().await.unwrap();
+        self.inner.start_stream(s.id());
+        self.ongoing_streams.insert(s.id());
+        return Ok(Some(s));
     }
 
     fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         while let Poll::Ready(frame) = self.inner.poll_control(cx)? {
             match frame {
-                Frame::Settings(_) => trace!("Got settings"),
+                Frame::Settings(_) => warn!("Got settings"),
                 Frame::Goaway(id) => {
                     if !id.is_push() {
                         return Poll::Ready(Err(Code::H3_ID_ERROR.with_reason(

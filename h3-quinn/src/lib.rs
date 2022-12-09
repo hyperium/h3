@@ -5,14 +5,18 @@
 use std::{
     convert::TryInto,
     fmt::{self, Display},
+    future,
+    marker::PhantomData,
+    pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
 
-use bytes::{Buf, Bytes};
-use futures_util::{ready, FutureExt};
+use bytes::{Buf, Bytes, BytesMut};
+use futures_util::{ready, Future, FutureExt};
 use h3::quic::{self, Error, StreamId, WriteBuf};
-use quinn::VarInt;
+use pin_project::pin_project;
+use quinn::{AcceptBi, AcceptUni, VarInt};
 
 pub use quinn::{self};
 
@@ -30,26 +34,49 @@ impl Connection {
     }
 }
 
+/// d
+#[pin_project]
+pub struct AcceptBidiStream<'a, B> {
+    #[pin]
+    uni_fut: AcceptBi<'a>,
+    e: Option<B>,
+}
+
+impl<'a, B: Buf> Future for AcceptBidiStream<'a, B> {
+    type Output = BidiStream<B>;
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        //self.uni_fut.poll_unpin(cx);
+        //   let c = self.project().uni_fut;
+        match self.project().uni_fut.poll_unpin(cx) {
+            Poll::Ready(s) => match s {
+                Ok((a, b)) => {
+                    return Poll::Ready(BidiStream::new(SendStream::new(a), RecvStream::new(b)))
+                }
+                Err(_) => todo!(),
+            },
+            Poll::Pending => return Poll::Pending,
+        }
+    }
+}
+
 impl<B: Buf> quic::Connection<B> for Connection {
-    type OpenStreams = OpenStreams;
     type BidiStream = BidiStream<B>;
+    type OpenStreams = OpenStreams;
     type SendStream = SendStream<B>;
     type RecvStream = RecvStream;
     type Error = ConnectionError;
+    type BidiStream1<'a> = AcceptBidiStream<'a, B> where Self: 'a;
 
-    fn poll_accept_bidi(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<Self::BidiStream>, Self::Error>> {
-        Poll::Ready(
-            match ready!(Box::pin(self.conn.accept_bi()).poll_unpin(cx)) {
-                Ok((send, recv)) => Ok(Some(Self::BidiStream::new(
-                    Self::SendStream::new(send),
-                    Self::RecvStream::new(recv),
-                ))),
-                Err(e) => Err(ConnectionError(e)),
-            },
-        )
+    fn poll_accept_bidi<'a>(&'a mut self) -> Self::BidiStream1<'a> {
+        let x = self.conn.accept_bi();
+        //  AcceptBidiStream<'a>{ uni_fut: x}
+        println!("TT");
+        let mut x2: AcceptBidiStream<B> = AcceptBidiStream {
+            uni_fut: x,
+            e: None,
+        };
+        return x2; 
     }
 
     fn poll_accept_recv(

@@ -3,9 +3,11 @@
 //! This module includes traits and types meant to allow being generic over any
 //! QUIC implementation.
 
+use std::pin::Pin;
 use std::task::{self, Poll};
 
 use bytes::Buf;
+use futures_util::Future;
 
 pub use crate::proto::stream::{InvalidStreamId, StreamId};
 pub use crate::stream::WriteBuf;
@@ -41,6 +43,10 @@ pub trait Connection<B: Buf> {
     type OpenStreams: OpenStreams<B>;
     /// Error type yielded by this trait methods
     type Error: Into<Box<dyn Error>>;
+    /// Future for poll_accept_bidi
+    type BidiStream1<'a>: Future<Output = Self::BidiStream>
+    where
+        Self: 'a;
 
     /// Accept an incoming unidirectional stream
     ///
@@ -53,10 +59,7 @@ pub trait Connection<B: Buf> {
     /// Accept an incoming bidirectional stream
     ///
     /// Returning `None` implies the connection is closing or closed.
-    fn poll_accept_bidi(
-        &mut self,
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::BidiStream>, Self::Error>>;
+    fn poll_accept_bidi<'a>(&'a mut self) -> Self::BidiStream1<'a>;
 
     /// Poll the connection to create a new bidirectional stream.
     fn poll_open_bidi(
