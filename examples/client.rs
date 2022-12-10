@@ -75,6 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // load certificate of CA who issues the server certificate
+    // NOTE that this should be used for dev only
     if let Err(e) = roots.add(&rustls::Certificate(std::fs::read(opt.ca)?)) {
         error!("failed to parse trust anchor: {}", e);
     }
