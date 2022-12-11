@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use futures::future;
 use h3_quinn::quinn;
 use rustls::{self, client::ServerCertVerified};
 use rustls::{Certificate, ServerName};
