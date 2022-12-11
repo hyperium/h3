@@ -72,7 +72,7 @@ use crate::{
     quic::{self, RecvStream as _, SendStream as _},
     stream,
 };
-use tracing::error;
+use tracing::{error, trace};
 
 /// Create a builder of HTTP/3 server connections
 ///
@@ -342,7 +342,6 @@ where
         let _ = self.control().await;
         let _ = future::poll_fn(|cx| self.poll_requests_completion(cx)).await;
         let closing = self.shared_state().read("server accept").closing;
-        println!("D");
         let mut req_stream = self.inner.accept_request().await.unwrap();
         if let Some(max_id) = closing {
             if req_stream.id() > max_id {
@@ -359,7 +358,7 @@ where
 
     async fn control(&mut self) -> Result<(), Error> {
         match self.inner.control().await? {
-            Frame::Settings(_) => println!("Got settings"),
+            Frame::Settings(_) => trace!("Got settings"),
             Frame::Goaway(id) => {
                 if !id.is_push() {
                     return Err(Code::H3_ID_ERROR.with_reason(
@@ -369,7 +368,7 @@ where
                 }
             }
             f @ Frame::MaxPushId(_) | f @ Frame::CancelPush(_) => {
-                println!("Control frame ignored {:?}", f);
+                trace!("Control frame ignored {:?}", f);
 
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
                 //= type=TODO
