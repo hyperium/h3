@@ -9,6 +9,7 @@ macro_rules! config_struct {
         $name:ident { $($fn:ident: $ft:ty),*$(,)? }
     ) => {
         $(#[$doc])*
+        #[derive(Debug)]
         pub struct $name {
             // common fields
             pub(crate) enable_grease: bool,
