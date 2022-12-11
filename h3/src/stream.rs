@@ -229,7 +229,7 @@ where
         })
     }
 
-    pub async fn poll_type(&mut self) -> Result<(), Error> {
+    pub async fn receive_type(&mut self) -> Result<(), Error> {
         loop {
             match (self.ty.as_ref(), self.push_id) {
                 // When accepting a Push stream, we want to parse two VarInts: [StreamType, PUSH_ID]

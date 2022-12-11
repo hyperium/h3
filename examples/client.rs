@@ -104,7 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut driver, mut send_request) = h3::client::new(quinn_conn).await?;
 
     let drive = async move {
-        driver.poll_close().await?;
+        driver.close().await?;
         Ok::<(), Box<dyn std::error::Error>>(())
     };
 

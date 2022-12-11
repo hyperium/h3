@@ -140,7 +140,7 @@ impl<B: Buf> quic::Connection<B> for Connection {
     where
         Self: 'a;
 
-    fn poll_accept_bidi<'a>(&'a mut self) -> Self::BidiStreamFuture<'a> {
+    fn accept_bidi<'a>(&'a mut self) -> Self::BidiStreamFuture<'a> {
         let accept_bidi = self.conn.accept_bi();
         AcceptBidiStream {
             uni_fut: accept_bidi,
@@ -148,14 +148,14 @@ impl<B: Buf> quic::Connection<B> for Connection {
         }
     }
 
-    fn poll_accept_recv<'a>(&'a mut self) -> Self::AcceptRecvFuture<'a> {
+    fn accept_recv<'a>(&'a mut self) -> Self::AcceptRecvFuture<'a> {
         let accept_recv = self.conn.accept_uni();
         AcceptRecvStream {
             uni_fut: accept_recv,
         }
     }
 
-    fn poll_open_bidi<'a>(&'a mut self) -> Self::OpenBidiFuture<'a> {
+    fn open_bidi<'a>(&'a mut self) -> Self::OpenBidiFuture<'a> {
         let open_bidi = self.conn.open_bi();
         OpenBidiStream {
             uni_fut: open_bidi,
@@ -163,7 +163,7 @@ impl<B: Buf> quic::Connection<B> for Connection {
         }
     }
 
-    fn poll_open_send<'a>(&'a mut self) -> Self::OpenSendFuture<'a> {
+    fn open_send<'a>(&'a mut self) -> Self::OpenSendFuture<'a> {
         OpenSendStream {
             uni_fut: self.conn.open_uni(),
             e: None,

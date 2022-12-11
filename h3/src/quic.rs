@@ -62,18 +62,18 @@ pub trait Connection<B: Buf> {
     /// Accept an incoming unidirectional stream
     ///
     /// Returning `None` implies the connection is closing or closed.
-    fn poll_accept_recv<'a>(&'a mut self) -> Self::AcceptRecvFuture<'a>;
+    fn accept_recv<'a>(&'a mut self) -> Self::AcceptRecvFuture<'a>;
 
     /// Accept an incoming bidirectional stream
     ///
     /// Returning `None` implies the connection is closing or closed.
-    fn poll_accept_bidi<'a>(&'a mut self) -> Self::BidiStreamFuture<'a>;
+    fn accept_bidi<'a>(&'a mut self) -> Self::BidiStreamFuture<'a>;
 
     /// Poll the connection to create a new bidirectional stream.
-    fn poll_open_bidi<'a>(&'a mut self) -> Self::OpenBidiFuture<'a>;
+    fn open_bidi<'a>(&'a mut self) -> Self::OpenBidiFuture<'a>;
 
     /// Poll the connection to create a new unidirectional stream.
-    fn poll_open_send<'a>(&'a mut self) -> Self::OpenSendFuture<'a>;
+    fn open_send<'a>(&'a mut self) -> Self::OpenSendFuture<'a>;
 
     /// Get an object to open outgoing streams.
     fn opener(&self) -> Self::OpenStreams;

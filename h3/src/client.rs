@@ -362,12 +362,12 @@ where
 
     /// Wait until the connection is closed
     pub async fn wait_idle(&mut self) -> Result<(), Error> {
-        self.poll_close().await
+        self.close().await
     }
 
     /// Todo
-    pub async fn poll_close(&mut self) -> Result<(), Error> {
-        while let result = self.inner.poll_control().await {
+    pub async fn close(&mut self) -> Result<(), Error> {
+        while let result = self.inner.control().await {
             match result {
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.2
                 //= type=TODO

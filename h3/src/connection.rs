@@ -105,7 +105,7 @@ where
         //# QPACK encoder and decoder streams) first, and then create additional
         //# streams as allowed by their peer.
         let mut control_send = conn
-            .poll_open_send()
+            .open_send()
             .await
             .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))?;
 
@@ -214,24 +214,24 @@ where
         stream::write(&mut self.control_send, Frame::Goaway(max_id)).await
     }
 
-    pub async fn poll_accept_request(&mut self) -> Result<C::BidiStream, Error> {
+    pub async fn accept_request(&mut self) -> Result<C::BidiStream, Error> {
         {
             let state = self.shared.read("poll_accept_request");
             if let Some(ref e) = state.error {
                 return Err(e.clone());
             }
         }
-        let rec_stream = self.conn.poll_accept_bidi();
+        let rec_stream = self.conn.accept_bidi();
         rec_stream.await.map_err(|e| e.into().into())
     }
 
-    pub async fn poll_accept_recv(&mut self) -> Result<(), Error> {
+    pub async fn accept_recv(&mut self) -> Result<(), Error> {
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
             return Err(e.clone());
         }
 
-        let mut accept_stream = AcceptRecvStream::new(self.conn.poll_accept_recv().await?);
-        accept_stream.poll_type().await?;
+        let mut accept_stream = AcceptRecvStream::new(self.conn.accept_recv().await?);
+        accept_stream.receive_type().await?;
         let stream = accept_stream.into_stream()?;
 
         let _ = match stream {
@@ -270,7 +270,7 @@ where
         Ok(())
     }
 
-    pub async fn poll_control(&mut self) -> Result<Frame<PayloadLen>, Error> {
+    pub async fn control(&mut self) -> Result<Frame<PayloadLen>, Error> {
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
             return Err(e.clone());
         }
@@ -279,7 +279,7 @@ where
             match &mut self.control_recv {
                 Some(stream) => break stream,
                 None => {
-                    self.poll_accept_recv().await?;
+                    self.accept_recv().await?;
                     continue;
                 }
             }
@@ -434,7 +434,7 @@ where
         // start the stream
         let mut grease_stream = match self
             .conn
-            .poll_open_send()
+            .open_send()
             .await
             .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))
         {

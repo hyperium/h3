@@ -143,7 +143,7 @@ where
     ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
         // Accept the incoming stream
         // let mut stream = match future::poll_fn(|cx| self.poll_accept_request(cx)).await {
-        let mut stream = match self.poll_accept_request().await {
+        let mut stream = match self.accept_request().await {
             Ok(Some(s)) => FrameStream::new(s),
             Ok(None) => {
                 // We always send a last GoAway frame to the client, so it knows which was the last
@@ -338,12 +338,12 @@ where
         self.inner.shutdown(max_requests).await
     }
 
-    async fn poll_accept_request(&mut self) -> Result<Option<C::BidiStream>, Error> {
-        let _ = self.poll_control().await;
+    async fn accept_request(&mut self) -> Result<Option<C::BidiStream>, Error> {
+        let _ = self.control().await;
         let _ = future::poll_fn(|cx| self.poll_requests_completion(cx)).await;
         let closing = self.shared_state().read("server accept").closing;
         println!("D");
-        let mut req_stream = self.inner.poll_accept_request().await.unwrap();
+        let mut req_stream = self.inner.accept_request().await.unwrap();
         if let Some(max_id) = closing {
             if req_stream.id() > max_id {
                 req_stream.stop_sending(Code::H3_REQUEST_REJECTED.value());
@@ -357,8 +357,8 @@ where
         return Ok(Some(req_stream));
     }
 
-    async fn poll_control(&mut self) -> Result<(), Error> {
-        match self.inner.poll_control().await? {
+    async fn control(&mut self) -> Result<(), Error> {
+        match self.inner.control().await? {
             Frame::Settings(_) => println!("Got settings"),
             Frame::Goaway(id) => {
                 if !id.is_push() {

@@ -82,7 +82,7 @@ async fn server_drop_close() {
         };
 
         let drive_fut = async {
-            let drive = conn.poll_close().await;
+            let drive = conn.close().await;
             assert_matches!(drive, Ok(()));
         };
         tokio::select! {biased; _ = request_fut => (), _ = drive_fut => () }
@@ -121,7 +121,7 @@ async fn client_close_only_on_last_sender_drop() {
         drop(send1);
         drop(send2);
 
-        let drive = conn.poll_close().await;
+        let drive = conn.close().await;
         assert_matches!(drive, Ok(()));
     };
 
@@ -152,7 +152,7 @@ async fn settings_exchange_client() {
         };
 
         let drive = async move {
-            let _ = conn.poll_close().await;
+            let _ = conn.close().await;
         };
 
         tokio::select! { _ = settings_change => (), _ = drive => panic!("driver resolved first") };
@@ -184,7 +184,7 @@ async fn settings_exchange_server() {
             .await
             .expect("client init");
         let drive = async move {
-            let _ = conn.poll_close().await;
+            let _ = conn.close().await;
         };
 
         tokio::select! { _ = drive => () };
@@ -235,7 +235,7 @@ async fn client_error_on_bidi_recv() {
         //# receipt of a server-initiated bidirectional stream as a connection
         //# error of type H3_STREAM_CREATION_ERROR unless such an extension has
         //# been negotiated.
-        let driver = conn.poll_close().await;
+        let driver = conn.close().await;
         check_err!(driver);
         check_err!(
             send.send_request(Request::get("http://no.way").body(()).unwrap())
@@ -327,7 +327,7 @@ async fn control_close_send_error() {
             .await
             .unwrap();
 
-        let _ = driver.poll_close().await;
+        let _ = driver.close().await;
     };
 
     let server_fut = async {
@@ -435,7 +435,7 @@ async fn timeout_on_control_frame_read() {
 
     let client_fut = async {
         let (mut driver, _send_request) = client::new(pair.client().await).await.unwrap();
-        let _ = driver.poll_close().await;
+        let _ = driver.close().await;
     };
 
     let server_fut = async {
@@ -512,7 +512,7 @@ async fn goaway_from_server_not_request_id() {
             .unwrap();
 
         assert_matches!(
-            driver.poll_close().await.unwrap_err().kind(),
+            driver.close().await.unwrap_err().kind(),
             Kind::Application {
                 // The sent in the GoAway frame from the client is not a Request:
                 code: Code::H3_ID_ERROR,
@@ -621,7 +621,7 @@ async fn graceful_shutdown_grace_interval() {
             tokio::time::sleep(Duration::from_millis(15)).await;
             request(send_request).await
         };
-        let driver = driver.poll_close();
+        let driver = driver.close();
 
         let (too_late, driver) = tokio::join!(too_late, driver);
         assert_matches!(first, Ok(_));
@@ -663,7 +663,7 @@ async fn graceful_shutdown_closes_when_idle() {
         while request(&mut send_request).await.is_ok() {
             tokio::task::yield_now().await;
         }
-        assert_matches!(driver.poll_close().await, Ok(()));
+        assert_matches!(driver.close().await, Ok(()));
     };
 
     let server_fut = async {
