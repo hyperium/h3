@@ -1,11 +1,10 @@
 use std::{
     convert::TryFrom,
     sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
-    task::{Context, Poll},
 };
 
 use bytes::{Buf, Bytes, BytesMut};
-use futures_util::{future, ready};
+use futures_util::future;
 use http::HeaderMap;
 use tracing::warn;
 
@@ -82,7 +81,6 @@ where
     control_recv: Option<FrameStream<C::RecvStream, B>>,
     decoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
     encoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
-    pending_recv_streams: Vec<AcceptRecvStream<C::RecvStream>>,
     // The id of the last stream received by this connection:
     // request and push stream for server and clients respectively.
     last_accepted_stream: Option<StreamId>,
@@ -180,7 +178,6 @@ where
             control_recv: None,
             decoder_recv: None,
             encoder_recv: None,
-            pending_recv_streams: Vec::with_capacity(3),
             last_accepted_stream: None,
             got_peer_settings: false,
             send_grease_frame: grease,

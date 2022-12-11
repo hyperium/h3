@@ -5,7 +5,6 @@ use std::{borrow::BorrowMut, time::Duration};
 
 use assert_matches::assert_matches;
 use bytes::{Buf, Bytes, BytesMut};
-use futures_util::future;
 use http::{Request, Response, StatusCode};
 
 use crate::{
@@ -153,7 +152,7 @@ async fn settings_exchange_client() {
         };
 
         let drive = async move {
-            conn.poll_close().await;
+            let _ = conn.poll_close().await;
         };
 
         tokio::select! { _ = settings_change => (), _ = drive => panic!("driver resolved first") };
@@ -185,7 +184,7 @@ async fn settings_exchange_server() {
             .await
             .expect("client init");
         let drive = async move {
-            conn.poll_close().await;
+            let _ = conn.poll_close().await;
         };
 
         tokio::select! { _ = drive => () };
@@ -328,7 +327,7 @@ async fn control_close_send_error() {
             .await
             .unwrap();
 
-        driver.poll_close().await;
+        let _ = driver.poll_close().await;
     };
 
     let server_fut = async {

@@ -5,14 +5,11 @@
 use std::{
     convert::TryInto,
     fmt::{self, Display},
-    future,
-    marker::PhantomData,
-    pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
 
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Buf, Bytes};
 use futures_util::{ready, Future, FutureExt};
 use h3::quic::{self, Error, StreamId, WriteBuf};
 use pin_project::pin_project;

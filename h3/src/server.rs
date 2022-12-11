@@ -72,7 +72,7 @@ use crate::{
     quic::{self, RecvStream as _, SendStream as _},
     stream,
 };
-use tracing::{error, trace, warn};
+use tracing::error;
 
 /// Create a builder of HTTP/3 server connections
 ///

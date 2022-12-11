@@ -3,7 +3,6 @@
 //! This module includes traits and types meant to allow being generic over any
 //! QUIC implementation.
 
-use std::pin::Pin;
 use std::task::{self, Poll};
 
 use bytes::Buf;
