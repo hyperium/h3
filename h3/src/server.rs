@@ -143,7 +143,6 @@ where
     ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
         // Accept the incoming stream
         // let mut stream = match future::poll_fn(|cx| self.poll_accept_request(cx)).await {
-        println!("ONLY ACCEPT");
         let mut stream = match self.poll_accept_request().await {
             Ok(Some(s)) => FrameStream::new(s),
             Ok(None) => {
@@ -169,7 +168,6 @@ where
                 };
             }
         };
-        println!("HÄ");
         let frame = future::poll_fn(|cx| stream.poll_next(cx)).await;
 
         let mut encoded = match frame {
@@ -341,14 +339,10 @@ where
     }
 
     async fn poll_accept_request(&mut self) -> Result<Option<C::BidiStream>, Error> {
-        println!("3");
         let _ = self.poll_control().await;
-        println!("2");
         let _ = future::poll_fn(|cx| self.poll_requests_completion(cx)).await;
-        println!("1");
         let closing = self.shared_state().read("server accept").closing;
-
-        println!("SERVER AC PO");
+        println!("D");
         let mut req_stream = self.inner.poll_accept_request().await.unwrap();
         if let Some(max_id) = closing {
             if req_stream.id() > max_id {
@@ -364,49 +358,46 @@ where
     }
 
     async fn poll_control(&mut self) -> Result<(), Error> {
-        while let frame = self.inner.poll_control().await? {
-            match frame {
-                Frame::Settings(_) => println!("Got settings"),
-                Frame::Goaway(id) => {
-                    if !id.is_push() {
-                        return Err(Code::H3_ID_ERROR.with_reason(
-                            format!("non-push StreamId in a GoAway frame: {}", id),
-                            ErrorLevel::ConnectionError,
-                        ))
-                    }
-                }
-                f @ Frame::MaxPushId(_) | f @ Frame::CancelPush(_) => {
-                    println!("Control frame ignored {:?}", f);
-
-                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
-                    //= type=TODO
-                    //# If a server receives a CANCEL_PUSH frame for a push
-                    //# ID that has not yet been mentioned by a PUSH_PROMISE frame, this MUST
-                    //# be treated as a connection error of type H3_ID_ERROR.
-
-                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.7
-                    //= type=TODO
-                    //# A MAX_PUSH_ID frame cannot reduce the maximum push
-                    //# ID; receipt of a MAX_PUSH_ID frame that contains a smaller value than
-                    //# previously received MUST be treated as a connection error of type
-                    //# H3_ID_ERROR.
-                }
-
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.5
-                //# A server MUST treat the
-                //# receipt of a PUSH_PROMISE frame as a connection error of type
-                //# H3_FRAME_UNEXPECTED.
-                frame => {
-                    return Err(Code::H3_FRAME_UNEXPECTED.with_reason(
-                        format!("on server control stream: {:?}", frame),
+        match self.inner.poll_control().await? {
+            Frame::Settings(_) => println!("Got settings"),
+            Frame::Goaway(id) => {
+                if !id.is_push() {
+                    return Err(Code::H3_ID_ERROR.with_reason(
+                        format!("non-push StreamId in a GoAway frame: {}", id),
                         ErrorLevel::ConnectionError,
                     ));
                 }
             }
-        }
-        todo!();
-    }
+            f @ Frame::MaxPushId(_) | f @ Frame::CancelPush(_) => {
+                println!("Control frame ignored {:?}", f);
 
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
+                //= type=TODO
+                //# If a server receives a CANCEL_PUSH frame for a push
+                //# ID that has not yet been mentioned by a PUSH_PROMISE frame, this MUST
+                //# be treated as a connection error of type H3_ID_ERROR.
+
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.7
+                //= type=TODO
+                //# A MAX_PUSH_ID frame cannot reduce the maximum push
+                //# ID; receipt of a MAX_PUSH_ID frame that contains a smaller value than
+                //# previously received MUST be treated as a connection error of type
+                //# H3_ID_ERROR.
+            }
+
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.5
+            //# A server MUST treat the
+            //# receipt of a PUSH_PROMISE frame as a connection error of type
+            //# H3_FRAME_UNEXPECTED.
+            frame => {
+                return Err(Code::H3_FRAME_UNEXPECTED.with_reason(
+                    format!("on server control stream: {:?}", frame),
+                    ErrorLevel::ConnectionError,
+                ));
+            }
+        };
+        return Ok(());
+    }
 
     fn poll_requests_completion(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         loop {

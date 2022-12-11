@@ -233,8 +233,11 @@ where
             return Err(e.clone());
         }
 
-        let stream = AcceptRecvStream::new(self.conn.poll_accept_recv().await?).into_stream()?;
-        let y = match stream {
+        let mut accept_stream = AcceptRecvStream::new(self.conn.poll_accept_recv().await?);
+        accept_stream.poll_type().await?;
+        let stream = accept_stream.into_stream()?;
+
+        let _ = match stream {
             //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
             //# Only one control stream per peer is permitted;
             //# receipt of a second stream claiming to be a control stream MUST be
