@@ -11,9 +11,8 @@
 //! C: h3::quic::Connection<bytes::Bytes>,
 //! <C as h3::quic::Connection<bytes::Bytes>>::BidiStream: Send + 'static
 //! {
-//!     let mut server_builder = h3::server::builder();
-//!     // Build the Connection
-//!     let mut h3_conn = server_builder.build(conn).await.unwrap();
+//!     let mut h3_conn = h3::server::new(conn, Default::default()).await.unwrap();
+//!
 //!     loop {
 //!         // Accept incoming requests
 //!         match h3_conn.accept().await {
@@ -62,9 +61,10 @@ use futures_util::future;
 use http::{response, HeaderMap, Request, Response, StatusCode};
 use quic::StreamId;
 use tokio::sync::mpsc;
+use tracing::{error, trace, warn};
 
 use crate::{
-    config::Config,
+    config::ServerConfig,
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
     error::{Code, Error, ErrorLevel},
     frame::FrameStream,
@@ -73,14 +73,33 @@ use crate::{
     quic::{self, RecvStream as _, SendStream as _},
     stream,
 };
-use tracing::{error, trace, warn};
 
-/// Create a builder of HTTP/3 server connections
+/// Create an HTTP/3 server endpoint [`Connection`] with
+/// a QUIC connection endpoint and
+/// the configuration for the HTTP/3 server endpoint.
 ///
-/// This function creates a [`Builder`] that carries settings that can
-/// be shared between server connections.
-pub fn builder() -> Builder {
-    Builder::new(Default::default())
+/// # Example
+///
+/// ```rust
+/// async fn doc<C, B>(conn: C)
+/// where
+/// C: h3::quic::Connection<B>,
+/// B: bytes::Buf,
+/// {
+///     let config = h3::ServerConfig::new()
+///         .disable_grease()
+///         .enable_webtransport()
+///         .max_field_section_size(8192);
+///
+///     let server = h3::server::new(conn, config).await.unwrap();
+/// }
+/// ```
+pub async fn new<C, B>(conn: C, config: ServerConfig) -> Result<Connection<C, B>, Error>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    Connection::new(conn, config).await
 }
 
 /// Server connection driver
@@ -119,13 +138,25 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    /// Create a new HTTP/3 server connection with default settings
+    /// Create a new HTTP/3 server connection
     ///
-    /// Use a custom [`Builder`] with [`builder()`] to create a connection
-    /// with different settings.
-    /// Provide a Connection which implements [`quic::Connection`].
-    pub async fn new(conn: C) -> Result<Self, Error> {
-        builder().build(conn).await
+    /// Provide a connection endpoint which implements [`quic::Connection`] and
+    /// desired configuration for the server.
+    pub async fn new(conn: C, config: ServerConfig) -> Result<Self, Error> {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        Ok(Connection {
+            inner: ConnectionInner::new(
+                conn,
+                config.max_field_section_size,
+                SharedStateRef::default(),
+                config.enable_grease,
+            )
+            .await?,
+            max_field_section_size: config.max_field_section_size,
+            request_end_send: sender,
+            request_end_recv: receiver,
+            ongoing_streams: HashSet::new(),
+        })
     }
 }
 
@@ -479,66 +510,6 @@ where
 //# So as to not unnecessarily limit
 //# parallelism, at least 100 request streams SHOULD be permitted at a
 //# time.
-
-/// Builder of HTTP/3 server connections.
-///
-/// Use this struct to create a new [`Connection`].
-/// Settings for the [`Connection`] can be provided here.
-///
-/// # Example
-///
-/// ```rust
-/// fn doc<C,B>(conn: C)
-/// where
-/// C: h3::quic::Connection<B>,
-/// B: bytes::Buf,
-/// {
-///     let config = h3::Config::new()
-///         // Set the maximum header size
-///         .max_field_section_size(1000)
-///         // do not send grease types
-///         .disable_grease();
-///     let mut server_builder = h3::server::Builder::new(config);
-///     // Build the Connection
-///     let mut h3_conn = server_builder.build(conn);
-/// }
-/// ```
-pub struct Builder {
-    pub(super) config: Config,
-}
-
-impl Builder {
-    /// Create a new HTTP/3 server [`Builder`]
-    pub fn new(config: Config) -> Self {
-        Self { config }
-    }
-}
-
-impl Builder {
-    /// Build an HTTP/3 connection from a QUIC connection
-    ///
-    /// This method creates a [`Connection`] instance with the settings in the [`Builder`].
-    pub async fn build<C, B>(&self, conn: C) -> Result<Connection<C, B>, Error>
-    where
-        C: quic::Connection<B>,
-        B: Buf,
-    {
-        let (sender, receiver) = mpsc::unbounded_channel();
-        Ok(Connection {
-            inner: ConnectionInner::new(
-                conn,
-                self.config.max_field_section_size,
-                SharedStateRef::default(),
-                self.config.grease,
-            )
-            .await?,
-            max_field_section_size: self.config.max_field_section_size,
-            request_end_send: sender,
-            request_end_recv: receiver,
-            ongoing_streams: HashSet::new(),
-        })
-    }
-}
 
 struct RequestEnd {
     request_end: mpsc::UnboundedSender<StreamId>,

@@ -13,7 +13,7 @@ use http::{request, HeaderMap, Response};
 use tracing::{info, trace};
 
 use crate::{
-    config::Config,
+    config::ClientConfig,
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
     error::{Code, Error, ErrorLevel},
     frame::FrameStream,
@@ -21,24 +21,67 @@ use crate::{
     qpack, quic, stream,
 };
 
-/// Start building a new HTTP/3 client with default config
-pub fn builder() -> Builder {
-    Builder::new(Default::default())
-}
-
-/// Create a new HTTP/3 client with default settings
-pub async fn new<C, O>(conn: C) -> Result<(Connection<C, Bytes>, SendRequest<O, Bytes>), Error>
+/// Create HTTP/3 client endpoint with
+/// an established QUIC connection and
+/// the configuration for the client endpoint.
+///
+/// # Example
+///
+/// ```rust
+/// # use bytes::Bytes;
+/// # use h3::quic;
+/// # async fn doc<C, O>(conn: C)
+/// # where
+/// #   C: quic::Connection<Bytes, OpenStreams = O>,
+/// #   O: quic::OpenStreams<Bytes>,
+/// # {
+/// let config = h3::ClientConfig::new()
+///     .disable_grease()
+///     .enable_webtransport()
+///     .max_field_section_size(8192);
+///
+/// let client = h3::client::new(conn, config).await.unwrap();
+/// # }
+/// ```
+pub async fn new<C, O>(
+    conn: C,
+    config: ClientConfig,
+) -> Result<(Connection<C, Bytes>, SendRequest<O, Bytes>), Error>
 where
     C: quic::Connection<Bytes, OpenStreams = O>,
     O: quic::OpenStreams<Bytes>,
 {
+    let open = conn.opener();
+    let conn_state = SharedStateRef::default();
+
+    let conn_waker = Some(future::poll_fn(|cx| Poll::Ready(cx.waker().clone())).await);
+
     //= https://www.rfc-editor.org/rfc/rfc9114#section-3.3
     //= type=implication
     //# Clients SHOULD NOT open more than one HTTP/3 connection to a given IP
     //# address and UDP port, where the IP address and port might be derived
     //# from a URI, a selected alternative service ([ALTSVC]), a configured
     //# proxy, or name resolution of any of these.
-    Builder::new(Default::default()).build(conn).await
+    Ok((
+        Connection {
+            inner: ConnectionInner::new(
+                conn,
+                config.max_field_section_size,
+                conn_state.clone(),
+                config.enable_grease,
+            )
+            .await?,
+        },
+        SendRequest {
+            open,
+            conn_state,
+            conn_waker,
+            max_field_section_size: config.max_field_section_size,
+            sender_count: Arc::new(AtomicUsize::new(1)),
+            _buf: PhantomData,
+            send_grease_frame: config.enable_grease,
+        },
+    ))
 }
 
 /// HTTP/3 request sender
@@ -454,75 +497,6 @@ where
         }
 
         Poll::Pending
-    }
-}
-
-/// HTTP/3 client builder
-///
-/// Set the configuration for a new client.
-///
-/// # Examples
-/// ```rust
-/// # use h3::quic;
-/// # async fn doc<C, O, B>(quic: C)
-/// # where
-/// #   C: quic::Connection<B, OpenStreams = O>,
-/// #   O: quic::OpenStreams<B>,
-/// #   B: bytes::Buf,
-/// # {
-/// let config = h3::Config::new()
-///     .max_field_section_size(8192);
-/// let h3_conn = h3::client::Builder::new(config)
-///     .build(quic)
-///     .await
-///     .expect("Failed to build connection");
-/// # }
-/// ```
-pub struct Builder {
-    config: Config,
-}
-
-impl Builder {
-    /// Create a HTTP/3 client builder
-    pub fn new(config: Config) -> Self {
-        Self { config }
-    }
-
-    /// Create a new HTTP/3 client from a `quic` connection
-    pub async fn build<C, O, B>(
-        &mut self,
-        quic: C,
-    ) -> Result<(Connection<C, B>, SendRequest<O, B>), Error>
-    where
-        C: quic::Connection<B, OpenStreams = O>,
-        O: quic::OpenStreams<B>,
-        B: Buf,
-    {
-        let open = quic.opener();
-        let conn_state = SharedStateRef::default();
-
-        let conn_waker = Some(future::poll_fn(|cx| Poll::Ready(cx.waker().clone())).await);
-
-        Ok((
-            Connection {
-                inner: ConnectionInner::new(
-                    quic,
-                    self.config.max_field_section_size,
-                    conn_state.clone(),
-                    self.config.grease,
-                )
-                .await?,
-            },
-            SendRequest {
-                open,
-                conn_state,
-                conn_waker,
-                max_field_section_size: self.config.max_field_section_size,
-                sender_count: Arc::new(AtomicUsize::new(1)),
-                _buf: PhantomData,
-                send_grease_frame: self.config.grease,
-            },
-        ))
     }
 }
 

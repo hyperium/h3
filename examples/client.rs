@@ -101,7 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("QUIC connected ...");
 
     // generic h3
-    let (mut driver, mut send_request) = h3::client::new(quinn_conn).await?;
+    let (mut driver, mut send_request) = h3::client::new(quinn_conn, Default::default()).await?;
 
     let drive = async move {
         future::poll_fn(|cx| driver.poll_close(cx)).await?;

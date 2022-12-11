@@ -7,7 +7,7 @@ use http::{request, HeaderMap, Request, Response, StatusCode};
 
 use crate::{
     client,
-    config::Config,
+    config::{ClientConfig, ServerConfig},
     connection::ConnectionState,
     error::{Code, Error, Kind},
     proto::{
@@ -30,7 +30,9 @@ async fn get() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
+        let (mut driver, mut client) = client::new(pair.client().await, Default::default())
+            .await
+            .expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
         let req_fut = async {
             let mut request_stream = client
@@ -53,7 +55,7 @@ async fn get() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::Connection::new(conn).await.unwrap();
+        let mut incoming_req = server::new(conn, Default::default()).await.unwrap();
 
         let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
         request_stream
@@ -82,7 +84,9 @@ async fn get_with_trailers_unknown_content_type() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
+        let (mut driver, mut client) = client::new(pair.client().await, Default::default())
+            .await
+            .expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
         let req_fut = async {
             let mut request_stream = client
@@ -109,7 +113,7 @@ async fn get_with_trailers_unknown_content_type() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::Connection::new(conn).await.unwrap();
+        let mut incoming_req = server::new(conn, Default::default()).await.unwrap();
 
         let (_, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
         request_stream
@@ -144,7 +148,9 @@ async fn get_with_trailers_known_content_type() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
+        let (mut driver, mut client) = client::new(pair.client().await, Default::default())
+            .await
+            .expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
         let req_fut = async {
             let mut request_stream = client
@@ -170,7 +176,7 @@ async fn get_with_trailers_known_content_type() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::Connection::new(conn).await.unwrap();
+        let mut incoming_req = server::new(conn, Default::default()).await.unwrap();
 
         let (_, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
         request_stream
@@ -206,7 +212,9 @@ async fn post() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
+        let (mut driver, mut client) = client::new(pair.client().await, Default::default())
+            .await
+            .expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
         let req_fut = async {
             let mut request_stream = client
@@ -227,7 +235,7 @@ async fn post() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::Connection::new(conn).await.unwrap();
+        let mut incoming_req = server::new(conn, Default::default()).await.unwrap();
 
         let (_, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
         request_stream
@@ -260,7 +268,9 @@ async fn header_too_big_response_from_server() {
 
     let client_fut = async {
         // Do not poll driver so client doesn't know about server's max_field section size setting
-        let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
+        let (mut driver, mut client) = client::new(pair.client().await, Default::default())
+            .await
+            .expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
         let req_fut = async {
             let mut request_stream = client
@@ -283,8 +293,8 @@ async fn header_too_big_response_from_server() {
         //= type=test
         //# An HTTP/3 implementation MAY impose a limit on the maximum size of
         //# the message header it will accept on an individual HTTP message.
-        let config = Config::new().max_field_section_size(12);
-        let mut incoming_req = server::Builder::new(config).build(conn).await.unwrap();
+        let config = ServerConfig::new().max_field_section_size(12);
+        let mut incoming_req = server::new(conn, config).await.unwrap();
 
         let err_kind = incoming_req.accept().await.map(|_| ()).unwrap_err().kind();
         assert_matches!(
@@ -309,7 +319,9 @@ async fn header_too_big_response_from_server_trailers() {
 
     let client_fut = async {
         // Do not poll driver so client doesn't know about server's max_field_section_size setting
-        let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
+        let (mut driver, mut client) = client::new(pair.client().await, Default::default())
+            .await
+            .expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
         let req_fut = async {
             let mut request_stream = client
@@ -338,8 +350,8 @@ async fn header_too_big_response_from_server_trailers() {
         //= type=test
         //# An HTTP/3 implementation MAY impose a limit on the maximum size of
         //# the message header it will accept on an individual HTTP message.
-        let config = Config::new().max_field_section_size(207);
-        let mut incoming_req = server::Builder::new(config).build(conn).await.unwrap();
+        let config = ServerConfig::new().max_field_section_size(207);
+        let mut incoming_req = server::new(conn, config).await.unwrap();
 
         let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
         let _ = request_stream
@@ -369,7 +381,9 @@ async fn header_too_big_client_error() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
+        let (mut driver, mut client) = client::new(pair.client().await, Default::default())
+            .await
+            .expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
         let req_fut = async {
             // pretend client already received server's settings
@@ -403,8 +417,8 @@ async fn header_too_big_client_error() {
         //= type=test
         //# An HTTP/3 implementation MAY impose a limit on the maximum size of
         //# the message header it will accept on an individual HTTP message.
-        let config = Config::new().max_field_section_size(12);
-        server::Builder::new(config).build(conn).await.unwrap();
+        let config = ServerConfig::new().max_field_section_size(12);
+        server::new(conn, config).await.unwrap();
     };
 
     tokio::join!(server_fut, client_fut);
@@ -418,7 +432,9 @@ async fn header_too_big_client_error_trailer() {
 
     let client_fut = async {
         // Do not poll driver so client doesn't know about server's max_field_section_size setting
-        let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
+        let (mut driver, mut client) = client::new(pair.client().await, Default::default())
+            .await
+            .expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
         let req_fut = async {
             client
@@ -463,8 +479,8 @@ async fn header_too_big_client_error_trailer() {
         //= type=test
         //# An HTTP/3 implementation MAY impose a limit on the maximum size of
         //# the message header it will accept on an individual HTTP message.
-        let config = Config::new().max_field_section_size(207);
-        let mut incoming_req = server::Builder::new(config).build(conn).await.unwrap();
+        let config = ServerConfig::new().max_field_section_size(207);
+        let mut incoming_req = server::new(conn, config).await.unwrap();
 
         let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
         let _ = request_stream
@@ -493,9 +509,8 @@ async fn header_too_big_discard_from_client() {
         //# process it.
 
         // Do not poll driver so client doesn't know about server's max_field section size setting
-        let config = Config::new().max_field_section_size(12);
-        let (_conn, mut client) = client::Builder::new(config)
-            .build::<_, _, Bytes>(pair.client().await)
+        let config = ClientConfig::new().max_field_section_size(12);
+        let (_conn, mut client) = client::new(pair.client().await, config)
             .await
             .expect("client init");
         let mut request_stream = client
@@ -523,7 +538,7 @@ async fn header_too_big_discard_from_client() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::Connection::new(conn).await.unwrap();
+        let mut incoming_req = server::new(conn, Default::default()).await.unwrap();
 
         let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
         // pretend server didn't receive settings
@@ -578,9 +593,8 @@ async fn header_too_big_discard_from_client_trailers() {
         //# process it.
 
         // Do not poll driver so client doesn't know about server's max_field section size setting
-        let params = Config::new().max_field_section_size(200);
-        let (mut driver, mut client) = client::Builder::new(params)
-            .build::<_, _, Bytes>(pair.client().await)
+        let config = ClientConfig::new().max_field_section_size(200);
+        let (mut driver, mut client) = client::new(pair.client().await, config)
             .await
             .expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
@@ -608,7 +622,7 @@ async fn header_too_big_discard_from_client_trailers() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::Connection::new(conn).await.unwrap();
+        let mut incoming_req = server::new(conn, Default::default()).await.unwrap();
 
         let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
 
@@ -654,7 +668,7 @@ async fn header_too_big_server_error() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, mut client) = client::new(pair.client().await) // header size limit faked for brevity
+        let (mut driver, mut client) = client::new(pair.client().await, Default::default()) // header size limit faked for brevity
             .await
             .expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
@@ -672,7 +686,7 @@ async fn header_too_big_server_error() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::Connection::new(conn).await.unwrap();
+        let mut incoming_req = server::new(conn, Default::default()).await.unwrap();
 
         let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
 
@@ -721,7 +735,7 @@ async fn header_too_big_server_error_trailers() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, mut client) = client::new(pair.client().await) // header size limit faked for brevity
+        let (mut driver, mut client) = client::new(pair.client().await, Default::default()) // header size limit faked for brevity
             .await
             .expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
@@ -739,7 +753,7 @@ async fn header_too_big_server_error_trailers() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::Connection::new(conn).await.unwrap();
+        let mut incoming_req = server::new(conn, Default::default()).await.unwrap();
 
         let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
         request_stream
@@ -797,7 +811,9 @@ async fn get_timeout_client_recv_response() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut conn, mut client) = client::new(pair.client().await).await.expect("client init");
+        let (mut conn, mut client) = client::new(pair.client().await, Default::default())
+            .await
+            .expect("client init");
         let request_fut = async {
             let mut request_stream = client
                 .send_request(Request::get("http://localhost/salut").body(()).unwrap())
@@ -818,7 +834,7 @@ async fn get_timeout_client_recv_response() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::Connection::new(conn).await.unwrap();
+        let mut incoming_req = server::new(conn, Default::default()).await.unwrap();
 
         // _req must not be dropped, else the connection will be closed and the timeout
         // wont be triggered
@@ -837,7 +853,9 @@ async fn get_timeout_client_recv_data() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut conn, mut client) = client::new(pair.client().await).await.expect("client init");
+        let (mut conn, mut client) = client::new(pair.client().await, Default::default())
+            .await
+            .expect("client init");
         let request_fut = async {
             let mut request_stream = client
                 .send_request(Request::get("http://localhost/salut").body(()).unwrap())
@@ -859,7 +877,7 @@ async fn get_timeout_client_recv_data() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::Connection::new(conn).await.unwrap();
+        let mut incoming_req = server::new(conn, Default::default()).await.unwrap();
 
         let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
         request_stream
@@ -885,7 +903,9 @@ async fn get_timeout_server_accept() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut conn, _client) = client::new(pair.client().await).await.expect("client init");
+        let (mut conn, _client) = client::new(pair.client().await, Default::default())
+            .await
+            .expect("client init");
         let request_fut = async {
             tokio::time::sleep(Duration::from_millis(500)).await;
         };
@@ -900,7 +920,7 @@ async fn get_timeout_server_accept() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::Connection::new(conn).await.unwrap();
+        let mut incoming_req = server::new(conn, Default::default()).await.unwrap();
 
         assert_matches!(
             incoming_req.accept().await.map(|_| ()).unwrap_err().kind(),
@@ -919,7 +939,9 @@ async fn post_timeout_server_recv_data() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (_conn, mut client) = client::new(pair.client().await).await.expect("client init");
+        let (_conn, mut client) = client::new(pair.client().await, Default::default())
+            .await
+            .expect("client init");
         let _request_stream = client
             .send_request(Request::post("http://localhost/salut").body(()).unwrap())
             .await
@@ -929,7 +951,7 @@ async fn post_timeout_server_recv_data() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::Connection::new(conn).await.unwrap();
+        let mut incoming_req = server::new(conn, Default::default()).await.unwrap();
 
         let (_, mut req_stream) = incoming_req.accept().await.expect("accept").unwrap();
         assert_matches!(
@@ -1407,9 +1429,12 @@ where
             .map(|_| ());
         check(res);
 
-        let (mut driver, _send) = client::new(h3_quinn::Connection::new(new_connection))
-            .await
-            .unwrap();
+        let (mut driver, _send) = client::new(
+            h3_quinn::Connection::new(new_connection),
+            Default::default(),
+        )
+        .await
+        .unwrap();
 
         let res = future::poll_fn(|cx| driver.poll_close(cx))
             .await
@@ -1420,7 +1445,7 @@ where
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::new(conn, Default::default()).await.unwrap();
         let (_, mut stream) = incoming
             .accept()
             .await?

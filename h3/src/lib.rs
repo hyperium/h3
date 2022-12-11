@@ -8,7 +8,7 @@ pub mod error;
 pub mod quic;
 pub mod server;
 
-pub use config::Config;
+pub use config::{ClientConfig, ServerConfig};
 pub use error::Error;
 
 mod buf;

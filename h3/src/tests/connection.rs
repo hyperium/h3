@@ -10,7 +10,7 @@ use http::{Request, Response, StatusCode};
 
 use crate::{
     client::{self, SendRequest},
-    config::Config,
+    config::{ClientConfig, ServerConfig},
     connection::ConnectionState,
     error::{Code, Error, Kind},
     proto::{
@@ -31,12 +31,14 @@ async fn connect() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let _ = client::new(pair.client().await).await.expect("client init");
+        let _ = client::new(pair.client().await, Default::default())
+            .await
+            .expect("client init");
     };
 
     let server_fut = async {
         let conn = server.next().await;
-        let _ = server::Connection::new(conn).await.unwrap();
+        let _ = server::new(conn, Default::default()).await.unwrap();
     };
 
     tokio::join!(server_fut, client_fut);
@@ -48,13 +50,15 @@ async fn accept_request_end_on_client_close() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let _ = client::new(pair.client().await).await.expect("client init");
+        let _ = client::new(pair.client().await, Default::default())
+            .await
+            .expect("client init");
         // client is dropped, it will send H3_NO_ERROR
     };
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::new(conn, Default::default()).await.unwrap();
         // Accept returns Ok(None)
         assert!(incoming.accept().await.unwrap().is_none());
     };
@@ -69,10 +73,12 @@ async fn server_drop_close() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let _ = server::Connection::new(conn).await.unwrap();
+        let _ = server::new(conn, Default::default()).await.unwrap();
     };
 
-    let (mut conn, mut send) = client::new(pair.client().await).await.expect("client init");
+    let (mut conn, mut send) = client::new(pair.client().await, Default::default())
+        .await
+        .expect("client init");
     let client_fut = async {
         let request_fut = async move {
             let mut request_stream = send
@@ -99,14 +105,16 @@ async fn client_close_only_on_last_sender_drop() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::new(conn, Default::default()).await.unwrap();
         assert!(incoming.accept().await.unwrap().is_some());
         assert!(incoming.accept().await.unwrap().is_some());
         assert!(incoming.accept().await.unwrap().is_none());
     };
 
     let client_fut = async {
-        let (mut conn, mut send1) = client::new(pair.client().await).await.expect("client init");
+        let (mut conn, mut send1) = client::new(pair.client().await, Default::default())
+            .await
+            .expect("client init");
         let mut send2 = send1.clone();
         let _ = send1
             .send_request(Request::get("http://no.way").body(()).unwrap())
@@ -137,7 +145,9 @@ async fn settings_exchange_client() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut conn, client) = client::new(pair.client().await).await.expect("client init");
+        let (mut conn, client) = client::new(pair.client().await, Default::default())
+            .await
+            .expect("client init");
         let settings_change = async {
             for _ in 0..10 {
                 if client
@@ -162,8 +172,8 @@ async fn settings_exchange_client() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let params = Config::new().max_field_section_size(12);
-        let mut incoming = server::Builder::new(params).build(conn).await.unwrap();
+        let config = ServerConfig::new().max_field_section_size(12);
+        let mut incoming = server::new(conn, config).await.unwrap();
         incoming.accept().await.unwrap()
     };
 
@@ -177,9 +187,8 @@ async fn settings_exchange_server() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let params = Config::new().max_field_section_size(12);
-        let (mut conn, _client) = client::Builder::new(params)
-            .build::<_, _, Bytes>(pair.client().await)
+        let config = ClientConfig::new().max_field_section_size(12);
+        let (mut conn, _client) = client::new(pair.client().await, config)
             .await
             .expect("client init");
         let drive = async move {
@@ -191,7 +200,7 @@ async fn settings_exchange_server() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::new(conn, Default::default()).await.unwrap();
 
         let state = incoming.shared_state().clone();
         let accept = async { incoming.accept().await.unwrap() };
@@ -226,7 +235,9 @@ async fn client_error_on_bidi_recv() {
     }
 
     let client_fut = async {
-        let (mut conn, mut send) = client::new(pair.client().await).await.expect("client init");
+        let (mut conn, mut send) = client::new(pair.client().await, Default::default())
+            .await
+            .expect("client init");
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.1
         //= type=test
@@ -289,7 +300,7 @@ async fn two_control_streams() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::new(conn, Default::default()).await.unwrap();
         assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err().kind(),
             Kind::Application {
@@ -323,16 +334,21 @@ async fn control_close_send_error() {
         //# error of type H3_CLOSED_CRITICAL_STREAM.
         control_stream.finish().await.unwrap(); // close the client control stream immediately
 
-        let (mut driver, _send) = client::new(h3_quinn::Connection::new(new_connection))
-            .await
-            .unwrap();
+        let (mut driver, _send) = client::new(
+            h3_quinn::Connection::new(new_connection),
+            Default::default(),
+        )
+        .await
+        .unwrap();
 
         future::poll_fn(|cx| driver.poll_close(cx)).await
     };
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::Connection::new(conn, Default::default())
+            .await
+            .unwrap();
         // Driver detects that the recieving side of the control stream has been closed
         assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err().kind(),
@@ -374,7 +390,7 @@ async fn missing_settings() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::new(conn, Default::default()).await.unwrap();
         assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err().kind(),
             Kind::Application {
@@ -412,7 +428,7 @@ async fn control_stream_frame_unexpected() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::new(conn, Default::default()).await.unwrap();
         assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err().kind(),
             Kind::Application {
@@ -434,13 +450,15 @@ async fn timeout_on_control_frame_read() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, _send_request) = client::new(pair.client().await).await.unwrap();
+        let (mut driver, _send_request) = client::new(pair.client().await, Default::default())
+            .await
+            .unwrap();
         let _ = future::poll_fn(|cx| driver.poll_close(cx)).await;
     };
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::new(conn, Default::default()).await.unwrap();
         assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err().kind(),
             Kind::Timeout
@@ -478,7 +496,7 @@ async fn goaway_from_client_not_push_id() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::new(conn, Default::default()).await.unwrap();
         assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err().kind(),
             Kind::Application {
@@ -507,9 +525,12 @@ async fn goaway_from_server_not_request_id() {
         control_stream.write_all(&buf[..]).await.unwrap();
         control_stream.finish().await.unwrap(); // close the client control stream immediately
 
-        let (mut driver, _send) = client::new(h3_quinn::Connection::new(new_connection))
-            .await
-            .unwrap();
+        let (mut driver, _send) = client::new(
+            h3_quinn::Connection::new(new_connection),
+            Default::default(),
+        )
+        .await
+        .unwrap();
 
         assert_matches!(
             future::poll_fn(|cx| driver.poll_close(cx))
@@ -554,7 +575,9 @@ async fn graceful_shutdown_server_rejects() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (_driver, mut send_request) = client::new(pair.client().await).await.unwrap();
+        let (_driver, mut send_request) = client::new(pair.client().await, Default::default())
+            .await
+            .unwrap();
 
         let mut first = send_request
             .send_request(Request::get("http://no.way").body(()).unwrap())
@@ -579,7 +602,7 @@ async fn graceful_shutdown_server_rejects() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::new(conn, Default::default()).await.unwrap();
         let (_, stream) = incoming.accept().await.unwrap().unwrap();
         response(stream).await;
         incoming.shutdown(0).await.unwrap();
@@ -597,7 +620,9 @@ async fn graceful_shutdown_grace_interval() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, mut send_request) = client::new(pair.client().await).await.unwrap();
+        let (mut driver, mut send_request) = client::new(pair.client().await, Default::default())
+            .await
+            .unwrap();
 
         // Sent as the connection is not shutting down
         let mut first = send_request
@@ -628,7 +653,7 @@ async fn graceful_shutdown_grace_interval() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::new(conn, Default::default()).await.unwrap();
         let (_, first) = incoming.accept().await.unwrap().unwrap();
         incoming.shutdown(1).await.unwrap();
         let (_, in_flight) = incoming.accept().await.unwrap().unwrap();
@@ -653,7 +678,9 @@ async fn graceful_shutdown_closes_when_idle() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, mut send_request) = client::new(pair.client().await).await.unwrap();
+        let (mut driver, mut send_request) = client::new(pair.client().await, Default::default())
+            .await
+            .unwrap();
 
         // Make continuous requests, ignoring GoAway because the connection is not driven
         while request(&mut send_request).await.is_ok() {
@@ -671,7 +698,7 @@ async fn graceful_shutdown_closes_when_idle() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::new(conn, Default::default()).await.unwrap();
 
         let mut count = 0;
 
