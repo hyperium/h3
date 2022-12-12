@@ -3,48 +3,53 @@
 /// Default max header size
 pub const DEFAULT_MAX_FIELD_SECTION_SIZE: u64 = (1 << 62) - 1;
 
-macro_rules! config_struct {
-    (
-        $(#[$doc:meta])*
-        $name:ident { $($fn:ident: $ft:ty),*$(,)? }
-    ) => {
-        $(#[$doc])*
-        #[derive(Debug)]
-        pub struct $name {
-            // common fields
-            pub(crate) enable_grease: bool,
-            pub(crate) enable_webtransport: bool,
-            pub(crate) max_field_section_size: u64,
+/// Client config builder
+#[derive(Debug, Default)]
+pub struct ClientConfig {
+    pub(crate) conn: ConnectionConfig,
+}
 
-            // fields specific to the config
-            $(pub(crate) $fn: $ft),*
+/// Server config builder
+#[derive(Debug, Default)]
+pub struct ServerConfig {
+    pub(crate) conn: ConnectionConfig,
+}
+
+/// Configuration for [`ConnectionInner`]
+#[derive(Clone, Copy, Debug)]
+pub struct ConnectionConfig {
+    pub(crate) enable_grease: bool,
+    pub(crate) enable_webtransport: bool,
+    pub(crate) max_field_section_size: u64,
+}
+
+impl Default for ConnectionConfig {
+    fn default() -> Self {
+        Self {
+            enable_grease: true,
+            enable_webtransport: false,
+            max_field_section_size: DEFAULT_MAX_FIELD_SECTION_SIZE,
         }
+    }
+}
 
-        impl Default for $name {
-            fn default() -> Self {
-                Self {
-                    enable_grease: true,
-                    enable_webtransport: false,
-                    max_field_section_size: DEFAULT_MAX_FIELD_SECTION_SIZE,
-                }
-            }
-        }
-
+macro_rules! impl_builder {
+    ($name:ident) => {
         impl $name {
             /// Start to build config
             pub fn new() -> Self {
                 Self::default()
             }
 
-            /// Enable WebTransport
-            pub fn enable_webtransport(mut self) -> Self {
-                self.enable_webtransport = true;
+            /// Disable grease in SETTINGS
+            pub fn disable_grease(mut self) -> Self {
+                self.conn.enable_grease = false;
                 self
             }
 
-            /// Disable grease in SETTINGS
-            pub fn disable_grease(mut self) -> Self {
-                self.enable_grease = false;
+            /// Enable WebTransport
+            pub fn enable_webtransport(mut self) -> Self {
+                self.conn.enable_webtransport = true;
                 self
             }
 
@@ -54,19 +59,12 @@ macro_rules! config_struct {
             ///
             /// [header size constraints]: https://www.rfc-editor.org/rfc/rfc9114.html#name-header-size-constraints
             pub fn max_field_section_size(mut self, val: u64) -> Self {
-                self.max_field_section_size = val;
+                self.conn.max_field_section_size = val;
                 self
             }
         }
-    }
+    };
 }
 
-config_struct!(
-    /// Client endpoint config builder
-    ClientConfig {}
-);
-
-config_struct!(
-    /// Server endpoint config builder
-    ServerConfig {}
-);
+impl_builder!(ClientConfig);
+impl_builder!(ServerConfig);

@@ -66,9 +66,9 @@ where
         Connection {
             inner: ConnectionInner::new(
                 conn,
-                config.max_field_section_size,
+                config.conn.max_field_section_size,
                 conn_state.clone(),
-                config.enable_grease,
+                config.conn.enable_grease,
             )
             .await?,
         },
@@ -76,10 +76,10 @@ where
             open,
             conn_state,
             conn_waker,
-            max_field_section_size: config.max_field_section_size,
+            max_field_section_size: config.conn.max_field_section_size,
             sender_count: Arc::new(AtomicUsize::new(1)),
             _buf: PhantomData,
-            send_grease_frame: config.enable_grease,
+            send_grease_frame: config.conn.enable_grease,
         },
     ))
 }

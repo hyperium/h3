@@ -147,12 +147,12 @@ where
         Ok(Connection {
             inner: ConnectionInner::new(
                 conn,
-                config.max_field_section_size,
+                config.conn.max_field_section_size,
                 SharedStateRef::default(),
-                config.enable_grease,
+                config.conn.enable_grease,
             )
             .await?,
-            max_field_section_size: config.max_field_section_size,
+            max_field_section_size: config.conn.max_field_section_size,
             request_end_send: sender,
             request_end_recv: receiver,
             ongoing_streams: HashSet::new(),
