@@ -7,11 +7,11 @@ on:
 
 env:
   RUST_BACKTRACE: 1
-  rs_style: stable
-  rs_msrv: 1.56
-  rs_doc: nightly
-  rs_lint: stable
-  rs_fuzz: nightly
+  toolchain_style: stable
+  toolchain_msrv: 1.56
+  toolchain_doc: nightly-2022-11-03
+  toolchain_lint: stable
+  toolchain_fuzz: nightly-2022-11-03
 
 jobs:
   ci-pass:
@@ -19,10 +19,10 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - style
+      - lint
       - msrv
       - test
       - doc
-      - lint
       - fuzz
     steps:
       - run: exit 0
@@ -32,11 +32,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - name: Install Rust ${{ env.rs_style }}
+      - name: Install Rust ${{ env.toolchain_style }}
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: ${{ env.rs_style }}
+          toolchain: ${{ env.toolchain_style }}
           override: true
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
@@ -46,17 +46,35 @@ jobs:
           command: fmt
           args: --all -- --check
 
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust ${{ env.toolchain_lint }}
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ env.toolchain_lint }}
+          override: true
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo clippy
+        uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+
   msrv:
     name: Check MSRV
     needs: [style]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - name: Install Rust ${{ env.rs_msrv }}
+      - name: Install Rust ${{ env.toolchain_msrv }}
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: ${{ env.rs_msrv }}
+          toolchain: ${{ env.toolchain_msrv }}
           override: true
       - uses: Swatinem/rust-cache@v2
       - name: cargo check --workspace
@@ -66,21 +84,20 @@ jobs:
           args: --workspace
 
   test:
-    name: Test ${{ matrix.rust }}
+    name: Test ${{ matrix.toolchain }} ${{ matrix.os }}
     needs: [style]
     strategy:
       matrix:
-        rust:
-          - stable
-          - beta
-    runs-on: ubuntu-latest
+        os: [ubuntu-latest]
+        toolchain: [stable, beta]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
-      - name: Install Rust ${{ matrix.rust }}
+      - name: Install Rust ${{ matrix.toolchain }}
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: ${{ matrix.rust }}
+          toolchain: ${{ matrix.toolchain }}
           override: true
       - uses: Swatinem/rust-cache@v2
       - name: cargo test
@@ -89,19 +106,19 @@ jobs:
           command: test
       - name: h3Spec
         run: ./ci/h3spec.sh
-        if: matrix.rust == 'stable'
+        if: matrix.toolchain == 'stable'
 
   doc:
     name: Build docs
-    needs: [style, test]
+    needs: [test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - name: Install Rust ${{ env.rs_doc }}
+      - name: Install Rust ${{ env.toolchain_doc }}
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain:  ${{ env.rs_doc }}
+          toolchain:  ${{ env.toolchain_doc }}
           override: true
       - uses: Swatinem/rust-cache@v2
       - name: cargo rustdoc -p h3 -- -D intra-doc-link-resolution-failure
@@ -110,35 +127,17 @@ jobs:
           command: rustdoc
           args: -p h3 -- -D intra-doc-link-resolution-failure
 
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Install Rust ${{ env.rs_lint }}
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ env.rs_lint }}
-          override: true
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - name: cargo clippy
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-
   fuzz:
     name: Fuzz test
-    needs: [style, test]
+    needs: [test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - name: Install Rust ${{ env.rs_fuzz }}
+      - name: Install Rust ${{ env.toolchain_fuzz }}
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: ${{ env.rs_fuzz }}
+          toolchain: ${{ env.toolchain_fuzz }}
           override: true
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-fuzz
@@ -154,6 +153,7 @@ jobs:
 
   compliance:
     name: Compliance report
+    needs: [test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
