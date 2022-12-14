@@ -297,7 +297,7 @@ where
             };
 
         // Parse the request headers
-        let (method, uri, headers) = match Header::try_from(fields) {
+        let (method, uri, protocol, headers) = match Header::try_from(fields) {
             Ok(header) => match header.into_request_parts() {
                 Ok(parts) => parts,
                 Err(err) => {
@@ -319,19 +319,27 @@ where
                 return Err(error);
             }
         };
+
+        let mut extensions = http::Extensions::new();
+        if !protocol.is_empty() {
+            extensions.insert(protocol);
+        }
+
         //  request_stream.stop_stream(Code::H3_MESSAGE_ERROR).await;
         let mut req = http::Request::new(());
         *req.method_mut() = method;
         *req.uri_mut() = uri;
         *req.headers_mut() = headers;
         *req.version_mut() = http::Version::HTTP_3;
+        *req.extensions_mut() = extensions;
+
         // send the grease frame only once
         self.inner.send_grease_frame = false;
 
         Ok(Some((req, request_stream)))
     }
 
-    /// Itiniate a graceful shutdown, accepting `max_request` potentially still in-flight
+    /// Initiate a graceful shutdown, accepting `max_request` potentially still in-flight
     ///
     /// See [connection shutdown](https://www.rfc-editor.org/rfc/rfc9114.html#connection-shutdown) for more information.
     pub async fn shutdown(&mut self, max_requests: usize) -> Result<(), Error> {
