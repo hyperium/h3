@@ -342,7 +342,11 @@ where
         let _ = self.control().await;
         let _ = future::poll_fn(|cx| self.poll_requests_completion(cx)).await;
         let closing = self.shared_state().read("server accept").closing;
-        let mut req_stream = self.inner.accept_request().await.unwrap();
+        let mut req_stream = match self.inner.accept_request().await{
+            Ok(stream) => stream,
+            Err(err) => return Err(err),
+        };
+
         if let Some(max_id) = closing {
             if req_stream.id() > max_id {
                 req_stream.stop_sending(Code::H3_REQUEST_REJECTED.value());
@@ -506,6 +510,7 @@ impl Builder {
         C: quic::Connection<B>,
         B: Buf,
     {
+        // Create the Connection
         let (sender, receiver) = mpsc::unbounded_channel();
         Ok(Connection {
             inner: ConnectionInner::new(
