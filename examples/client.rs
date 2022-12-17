@@ -1,14 +1,9 @@
 use std::{path::PathBuf, sync::Arc};
 
 use h3_quinn::quinn;
-use rustls::{self, client::ServerCertVerified};
-use rustls::{Certificate, ServerName};
-use futures::future;
 use structopt::StructOpt;
 use tokio::io::AsyncWriteExt;
 use tracing::{error, info};
-
-use h3_quinn::quinn;
 
 static ALPN: &[u8] = b"h3";
 

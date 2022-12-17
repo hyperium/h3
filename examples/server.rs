@@ -99,7 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tls_config.alpn_protocols = vec![ALPN.into()];
 
     let server_config = quinn::ServerConfig::with_crypto(Arc::new(tls_config));
-    let (endpoint, mut incoming) = quinn::Endpoint::server(server_config, opt.listen)?;
+    let endpoint = quinn::Endpoint::server(server_config, opt.listen)?;
 
     info!("listening on {}", opt.listen);
 
