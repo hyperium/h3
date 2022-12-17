@@ -7,6 +7,11 @@ on:
 
 env:
   RUST_BACKTRACE: 1
+  toolchain_style: stable
+  toolchain_msrv: 1.56
+  toolchain_doc: nightly-2022-12-01
+  toolchain_lint: stable
+  toolchain_fuzz: nightly-2022-12-01
 
 jobs:
   ci-pass:
@@ -14,10 +19,10 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - style
-      - build
+      - lint
+      - msrv
       - test
       - doc
-      - lint
       - fuzz
     steps:
       - run: exit 0
@@ -26,166 +31,134 @@ jobs:
     name: Check Style
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v1
-
-      - name: Install Rust
+      - uses: actions/checkout@v3
+      - name: Install Rust ${{ env.toolchain_style }}
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: ${{ env.toolchain_style }}
           override: true
           components: rustfmt
-
-      - name: cargo fmt --check
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo fmt --all -- --check
         uses: actions-rs/cargo@v1
         with:
           command: fmt
           args: --all -- --check
 
-  build:
-    name: Build
-    strategy:
-      matrix:
-        rust:
-          - stable
-          - beta
-          - nightly
-          - "1.59"
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v1
-
-      - name: Install Rust (${{ matrix.rust }})
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ matrix.rust }}
-          override: true
-
-      - name: cargo build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: -p h3
-
-  test:
-    name: Test ${{ matrix.rust }}
-    needs: [style]
-    strategy:
-      matrix:
-        rust:
-          - stable
-          - beta
-          - nightly
-          - "1.59"
-
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v1
-
-      - name: Install Rust (${{ matrix.rust }})
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ matrix.rust }}
-          override: true
-
-      - name: Test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-
-      - name: h3Spec
-        run: ./ci/h3spec.sh
-        if: matrix.rust == 'stable'
-
-  doc:
-    name: Build docs
-    needs: [style, test]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v1
-
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: nightly
-          override: true
-
-      - name: cargo doc
-        uses: actions-rs/cargo@v1
-        with:
-          command: rustdoc
-          args: -p h3 -- -D intra-doc-link-resolution-failure
-
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v1
-
-      - name: Install Rust
+      - uses: actions/checkout@v3
+      - name: Install Rust ${{ env.toolchain_lint }}
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: stable
+          toolchain: ${{ env.toolchain_lint }}
           override: true
           components: clippy
-
+      - uses: Swatinem/rust-cache@v2
       - name: cargo clippy
         uses: actions-rs/cargo@v1
         with:
           command: clippy
 
-  fuzz:
-    name: Fuzz test
-    needs: [style, test]
-    strategy:
-      matrix:
-        rust:
-          - nightly
-
+  msrv:
+    name: Check MSRV
+    needs: [style]
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v1
-
-      - name: Install Rust (${{ matrix.rust }})
+      - uses: actions/checkout@v3
+      - name: Install Rust ${{ env.toolchain_msrv }}
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: ${{ matrix.rust }}
+          toolchain: ${{ env.toolchain_msrv }}
           override: true
-
-      - name: install cargo-fuzz
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo check --workspace
         uses: actions-rs/cargo@v1
         with:
-          command: install
-          args: cargo-fuzz
+          command: check
+          args: --workspace
 
-      - name: Fuzz
+  test:
+    name: Test ${{ matrix.toolchain }} ${{ matrix.os }}
+    needs: [style]
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        toolchain: [stable, beta]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust ${{ matrix.toolchain }}
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ matrix.toolchain }}
+          override: true
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo test
         uses: actions-rs/cargo@v1
         with:
-          command: +nightly
-          args: fuzz run fuzz_varint -- -runs=1
+          command: test
+      - name: h3Spec
+        run: ./ci/h3spec.sh
+        if: matrix.toolchain == 'stable'
+
+  doc:
+    name: Build docs
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust ${{ env.toolchain_doc }}
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain:  ${{ env.toolchain_doc }}
+          override: true
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo rustdoc -p h3 -- -D intra-doc-link-resolution-failure
+        uses: actions-rs/cargo@v1
+        with:
+          command: rustdoc
+          args: -p h3 -- -D intra-doc-link-resolution-failure
+
+  fuzz:
+    name: Fuzz test
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust ${{ env.toolchain_fuzz }}
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ env.toolchain_fuzz }}
+          override: true
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-fuzz
+        uses: camshaft/install@v1
+        with:
+          crate: cargo-fuzz
+      - name: cargo fuzz run fuzz_varint -- -runs=1
+        uses: actions-rs/cargo@v1
+        with:
+          command: fuzz
+          args: run fuzz_varint -- -runs=1
 
   compliance:
     name: Compliance report
+    needs: [test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
         with:
           persist-credentials: false
           fetch-depth: 0
-
       - name: Generate compliance report
         uses: ./.github/actions/compliance
         with:
