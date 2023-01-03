@@ -138,11 +138,7 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    /// Create a new HTTP/3 server connection
-    ///
-    /// Provide a connection endpoint which implements [`quic::Connection`] and
-    /// desired configuration for the server.
-    pub async fn new(conn: C, config: ServerConfig) -> Result<Self, Error> {
+    async fn new(conn: C, config: ServerConfig) -> Result<Self, Error> {
         let (sender, receiver) = mpsc::unbounded_channel();
         Ok(Connection {
             inner: ConnectionInner::new(

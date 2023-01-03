@@ -47,7 +47,7 @@ macro_rules! impl_builder {
                 self
             }
 
-            /// Enable WebTransport
+            /// Enable WebTransport (not supported yet)
             pub fn enable_webtransport(mut self) -> Self {
                 self.conn.enable_webtransport = true;
                 self

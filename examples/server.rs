@@ -116,12 +116,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(conn) => {
                     info!("new connection established");
 
-                    let mut h3_conn = h3::server::Connection::new(
-                        h3_quinn::Connection::new(conn),
-                        Default::default(),
-                    )
-                    .await
-                    .unwrap();
+                    let mut h3_conn =
+                        h3::server::new(h3_quinn::Connection::new(conn), Default::default())
+                            .await
+                            .unwrap();
                     loop {
                         match h3_conn.accept().await {
                             Ok(Some((req, stream))) => {

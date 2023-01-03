@@ -346,9 +346,7 @@ async fn control_close_send_error() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn, Default::default())
-            .await
-            .unwrap();
+        let mut incoming = server::new(conn, Default::default()).await.unwrap();
         // Driver detects that the recieving side of the control stream has been closed
         assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err().kind(),
