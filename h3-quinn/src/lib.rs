@@ -11,7 +11,7 @@ use std::{
 
 use bytes::{Buf, Bytes};
 use futures_util::{ready, Future, FutureExt};
-use h3::quic::{self, Error, StreamId, WriteBuf};
+use h3::quic::{self, CloseCon, Error, StreamId, WriteBuf};
 use pin_project::pin_project;
 use quinn::{AcceptBi, AcceptUni, OpenBi, OpenUni, VarInt};
 
@@ -128,6 +128,7 @@ impl<B: Buf> quic::Connection<B> for Connection {
     type SendStream = SendStream<B>;
     type RecvStream = RecvStream;
     type Error = ConnectionError;
+    type AcceptStreams = AcceptStreams;
     type BidiStreamFuture<'a> = AcceptBidiStream<'a, B> where Self: 'a;
     type AcceptRecvFuture<'a> = AcceptRecvStream<'a>
     where
@@ -176,6 +177,59 @@ impl<B: Buf> quic::Connection<B> for Connection {
         }
     }
 
+    fn accepter(&self) -> Self::AcceptStreams {
+        AcceptStreams {
+            conn: self.conn.clone(),
+        }
+    }
+}
+
+impl CloseCon for Connection {
+    fn close(&mut self, code: h3::error::Code, reason: &[u8]) {
+        self.conn.close(
+            VarInt::from_u64(code.value()).expect("Invalid error code"),
+            reason,
+        );
+    }
+}
+
+impl CloseCon for OpenStreams {
+    fn close(&mut self, code: h3::error::Code, reason: &[u8]) {
+        self.conn.close(
+            VarInt::from_u64(code.value()).expect("Invalid error code"),
+            reason,
+        );
+    }
+}
+
+/// Todo
+pub struct AcceptStreams {
+    conn: quinn::Connection,
+}
+
+impl<B: Buf> quic::AcceptStreams<B> for AcceptStreams {
+    type BidiStream = BidiStream<B>;
+
+    type SendStream = SendStream<B>;
+
+    type RecvStream = RecvStream;
+
+    type Error = ConnectionError;
+
+    type BidiStreamFuture<'a> = AcceptBidiStream<'a, B>
+    where
+        Self: 'a;
+
+    fn accept_bidi<'a>(&'a mut self) -> Self::BidiStreamFuture<'a> {
+        let accept_bidi = self.conn.accept_bi();
+        AcceptBidiStream {
+            uni_fut: accept_bidi,
+            e: None,
+        }
+    }
+}
+
+impl CloseCon for AcceptStreams {
     fn close(&mut self, code: h3::error::Code, reason: &[u8]) {
         self.conn.close(
             VarInt::from_u64(code.value()).expect("Invalid error code"),
@@ -220,13 +274,6 @@ impl<B: Buf> quic::OpenStreams<B> for OpenStreams {
                 Err(e) => Err(ConnectionError(e)),
             },
         )
-    }
-
-    fn close(&mut self, code: h3::error::Code, reason: &[u8]) {
-        self.conn.close(
-            VarInt::from_u64(code.value()).expect("Invalid error code"),
-            reason,
-        );
     }
 }
 

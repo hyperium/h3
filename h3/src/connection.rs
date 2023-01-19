@@ -18,7 +18,7 @@ use crate::{
         varint::VarInt,
     },
     qpack,
-    quic::{self, SendStream as _},
+    quic::{self, CloseCon, SendStream as _},
     stream::{self, AcceptRecvStream, AcceptedRecvStream},
 };
 
@@ -70,9 +70,14 @@ pub trait ConnectionState {
     }
 }
 
+pub trait HasQuicConnection<B: Buf> {
+    type Conn: quic::CloseCon;
+    fn get_conn(&mut self) -> &mut Self::Conn;
+}
+
 pub struct ConnectionInner<C, B>
 where
-    C: quic::Connection<B>,
+    C: quic::Connection<B> + quic::CloseCon,
     B: Buf,
 {
     pub(super) shared: SharedStateRef,
@@ -90,7 +95,7 @@ where
 
 impl<C, B> ConnectionInner<C, B>
 where
-    C: quic::Connection<B>,
+    C: quic::Connection<B> + quic::CloseCon,
     B: Buf,
 {
     pub async fn new(
@@ -212,17 +217,6 @@ where
         //# previously sent frames have been processed and gracefully complete or
         //# terminate any necessary remaining tasks.
         stream::write(&mut self.control_send, Frame::Goaway(max_id)).await
-    }
-
-    pub async fn accept_request(&mut self) -> Result<C::BidiStream, Error> {
-        {
-            let state = self.shared.read("poll_accept_request");
-            if let Some(ref e) = state.error {
-                return Err(e.clone());
-            }
-        }
-        let rec_stream = self.conn.accept_bidi();
-        rec_stream.await.map_err(|e| e.into().into())
     }
 
     pub async fn accept_recv(&mut self) -> Result<(), Error> {
@@ -422,10 +416,7 @@ where
     /// Closes a Connection with code and reason.
     /// It returns an [`Error`] which can be returned.
     pub fn close<T: AsRef<str>>(&mut self, code: Code, reason: T) -> Error {
-        self.shared.write("connection close err").error =
-            Some(code.with_reason(reason.as_ref(), crate::error::ErrorLevel::ConnectionError));
-        self.conn.close(code, reason.as_ref().as_bytes());
-        code.with_reason(reason.as_ref(), crate::error::ErrorLevel::ConnectionError)
+        close_con(code, reason, self)
     }
 
     /// starts an grease stream
@@ -477,6 +468,20 @@ where
     }
 }
 
+/// Closes a Connection with code and reason.
+/// It returns an [`Error`] which can be returned.
+pub fn close_con<T, C, B>(code: Code, reason: T, conn: &mut C) -> Error
+where
+    T: AsRef<str>,
+    C: HasQuicConnection<B> + ConnectionState,
+    B: Buf,
+{
+    conn.shared_state().write("connection close err").error =
+        Some(code.with_reason(reason.as_ref(), crate::error::ErrorLevel::ConnectionError));
+    conn.get_conn().close(code, reason.as_ref().as_bytes());
+    code.with_reason(reason.as_ref(), crate::error::ErrorLevel::ConnectionError)
+}
+
 pub struct RequestStream<S, B> {
     pub(super) stream: FrameStream<S, B>,
     pub(super) trailers: Option<Bytes>,
@@ -499,6 +504,28 @@ impl<S, B> RequestStream<S, B> {
             trailers: None,
             send_grease_frame: grease,
         }
+    }
+}
+
+impl<C, B> ConnectionState for ConnectionInner<C, B>
+where
+    B: Buf,
+    C: quic::Connection<B> + quic::CloseCon,
+{
+    fn shared_state(&self) -> &SharedStateRef {
+        &self.shared
+    }
+}
+
+impl<C, B> HasQuicConnection<B> for ConnectionInner<C, B>
+where
+    B: Buf,
+    C: quic::CloseCon + quic::Connection<B>,
+{
+    type Conn = C;
+
+    fn get_conn(&mut self) -> &mut Self::Conn {
+        &mut self.conn
     }
 }
 

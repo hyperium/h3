@@ -21,7 +21,7 @@ use std::{
 use bytes::Bytes;
 use rustls::{Certificate, PrivateKey};
 
-use crate::quic;
+use crate::quic::{self, CloseCon};
 use h3_quinn::{
     quinn::{self, TransportConfig},
     Connection,
@@ -132,7 +132,7 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn next(&mut self) -> impl quic::Connection<Bytes> {
+    pub async fn next(&mut self) -> impl quic::Connection<Bytes> + CloseCon {
         Connection::new(self.endpoint.accept().await.unwrap().await.unwrap())
     }
 }

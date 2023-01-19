@@ -40,6 +40,8 @@ pub trait Connection<B: Buf> {
     type RecvStream: RecvStream;
     /// A producer of outgoing Unidirectional and Bidirectional streams.
     type OpenStreams: OpenStreams<B>;
+    /// Todo
+    type AcceptStreams: AcceptStreams<B> + CloseCon;
     /// Error type yielded by this trait methods
     type Error: Into<Box<dyn Error>>;
     /// Future for poll_accept_bidi
@@ -78,7 +80,31 @@ pub trait Connection<B: Buf> {
     /// Get an object to open outgoing streams.
     fn opener(&self) -> Self::OpenStreams;
 
-    /// Close the connection immediately
+    /// Todo
+    fn accepter(&self) -> Self::AcceptStreams;
+}
+
+/// Todo
+pub trait AcceptStreams<B: Buf> {
+    /// Todo
+    type BidiStream: SendStream<B> + RecvStream;
+    /// Todo
+    type SendStream: SendStream<B>;
+    /// Todo
+    type RecvStream: RecvStream;
+    /// Todo
+    type Error: Into<Box<dyn Error>>;
+    /// Todo
+    type BidiStreamFuture<'a>: Future<Output = Result<Self::BidiStream, Self::Error>>
+    where
+        Self: 'a;
+    /// Todo
+    fn accept_bidi<'a>(&'a mut self) -> Self::BidiStreamFuture<'a>;
+}
+
+/// Todo
+pub trait CloseCon {
+    /// Todo
     fn close(&mut self, code: crate::error::Code, reason: &[u8]);
 }
 
@@ -104,9 +130,6 @@ pub trait OpenStreams<B: Buf> {
         &mut self,
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Self::SendStream, Self::Error>>;
-
-    /// Close the connection immediately
-    fn close(&mut self, code: crate::error::Code, reason: &[u8]);
 }
 
 /// A trait describing the "send" actions of a QUIC stream.

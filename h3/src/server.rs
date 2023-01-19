@@ -53,6 +53,7 @@
 use std::{
     collections::HashSet,
     convert::TryFrom,
+    marker::PhantomData,
     sync::Arc,
     task::{Context, Poll},
 };
@@ -64,12 +65,14 @@ use quic::StreamId;
 use tokio::sync::mpsc;
 
 use crate::{
-    connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
+    connection::{
+        self, close_con, ConnectionInner, ConnectionState, HasQuicConnection, SharedStateRef,
+    },
     error::{Code, Error, ErrorLevel},
     frame::FrameStream,
     proto::{frame::Frame, headers::Header, varint::VarInt},
     qpack,
-    quic::{self, RecvStream as _, SendStream as _},
+    quic::{self, AcceptStreams, CloseCon, RecvStream as _, SendStream as _},
     stream,
 };
 use tracing::{error, trace};
@@ -82,55 +85,24 @@ pub fn builder() -> Builder {
     Builder::new()
 }
 
-/// Server connection driver
-///
-/// The [`Connection`] struct manages a connection from the side of the HTTP/3 server
-///
-/// Create a new Instance with [`Connection::new()`].
-/// Accept incoming requests with [`Connection::accept()`].
-/// And shutdown a connection with [`Connection::shutdown()`].
-pub struct Connection<C, B>
+/// Todo
+pub struct AcceptRequest<C, B>
 where
-    C: quic::Connection<B>,
+    C: quic::AcceptStreams<B> + quic::CloseCon,
     B: Buf,
 {
-    inner: ConnectionInner<C, B>,
+    accept: C,
+    _buf: PhantomData<fn(B)>,
+    shared: SharedStateRef,
     max_field_section_size: u64,
-    // List of all incoming streams that are currently running.
-    ongoing_streams: HashSet<StreamId>,
     // Let the streams tell us when they are no longer running.
-    request_end_recv: mpsc::UnboundedReceiver<StreamId>,
     request_end_send: mpsc::UnboundedSender<StreamId>,
+    send_grease_frame: bool,
 }
 
-impl<C, B> ConnectionState for Connection<C, B>
+impl<C, B> AcceptRequest<C, B>
 where
-    C: quic::Connection<B>,
-    B: Buf,
-{
-    fn shared_state(&self) -> &SharedStateRef {
-        &self.inner.shared
-    }
-}
-
-impl<C, B> Connection<C, B>
-where
-    C: quic::Connection<B>,
-    B: Buf,
-{
-    /// Create a new HTTP/3 server connection with default settings
-    ///
-    /// Use a custom [`Builder`] with [`builder()`] to create a connection
-    /// with different settings.
-    /// Provide a Connection which implements [`quic::Connection`].
-    pub async fn new(conn: C) -> Result<Self, Error> {
-        builder().build(conn).await
-    }
-}
-
-impl<C, B> Connection<C, B>
-where
-    C: quic::Connection<B>,
+    C: quic::AcceptStreams<B> + quic::CloseCon,
     B: Buf,
 {
     /// Accept an incoming request.
@@ -148,7 +120,9 @@ where
             Ok(None) => {
                 // We always send a last GoAway frame to the client, so it knows which was the last
                 // non-rejected request.
-                self.inner.shutdown(0).await?;
+
+                // TODO: Is this required?
+                //  self.inner.shutdown(0).await?;
                 return Ok(None);
             }
             Err(err) => {
@@ -159,9 +133,10 @@ where
                         reason,
                         level: ErrorLevel::ConnectionError,
                     } => {
-                        return Err(self.inner.close(
+                        return Err(close_con(
                             code,
                             reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
+                            self,
                         ))
                     }
                     _ => return Err(err),
@@ -179,9 +154,10 @@ where
             //# complete response, the server SHOULD abort its response stream with
             //# the error code H3_REQUEST_INCOMPLETE.
             Ok(None) => {
-                return Err(self.inner.close(
+                return Err(close_con(
                     Code::H3_REQUEST_INCOMPLETE,
                     "request stream closed before headers",
+                    self,
                 ))
             }
 
@@ -198,9 +174,10 @@ where
                 //# Receipt of an invalid sequence of frames MUST be treated as a
                 //# connection error of type H3_FRAME_UNEXPECTED.
                 // Close if the first frame is not a header frame
-                return Err(self.inner.close(
+                return Err(close_con(
                     Code::H3_FRAME_UNEXPECTED,
                     "first request frame is not headers",
+                    self,
                 ));
             }
             Err(e) => {
@@ -215,9 +192,10 @@ where
                         reason,
                         level: ErrorLevel::ConnectionError,
                     } => {
-                        return Err(self.inner.close(
+                        return Err(close_con(
                             code,
                             reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
+                            self,
                         ))
                     }
                     crate::error::Kind::Application {
@@ -241,8 +219,8 @@ where
             inner: connection::RequestStream::new(
                 stream,
                 self.max_field_section_size,
-                self.inner.shared.clone(),
-                self.inner.send_grease_frame,
+                self.shared.clone(),
+                self.send_grease_frame,
             ),
         };
 
@@ -278,9 +256,10 @@ where
                             reason,
                             level: ErrorLevel::ConnectionError,
                         } => {
-                            return Err(self.inner.close(
+                            return Err(close_con(
                                 code,
                                 reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
+                                self,
                             ))
                         }
                         crate::error::Kind::Application {
@@ -326,108 +305,168 @@ where
         *req.headers_mut() = headers;
         *req.version_mut() = http::Version::HTTP_3;
         // send the grease frame only once
-        self.inner.send_grease_frame = false;
+        self.send_grease_frame = false;
 
         Ok(Some((req, request_stream)))
     }
 
-    /// Itiniate a graceful shutdown, accepting `max_request` potentially still in-flight
+    async fn accept_request1(&mut self) -> Result<C::BidiStream, Error> {
+        {
+            let state = self.shared.read("poll_accept_request");
+            if let Some(ref e) = state.error {
+                return Err(e.clone());
+            }
+        }
+        let rec_stream = self.accept.accept_bidi();
+        rec_stream.await.map_err(|e| e.into().into())
+    }
+    async fn accept_request(&mut self) -> Result<Option<C::BidiStream>, Error> {
+        //     let _ = self.control().await;
+        //  let _ = future::poll_fn(|cx| self.poll_requests_completion(cx)).await;
+        //    let closing = self.shared_state().read("server accept").closing;
+        let mut req_stream = match self.accept_request1().await {
+            Ok(stream) => stream,
+            Err(err) => return Err(err),
+        };
+        // look of connection is closing after the request is accepted.
+        let closing = self.shared_state().read("server accept").closing;
+        if let Some(max_id) = closing {
+            if req_stream.id() > max_id {
+                req_stream.stop_sending(Code::H3_REQUEST_REJECTED.value());
+                req_stream.reset(Code::H3_REQUEST_REJECTED.value());
+                //     future::poll_fn(|cx| self.poll_requests_completion(cx)).await;
+                return Ok(None);
+            }
+        }
+        // Todo: put this somewhere
+        //  self.inner.start_stream(req_stream.id());
+        return Ok(Some(req_stream));
+    }
+}
+
+impl<C, B> HasQuicConnection<B> for AcceptRequest<C, B>
+where
+    C: quic::AcceptStreams<B> + quic::CloseCon,
+    B: Buf,
+{
+    type Conn = C;
+
+    fn get_conn(&mut self) -> &mut Self::Conn {
+        &mut self.accept
+    }
+}
+
+impl<C, B> ConnectionState for AcceptRequest<C, B>
+where
+    C: quic::AcceptStreams<B> + quic::CloseCon,
+    B: Buf,
+{
+    fn shared_state(&self) -> &SharedStateRef {
+        &self.shared
+    }
+}
+
+/// Server connection driver
+///
+/// The [`Connection`] struct manages a connection from the side of the HTTP/3 server
+///
+/// Create a new Instance with [`Connection::new()`].
+/// Accept incoming requests with [`Connection::accept()`].
+/// And shutdown a connection with [`Connection::shutdown()`].
+pub struct Connection<C, B>
+where
+    C: quic::Connection<B> + CloseCon,
+    B: Buf,
+{
+    inner: ConnectionInner<C, B>,
+    max_field_section_size: u64,
+    // Let the streams tell us when they are no longer running.
+    request_end_recv: mpsc::UnboundedReceiver<StreamId>,
+    request_end_send: mpsc::UnboundedSender<StreamId>,
+}
+
+impl<C, B> ConnectionState for Connection<C, B>
+where
+    C: quic::Connection<B> + CloseCon,
+    B: Buf,
+{
+    fn shared_state(&self) -> &SharedStateRef {
+        &self.inner.shared
+    }
+}
+
+impl<C, B> Connection<C, B>
+where
+    C: quic::Connection<B> + CloseCon,
+    B: Buf,
+{
+    /// Accept an incoming request.
+    ///
+    /// It returns a tuple with a [`http::Request`] and an [`RequestStream`].
+    /// The [`http::Request`] is the received request from the client.
+    /// The [`RequestStream`] can be used to send the response.
+    pub async fn accept(
+        &mut self,
+    ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
+        todo!()
+    }
+
+    /// Initiate a graceful shutdown, accepting `max_request` potentially still in-flight
     ///
     /// See [connection shutdown](https://www.rfc-editor.org/rfc/rfc9114.html#connection-shutdown) for more information.
     pub async fn shutdown(&mut self, max_requests: usize) -> Result<(), Error> {
         self.inner.shutdown(max_requests).await
     }
 
-    async fn accept_request(&mut self) -> Result<Option<C::BidiStream>, Error> {
-        let _ = self.control().await;
-        let _ = future::poll_fn(|cx| self.poll_requests_completion(cx)).await;
-        let closing = self.shared_state().read("server accept").closing;
-        let mut req_stream = match self.inner.accept_request().await{
-            Ok(stream) => stream,
-            Err(err) => return Err(err),
-        };
+    /// Controlls the Controll stream
+    pub async fn control(&mut self) -> Result<(), Error> {
+        loop {
+            match self.inner.control().await? {
+                Frame::Settings(_) => trace!("Got settings"),
+                Frame::Goaway(id) => {
+                    if !id.is_push() {
+                        return Err(Code::H3_ID_ERROR.with_reason(
+                            format!("non-push StreamId in a GoAway frame: {}", id),
+                            ErrorLevel::ConnectionError,
+                        ));
+                    }
+                }
+                f @ Frame::MaxPushId(_) | f @ Frame::CancelPush(_) => {
+                    trace!("Control frame ignored {:?}", f);
 
-        if let Some(max_id) = closing {
-            if req_stream.id() > max_id {
-                req_stream.stop_sending(Code::H3_REQUEST_REJECTED.value());
-                req_stream.reset(Code::H3_REQUEST_REJECTED.value());
-                future::poll_fn(|cx| self.poll_requests_completion(cx)).await;
-                return Ok(None);
-            }
-        }
-        self.inner.start_stream(req_stream.id());
-        self.ongoing_streams.insert(req_stream.id());
-        return Ok(Some(req_stream));
-    }
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
+                    //= type=TODO
+                    //# If a server receives a CANCEL_PUSH frame for a push
+                    //# ID that has not yet been mentioned by a PUSH_PROMISE frame, this MUST
+                    //# be treated as a connection error of type H3_ID_ERROR.
 
-    async fn control(&mut self) -> Result<(), Error> {
-        match self.inner.control().await? {
-            Frame::Settings(_) => trace!("Got settings"),
-            Frame::Goaway(id) => {
-                if !id.is_push() {
-                    return Err(Code::H3_ID_ERROR.with_reason(
-                        format!("non-push StreamId in a GoAway frame: {}", id),
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.7
+                    //= type=TODO
+                    //# A MAX_PUSH_ID frame cannot reduce the maximum push
+                    //# ID; receipt of a MAX_PUSH_ID frame that contains a smaller value than
+                    //# previously received MUST be treated as a connection error of type
+                    //# H3_ID_ERROR.
+                }
+
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.5
+                //# A server MUST treat the
+                //# receipt of a PUSH_PROMISE frame as a connection error of type
+                //# H3_FRAME_UNEXPECTED.
+                frame => {
+                    return Err(Code::H3_FRAME_UNEXPECTED.with_reason(
+                        format!("on server control stream: {:?}", frame),
                         ErrorLevel::ConnectionError,
                     ));
                 }
-            }
-            f @ Frame::MaxPushId(_) | f @ Frame::CancelPush(_) => {
-                trace!("Control frame ignored {:?}", f);
-
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
-                //= type=TODO
-                //# If a server receives a CANCEL_PUSH frame for a push
-                //# ID that has not yet been mentioned by a PUSH_PROMISE frame, this MUST
-                //# be treated as a connection error of type H3_ID_ERROR.
-
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.7
-                //= type=TODO
-                //# A MAX_PUSH_ID frame cannot reduce the maximum push
-                //# ID; receipt of a MAX_PUSH_ID frame that contains a smaller value than
-                //# previously received MUST be treated as a connection error of type
-                //# H3_ID_ERROR.
-            }
-
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.5
-            //# A server MUST treat the
-            //# receipt of a PUSH_PROMISE frame as a connection error of type
-            //# H3_FRAME_UNEXPECTED.
-            frame => {
-                return Err(Code::H3_FRAME_UNEXPECTED.with_reason(
-                    format!("on server control stream: {:?}", frame),
-                    ErrorLevel::ConnectionError,
-                ));
-            }
-        };
-        return Ok(());
-    }
-
-    fn poll_requests_completion(&mut self, cx: &mut Context<'_>) -> Poll<()> {
-        loop {
-            match self.request_end_recv.poll_recv(cx) {
-                // The channel is closed
-                Poll::Ready(None) => return Poll::Ready(()),
-                // A request has completed
-                Poll::Ready(Some(id)) => {
-                    self.ongoing_streams.remove(&id);
-                }
-                Poll::Pending => {
-                    if self.ongoing_streams.is_empty() {
-                        // Tell the caller there is not more ongoing requests.
-                        // Still, the completion of future requests will wake us.
-                        return Poll::Ready(());
-                    } else {
-                        return Poll::Pending;
-                    }
-                }
-            }
+            };
         }
+        return Ok(());
     }
 }
 
 impl<C, B> Drop for Connection<C, B>
 where
-    C: quic::Connection<B>,
+    C: quic::Connection<B> + CloseCon,
     B: Buf,
 {
     fn drop(&mut self) {
@@ -505,26 +544,41 @@ impl Builder {
     /// Build an HTTP/3 connection from a QUIC connection
     ///
     /// This method creates a [`Connection`] instance with the settings in the [`Builder`].
-    pub async fn build<C, B>(&self, conn: C) -> Result<Connection<C, B>, Error>
+    pub async fn build<A, C, B>(
+        &self,
+        conn: C,
+    ) -> Result<(Connection<C, B>, AcceptRequest<A, B>), Error>
     where
-        C: quic::Connection<B>,
+        A: AcceptStreams<B> + CloseCon,
+        C: quic::Connection<B, AcceptStreams = A> + CloseCon,
         B: Buf,
     {
         // Create the Connection
         let (sender, receiver) = mpsc::unbounded_channel();
-        Ok(Connection {
-            inner: ConnectionInner::new(
-                conn,
-                self.max_field_section_size,
-                SharedStateRef::default(),
-                self.send_grease,
-            )
-            .await?,
-            max_field_section_size: self.max_field_section_size,
-            request_end_send: sender,
-            request_end_recv: receiver,
-            ongoing_streams: HashSet::new(),
-        })
+        let shared = SharedStateRef::default();
+        let accept_request = conn.accepter();
+        Ok((
+            Connection {
+                inner: ConnectionInner::new(
+                    conn,
+                    self.max_field_section_size,
+                    shared.clone(),
+                    self.send_grease,
+                )
+                .await?,
+                max_field_section_size: self.max_field_section_size,
+                request_end_send: sender.clone(),
+                request_end_recv: receiver,
+            },
+            AcceptRequest {
+                accept: accept_request,
+                _buf: PhantomData,
+                shared: shared,
+                max_field_section_size: self.max_field_section_size,
+                request_end_send: sender.clone(),
+                send_grease_frame: self.send_grease,
+            },
+        ))
     }
 }
 

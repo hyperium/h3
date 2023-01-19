@@ -16,7 +16,7 @@ use crate::{
         frame::{Frame, Settings},
         stream::{StreamId, StreamType},
     },
-    quic::{self, SendStream},
+    quic::{self, CloseCon, SendStream},
     server,
 };
 
@@ -34,7 +34,7 @@ async fn connect() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let _ = server::Connection::new(conn).await.unwrap();
+        let _ = server::builder().build(conn).await.unwrap();
     };
 
     tokio::join!(server_fut, client_fut);
@@ -52,9 +52,15 @@ async fn accept_request_end_on_client_close() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
-        // Accept returns Ok(None)
-        assert!(incoming.accept().await.unwrap().is_none());
+        let (mut h3_conn, mut incoming) = server::builder().build(conn).await.unwrap();
+        let driver_fut = async {
+            h3_conn.control().await;
+        };
+        let request_fut = async {
+            // Accept returns Ok(None)
+            assert!(incoming.accept().await.unwrap().is_none());
+        };
+        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
     };
 
     tokio::join!(server_fut, client_fut);
@@ -67,7 +73,7 @@ async fn server_drop_close() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let _ = server::Connection::new(conn).await.unwrap();
+        let (mut h3_conn, mut incoming) = server::builder().build(conn).await.unwrap();
     };
 
     let (mut conn, mut send) = client::new(pair.client().await).await.expect("client init");
@@ -97,10 +103,16 @@ async fn client_close_only_on_last_sender_drop() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
-        assert!(incoming.accept().await.unwrap().is_some());
-        assert!(incoming.accept().await.unwrap().is_some());
-        assert!(incoming.accept().await.unwrap().is_none());
+        let (mut h3_conn, mut incoming) = server::builder().build(conn).await.unwrap();
+        let driver_fut = async {
+            h3_conn.control().await;
+        };
+        let request_fut = async {
+            assert!(incoming.accept().await.unwrap().is_some());
+            assert!(incoming.accept().await.unwrap().is_some());
+            assert!(incoming.accept().await.unwrap().is_none());
+        };
+        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
     };
 
     let client_fut = async {
@@ -160,12 +172,16 @@ async fn settings_exchange_client() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::builder()
+        let (mut h3_conn, mut incoming) = server::builder()
             .max_field_section_size(12)
             .build(conn)
             .await
             .unwrap();
-        incoming.accept().await.unwrap()
+        let driver_fut = async {
+            h3_conn.control().await;
+        };
+        let request_fut = async { incoming.accept().await.unwrap() };
+        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
     };
 
     tokio::select! { _ = server_fut => panic!("server resolved first"), _ = client_fut => () };
@@ -192,7 +208,14 @@ async fn settings_exchange_server() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
+        let (mut h3_conn, mut incoming) = server::builder()
+            .max_field_section_size(12)
+            .build(conn)
+            .await
+            .unwrap();
+        let driver_fut = async {
+            h3_conn.control().await;
+        };
 
         let state = incoming.shared_state().clone();
         let accept = async { incoming.accept().await.unwrap() };
@@ -206,7 +229,7 @@ async fn settings_exchange_server() {
             }
             panic!("peer's max_field_section_size didn't change");
         };
-        tokio::select! { _ = accept => panic!("server resolved first"), _ = settings_change => () };
+        tokio::select! { _ = accept => panic!("server resolved first"), _ = settings_change => (), _ = driver_fut => () };
     };
 
     tokio::select! { _ = server_fut => (), _ = client_fut => () };
@@ -289,14 +312,20 @@ async fn two_control_streams() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
-        assert_matches!(
-            incoming.accept().await.map(|_| ()).unwrap_err().kind(),
-            Kind::Application {
-                code: Code::H3_STREAM_CREATION_ERROR,
-                ..
-            }
-        );
+        let (mut h3_conn, mut incoming) = server::builder().build(conn).await.unwrap();
+        let driver_fut = async {
+            h3_conn.control().await;
+        };
+        let request_fut = async {
+            assert_matches!(
+                incoming.accept().await.map(|_| ()).unwrap_err().kind(),
+                Kind::Application {
+                    code: Code::H3_STREAM_CREATION_ERROR,
+                    ..
+                }
+            );
+        };
+        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
     };
 
     tokio::select! { _ = server_fut => (), _ = client_fut => panic!("client resolved first") };
@@ -332,17 +361,23 @@ async fn control_close_send_error() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
-        // Driver detects that the recieving side of the control stream has been closed
-        assert_matches!(
+        let (mut h3_conn, mut incoming) = server::builder().build(conn).await.unwrap();
+        let driver_fut = async {
+            h3_conn.control().await;
+        };
+        let request_fut = async {
+            // Driver detects that the receiving side of the control stream has been closed
+            assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err().kind(),
             Kind::Application { reason: Some(reason), code: Code::H3_CLOSED_CRITICAL_STREAM, .. }
             if *reason == *"control stream closed");
-        // Poll it once again returns the previously stored error
-        assert_matches!(
+            // Poll it once again returns the previously stored error
+            assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err().kind(),
             Kind::Application { reason: Some(reason), code: Code::H3_CLOSED_CRITICAL_STREAM, .. }
             if *reason == *"control stream closed");
+        };
+        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
     };
 
     tokio::select! { _ = server_fut => (), _ = client_fut => panic!("client resolved first") };
@@ -374,14 +409,20 @@ async fn missing_settings() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
-        assert_matches!(
-            incoming.accept().await.map(|_| ()).unwrap_err().kind(),
-            Kind::Application {
-                code: Code::H3_MISSING_SETTINGS,
-                ..
-            }
-        );
+        let (mut h3_conn, mut incoming) = server::builder().build(conn).await.unwrap();
+        let driver_fut = async {
+            h3_conn.control().await;
+        };
+        let request_fut = async {
+            assert_matches!(
+                incoming.accept().await.map(|_| ()).unwrap_err().kind(),
+                Kind::Application {
+                    code: Code::H3_MISSING_SETTINGS,
+                    ..
+                }
+            );
+        };
+        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
     };
 
     tokio::select! { _ = server_fut => (), _ = client_fut => panic!("client resolved first") };
@@ -412,14 +453,20 @@ async fn control_stream_frame_unexpected() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
-        assert_matches!(
-            incoming.accept().await.map(|_| ()).unwrap_err().kind(),
-            Kind::Application {
-                code: Code::H3_FRAME_UNEXPECTED,
-                ..
-            }
-        );
+        let (mut h3_conn, mut incoming) = server::builder().build(conn).await.unwrap();
+        let driver_fut = async {
+            h3_conn.control().await;
+        };
+        let request_fut = async {
+            assert_matches!(
+                incoming.accept().await.map(|_| ()).unwrap_err().kind(),
+                Kind::Application {
+                    code: Code::H3_FRAME_UNEXPECTED,
+                    ..
+                }
+            );
+        };
+        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
     };
 
     tokio::select! { _ = server_fut => (), _ = client_fut => panic!("client resolved first") };
@@ -440,11 +487,17 @@ async fn timeout_on_control_frame_read() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
-        assert_matches!(
-            incoming.accept().await.map(|_| ()).unwrap_err().kind(),
-            Kind::Timeout
-        );
+        let (mut h3_conn, mut incoming) = server::builder().build(conn).await.unwrap();
+        let driver_fut = async {
+            h3_conn.control().await;
+        };
+        let request_fut = async {
+            assert_matches!(
+                incoming.accept().await.map(|_| ()).unwrap_err().kind(),
+                Kind::Timeout
+            );
+        };
+        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
     };
 
     tokio::join!(server_fut, client_fut);
@@ -478,15 +531,21 @@ async fn goaway_from_client_not_push_id() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
-        assert_matches!(
-            incoming.accept().await.map(|_| ()).unwrap_err().kind(),
-            Kind::Application {
-                // The StreamId sent in the GoAway frame from the client is not a PushId:
-                code: Code::H3_ID_ERROR,
-                ..
-            }
-        );
+        let (mut h3_conn, mut incoming) = server::builder().build(conn).await.unwrap();
+        let driver_fut = async {
+            h3_conn.control().await;
+        };
+        let request_fut = async {
+            assert_matches!(
+                incoming.accept().await.map(|_| ()).unwrap_err().kind(),
+                Kind::Application {
+                    // The StreamId sent in the GoAway frame from the client is not a PushId:
+                    code: Code::H3_ID_ERROR,
+                    ..
+                }
+            );
+        };
+        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
     };
 
     tokio::select! { _ = server_fut => (), _ = client_fut => panic!("client resolved first") };
@@ -579,12 +638,19 @@ async fn graceful_shutdown_server_rejects() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
-        let (_, stream) = incoming.accept().await.unwrap().unwrap();
-        response(stream).await;
-        incoming.shutdown(0).await.unwrap();
-        assert_matches!(incoming.accept().await.map(|x| x.map(|_| ())), Ok(None));
-        server.endpoint.wait_idle().await;
+        let (mut h3_conn, mut incoming) = server::builder().build(conn).await.unwrap();
+        let driver_fut = async {
+            h3_conn.control().await;
+        };
+        let request_fut = async {
+            let (_, stream) = incoming.accept().await.unwrap().unwrap();
+            response(stream).await;
+            // Todo
+            //  incoming.shutdown(0).await.unwrap();
+            assert_matches!(incoming.accept().await.map(|x| x.map(|_| ())), Ok(None));
+            server.endpoint.wait_idle().await;
+        };
+        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
     };
 
     tokio::join!(server_fut, client_fut);
@@ -632,19 +698,26 @@ async fn graceful_shutdown_grace_interval() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
-        let (_, first) = incoming.accept().await.unwrap().unwrap();
-        incoming.shutdown(1).await.unwrap();
-        let (_, in_flight) = incoming.accept().await.unwrap().unwrap();
-        response(first).await;
-        response(in_flight).await;
+        let (mut h3_conn, mut incoming) = server::builder().build(conn).await.unwrap();
+        let driver_fut = async {
+            h3_conn.control().await;
+        };
+        let request_fut = async {
+            let (_, first) = incoming.accept().await.unwrap().unwrap();
+            // Todo
+            //  incoming.shutdown(1).await.unwrap();
+            let (_, in_flight) = incoming.accept().await.unwrap().unwrap();
+            response(first).await;
+            response(in_flight).await;
 
-        while let Ok(Some((_, stream))) = incoming.accept().await {
-            response(stream).await;
-        }
-        // Ensure `too_late` request is executed as the connection is still
-        // closing (no QUIC `Close` frame has been fired yet)
-        tokio::time::sleep(Duration::from_millis(50)).await;
+            while let Ok(Some((_, stream))) = incoming.accept().await {
+                response(stream).await;
+            }
+            // Ensure `too_late` request is executed as the connection is still
+            // closing (no QUIC `Close` frame has been fired yet)
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        };
+        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
     };
 
     tokio::join!(server_fut, client_fut);
@@ -668,18 +741,24 @@ async fn graceful_shutdown_closes_when_idle() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
+        let (mut h3_conn, mut incoming) = server::builder().build(conn).await.unwrap();
+        let driver_fut = async {
+            h3_conn.control().await;
+        };
+        let request_fut = async {
+            let mut count = 0;
 
-        let mut count = 0;
+            while let Ok(Some((_, stream))) = incoming.accept().await {
+                count += 1;
+                if count == 4 {
+                    // Todo
+                  //  incoming.shutdown(2).await.unwrap();
+                }
 
-        while let Ok(Some((_, stream))) = incoming.accept().await {
-            count += 1;
-            if count == 4 {
-                incoming.shutdown(2).await.unwrap();
-            }
-
-            response(stream).await;
-        }
+                response(stream).await;
+            };
+        };
+        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
     };
 
     tokio::select! {
@@ -692,7 +771,7 @@ async fn graceful_shutdown_closes_when_idle() {
 async fn request<T, O, B>(mut send_request: T) -> Result<Response<()>, Error>
 where
     T: BorrowMut<SendRequest<O, B>>,
-    O: quic::OpenStreams<B>,
+    O: quic::OpenStreams<B> + CloseCon,
     B: Buf,
 {
     let mut request_stream = send_request

@@ -17,7 +17,9 @@ use crate::{
     error::{Code, Error, ErrorLevel},
     frame::FrameStream,
     proto::{frame::Frame, headers::Header, varint::VarInt},
-    qpack, quic, stream,
+    qpack,
+    quic::{self, CloseCon},
+    stream,
 };
 
 /// Start building a new HTTP/3 client
@@ -28,8 +30,8 @@ pub fn builder() -> Builder {
 /// Create a new HTTP/3 client with default settings
 pub async fn new<C, O>(conn: C) -> Result<(Connection<C, Bytes>, SendRequest<O, Bytes>), Error>
 where
-    C: quic::Connection<Bytes, OpenStreams = O>,
-    O: quic::OpenStreams<Bytes>,
+    C: quic::CloseCon + quic::Connection<Bytes, OpenStreams = O>,
+    O: quic::OpenStreams<Bytes> + CloseCon,
 {
     //= https://www.rfc-editor.org/rfc/rfc9114#section-3.3
     //= type=implication
@@ -119,7 +121,7 @@ where
 /// [`RequestStream::finish()`]: struct.RequestStream.html#method.finish
 pub struct SendRequest<T, B>
 where
-    T: quic::OpenStreams<B>,
+    T: quic::OpenStreams<B> + CloseCon,
     B: Buf,
 {
     open: T,
@@ -134,7 +136,7 @@ where
 
 impl<T, B> SendRequest<T, B>
 where
-    T: quic::OpenStreams<B>,
+    T: quic::OpenStreams<B> + CloseCon,
     B: Buf,
 {
     /// Send a HTTP/3 request to the server
@@ -211,7 +213,7 @@ where
 
 impl<T, B> ConnectionState for SendRequest<T, B>
 where
-    T: quic::OpenStreams<B>,
+    T: quic::OpenStreams<B> + CloseCon,
     B: Buf,
 {
     fn shared_state(&self) -> &SharedStateRef {
@@ -221,7 +223,7 @@ where
 
 impl<T, B> Clone for SendRequest<T, B>
 where
-    T: quic::OpenStreams<B> + Clone,
+    T: quic::OpenStreams<B> + Clone + CloseCon,
     B: Buf,
 {
     fn clone(&self) -> Self {
@@ -242,7 +244,7 @@ where
 
 impl<T, B> Drop for SendRequest<T, B>
 where
-    T: quic::OpenStreams<B>,
+    T: quic::OpenStreams<B> + CloseCon,
     B: Buf,
 {
     fn drop(&mut self) {
@@ -344,7 +346,7 @@ where
 /// [`shutdown()`]: struct.Connection.html#method.shutdown
 pub struct Connection<C, B>
 where
-    C: quic::Connection<B>,
+    C: quic::Connection<B> + CloseCon,
     B: Buf,
 {
     inner: ConnectionInner<C, B>,
@@ -352,7 +354,7 @@ where
 
 impl<C, B> Connection<C, B>
 where
-    C: quic::Connection<B>,
+    C: quic::Connection<B> + CloseCon,
     B: Buf,
 {
     /// Itiniate a graceful shutdown, accepting `max_request` potentially in-flight server push
@@ -504,8 +506,8 @@ impl Builder {
         quic: C,
     ) -> Result<(Connection<C, B>, SendRequest<O, B>), Error>
     where
-        C: quic::Connection<B, OpenStreams = O>,
-        O: quic::OpenStreams<B>,
+        C: quic::Connection<B, OpenStreams = O> + CloseCon,
+        O: quic::OpenStreams<B> + CloseCon,
         B: Buf,
     {
         let open = quic.opener();
