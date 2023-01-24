@@ -1566,7 +1566,7 @@ where
             while stream.recv_data().await.unwrap().is_some() {}
             stream.recv_trailers().await.unwrap();
         };
-
+        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
         Result::<(), Error>::Ok(())
     };
 
