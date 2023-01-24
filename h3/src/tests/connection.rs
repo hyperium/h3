@@ -752,11 +752,11 @@ async fn graceful_shutdown_closes_when_idle() {
                 count += 1;
                 if count == 4 {
                     // Todo
-                  //  incoming.shutdown(2).await.unwrap();
+                    //  incoming.shutdown(2).await.unwrap();
                 }
 
                 response(stream).await;
-            };
+            }
         };
         tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
     };
