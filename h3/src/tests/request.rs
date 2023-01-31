@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use assert_matches::assert_matches;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use futures_util::__private::async_await;
 use http::{request, HeaderMap, Request, Response, StatusCode};
 
 use crate::{
@@ -1580,19 +1581,25 @@ where
         let (mut h3_conn, mut incoming, _control_send) =
             server::builder().build(conn).await.unwrap();
         let driver_fut = async {
-            h3_conn.control().await;
+            h3_conn.control().await?;
+            Result::<(), Error>::Ok(())
         };
         let request_fut = async {
             let (_, mut stream) = incoming
                 .accept()
-                .await
-                .unwrap()
+                .await?
                 .expect("request stream end unexpected");
-            while stream.recv_data().await.unwrap().is_some() {}
-            stream.recv_trailers().await.unwrap();
+            while stream.recv_data().await?.is_some() {}
+            stream.recv_trailers().await?;
+            Result::<(), Error>::Ok(())
         };
-        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
-        Result::<(), Error>::Ok(())
+        tokio::select! {res = request_fut => match res {
+            Ok(_) => Ok(()),
+            Err(err) => Err(err),
+        } , res = driver_fut => match res {
+            Ok(_) => Ok(()),
+            Err(err) => Err(err),
+        }}
     };
 
     tokio::select! { res = server_fut => check(res)

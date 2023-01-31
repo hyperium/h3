@@ -404,17 +404,6 @@ where
     C: quic::Connection<B> + CloseCon,
     B: Buf,
 {
-    /// Accept an incoming request.
-    ///
-    /// It returns a tuple with a [`http::Request`] and an [`RequestStream`].
-    /// The [`http::Request`] is the received request from the client.
-    /// The [`RequestStream`] can be used to send the response.
-    pub async fn accept(
-        &mut self,
-    ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
-        todo!()
-    }
-
     /// Controls the Control stream
     pub async fn control(&mut self) -> Result<(), Error> {
         loop {
