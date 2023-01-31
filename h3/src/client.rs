@@ -7,13 +7,14 @@ use std::{
     task::{Context, Poll, Waker},
 };
 
+use crate::{connection::ControlStreamSendHandler, quic::SendStream};
 use bytes::{Buf, Bytes, BytesMut};
 use futures_util::future;
 use http::{request, HeaderMap, Response};
 use tracing::{info, trace};
 
 use crate::{
-    connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
+    connection::{self, ConnectionState, ControlStreamReceiveHandler, SharedStateRef},
     error::{Code, Error, ErrorLevel},
     frame::FrameStream,
     proto::{frame::Frame, headers::Header, varint::VarInt},
@@ -28,10 +29,20 @@ pub fn builder() -> Builder {
 }
 
 /// Create a new HTTP/3 client with default settings
-pub async fn new<C, O>(conn: C) -> Result<(Connection<C, Bytes>, SendRequest<O, Bytes>), Error>
+pub async fn new<C, O, S>(
+    conn: C,
+) -> Result<
+    (
+        Connection<C, Bytes>,
+        SendRequest<O, Bytes>,
+        ControlStreamSendHandler<S, Bytes>,
+    ),
+    Error,
+>
 where
-    C: quic::CloseCon + quic::Connection<Bytes, OpenStreams = O>,
+    C: quic::CloseCon + quic::Connection<Bytes, OpenStreams = O, SendStream = S>,
     O: quic::OpenStreams<Bytes> + CloseCon,
+    S: SendStream<Bytes>,
 {
     //= https://www.rfc-editor.org/rfc/rfc9114#section-3.3
     //= type=implication
@@ -349,7 +360,7 @@ where
     C: quic::Connection<B> + CloseCon,
     B: Buf,
 {
-    inner: ConnectionInner<C, B>,
+    inner: ControlStreamReceiveHandler<C, B>,
 }
 
 impl<C, B> Connection<C, B>
@@ -357,11 +368,6 @@ where
     C: quic::Connection<B> + CloseCon,
     B: Buf,
 {
-    /// Itiniate a graceful shutdown, accepting `max_request` potentially in-flight server push
-    pub async fn shutdown(&mut self, max_requests: usize) -> Result<(), Error> {
-        self.inner.shutdown(max_requests).await
-    }
-
     /// Wait until the connection is closed
     pub async fn wait_idle(&mut self) -> Result<(), Error> {
         self.close().await
@@ -501,29 +507,39 @@ impl Builder {
     }
 
     /// Create a new HTTP/3 client from a `quic` connection
-    pub async fn build<C, O, B>(
+    pub async fn build<C, O, B, S>(
         &mut self,
         quic: C,
-    ) -> Result<(Connection<C, B>, SendRequest<O, B>), Error>
+    ) -> Result<
+        (
+            Connection<C, B>,
+            SendRequest<O, B>,
+            crate::connection::ControlStreamSendHandler<S, B>,
+        ),
+        Error,
+    >
     where
-        C: quic::Connection<B, OpenStreams = O> + CloseCon,
+        C: quic::Connection<B, OpenStreams = O, SendStream = S> + CloseCon,
         O: quic::OpenStreams<B> + CloseCon,
         B: Buf,
+        S: SendStream<B>,
     {
         let open = quic.opener();
         let conn_state = SharedStateRef::default();
 
         let conn_waker = Some(future::poll_fn(|cx| Poll::Ready(cx.waker().clone())).await);
 
+        let (control_recv, send) = connection::start_connection(
+            quic,
+            self.max_field_section_size,
+            conn_state.clone(),
+            self.send_grease,
+        )
+        .await?;
+
         Ok((
             Connection {
-                inner: ConnectionInner::new(
-                    quic,
-                    self.max_field_section_size,
-                    conn_state.clone(),
-                    self.send_grease,
-                )
-                .await?,
+                inner: control_recv,
             },
             SendRequest {
                 open,
@@ -534,6 +550,7 @@ impl Builder {
                 _buf: PhantomData,
                 send_grease_frame: self.send_grease,
             },
+            send,
         ))
     }
 }

@@ -1,5 +1,6 @@
 use std::{
     convert::TryFrom,
+    marker::PhantomData,
     sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
 
@@ -32,6 +33,8 @@ pub struct SharedState {
     // we're willing to accept. This lets us finish the requests or pushes that were
     // already in flight when the graceful shutdown was initiated.
     pub closing: Option<StreamId>,
+    /// Stream ID of the last accepted Stream
+    pub last_accepted_stream: Option<StreamId>,
 }
 
 #[derive(Clone)]
@@ -54,6 +57,7 @@ impl Default for SharedStateRef {
             peer_max_field_section_size: VarInt::MAX.0,
             error: None,
             closing: None,
+            last_accepted_stream: None,
         })))
     }
 }
@@ -75,135 +79,141 @@ pub trait HasQuicConnection<B: Buf> {
     fn get_conn(&mut self) -> &mut Self::Conn;
 }
 
-pub struct ConnectionInner<C, B>
+/// Starts a http/3 connection from a quic Connection.
+pub(crate) async fn start_connection<C: quic::Connection<B> + quic::CloseCon, B: Buf>(
+    mut conn: C,
+    max_field_section_size: u64,
+    shared: SharedStateRef,
+    grease: bool,
+) -> Result<
+    (
+        ControlStreamReceiveHandler<C, B>,
+        ControlStreamSendHandler<C::SendStream, B>,
+    ),
+    Error,
+> {
+    //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
+    //# Endpoints SHOULD create the HTTP control stream as well as the
+    //# unidirectional streams required by mandatory extensions (such as the
+    //# QPACK encoder and decoder streams) first, and then create additional
+    //# streams as allowed by their peer.
+    let mut control_send = conn
+        .open_send()
+        .await
+        .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))?;
+
+    let mut settings = Settings::default();
+    settings
+        .insert(SettingId::MAX_HEADER_LIST_SIZE, max_field_section_size)
+        .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
+
+    if grease {
+        //  Grease Settings (https://www.rfc-editor.org/rfc/rfc9114.html#name-defined-settings-parameters)
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
+        //# Setting identifiers of the format 0x1f * N + 0x21 for non-negative
+        //# integer values of N are reserved to exercise the requirement that
+        //# unknown identifiers be ignored.  Such settings have no defined
+        //# meaning.  Endpoints SHOULD include at least one such setting in their
+        //# SETTINGS frame.
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
+        //# Setting identifiers that were defined in [HTTP/2] where there is no
+        //# corresponding HTTP/3 setting have also been reserved
+        //# (Section 11.2.2).  These reserved settings MUST NOT be sent, and
+        //# their receipt MUST be treated as a connection error of type
+        //# H3_SETTINGS_ERROR.
+        match settings.insert(SettingId::grease(), 0) {
+            Ok(_) => (),
+            Err(err) => warn!("Error when adding the grease Setting. Reason {}", err),
+        }
+    }
+
+    //= https://www.rfc-editor.org/rfc/rfc9114#section-3.2
+    //# After the QUIC connection is
+    //# established, a SETTINGS frame MUST be sent by each endpoint as the
+    //# initial frame of their respective HTTP control stream.
+
+    //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
+    //# Each side MUST initiate a single control stream at the beginning of
+    //# the connection and send its SETTINGS frame as the first frame on this
+    //# stream.
+
+    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
+    //# A SETTINGS frame MUST be sent as the first frame of
+    //# each control stream (see Section 6.2.1) by each peer, and it MUST NOT
+    //# be sent subsequently.
+
+    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
+    //= type=implication
+    //# SETTINGS frames MUST NOT be sent on any stream other than the control
+    //# stream.
+
+    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.2
+    //= type=implication
+    //# Endpoints MUST NOT require any data to be received from
+    //# the peer prior to sending the SETTINGS frame; settings MUST be sent
+    //# as soon as the transport is ready to send data.
+    stream::write(
+        &mut control_send,
+        (StreamType::CONTROL, Frame::Settings(settings)),
+    )
+    .await?;
+
+    //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
+    //= type=implication
+    //# The
+    //# sender MUST NOT close the control stream, and the receiver MUST NOT
+    //# request that the sender close the control stream.
+    let mut conn_inner = ControlStreamReceiveHandler {
+        shared: shared.clone(),
+        conn,
+        control_recv: None,
+        decoder_recv: None,
+        encoder_recv: None,
+        last_accepted_stream: None,
+        got_peer_settings: false,
+        send_grease_frame: grease,
+    };
+    // start a grease stream
+    if grease {
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
+        //= type=implication
+        //# Frame types of the format 0x1f * N + 0x21 for non-negative integer
+        //# values of N are reserved to exercise the requirement that unknown
+        //# types be ignored (Section 9).  These frames have no semantics, and
+        //# they MAY be sent on any stream where frames are allowed to be sent.
+        conn_inner.start_grease_stream().await;
+    }
+
+    let control_send_handler = ControlStreamSendHandler {
+        shared,
+        control_send,
+        buf: PhantomData,
+    };
+
+    Ok((conn_inner, control_send_handler))
+}
+
+pub struct ControlStreamSendHandler<S, B>
 where
-    C: quic::Connection<B> + quic::CloseCon,
+    S: crate::quic::SendStream<B>,
     B: Buf,
 {
     pub(super) shared: SharedStateRef,
-    conn: C,
-    control_send: C::SendStream,
-    control_recv: Option<FrameStream<C::RecvStream, B>>,
-    decoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
-    encoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
-    // The id of the last stream received by this connection:
-    // request and push stream for server and clients respectively.
-    last_accepted_stream: Option<StreamId>,
-    got_peer_settings: bool,
-    pub(super) send_grease_frame: bool,
+    control_send: S,
+    buf: PhantomData<B>,
 }
 
-impl<C, B> ConnectionInner<C, B>
+impl<S, B> ControlStreamSendHandler<S, B>
 where
-    C: quic::Connection<B> + quic::CloseCon,
+    S: crate::quic::SendStream<B>,
     B: Buf,
 {
-    pub async fn new(
-        mut conn: C,
-        max_field_section_size: u64,
-        shared: SharedStateRef,
-        grease: bool,
-    ) -> Result<Self, Error> {
-        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
-        //# Endpoints SHOULD create the HTTP control stream as well as the
-        //# unidirectional streams required by mandatory extensions (such as the
-        //# QPACK encoder and decoder streams) first, and then create additional
-        //# streams as allowed by their peer.
-        let mut control_send = conn
-            .open_send()
-            .await
-            .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))?;
-
-        let mut settings = Settings::default();
-        settings
-            .insert(SettingId::MAX_HEADER_LIST_SIZE, max_field_section_size)
-            .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
-
-        if grease {
-            //  Grease Settings (https://www.rfc-editor.org/rfc/rfc9114.html#name-defined-settings-parameters)
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
-            //# Setting identifiers of the format 0x1f * N + 0x21 for non-negative
-            //# integer values of N are reserved to exercise the requirement that
-            //# unknown identifiers be ignored.  Such settings have no defined
-            //# meaning.  Endpoints SHOULD include at least one such setting in their
-            //# SETTINGS frame.
-
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
-            //# Setting identifiers that were defined in [HTTP/2] where there is no
-            //# corresponding HTTP/3 setting have also been reserved
-            //# (Section 11.2.2).  These reserved settings MUST NOT be sent, and
-            //# their receipt MUST be treated as a connection error of type
-            //# H3_SETTINGS_ERROR.
-            match settings.insert(SettingId::grease(), 0) {
-                Ok(_) => (),
-                Err(err) => warn!("Error when adding the grease Setting. Reason {}", err),
-            }
-        }
-
-        //= https://www.rfc-editor.org/rfc/rfc9114#section-3.2
-        //# After the QUIC connection is
-        //# established, a SETTINGS frame MUST be sent by each endpoint as the
-        //# initial frame of their respective HTTP control stream.
-
-        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
-        //# Each side MUST initiate a single control stream at the beginning of
-        //# the connection and send its SETTINGS frame as the first frame on this
-        //# stream.
-
-        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
-        //# A SETTINGS frame MUST be sent as the first frame of
-        //# each control stream (see Section 6.2.1) by each peer, and it MUST NOT
-        //# be sent subsequently.
-
-        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
-        //= type=implication
-        //# SETTINGS frames MUST NOT be sent on any stream other than the control
-        //# stream.
-
-        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.2
-        //= type=implication
-        //# Endpoints MUST NOT require any data to be received from
-        //# the peer prior to sending the SETTINGS frame; settings MUST be sent
-        //# as soon as the transport is ready to send data.
-        stream::write(
-            &mut control_send,
-            (StreamType::CONTROL, Frame::Settings(settings)),
-        )
-        .await?;
-
-        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
-        //= type=implication
-        //# The
-        //# sender MUST NOT close the control stream, and the receiver MUST NOT
-        //# request that the sender close the control stream.
-        let mut conn_inner = Self {
-            shared,
-            conn,
-            control_send,
-            control_recv: None,
-            decoder_recv: None,
-            encoder_recv: None,
-            last_accepted_stream: None,
-            got_peer_settings: false,
-            send_grease_frame: grease,
-        };
-        // start a grease stream
-        if grease {
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
-            //= type=implication
-            //# Frame types of the format 0x1f * N + 0x21 for non-negative integer
-            //# values of N are reserved to exercise the requirement that unknown
-            //# types be ignored (Section 9).  These frames have no semantics, and
-            //# they MAY be sent on any stream where frames are allowed to be sent.
-            conn_inner.start_grease_stream().await;
-        }
-
-        Ok(conn_inner)
-    }
-
     /// Initiate graceful shutdown, accepting `max_streams` potentially in-flight streams
     pub async fn shutdown(&mut self, max_streams: usize) -> Result<(), Error> {
         let max_id = self
+            .shared
+            .read("failed to read last_accepted_stream")
             .last_accepted_stream
             .map(|id| id + max_streams)
             .unwrap_or_else(StreamId::first_request);
@@ -218,7 +228,31 @@ where
         //# terminate any necessary remaining tasks.
         stream::write(&mut self.control_send, Frame::Goaway(max_id)).await
     }
+}
 
+/// Handles the
+pub struct ControlStreamReceiveHandler<C, B>
+where
+    C: quic::Connection<B> + quic::CloseCon,
+    B: Buf,
+{
+    pub(super) shared: SharedStateRef,
+    conn: C,
+    control_recv: Option<FrameStream<C::RecvStream, B>>,
+    decoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
+    encoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
+    // The id of the last stream received by this connection:
+    // request and push stream for server and clients respectively.
+    last_accepted_stream: Option<StreamId>,
+    got_peer_settings: bool,
+    pub(super) send_grease_frame: bool,
+}
+
+impl<C, B> ControlStreamReceiveHandler<C, B>
+where
+    C: quic::Connection<B> + quic::CloseCon,
+    B: Buf,
+{
     pub async fn accept_recv(&mut self) -> Result<(), Error> {
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
             return Err(e.clone());
@@ -409,9 +443,11 @@ where
         }
     }
 
-    pub fn start_stream(&mut self, id: StreamId) {
-        self.last_accepted_stream = Some(id);
-    }
+    /*    pub fn start_stream(&mut self, id: StreamId) {
+        self.shared
+            .write("cannot write the last stream")
+            .last_accepted_stream = Some(id);
+    }*/
 
     /// Closes a Connection with code and reason.
     /// It returns an [`Error`] which can be returned.
@@ -507,7 +543,7 @@ impl<S, B> RequestStream<S, B> {
     }
 }
 
-impl<C, B> ConnectionState for ConnectionInner<C, B>
+impl<C, B> ConnectionState for ControlStreamReceiveHandler<C, B>
 where
     B: Buf,
     C: quic::Connection<B> + quic::CloseCon,
@@ -517,7 +553,7 @@ where
     }
 }
 
-impl<C, B> HasQuicConnection<B> for ConnectionInner<C, B>
+impl<C, B> HasQuicConnection<B> for ControlStreamReceiveHandler<C, B>
 where
     B: Buf,
     C: quic::CloseCon + quic::Connection<B>,

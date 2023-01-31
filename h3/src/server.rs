@@ -66,7 +66,8 @@ use tokio::sync::mpsc;
 
 use crate::{
     connection::{
-        self, close_con, ConnectionInner, ConnectionState, HasQuicConnection, SharedStateRef,
+        self, close_con, ConnectionState, ControlStreamReceiveHandler, HasQuicConnection,
+        SharedStateRef,
     },
     error::{Code, Error, ErrorLevel},
     frame::FrameStream,
@@ -338,8 +339,11 @@ where
                 return Ok(None);
             }
         }
-        // Todo: put this somewhere
-        //  self.inner.start_stream(req_stream.id());
+
+        self.shared
+            .write("cannot write the last stream")
+            .last_accepted_stream = Some(req_stream.id());
+
         return Ok(Some(req_stream));
     }
 }
@@ -378,7 +382,7 @@ where
     C: quic::Connection<B> + CloseCon,
     B: Buf,
 {
-    inner: ConnectionInner<C, B>,
+    inner: ControlStreamReceiveHandler<C, B>,
     max_field_section_size: u64,
     // Let the streams tell us when they are no longer running.
     request_end_recv: mpsc::UnboundedReceiver<StreamId>,
@@ -411,14 +415,7 @@ where
         todo!()
     }
 
-    /// Initiate a graceful shutdown, accepting `max_request` potentially still in-flight
-    ///
-    /// See [connection shutdown](https://www.rfc-editor.org/rfc/rfc9114.html#connection-shutdown) for more information.
-    pub async fn shutdown(&mut self, max_requests: usize) -> Result<(), Error> {
-        self.inner.shutdown(max_requests).await
-    }
-
-    /// Controlls the Controll stream
+    /// Controls the Control stream
     pub async fn control(&mut self) -> Result<(), Error> {
         loop {
             match self.inner.control().await? {
@@ -544,28 +541,39 @@ impl Builder {
     /// Build an HTTP/3 connection from a QUIC connection
     ///
     /// This method creates a [`Connection`] instance with the settings in the [`Builder`].
-    pub async fn build<A, C, B>(
+    pub async fn build<A, C, B, S>(
         &self,
         conn: C,
-    ) -> Result<(Connection<C, B>, AcceptRequest<A, B>), Error>
+    ) -> Result<
+        (
+            Connection<C, B>,
+            AcceptRequest<A, B>,
+            crate::connection::ControlStreamSendHandler<S, B>,
+        ),
+        Error,
+    >
     where
         A: AcceptStreams<B> + CloseCon,
-        C: quic::Connection<B, AcceptStreams = A> + CloseCon,
+        C: quic::Connection<B, AcceptStreams = A, SendStream = S> + CloseCon,
         B: Buf,
+        S: quic::SendStream<B>,
     {
         // Create the Connection
         let (sender, receiver) = mpsc::unbounded_channel();
         let shared = SharedStateRef::default();
         let accept_request = conn.accepter();
+
+        let (inner_control_recv, send) = connection::start_connection(
+            conn,
+            self.max_field_section_size,
+            shared.clone(),
+            self.send_grease,
+        )
+        .await?;
+
         Ok((
             Connection {
-                inner: ConnectionInner::new(
-                    conn,
-                    self.max_field_section_size,
-                    shared.clone(),
-                    self.send_grease,
-                )
-                .await?,
+                inner: inner_control_recv,
                 max_field_section_size: self.max_field_section_size,
                 request_end_send: sender.clone(),
                 request_end_recv: receiver,
@@ -578,6 +586,7 @@ impl Builder {
                 request_end_send: sender.clone(),
                 send_grease_frame: self.send_grease,
             },
+            send,
         ))
     }
 }

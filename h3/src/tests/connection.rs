@@ -52,7 +52,8 @@ async fn accept_request_end_on_client_close() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let (mut h3_conn, mut incoming) = server::builder().build(conn).await.unwrap();
+        let (mut h3_conn, mut incoming, _control_send) =
+            server::builder().build(conn).await.unwrap();
         let driver_fut = async {
             h3_conn.control().await;
         };
@@ -73,10 +74,12 @@ async fn server_drop_close() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let (mut h3_conn, mut incoming) = server::builder().build(conn).await.unwrap();
+        let (mut h3_conn, mut incoming, _control_send) =
+            server::builder().build(conn).await.unwrap();
     };
 
-    let (mut conn, mut send) = client::new(pair.client().await).await.expect("client init");
+    let (mut conn, mut send, control_sen) =
+        client::new(pair.client().await).await.expect("client init");
     let client_fut = async {
         let request_fut = async move {
             let mut request_stream = send
@@ -103,7 +106,8 @@ async fn client_close_only_on_last_sender_drop() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let (mut h3_conn, mut incoming) = server::builder().build(conn).await.unwrap();
+        let (mut h3_conn, mut incoming, _control_send) =
+            server::builder().build(conn).await.unwrap();
         let driver_fut = async {
             h3_conn.control().await;
         };
@@ -116,7 +120,8 @@ async fn client_close_only_on_last_sender_drop() {
     };
 
     let client_fut = async {
-        let (mut conn, mut send1) = client::new(pair.client().await).await.expect("client init");
+        let (mut conn, mut send1, control_send) =
+            client::new(pair.client().await).await.expect("client init");
         let mut send2 = send1.clone();
         let _ = send1
             .send_request(Request::get("http://no.way").body(()).unwrap())
@@ -147,7 +152,8 @@ async fn settings_exchange_client() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut conn, client) = client::new(pair.client().await).await.expect("client init");
+        let (mut conn, client, control_send) =
+            client::new(pair.client().await).await.expect("client init");
         let settings_change = async {
             for _ in 0..10 {
                 if client
@@ -172,7 +178,7 @@ async fn settings_exchange_client() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let (mut h3_conn, mut incoming) = server::builder()
+        let (mut h3_conn, mut incoming, _control_send) = server::builder()
             .max_field_section_size(12)
             .build(conn)
             .await
@@ -194,9 +200,9 @@ async fn settings_exchange_server() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut conn, _client) = client::builder()
+        let (mut conn, _client, control_send) = client::builder()
             .max_field_section_size(12)
-            .build::<_, _, Bytes>(pair.client().await)
+            .build::<_, _, Bytes, _>(pair.client().await)
             .await
             .expect("client init");
         let drive = async move {
@@ -208,7 +214,7 @@ async fn settings_exchange_server() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let (mut h3_conn, mut incoming) = server::builder()
+        let (mut h3_conn, mut incoming, _control_send) = server::builder()
             .max_field_section_size(12)
             .build(conn)
             .await
@@ -250,7 +256,8 @@ async fn client_error_on_bidi_recv() {
     }
 
     let client_fut = async {
-        let (mut conn, mut send) = client::new(pair.client().await).await.expect("client init");
+        let (mut conn, mut send, control_sen) =
+            client::new(pair.client().await).await.expect("client init");
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.1
         //= type=test
@@ -312,7 +319,8 @@ async fn two_control_streams() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let (mut h3_conn, mut incoming) = server::builder().build(conn).await.unwrap();
+        let (mut h3_conn, mut incoming, _control_send) =
+            server::builder().build(conn).await.unwrap();
         let driver_fut = async {
             h3_conn.control().await;
         };
@@ -352,7 +360,7 @@ async fn control_close_send_error() {
         //# error of type H3_CLOSED_CRITICAL_STREAM.
         control_stream.finish().await.unwrap(); // close the client control stream immediately
 
-        let (mut driver, _send) = client::new(h3_quinn::Connection::new(connection))
+        let (mut driver, _send, control_send) = client::new(h3_quinn::Connection::new(connection))
             .await
             .unwrap();
 
@@ -361,7 +369,8 @@ async fn control_close_send_error() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let (mut h3_conn, mut incoming) = server::builder().build(conn).await.unwrap();
+        let (mut h3_conn, mut incoming, _control_send) =
+            server::builder().build(conn).await.unwrap();
         let driver_fut = async {
             h3_conn.control().await;
         };
@@ -409,7 +418,8 @@ async fn missing_settings() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let (mut h3_conn, mut incoming) = server::builder().build(conn).await.unwrap();
+        let (mut h3_conn, mut incoming, _control_send) =
+            server::builder().build(conn).await.unwrap();
         let driver_fut = async {
             h3_conn.control().await;
         };
@@ -453,7 +463,8 @@ async fn control_stream_frame_unexpected() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let (mut h3_conn, mut incoming) = server::builder().build(conn).await.unwrap();
+        let (mut h3_conn, mut incoming, _control_send) =
+            server::builder().build(conn).await.unwrap();
         let driver_fut = async {
             h3_conn.control().await;
         };
@@ -481,13 +492,15 @@ async fn timeout_on_control_frame_read() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, _send_request) = client::new(pair.client().await).await.unwrap();
+        let (mut driver, _send_request, control_send) =
+            client::new(pair.client().await).await.unwrap();
         let _ = driver.close().await;
     };
 
     let server_fut = async {
         let conn = server.next().await;
-        let (mut h3_conn, mut incoming) = server::builder().build(conn).await.unwrap();
+        let (mut h3_conn, mut incoming, _control_send) =
+            server::builder().build(conn).await.unwrap();
         let driver_fut = async {
             h3_conn.control().await;
         };
@@ -531,7 +544,8 @@ async fn goaway_from_client_not_push_id() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let (mut h3_conn, mut incoming) = server::builder().build(conn).await.unwrap();
+        let (mut h3_conn, mut incoming, _control_send) =
+            server::builder().build(conn).await.unwrap();
         let driver_fut = async {
             h3_conn.control().await;
         };
@@ -566,7 +580,7 @@ async fn goaway_from_server_not_request_id() {
         control_stream.write_all(&buf[..]).await.unwrap();
         control_stream.finish().await.unwrap(); // close the client control stream immediately
 
-        let (mut driver, _send) = client::new(h3_quinn::Connection::new(connection))
+        let (mut driver, _send, control_send) = client::new(h3_quinn::Connection::new(connection))
             .await
             .unwrap();
 
@@ -610,7 +624,8 @@ async fn graceful_shutdown_server_rejects() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (_driver, mut send_request) = client::new(pair.client().await).await.unwrap();
+        let (_driver, mut send_request, control_send) =
+            client::new(pair.client().await).await.unwrap();
 
         let mut first = send_request
             .send_request(Request::get("http://no.way").body(()).unwrap())
@@ -638,15 +653,15 @@ async fn graceful_shutdown_server_rejects() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let (mut h3_conn, mut incoming) = server::builder().build(conn).await.unwrap();
+        let (mut h3_conn, mut incoming, mut control_send) =
+            server::builder().build(conn).await.unwrap();
         let driver_fut = async {
             h3_conn.control().await;
         };
         let request_fut = async {
             let (_, stream) = incoming.accept().await.unwrap().unwrap();
             response(stream).await;
-            // Todo
-            //  incoming.shutdown(0).await.unwrap();
+            control_send.shutdown(0).await.unwrap();
             assert_matches!(incoming.accept().await.map(|x| x.map(|_| ())), Ok(None));
             server.endpoint.wait_idle().await;
         };
@@ -663,7 +678,8 @@ async fn graceful_shutdown_grace_interval() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, mut send_request) = client::new(pair.client().await).await.unwrap();
+        let (mut driver, mut send_request, control_send) =
+            client::new(pair.client().await).await.unwrap();
 
         // Sent as the connection is not shutting down
         let mut first = send_request
@@ -698,14 +714,14 @@ async fn graceful_shutdown_grace_interval() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let (mut h3_conn, mut incoming) = server::builder().build(conn).await.unwrap();
+        let (mut h3_conn, mut incoming, mut control_send) =
+            server::builder().build(conn).await.unwrap();
         let driver_fut = async {
             h3_conn.control().await;
         };
         let request_fut = async {
             let (_, first) = incoming.accept().await.unwrap().unwrap();
-            // Todo
-            //  incoming.shutdown(1).await.unwrap();
+            control_send.shutdown(1).await.unwrap();
             let (_, in_flight) = incoming.accept().await.unwrap().unwrap();
             response(first).await;
             response(in_flight).await;
@@ -730,7 +746,8 @@ async fn graceful_shutdown_closes_when_idle() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, mut send_request) = client::new(pair.client().await).await.unwrap();
+        let (mut driver, mut send_request, control_send) =
+            client::new(pair.client().await).await.unwrap();
 
         // Make continuous requests, ignoring GoAway because the connection is not driven
         while request(&mut send_request).await.is_ok() {
@@ -741,7 +758,8 @@ async fn graceful_shutdown_closes_when_idle() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let (mut h3_conn, mut incoming) = server::builder().build(conn).await.unwrap();
+        let (mut h3_conn, mut incoming, mut control_send) =
+            server::builder().build(conn).await.unwrap();
         let driver_fut = async {
             h3_conn.control().await;
         };
@@ -751,8 +769,7 @@ async fn graceful_shutdown_closes_when_idle() {
             while let Ok(Some((_, stream))) = incoming.accept().await {
                 count += 1;
                 if count == 4 {
-                    // Todo
-                    //  incoming.shutdown(2).await.unwrap();
+                    control_send.shutdown(2).await.unwrap();
                 }
 
                 response(stream).await;

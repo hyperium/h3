@@ -119,7 +119,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(conn) => {
                     info!("new connection established");
 
-                    let (mut h3_conn, mut accept_req) = builder()
+                    let (mut h3_conn, mut accept_req, _control_send) = builder()
                         .build(h3_quinn::Connection::new(conn))
                         .await
                         .unwrap();
