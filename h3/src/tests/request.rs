@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use assert_matches::assert_matches;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use futures_util::__private::async_await;
+
 use http::{request, HeaderMap, Request, Response, StatusCode};
 
 use crate::{
@@ -58,7 +58,7 @@ async fn get() {
         let (mut h3_conn, mut incoming_req, _control_send) =
             server::builder().build(conn).await.unwrap();
         let driver_fut = async {
-            h3_conn.control().await;
+            h3_conn.control().await.unwrap();
         };
 
         let request_fut = async {
@@ -126,7 +126,7 @@ async fn get_with_trailers_unknown_content_type() {
         let (mut h3_conn, mut incoming_req, _control_send) =
             server::builder().build(conn).await.unwrap();
         let driver_fut = async {
-            h3_conn.control().await;
+            h3_conn.control().await.unwrap();
         };
 
         let request_fut = async {
@@ -198,7 +198,7 @@ async fn get_with_trailers_known_content_type() {
         let (mut h3_conn, mut incoming_req, _control_send) =
             server::builder().build(conn).await.unwrap();
         let driver_fut = async {
-            h3_conn.control().await;
+            h3_conn.control().await.unwrap();
         };
 
         let request_fut = async {
@@ -264,7 +264,7 @@ async fn post() {
         let (mut h3_conn, mut incoming_req, _control_send) =
             server::builder().build(conn).await.unwrap();
         let driver_fut = async {
-            h3_conn.control().await;
+            h3_conn.control().await.unwrap();
         };
         let request_fut = async {
             let (_, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
@@ -331,7 +331,7 @@ async fn header_too_big_response_from_server() {
             .unwrap();
 
         let driver_fut = async {
-            h3_conn.control().await;
+            h3_conn.control().await.unwrap();
         };
 
         let request_fut = async {
@@ -397,7 +397,7 @@ async fn header_too_big_response_from_server_trailers() {
             .unwrap();
 
         let driver_fut = async {
-            h3_conn.control().await;
+            h3_conn.control().await.unwrap();
         };
 
         let request_fut = async {
@@ -537,7 +537,7 @@ async fn header_too_big_client_error_trailer() {
             .await
             .unwrap();
         let driver_fut = async {
-            h3_conn.control().await;
+            h3_conn.control().await.unwrap();
         };
 
         let request_fut = async {
@@ -605,7 +605,7 @@ async fn header_too_big_discard_from_client() {
         let (mut h3_conn, mut incoming_req, _control_send) =
             server::builder().build(conn).await.unwrap();
         let driver_fut = async {
-            h3_conn.control().await;
+            h3_conn.control().await.unwrap();
         };
 
         let request_fut = async {
@@ -699,7 +699,7 @@ async fn header_too_big_discard_from_client_trailers() {
         let (mut h3_conn, mut incoming_req, _control_send) =
             server::builder().build(conn).await.unwrap();
         let driver_fut = async {
-            h3_conn.control().await;
+            h3_conn.control().await.unwrap();
         };
 
         let request_fut = async {
@@ -770,7 +770,7 @@ async fn header_too_big_server_error() {
         let (mut h3_conn, mut incoming_req, _control_send) =
             server::builder().build(conn).await.unwrap();
         let driver_fut = async {
-            h3_conn.control().await;
+            h3_conn.control().await.unwrap();
         };
 
         let request_fut = async {
@@ -843,7 +843,7 @@ async fn header_too_big_server_error_trailers() {
         let (mut h3_conn, mut incoming_req, _control_send) =
             server::builder().build(conn).await.unwrap();
         let driver_fut = async {
-            h3_conn.control().await;
+            h3_conn.control().await.unwrap();
         };
 
         let request_fut = async {
@@ -932,7 +932,7 @@ async fn get_timeout_client_recv_response() {
         let (mut h3_conn, mut incoming_req, _control_send) =
             server::builder().build(conn).await.unwrap();
         let driver_fut = async {
-            h3_conn.control().await;
+            h3_conn.control().await.unwrap();
         };
 
         let request_fut = async {
@@ -983,7 +983,7 @@ async fn get_timeout_client_recv_data() {
         let (mut h3_conn, mut incoming_req, _control_send) =
             server::builder().build(conn).await.unwrap();
         let driver_fut = async {
-            h3_conn.control().await;
+            h3_conn.control().await.unwrap();
         };
 
         let request_fut = async {
@@ -1032,7 +1032,7 @@ async fn get_timeout_server_accept() {
         let (mut h3_conn, mut incoming_req, _control_send) =
             server::builder().build(conn).await.unwrap();
         let driver_fut = async {
-            h3_conn.control().await;
+            h3_conn.control().await.unwrap();
         };
 
         let request_fut = async {
@@ -1069,7 +1069,7 @@ async fn post_timeout_server_recv_data() {
         let (mut h3_conn, mut incoming_req, _control_send) =
             server::builder().build(conn).await.unwrap();
         let driver_fut = async {
-            h3_conn.control().await;
+            h3_conn.control().await.unwrap();
         };
 
         let request_fut = async {

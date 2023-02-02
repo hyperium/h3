@@ -127,7 +127,8 @@ where
                 return Ok(None);
             }
             Err(err) => {
-                match err.inner.kind {
+                let err_new = self.maybe_conn_err(err);
+                match err_new.inner.kind {
                     crate::error::Kind::Closed => return Ok(None),
                     crate::error::Kind::Application {
                         code,
@@ -140,7 +141,7 @@ where
                             self,
                         ))
                     }
-                    _ => return Err(err),
+                    _ => return Err(err_new),
                 };
             }
         };
@@ -186,7 +187,8 @@ where
                 if err.is_closed() {
                     return Ok(None);
                 }
-                match err.inner.kind {
+                let err_new = self.maybe_conn_err(err);
+                match err_new.inner.kind {
                     crate::error::Kind::Closed => return Ok(None),
                     crate::error::Kind::Application {
                         code,
@@ -205,9 +207,9 @@ where
                         level: ErrorLevel::StreamError,
                     } => {
                         stream.reset(code.into());
-                        return Err(err);
+                        return Err(err_new);
                     }
-                    _ => return Err(err),
+                    _ => return Err(err_new),
                 };
             }
         };

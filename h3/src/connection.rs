@@ -65,6 +65,8 @@ impl Default for SharedStateRef {
 pub trait ConnectionState {
     fn shared_state(&self) -> &SharedStateRef;
 
+    /// checks if there has been an connection error somewhere and returns the Connection  Error.
+    /// If there was no Connection Error it returns the given Error
     fn maybe_conn_err<E: Into<Error>>(&self, err: E) -> Error {
         if let Some(ref e) = self.shared_state().0.read().unwrap().error {
             e.clone()
