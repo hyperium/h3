@@ -304,7 +304,6 @@ where
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
             return Err(e.clone());
         }
-
         let stream = loop {
             match &mut self.control_recv {
                 Some(stream) => break stream,
@@ -314,7 +313,6 @@ where
                 }
             }
         };
-
         let recv = future::poll_fn(|cx| stream.poll_next(cx)).await?;
         match recv {
             //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
@@ -678,6 +676,8 @@ where
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
                 //# An HTTP/3 implementation MAY impose a limit on the maximum size of
                 //# the message header it will accept on an individual HTTP message.
+
+                // Todo: Send response with status 431, see spec
                 Err(qpack::DecoderError::HeaderTooLong(cancel_size)) => {
                     return Err(Error::header_too_big(
                         cancel_size,

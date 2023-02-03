@@ -79,7 +79,7 @@ async fn get() {
                 .expect("send_data");
             request_stream.finish().await.expect("finish");
         };
-        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
+        tokio::join! {request_fut, driver_fut};
     };
 
     tokio::join!(server_fut, client_fut);
@@ -152,7 +152,7 @@ async fn get_with_trailers_unknown_content_type() {
                 .expect("send_trailers");
             request_stream.finish().await.expect("finish");
         };
-        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
+        tokio::join! {request_fut, driver_fut};
     };
 
     tokio::join!(server_fut, client_fut);
@@ -225,7 +225,7 @@ async fn get_with_trailers_known_content_type() {
                 .expect("send_trailers");
             request_stream.finish().await.expect("finish");
         };
-        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
+        tokio::join! {request_fut, driver_fut};
     };
 
     tokio::join!(server_fut, client_fut);
@@ -286,7 +286,7 @@ async fn post() {
             assert_eq!(request_body.chunk(), b"wonderful json");
             request_stream.finish().await.expect("client finish");
         };
-        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
+        tokio::join! {request_fut, driver_fut};
     };
 
     tokio::join!(server_fut, client_fut);
@@ -346,7 +346,7 @@ async fn header_too_big_response_from_server() {
             );
             let _ = incoming_req.accept().await;
         };
-        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
+        tokio::join! {request_fut, driver_fut};
     };
 
     tokio::join!(server_fut, client_fut);
@@ -419,7 +419,7 @@ async fn header_too_big_response_from_server_trailers() {
             );
             let _ = incoming_req.accept().await;
         };
-        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
+        tokio::join! {request_fut, driver_fut};
     };
 
     tokio::join!(server_fut, client_fut);
@@ -550,7 +550,7 @@ async fn header_too_big_client_error_trailer() {
                 .expect("body");
             let _ = incoming_req.accept().await;
         };
-        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
+        tokio::join! {request_fut, driver_fut};
     };
 
     tokio::join!(server_fut, client_fut);
@@ -604,9 +604,7 @@ async fn header_too_big_discard_from_client() {
 
         let (mut h3_conn, mut incoming_req, _control_send) =
             server::builder().build(conn).await.unwrap();
-        let driver_fut = async {
-            h3_conn.control().await.unwrap();
-        };
+        let driver_fut = async { h3_conn.control().await.unwrap() };
 
         let request_fut = async {
             let (_request, mut request_stream) =
@@ -644,7 +642,7 @@ async fn header_too_big_discard_from_client() {
             );
             let _ = incoming_req.accept().await;
         };
-        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
+        tokio::join! {request_fut, driver_fut};
     };
 
     tokio::join!(server_fut, client_fut);
@@ -737,7 +735,7 @@ async fn header_too_big_discard_from_client_trailers() {
 
             let _ = incoming_req.accept().await;
         };
-        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
+        tokio::join! {request_fut, driver_fut};
     };
 
     tokio::join!(server_fut, client_fut);
@@ -811,7 +809,7 @@ async fn header_too_big_server_error() {
                 }
             );
         };
-        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
+        tokio::join! {request_fut, driver_fut};
     };
     tokio::join!(server_fut, client_fut);
 }
@@ -842,9 +840,7 @@ async fn header_too_big_server_error_trailers() {
 
         let (mut h3_conn, mut incoming_req, _control_send) =
             server::builder().build(conn).await.unwrap();
-        let driver_fut = async {
-            h3_conn.control().await.unwrap();
-        };
+        let driver_fut = async { h3_conn.control().await.unwrap() };
 
         let request_fut = async {
             let (_request, mut request_stream) =
@@ -892,7 +888,7 @@ async fn header_too_big_server_error_trailers() {
                 }
             );
         };
-        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
+        tokio::join! {request_fut, driver_fut};
     };
 
     tokio::join!(server_fut, client_fut);
@@ -931,9 +927,8 @@ async fn get_timeout_client_recv_response() {
         let conn = server.next().await;
         let (mut h3_conn, mut incoming_req, _control_send) =
             server::builder().build(conn).await.unwrap();
-        let driver_fut = async {
-            h3_conn.control().await.unwrap();
-        };
+        let driver_fut =
+            async { assert_matches!(h3_conn.control().await.unwrap_err().kind(), Kind::Timeout) };
 
         let request_fut = async {
             // _req must not be dropped, else the connection will be closed and the timeout
@@ -941,7 +936,7 @@ async fn get_timeout_client_recv_response() {
             let _req = incoming_req.accept().await.expect("accept").unwrap();
             tokio::time::sleep(Duration::from_millis(500)).await;
         };
-        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
+        tokio::join! {request_fut, driver_fut};
     };
 
     tokio::join!(server_fut, client_fut);
@@ -982,9 +977,8 @@ async fn get_timeout_client_recv_data() {
 
         let (mut h3_conn, mut incoming_req, _control_send) =
             server::builder().build(conn).await.unwrap();
-        let driver_fut = async {
-            h3_conn.control().await.unwrap();
-        };
+        let driver_fut =
+            async { assert_matches!(h3_conn.control().await.unwrap_err().kind(), Kind::Timeout) };
 
         let request_fut = async {
             let (_request, mut request_stream) =
@@ -1000,7 +994,7 @@ async fn get_timeout_client_recv_data() {
                 .expect("send_response");
             tokio::time::sleep(Duration::from_millis(500)).await;
         };
-        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
+        tokio::join! {request_fut, driver_fut};
     };
     tokio::join!(server_fut, client_fut);
 }
@@ -1032,7 +1026,10 @@ async fn get_timeout_server_accept() {
         let (mut h3_conn, mut incoming_req, _control_send) =
             server::builder().build(conn).await.unwrap();
         let driver_fut = async {
-            h3_conn.control().await.unwrap();
+            assert_matches!(
+                h3_conn.control().await.map(|_| ()).unwrap_err().kind(),
+                Kind::Timeout
+            );
         };
 
         let request_fut = async {
@@ -1041,7 +1038,7 @@ async fn get_timeout_server_accept() {
                 Kind::Timeout
             );
         };
-        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
+        tokio::join! {request_fut, driver_fut};
     };
 
     tokio::join!(server_fut, client_fut);
@@ -1069,7 +1066,10 @@ async fn post_timeout_server_recv_data() {
         let (mut h3_conn, mut incoming_req, _control_send) =
             server::builder().build(conn).await.unwrap();
         let driver_fut = async {
-            h3_conn.control().await.unwrap();
+            assert_matches!(
+                h3_conn.control().await.map(|_| ()).unwrap_err().kind(),
+                Kind::Timeout
+            );
         };
 
         let request_fut = async {
@@ -1092,7 +1092,7 @@ async fn post_timeout_server_recv_data() {
                 _ => {}
             }
         };
-        tokio::select! {_ = request_fut => () , _ = driver_fut => ()};
+        tokio::join! {request_fut, driver_fut};
     };
 
     tokio::join!(server_fut, client_fut);

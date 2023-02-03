@@ -409,46 +409,54 @@ where
     /// Controls the Control stream
     pub async fn control(&mut self) -> Result<(), Error> {
         loop {
-            match self.inner.control().await? {
-                Frame::Settings(_) => trace!("Got settings"),
-                Frame::Goaway(id) => {
-                    if !id.is_push() {
-                        return Err(Code::H3_ID_ERROR.with_reason(
-                            format!("non-push StreamId in a GoAway frame: {}", id),
-                            ErrorLevel::ConnectionError,
+            match self.inner.control().await {
+                Ok(frame) => match frame {
+                    Frame::Settings(_) => trace!("Got settings"),
+                    Frame::Goaway(id) => {
+                        if !id.is_push() {
+                            return Err(self.inner.close(
+                                Code::H3_ID_ERROR,
+                                format!("non-push StreamId in a GoAway frame: {}", id),
+                            ));
+                        }
+                    }
+                    f @ Frame::MaxPushId(_) | f @ Frame::CancelPush(_) => {
+                        trace!("Control frame ignored {:?}", f);
+
+                        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
+                        //= type=TODO
+                        //# If a server receives a CANCEL_PUSH frame for a push
+                        //# ID that has not yet been mentioned by a PUSH_PROMISE frame, this MUST
+                        //# be treated as a connection error of type H3_ID_ERROR.
+
+                        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.7
+                        //= type=TODO
+                        //# A MAX_PUSH_ID frame cannot reduce the maximum push
+                        //# ID; receipt of a MAX_PUSH_ID frame that contains a smaller value than
+                        //# previously received MUST be treated as a connection error of type
+                        //# H3_ID_ERROR.
+                    }
+
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.5
+                    //# A server MUST treat the
+                    //# receipt of a PUSH_PROMISE frame as a connection error of type
+                    //# H3_FRAME_UNEXPECTED.
+                    frame => {
+                        return Err(self.inner.close(
+                            Code::H3_FRAME_UNEXPECTED,
+                            format!("on server control stream: {:?}", frame),
                         ));
                     }
-                }
-                f @ Frame::MaxPushId(_) | f @ Frame::CancelPush(_) => {
-                    trace!("Control frame ignored {:?}", f);
-
-                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
-                    //= type=TODO
-                    //# If a server receives a CANCEL_PUSH frame for a push
-                    //# ID that has not yet been mentioned by a PUSH_PROMISE frame, this MUST
-                    //# be treated as a connection error of type H3_ID_ERROR.
-
-                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.7
-                    //= type=TODO
-                    //# A MAX_PUSH_ID frame cannot reduce the maximum push
-                    //# ID; receipt of a MAX_PUSH_ID frame that contains a smaller value than
-                    //# previously received MUST be treated as a connection error of type
-                    //# H3_ID_ERROR.
-                }
-
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.5
-                //# A server MUST treat the
-                //# receipt of a PUSH_PROMISE frame as a connection error of type
-                //# H3_FRAME_UNEXPECTED.
-                frame => {
-                    return Err(Code::H3_FRAME_UNEXPECTED.with_reason(
-                        format!("on server control stream: {:?}", frame),
-                        ErrorLevel::ConnectionError,
-                    ));
+                },
+                Err(err) => {
+                    if err.is_closed() {
+                        return Ok(());
+                    } else {
+                        return Err(err);
+                    }
                 }
             };
         }
-        return Ok(());
     }
 }
 
