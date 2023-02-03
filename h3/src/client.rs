@@ -4,7 +4,7 @@ use std::{
     convert::TryFrom,
     marker::PhantomData,
     sync::{atomic::AtomicUsize, Arc},
-    task::{Context, Poll, Waker},
+    task::{Poll, Waker},
 };
 
 use crate::{connection::ControlStreamSendHandler, quic::SendStream};

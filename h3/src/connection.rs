@@ -172,9 +172,7 @@ pub(crate) async fn start_connection<C: quic::Connection<B> + quic::CloseCon, B:
         control_recv: None,
         decoder_recv: None,
         encoder_recv: None,
-        last_accepted_stream: None,
         got_peer_settings: false,
-        send_grease_frame: grease,
     };
     // start a grease stream
     if grease {
@@ -245,9 +243,7 @@ where
     encoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
     // The id of the last stream received by this connection:
     // request and push stream for server and clients respectively.
-    last_accepted_stream: Option<StreamId>,
     got_peer_settings: bool,
-    pub(super) send_grease_frame: bool,
 }
 
 impl<C, B> ControlStreamReceiveHandler<C, B>
