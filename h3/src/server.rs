@@ -50,11 +50,7 @@
 //! ## File server
 //! A ready-to-use example of a file server is available [here](https://github.com/hyperium/h3/blob/master/examples/client.rs)
 
-use std::{
-    convert::TryFrom,
-    marker::PhantomData,
-    sync::Arc,
-};
+use std::{convert::TryFrom, marker::PhantomData, sync::Arc};
 
 use bytes::{Buf, BytesMut};
 use futures_util::future;
