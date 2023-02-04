@@ -109,7 +109,7 @@ async fn client_close_only_on_last_sender_drop() {
         let (mut h3_conn, mut incoming, _control_send) =
             server::builder().build(conn).await.unwrap();
         let driver_fut = async {
-            assert_matches!(h3_conn.control().await.unwrap_err().kind(), Kind::Closed);
+            h3_conn.control().await.unwrap()
         };
         let request_fut = async {
             assert!(incoming.accept().await.unwrap().is_some());
