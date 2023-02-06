@@ -35,6 +35,7 @@ Get more information about this tool in the [contributing][] document.
 * HTTP/3 client and server implementation
 * Async only API
 * QUIC transport abstraction via traits in the [`quic`](./h3/src/quic.rs) module
+* Runtime independent (h3 does not spawn tasks and works with any runtime)
 * Supported QUIC implementations to date are
   [Quinn](https://github.com/quinn-rs/quinn) ([h3-quinn](./h3-quinn/))
   and [s2n-quic](https://github.com/aws/s2n-quic)
