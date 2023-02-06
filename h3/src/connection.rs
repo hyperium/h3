@@ -5,7 +5,7 @@ use std::{
 };
 
 use bytes::{Buf, Bytes, BytesMut};
-use futures_util::future;
+use futures_util::{future, Future};
 use http::HeaderMap;
 use tracing::warn;
 
@@ -89,7 +89,7 @@ pub(crate) async fn start_connection<C: quic::Connection<B> + quic::CloseCon, B:
     grease: bool,
 ) -> Result<
     (
-        ControlStreamReceiveHandler<C, B>,
+        UnidirectionalStreamAcceptHandler<C, B>,
         ControlStreamSendHandler<C::SendStream, B>,
     ),
     Error,
@@ -166,7 +166,7 @@ pub(crate) async fn start_connection<C: quic::Connection<B> + quic::CloseCon, B:
     //# The
     //# sender MUST NOT close the control stream, and the receiver MUST NOT
     //# request that the sender close the control stream.
-    let mut conn_inner = ControlStreamReceiveHandler {
+    let mut conn_inner = UnidirectionalStreamAcceptHandler {
         shared: shared.clone(),
         conn,
         control_recv: None,
@@ -230,8 +230,8 @@ where
     }
 }
 
-/// Handles the
-pub struct ControlStreamReceiveHandler<C, B>
+/// Accepts Unidirectional streams like the
+pub struct UnidirectionalStreamAcceptHandler<C, B>
 where
     C: quic::Connection<B> + quic::CloseCon,
     B: Buf,
@@ -246,15 +246,27 @@ where
     got_peer_settings: bool,
 }
 
-impl<C, B> ControlStreamReceiveHandler<C, B>
+pub trait H3FutureExecutor
+{
+    fn run_future(&self, future: impl Future + Send + 'static);
+}
+
+impl<C, B> UnidirectionalStreamAcceptHandler<C, B>
 where
     C: quic::Connection<B> + quic::CloseCon,
     B: Buf,
 {
-    pub async fn accept_recv(&mut self) -> Result<(), Error> {
+    pub async fn accept_recv<Fut: H3FutureExecutor>(
+        &mut self,
+        future_executor: Fut,
+    ) -> Result<(), Error> {
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
             return Err(e.clone());
         }
+
+        future_executor.run_future(async {
+            println!("HI---------------");
+        });
 
         let mut accept_stream = AcceptRecvStream::new(self.conn.accept_recv().await?);
         accept_stream.receive_type().await?;
@@ -539,7 +551,7 @@ impl<S, B> RequestStream<S, B> {
     }
 }
 
-impl<C, B> ConnectionState for ControlStreamReceiveHandler<C, B>
+impl<C, B> ConnectionState for UnidirectionalStreamAcceptHandler<C, B>
 where
     B: Buf,
     C: quic::Connection<B> + quic::CloseCon,
@@ -549,7 +561,7 @@ where
     }
 }
 
-impl<C, B> HasQuicConnection<B> for ControlStreamReceiveHandler<C, B>
+impl<C, B> HasQuicConnection<B> for UnidirectionalStreamAcceptHandler<C, B>
 where
     B: Buf,
     C: quic::CloseCon + quic::Connection<B>,

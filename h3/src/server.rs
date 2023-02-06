@@ -60,7 +60,7 @@ use tokio::sync::mpsc;
 
 use crate::{
     connection::{
-        self, close_con, ConnectionState, ControlStreamReceiveHandler, HasQuicConnection,
+        self, close_con, ConnectionState, UnidirectionalStreamAcceptHandler, HasQuicConnection,
         SharedStateRef,
     },
     error::{Code, Error, ErrorLevel},
@@ -378,7 +378,7 @@ where
     C: quic::Connection<B> + CloseCon,
     B: Buf,
 {
-    inner: ControlStreamReceiveHandler<C, B>,
+    inner: UnidirectionalStreamAcceptHandler<C, B>,
     max_field_section_size: u64,
     // Let the streams tell us when they are no longer running.
     request_end_recv: mpsc::UnboundedReceiver<StreamId>,

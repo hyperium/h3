@@ -14,7 +14,7 @@ use http::{request, HeaderMap, Response};
 use tracing::{info, trace};
 
 use crate::{
-    connection::{self, ConnectionState, ControlStreamReceiveHandler, SharedStateRef},
+    connection::{self, ConnectionState, UnidirectionalStreamAcceptHandler, SharedStateRef},
     error::{Code, Error, ErrorLevel},
     frame::FrameStream,
     proto::{frame::Frame, headers::Header, varint::VarInt},
@@ -360,7 +360,7 @@ where
     C: quic::Connection<B> + CloseCon,
     B: Buf,
 {
-    inner: ControlStreamReceiveHandler<C, B>,
+    inner: UnidirectionalStreamAcceptHandler<C, B>,
 }
 
 impl<C, B> Connection<C, B>
