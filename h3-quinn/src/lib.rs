@@ -95,16 +95,14 @@ impl<B> quic::Connection<B> for Connection
 where
     B: Buf,
 {
-    type SendStream = SendStream<B>;
     type RecvStream = RecvStream;
-    type BidiStream = BidiStream<B>;
     type OpenStreams = OpenStreams;
-    type Error = ConnectionError;
+    type AcceptError = ConnectionError;
 
     fn poll_accept_bidi(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::BidiStream>, Self::Error>> {
+    ) -> Poll<Result<Option<Self::BidiStream>, Self::AcceptError>> {
         let (send, recv) = match ready!(self.incoming_bi.next().poll_unpin(cx)) {
             Some(x) => x?,
             None => return Poll::Ready(Ok(None)),
@@ -118,39 +116,12 @@ where
     fn poll_accept_recv(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::RecvStream>, Self::Error>> {
+    ) -> Poll<Result<Option<Self::RecvStream>, Self::AcceptError>> {
         let recv = match ready!(self.incoming_uni.poll_next_unpin(cx)) {
             Some(x) => x?,
             None => return Poll::Ready(Ok(None)),
         };
         Poll::Ready(Ok(Some(Self::RecvStream::new(recv))))
-    }
-
-    fn poll_open_bidi(
-        &mut self,
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Self::BidiStream, Self::Error>> {
-        if self.opening_bi.is_none() {
-            self.opening_bi = Some(self.conn.open_bi());
-        }
-
-        let (send, recv) = ready!(self.opening_bi.as_mut().unwrap().poll_unpin(cx))?;
-        Poll::Ready(Ok(Self::BidiStream {
-            send: Self::SendStream::new(send),
-            recv: Self::RecvStream::new(recv),
-        }))
-    }
-
-    fn poll_open_send(
-        &mut self,
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Self::SendStream, Self::Error>> {
-        if self.opening_uni.is_none() {
-            self.opening_uni = Some(self.conn.open_uni());
-        }
-
-        let send = ready!(self.opening_uni.as_mut().unwrap().poll_unpin(cx))?;
-        Poll::Ready(Ok(Self::SendStream::new(send)))
     }
 
     fn opener(&self) -> Self::OpenStreams {
@@ -159,6 +130,42 @@ where
             opening_bi: None,
             opening_uni: None,
         }
+    }
+}
+
+impl<B> quic::OpenStreams<B> for Connection
+where
+    B: Buf,
+{
+    type SendStream = SendStream<B>;
+    type BidiStream = BidiStream<B>;
+    type OpenError = ConnectionError;
+
+    fn poll_open_bidi(
+        &mut self,
+        cx: &mut task::Context<'_>,
+    ) -> Poll<Result<Self::BidiStream, Self::OpenError>> {
+        if self.opening_bi.is_none() {
+            self.opening_bi = Some(self.conn.open_bi());
+        }
+
+        let (send, recv) = ready!(self.opening_bi.as_mut().unwrap().poll_unpin(cx))?;
+        Poll::Ready(Ok(Self::BidiStream {
+            send: Self::SendStream::new(send),
+            recv: RecvStream::new(recv),
+        }))
+    }
+
+    fn poll_open_send(
+        &mut self,
+        cx: &mut task::Context<'_>,
+    ) -> Poll<Result<Self::SendStream, Self::OpenError>> {
+        if self.opening_uni.is_none() {
+            self.opening_uni = Some(self.conn.open_uni());
+        }
+
+        let send = ready!(self.opening_uni.as_mut().unwrap().poll_unpin(cx))?;
+        Poll::Ready(Ok(Self::SendStream::new(send)))
     }
 
     fn close(&mut self, code: h3::error::Code, reason: &[u8]) {
@@ -183,15 +190,14 @@ impl<B> quic::OpenStreams<B> for OpenStreams
 where
     B: Buf,
 {
-    type RecvStream = RecvStream;
     type SendStream = SendStream<B>;
     type BidiStream = BidiStream<B>;
-    type Error = ConnectionError;
+    type OpenError = ConnectionError;
 
     fn poll_open_bidi(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Self::BidiStream, Self::Error>> {
+    ) -> Poll<Result<Self::BidiStream, Self::OpenError>> {
         if self.opening_bi.is_none() {
             self.opening_bi = Some(self.conn.open_bi());
         }
@@ -199,14 +205,14 @@ where
         let (send, recv) = ready!(self.opening_bi.as_mut().unwrap().poll_unpin(cx))?;
         Poll::Ready(Ok(Self::BidiStream {
             send: Self::SendStream::new(send),
-            recv: Self::RecvStream::new(recv),
+            recv: RecvStream::new(recv),
         }))
     }
 
     fn poll_open_send(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Self::SendStream, Self::Error>> {
+    ) -> Poll<Result<Self::SendStream, Self::OpenError>> {
         if self.opening_uni.is_none() {
             self.opening_uni = Some(self.conn.open_uni());
         }
