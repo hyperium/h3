@@ -7,14 +7,18 @@ use std::{
     task::{Poll, Waker},
 };
 
-use crate::{connection::ControlStreamSendHandler, quic::SendStream};
+use crate::{
+    connection::{control_stream_send_handler::ControlStreamSendHandler, request_stream},
+    quic::SendStream,
+};
 use bytes::{Buf, Bytes, BytesMut};
 use futures_util::future;
 use http::{request, HeaderMap, Response};
 use tracing::{info, trace};
 
 use crate::{
-    connection::{self, ConnectionState, UnidirectionalStreamAcceptHandler, SharedStateRef},
+    connection::connection::{self, UnidirectionalStreamAcceptHandler},
+    connection::connection_state::{ConnectionState, SharedStateRef},
     error::{Code, Error, ErrorLevel},
     frame::FrameStream,
     proto::{frame::Frame, headers::Header, varint::VarInt},
@@ -209,7 +213,7 @@ where
             .map_err(|e| self.maybe_conn_err(e))?;
 
         let request_stream = RequestStream {
-            inner: connection::RequestStream::new(
+            inner: request_stream::RequestStream::new(
                 FrameStream::new(stream),
                 self.max_field_section_size,
                 self.conn_state.clone(),
@@ -376,7 +380,7 @@ where
     /// Todo
     pub async fn close(&mut self) -> Result<(), Error> {
         loop {
-            let result = self.inner.control().await;
+            let result = self.inner.handle_connection_state().await;
             match result {
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.2
                 //= type=TODO
@@ -514,7 +518,7 @@ impl Builder {
         (
             Connection<C, B>,
             SendRequest<O, B>,
-            crate::connection::ControlStreamSendHandler<S, B>,
+            ControlStreamSendHandler<S, B>,
         ),
         Error,
     >
@@ -609,7 +613,7 @@ impl Builder {
 /// [`finish()`]: #method.finish
 /// [`stop_sending()`]: #method.stop_sending
 pub struct RequestStream<S, B> {
-    inner: connection::RequestStream<S, B>,
+    inner: request_stream::RequestStream<S, B>,
 }
 
 impl<S, B> ConnectionState for RequestStream<S, B> {

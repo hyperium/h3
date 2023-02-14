@@ -7,7 +7,7 @@ use http::{request, HeaderMap, Request, Response, StatusCode};
 
 use crate::{
     client,
-    connection::ConnectionState,
+    connection::connection_state::ConnectionState,
     error::{Code, Error, Kind},
     proto::{
         coding::Encode,

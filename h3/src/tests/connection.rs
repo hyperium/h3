@@ -9,7 +9,7 @@ use http::{Request, Response, StatusCode};
 
 use crate::{
     client::{self, SendRequest},
-    connection::ConnectionState,
+    connection::connection_state::ConnectionState,
     error::{Code, Error, Kind},
     proto::{
         coding::Encode as _,
@@ -108,9 +108,7 @@ async fn client_close_only_on_last_sender_drop() {
         let conn = server.next().await;
         let (mut h3_conn, mut incoming, _control_send) =
             server::builder().build(conn).await.unwrap();
-        let driver_fut = async {
-            h3_conn.control().await.unwrap()
-        };
+        let driver_fut = async { h3_conn.control().await.unwrap() };
         let request_fut = async {
             assert!(incoming.accept().await.unwrap().is_some());
             assert!(incoming.accept().await.unwrap().is_some());

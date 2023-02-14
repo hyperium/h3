@@ -10,7 +10,7 @@ pub mod server;
 pub use error::Error;
 
 mod buf;
-mod connection;
+pub(crate) mod connection;
 mod frame;
 mod proto;
 #[allow(dead_code)]

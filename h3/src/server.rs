@@ -59,9 +59,13 @@ use quic::StreamId;
 use tokio::sync::mpsc;
 
 use crate::{
+    connection::connection::{
+        self, close_con, HasQuicConnection, UnidirectionalStreamAcceptHandler,
+    },
+    connection::control_stream_send_handler::ControlStreamSendHandler,
     connection::{
-        self, close_con, ConnectionState, UnidirectionalStreamAcceptHandler, HasQuicConnection,
-        SharedStateRef,
+        connection_state::{ConnectionState, SharedStateRef},
+        request_stream,
     },
     error::{Code, Error, ErrorLevel},
     frame::FrameStream,
@@ -213,7 +217,7 @@ where
                 request_end: self.request_end_send.clone(),
                 stream_id: stream.id(),
             }),
-            inner: connection::RequestStream::new(
+            inner: request_stream::RequestStream::new(
                 stream,
                 self.max_field_section_size,
                 self.shared.clone(),
@@ -403,7 +407,7 @@ where
     /// Controls the Control stream
     pub async fn control(&mut self) -> Result<(), Error> {
         loop {
-            match self.inner.control().await {
+            match self.inner.handle_connection_state().await {
                 Ok(frame) => match frame {
                     Frame::Settings(_) => trace!("Got settings"),
                     Frame::Goaway(id) => {
@@ -541,7 +545,7 @@ impl Builder {
         (
             Connection<C, B>,
             AcceptRequest<A, B>,
-            crate::connection::ControlStreamSendHandler<S, B>,
+            ControlStreamSendHandler<S, B>,
         ),
         Error,
     >
@@ -594,12 +598,12 @@ struct RequestEnd {
 /// The [`RequestStream`] struct is used to send and/or receive
 /// information from the client.
 pub struct RequestStream<S, B> {
-    inner: connection::RequestStream<S, B>,
+    inner: request_stream::RequestStream<S, B>,
     request_end: Arc<RequestEnd>,
 }
 
-impl<S, B> AsMut<connection::RequestStream<S, B>> for RequestStream<S, B> {
-    fn as_mut(&mut self) -> &mut connection::RequestStream<S, B> {
+impl<S, B> AsMut<request_stream::RequestStream<S, B>> for RequestStream<S, B> {
+    fn as_mut(&mut self) -> &mut request_stream::RequestStream<S, B> {
         &mut self.inner
     }
 }
