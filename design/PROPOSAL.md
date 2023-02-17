@@ -320,10 +320,10 @@ The HTTP/3 RFC mentions several [security considerations](https://www.rfc-editor
 The correctness of the HTTP/3 implementation is supremely important. We will need a testing strategy that ensures the implementation is correct while developing, and to catch regressions.
 
 
-- **Unit Tests: **Each module should have suitable unit tests for invariants it upholds.
-- **Integration Tests: **Testing the public API of the `client` and `server`. This includes being to simulate incorrect or bad-acting peers.
-- **Interoperability Tests:** It’s helpful to test our library with others, to validate any edge cases or timing differences that exist.
-- **Fuzzing:** fuzzing input that would be received from the network is especially important, to ensure we don’t do anything wrong, or panic.
+- **Unit Tests**: Each module should have suitable unit tests for invariants it upholds.
+- **Integration Tests**: Testing the public API of the `client` and `server`. This includes being to simulate incorrect or bad-acting peers.
+- **Interoperability Tests**: It’s helpful to test our library with others, to validate any edge cases or timing differences that exist.
+- **Fuzzing**: fuzzing input that would be received from the network is especially important, to ensure we don’t do anything wrong, or panic.
     - QPACK decoding
     - HTTP/3 Frame decoding
 
