@@ -6,6 +6,7 @@
 use std::task::{self, Poll};
 
 use bytes::Buf;
+use futures_util::Future;
 
 pub use crate::proto::stream::{InvalidStreamId, StreamId};
 pub use crate::stream::WriteBuf;
@@ -39,41 +40,71 @@ pub trait Connection<B: Buf> {
     type RecvStream: RecvStream;
     /// A producer of outgoing Unidirectional and Bidirectional streams.
     type OpenStreams: OpenStreams<B>;
+    /// Todo
+    type AcceptStreams: AcceptStreams<B> + CloseCon;
     /// Error type yielded by this trait methods
     type Error: Into<Box<dyn Error>>;
+    /// Future for poll_accept_bidi
+    type BidiStreamFuture<'a>: Future<Output = Result<Self::BidiStream, Self::Error>>
+    where
+        Self: 'a;
+    /// Future for accept_recv
+    type AcceptRecvFuture<'a>: Future<Output = Result<Self::RecvStream, Self::Error>>
+    where
+        Self: 'a;
+    /// Future for open_bidi
+    type OpenBidiFuture<'a>: Future<Output = Result<Self::BidiStream, Self::Error>>
+    where
+        Self: 'a;
+    /// Future for open_send
+    type OpenSendFuture<'a>: Future<Output = Result<Self::SendStream, Self::Error>>
+    where
+        Self: 'a;
 
     /// Accept an incoming unidirectional stream
     ///
     /// Returning `None` implies the connection is closing or closed.
-    fn poll_accept_recv(
-        &mut self,
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::RecvStream>, Self::Error>>;
+    fn accept_recv<'a>(&'a mut self) -> Self::AcceptRecvFuture<'a>;
 
     /// Accept an incoming bidirectional stream
     ///
     /// Returning `None` implies the connection is closing or closed.
-    fn poll_accept_bidi(
-        &mut self,
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::BidiStream>, Self::Error>>;
+    fn accept_bidi<'a>(&'a mut self) -> Self::BidiStreamFuture<'a>;
 
     /// Poll the connection to create a new bidirectional stream.
-    fn poll_open_bidi(
-        &mut self,
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Self::BidiStream, Self::Error>>;
+    fn open_bidi<'a>(&'a mut self) -> Self::OpenBidiFuture<'a>;
 
     /// Poll the connection to create a new unidirectional stream.
-    fn poll_open_send(
-        &mut self,
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Self::SendStream, Self::Error>>;
+    fn open_send<'a>(&'a mut self) -> Self::OpenSendFuture<'a>;
 
     /// Get an object to open outgoing streams.
     fn opener(&self) -> Self::OpenStreams;
 
-    /// Close the connection immediately
+    /// Todo
+    fn accepter(&self) -> Self::AcceptStreams;
+}
+
+/// Todo
+pub trait AcceptStreams<B: Buf> {
+    /// Todo
+    type BidiStream: SendStream<B> + RecvStream;
+    /// Todo
+    type SendStream: SendStream<B>;
+    /// Todo
+    type RecvStream: RecvStream;
+    /// Todo
+    type Error: Into<Box<dyn Error>>;
+    /// Todo
+    type BidiStreamFuture<'a>: Future<Output = Result<Self::BidiStream, Self::Error>>
+    where
+        Self: 'a;
+    /// Todo
+    fn accept_bidi<'a>(&'a mut self) -> Self::BidiStreamFuture<'a>;
+}
+
+/// Todo
+pub trait CloseCon {
+    /// Todo
     fn close(&mut self, code: crate::error::Code, reason: &[u8]);
 }
 
@@ -99,9 +130,6 @@ pub trait OpenStreams<B: Buf> {
         &mut self,
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Self::SendStream, Self::Error>>;
-
-    /// Close the connection immediately
-    fn close(&mut self, code: crate::error::Code, reason: &[u8]);
 }
 
 /// A trait describing the "send" actions of a QUIC stream.

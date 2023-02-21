@@ -4,20 +4,27 @@ use std::{
     convert::TryFrom,
     marker::PhantomData,
     sync::{atomic::AtomicUsize, Arc},
-    task::{Context, Poll, Waker},
+    task::{Poll, Waker},
 };
 
+use crate::{
+    connection::{control_stream_send_handler::ControlStreamSendHandler, request_stream},
+    quic::SendStream,
+};
 use bytes::{Buf, Bytes, BytesMut};
 use futures_util::future;
 use http::{request, HeaderMap, Response};
 use tracing::{info, trace};
 
 use crate::{
-    connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
+    connection::connection::{self, UnidirectionalStreamAcceptHandler},
+    connection::connection_state::{ConnectionState, SharedStateRef},
     error::{Code, Error, ErrorLevel},
     frame::FrameStream,
     proto::{frame::Frame, headers::Header, varint::VarInt},
-    qpack, quic, stream,
+    qpack,
+    quic::{self, CloseCon},
+    stream,
 };
 
 /// Start building a new HTTP/3 client
@@ -26,10 +33,20 @@ pub fn builder() -> Builder {
 }
 
 /// Create a new HTTP/3 client with default settings
-pub async fn new<C, O>(conn: C) -> Result<(Connection<C, Bytes>, SendRequest<O, Bytes>), Error>
+pub async fn new<C, O, S>(
+    conn: C,
+) -> Result<
+    (
+        Connection<C, Bytes>,
+        SendRequest<O, Bytes>,
+        ControlStreamSendHandler<S, Bytes>,
+    ),
+    Error,
+>
 where
-    C: quic::Connection<Bytes, OpenStreams = O>,
-    O: quic::OpenStreams<Bytes>,
+    C: quic::CloseCon + quic::Connection<Bytes, OpenStreams = O, SendStream = S>,
+    O: quic::OpenStreams<Bytes> + CloseCon,
+    S: SendStream<Bytes>,
 {
     //= https://www.rfc-editor.org/rfc/rfc9114#section-3.3
     //= type=implication
@@ -119,7 +136,7 @@ where
 /// [`RequestStream::finish()`]: struct.RequestStream.html#method.finish
 pub struct SendRequest<T, B>
 where
-    T: quic::OpenStreams<B>,
+    T: quic::OpenStreams<B> + CloseCon,
     B: Buf,
 {
     open: T,
@@ -134,7 +151,7 @@ where
 
 impl<T, B> SendRequest<T, B>
 where
-    T: quic::OpenStreams<B>,
+    T: quic::OpenStreams<B> + CloseCon,
     B: Buf,
 {
     /// Send a HTTP/3 request to the server
@@ -196,7 +213,7 @@ where
             .map_err(|e| self.maybe_conn_err(e))?;
 
         let request_stream = RequestStream {
-            inner: connection::RequestStream::new(
+            inner: request_stream::RequestStream::new(
                 FrameStream::new(stream),
                 self.max_field_section_size,
                 self.conn_state.clone(),
@@ -211,7 +228,7 @@ where
 
 impl<T, B> ConnectionState for SendRequest<T, B>
 where
-    T: quic::OpenStreams<B>,
+    T: quic::OpenStreams<B> + CloseCon,
     B: Buf,
 {
     fn shared_state(&self) -> &SharedStateRef {
@@ -221,7 +238,7 @@ where
 
 impl<T, B> Clone for SendRequest<T, B>
 where
-    T: quic::OpenStreams<B> + Clone,
+    T: quic::OpenStreams<B> + Clone + CloseCon,
     B: Buf,
 {
     fn clone(&self) -> Self {
@@ -242,7 +259,7 @@ where
 
 impl<T, B> Drop for SendRequest<T, B>
 where
-    T: quic::OpenStreams<B>,
+    T: quic::OpenStreams<B> + CloseCon,
     B: Buf,
 {
     fn drop(&mut self) {
@@ -344,30 +361,26 @@ where
 /// [`shutdown()`]: struct.Connection.html#method.shutdown
 pub struct Connection<C, B>
 where
-    C: quic::Connection<B>,
+    C: quic::Connection<B> + CloseCon,
     B: Buf,
 {
-    inner: ConnectionInner<C, B>,
+    inner: UnidirectionalStreamAcceptHandler<C, B>,
 }
 
 impl<C, B> Connection<C, B>
 where
-    C: quic::Connection<B>,
+    C: quic::Connection<B> + CloseCon,
     B: Buf,
 {
-    /// Itiniate a graceful shutdown, accepting `max_request` potentially in-flight server push
-    pub async fn shutdown(&mut self, max_requests: usize) -> Result<(), Error> {
-        self.inner.shutdown(max_requests).await
-    }
-
     /// Wait until the connection is closed
     pub async fn wait_idle(&mut self) -> Result<(), Error> {
-        future::poll_fn(|cx| self.poll_close(cx)).await
+        self.close().await
     }
 
-    /// Maintain the connection state until it is closed
-    pub fn poll_close(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
-        while let Poll::Ready(result) = self.inner.poll_control(cx) {
+    /// Todo
+    pub async fn close(&mut self) -> Result<(), Error> {
+        loop {
+            let result = self.inner.handle_connection_state().await;
             match result {
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.2
                 //= type=TODO
@@ -397,10 +410,10 @@ where
                     //# A client MUST treat receipt of a GOAWAY frame containing a stream ID
                     //# of any other type as a connection error of type H3_ID_ERROR.
                     if !id.is_request() {
-                        return Poll::Ready(Err(Code::H3_ID_ERROR.with_reason(
+                        return Err(Code::H3_ID_ERROR.with_reason(
                             format!("non-request StreamId in a GoAway frame: {}", id),
                             ErrorLevel::ConnectionError,
-                        )));
+                        ));
                     }
                     info!("Server initiated graceful shutdown, last: StreamId({})", id);
                 }
@@ -414,10 +427,10 @@ where
                 //# receipt of a MAX_PUSH_ID frame as a connection error of type
                 //# H3_FRAME_UNEXPECTED.
                 Ok(frame) => {
-                    return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED.with_reason(
+                    return Err(Code::H3_FRAME_UNEXPECTED.with_reason(
                         format!("on client control stream: {:?}", frame),
                         ErrorLevel::ConnectionError,
-                    )))
+                    ));
                 }
                 Err(e) => {
                     let connection_error = self
@@ -429,31 +442,29 @@ where
                         .cloned();
 
                     match connection_error {
-                        Some(e) if e.is_closed() => return Poll::Ready(Ok(())),
-                        Some(e) => return Poll::Ready(Err(e)),
+                        Some(e) if e.is_closed() => return Ok(()),
+                        Some(e) => return Err(e),
                         None => {
                             self.inner.shared.write("poll_close error").error = e.clone().into();
-                            return Poll::Ready(Err(e));
+                            return Err(e);
                         }
                     }
                 }
             }
         }
-
-        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.1
-        //# Clients MUST treat
-        //# receipt of a server-initiated bidirectional stream as a connection
-        //# error of type H3_STREAM_CREATION_ERROR unless such an extension has
-        //# been negotiated.
-        if self.inner.poll_accept_request(cx).is_ready() {
-            return Poll::Ready(Err(self.inner.close(
-                Code::H3_STREAM_CREATION_ERROR,
-                "client received a bidirectional stream",
-            )));
-        }
-
-        Poll::Pending
     }
+    //= https://www.rfc-editor.org/rfc/rfc9114#section-6.1
+    //# Clients MUST treat
+    //# receipt of a server-initiated bidirectional stream as a connection
+    //# error of type H3_STREAM_CREATION_ERROR unless such an extension has
+    //# been negotiated.
+    // TODO: Where to put this?
+    /*  if self.inner.poll_accept_request(cx).is_ready() {
+        return Poll::Ready(Err(self.inner.close(
+            Code::H3_STREAM_CREATION_ERROR,
+            "client received a bidirectional stream",
+        )));
+    }*/
 }
 
 /// HTTP/3 client builder
@@ -500,29 +511,39 @@ impl Builder {
     }
 
     /// Create a new HTTP/3 client from a `quic` connection
-    pub async fn build<C, O, B>(
+    pub async fn build<C, O, B, S>(
         &mut self,
         quic: C,
-    ) -> Result<(Connection<C, B>, SendRequest<O, B>), Error>
+    ) -> Result<
+        (
+            Connection<C, B>,
+            SendRequest<O, B>,
+            ControlStreamSendHandler<S, B>,
+        ),
+        Error,
+    >
     where
-        C: quic::Connection<B, OpenStreams = O>,
-        O: quic::OpenStreams<B>,
+        C: quic::Connection<B, OpenStreams = O, SendStream = S> + CloseCon,
+        O: quic::OpenStreams<B> + CloseCon,
         B: Buf,
+        S: SendStream<B>,
     {
         let open = quic.opener();
         let conn_state = SharedStateRef::default();
 
         let conn_waker = Some(future::poll_fn(|cx| Poll::Ready(cx.waker().clone())).await);
 
+        let (control_recv, send) = connection::start_connection(
+            quic,
+            self.max_field_section_size,
+            conn_state.clone(),
+            self.send_grease,
+        )
+        .await?;
+
         Ok((
             Connection {
-                inner: ConnectionInner::new(
-                    quic,
-                    self.max_field_section_size,
-                    conn_state.clone(),
-                    self.send_grease,
-                )
-                .await?,
+                inner: control_recv,
             },
             SendRequest {
                 open,
@@ -533,6 +554,7 @@ impl Builder {
                 _buf: PhantomData,
                 send_grease_frame: self.send_grease,
             },
+            send,
         ))
     }
 }
@@ -591,7 +613,7 @@ impl Builder {
 /// [`finish()`]: #method.finish
 /// [`stop_sending()`]: #method.stop_sending
 pub struct RequestStream<S, B> {
-    inner: connection::RequestStream<S, B>,
+    inner: request_stream::RequestStream<S, B>,
 }
 
 impl<S, B> ConnectionState for RequestStream<S, B> {

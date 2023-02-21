@@ -1,14 +1,17 @@
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use bytes::{Bytes, BytesMut};
-use futures::StreamExt;
 use http::{Request, StatusCode};
 use rustls::{Certificate, PrivateKey};
 use structopt::StructOpt;
 use tokio::{fs::File, io::AsyncReadExt};
 use tracing::{error, info, trace_span};
 
-use h3::{error::ErrorLevel, quic::BidiStream, server::RequestStream};
+use h3::{
+    error::ErrorLevel,
+    quic::BidiStream,
+    server::{builder, RequestStream},
+};
 use h3_quinn::quinn;
 
 #[derive(StructOpt, Debug)]
@@ -100,13 +103,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tls_config.alpn_protocols = vec![ALPN.into()];
 
     let server_config = quinn::ServerConfig::with_crypto(Arc::new(tls_config));
-    let (endpoint, mut incoming) = quinn::Endpoint::server(server_config, opt.listen)?;
+    let endpoint = quinn::Endpoint::server(server_config, opt.listen)?;
 
     info!("listening on {}", opt.listen);
 
     // handle incoming connections and requests
 
-    while let Some(new_conn) = incoming.next().await {
+    while let Some(new_conn) = endpoint.accept().await {
         trace_span!("New connection being attempted");
 
         let root = root.clone();
@@ -116,12 +119,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(conn) => {
                     info!("new connection established");
 
-                    let mut h3_conn = h3::server::Connection::new(h3_quinn::Connection::new(conn))
+                    let (mut h3_conn, mut accept_req, _control_send) = builder()
+                        .build(h3_quinn::Connection::new(conn))
                         .await
                         .unwrap();
 
+                    tokio::spawn(async move { h3_conn.control().await });
+
                     loop {
-                        match h3_conn.accept().await {
+                        match accept_req.accept().await {
                             Ok(Some((req, stream))) => {
                                 info!("new request: {:#?}", req);
 

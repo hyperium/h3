@@ -1,11 +1,9 @@
 use std::{path::PathBuf, sync::Arc};
 
-use futures::future;
+use h3_quinn::quinn;
 use structopt::StructOpt;
 use tokio::io::AsyncWriteExt;
 use tracing::{error, info};
-
-use h3_quinn::quinn;
 
 static ALPN: &[u8] = b"h3";
 
@@ -113,10 +111,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // h3_quinn implements the trait w/ quinn to make it work with h3.
     let quinn_conn = h3_quinn::Connection::new(conn);
 
-    let (mut driver, mut send_request) = h3::client::new(quinn_conn).await?;
+    let (mut driver, mut send_request, _control_send) = h3::client::new(quinn_conn).await?;
 
     let drive = async move {
-        future::poll_fn(|cx| driver.poll_close(cx)).await?;
+        driver.close().await?;
         Ok::<(), Box<dyn std::error::Error>>(())
     };
 
