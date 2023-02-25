@@ -533,6 +533,8 @@ impl From<vas::Error> for Error {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::identity_op)]
+
     use super::*;
     use crate::qpack::{static_::StaticTable, tests::helpers::build_table};
 
@@ -1036,7 +1038,7 @@ mod tests {
         }
 
         for idx in 1..4 {
-            assert_eq!(table.is_tracked(idx), true);
+            assert!(table.is_tracked(idx));
             assert_eq!(table.track_map.get(&1), Some(&1));
         }
         let track_blocks = table.track_blocks;

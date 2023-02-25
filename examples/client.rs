@@ -1,22 +1,24 @@
-use std::sync::Arc;
-use std::time::SystemTime;
+use std::{path::PathBuf, sync::Arc};
 
 use futures::future;
-use h3_quinn::quinn;
-use rustls::{self, client::ServerCertVerified};
-use rustls::{Certificate, ServerName};
 use structopt::StructOpt;
-use tokio::{self, io::AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
+use tracing::{error, info};
 
-use h3_quinn::{self, quinn::crypto::rustls::Error};
+use h3_quinn::quinn;
 
 static ALPN: &[u8] = b"h3";
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "server")]
 struct Opt {
-    #[structopt(long)]
-    pub insecure: bool,
+    #[structopt(
+        long,
+        short,
+        default_value = "examples/ca.cert",
+        help = "Certificate of CA who issues the server certificate"
+    )]
+    pub ca: PathBuf,
 
     #[structopt(name = "keylogfile", long)]
     pub key_log_file: bool,
@@ -31,76 +33,86 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_span_events(tracing_subscriber::fmt::format::FmtSpan::FULL)
         .with_writer(std::io::stderr)
+        .with_max_level(tracing::Level::INFO)
         .init();
 
     let opt = Opt::from_args();
 
-    let dest = opt.uri.parse::<http::Uri>()?;
+    // DNS lookup
 
-    if dest.scheme() != Some(&http::uri::Scheme::HTTPS) {
-        Err("destination scheme must be 'https'")?;
+    let uri = opt.uri.parse::<http::Uri>()?;
+
+    if uri.scheme() != Some(&http::uri::Scheme::HTTPS) {
+        Err("uri scheme must be 'https'")?;
     }
 
-    let auth = dest
-        .authority()
-        .ok_or("destination must have a host")?
-        .clone();
+    let auth = uri.authority().ok_or("uri must have a host")?.clone();
 
     let port = auth.port_u16().unwrap_or(443);
 
-    // dns me!
     let addr = tokio::net::lookup_host((auth.host(), port))
         .await?
         .next()
         .ok_or("dns found no addresses")?;
 
-    eprintln!("DNS Lookup for {:?}: {:?}", dest, addr);
+    info!("DNS lookup for {:?}: {:?}", uri, addr);
 
-    // quinn setup
-    let tls_config_builder = rustls::ClientConfig::builder()
-        .with_safe_default_cipher_suites()
-        .with_safe_default_kx_groups()
-        .with_protocol_versions(&[&rustls::version::TLS13])?;
-    let mut tls_config = if !opt.insecure {
-        let mut roots = rustls::RootCertStore::empty();
-        match rustls_native_certs::load_native_certs() {
-            Ok(certs) => {
-                for cert in certs {
-                    if let Err(e) = roots.add(&rustls::Certificate(cert.0)) {
-                        eprintln!("failed to parse trust anchor: {}", e);
-                    }
+    // create quinn client endpoint
+
+    // load CA certificates stored in the system
+    let mut roots = rustls::RootCertStore::empty();
+    match rustls_native_certs::load_native_certs() {
+        Ok(certs) => {
+            for cert in certs {
+                if let Err(e) = roots.add(&rustls::Certificate(cert.0)) {
+                    error!("failed to parse trust anchor: {}", e);
                 }
             }
-            Err(e) => {
-                eprintln!("couldn't load any default trust roots: {}", e);
-            }
-        };
-        tls_config_builder
-            .with_root_certificates(roots)
-            .with_no_client_auth()
-    } else {
-        tls_config_builder
-            .with_custom_certificate_verifier(Arc::new(YesVerifier))
-            .with_no_client_auth()
+        }
+        Err(e) => {
+            error!("couldn't load any default trust roots: {}", e);
+        }
     };
+
+    // load certificate of CA who issues the server certificate
+    // NOTE that this should be used for dev only
+    if let Err(e) = roots.add(&rustls::Certificate(std::fs::read(opt.ca)?)) {
+        error!("failed to parse trust anchor: {}", e);
+    }
+
+    let mut tls_config = rustls::ClientConfig::builder()
+        .with_safe_default_cipher_suites()
+        .with_safe_default_kx_groups()
+        .with_protocol_versions(&[&rustls::version::TLS13])?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+
     tls_config.enable_early_data = true;
     tls_config.alpn_protocols = vec![ALPN.into()];
 
+    // optional debugging support
     if opt.key_log_file {
         // Write all Keys to a file if SSLKEYLOGFILE is set
         // WARNING, we enable this for the example, you should think carefully about enabling in your own code
         tls_config.key_log = Arc::new(rustls::KeyLogFile::new());
     }
 
-    let client_config = quinn::ClientConfig::new(Arc::new(tls_config));
-
     let mut client_endpoint = h3_quinn::quinn::Endpoint::client("[::]:0".parse().unwrap())?;
+
+    let client_config = quinn::ClientConfig::new(Arc::new(tls_config));
     client_endpoint.set_default_client_config(client_config);
-    let quinn_conn = h3_quinn::Connection::new(client_endpoint.connect(addr, auth.host())?.await?);
 
-    eprintln!("QUIC connected ...");
+    let conn = client_endpoint.connect(addr, auth.host())?.await?;
 
-    // generic h3
+    info!("QUIC connection established");
+
+    // create h3 client
+
+    // h3 is designed to work with different QUIC implementations via
+    // a generic interface, that is, the [`quic::Connection`] trait.
+    // h3_quinn implements the trait w/ quinn to make it work with h3.
+    let quinn_conn = h3_quinn::Connection::new(conn);
+
     let (mut driver, mut send_request) = h3::client::new(quinn_conn).await?;
 
     let drive = async move {
@@ -115,24 +127,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //             So we "move" it.
     //                  vvvv
     let request = async move {
-        eprintln!("Sending request ...");
+        info!("sending request ...");
 
-        let req = http::Request::builder().uri(dest).body(())?;
+        let req = http::Request::builder().uri(uri).body(())?;
 
+        // sending request results in a bidirectional stream,
+        // which is also used for receiving response
         let mut stream = send_request.send_request(req).await?;
+
+        // finish on the sending side
         stream.finish().await?;
 
-        eprintln!("Receiving response ...");
+        info!("receiving response ...");
+
         let resp = stream.recv_response().await?;
 
-        eprintln!("Response: {:?} {}", resp.version(), resp.status());
-        eprintln!("Headers: {:#?}", resp.headers());
+        info!("response: {:?} {}", resp.version(), resp.status());
+        info!("headers: {:#?}", resp.headers());
 
+        // `recv_data()` must be called after `recv_response()` for
+        // receiving potential response body
         while let Some(mut chunk) = stream.recv_data().await? {
             let mut out = tokio::io::stdout();
             out.write_all_buf(&mut chunk).await?;
             out.flush().await?;
         }
+
         Ok::<_, Box<dyn std::error::Error>>(())
     };
 
@@ -140,23 +160,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     req_res?;
     drive_res?;
 
+    // wait for the connection to be closed before exiting
     client_endpoint.wait_idle().await;
 
     Ok(())
-}
-
-struct YesVerifier;
-
-impl rustls::client::ServerCertVerifier for YesVerifier {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &Certificate,
-        _intermediates: &[Certificate],
-        _server_name: &ServerName,
-        _scts: &mut dyn Iterator<Item = &[u8]>,
-        _ocsp_response: &[u8],
-        _now: SystemTime,
-    ) -> Result<ServerCertVerified, Error> {
-        Ok(ServerCertVerified::assertion())
-    }
 }

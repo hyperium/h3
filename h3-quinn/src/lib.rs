@@ -361,12 +361,12 @@ pub enum SendError {
 
 impl Error for SendError {
     fn is_timeout(&self) -> bool {
-        match self {
-            Self::Write(quinn::WriteError::ConnectionLost(quinn::ConnectionError::TimedOut)) => {
-                true
-            }
-            _ => false,
-        }
+        matches!(
+            self,
+            Self::Write(quinn::WriteError::ConnectionLost(
+                quinn::ConnectionError::TimedOut
+            ))
+        )
     }
 
     fn err_code(&self) -> Option<u64> {

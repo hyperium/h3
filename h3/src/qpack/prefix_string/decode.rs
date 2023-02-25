@@ -326,6 +326,8 @@ impl HpackStringDecode for Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::identity_op)]
+
     use super::*;
 
     #[test]

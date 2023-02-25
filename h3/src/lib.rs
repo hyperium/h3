@@ -1,5 +1,6 @@
 //! HTTP/3 client and server
-#![deny(missing_docs)]
+#![deny(missing_docs, clippy::self_named_module_files)]
+#![allow(clippy::derive_partial_eq_without_eq)]
 
 pub mod client;
 pub mod error;
