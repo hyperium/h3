@@ -7,6 +7,12 @@ authors = [
 ]
 license = "MIT"
 edition = "2018"
+documentation = "https://docs.rs/h3"
+repository = "https://github.com/hyperium/h3"
+readme = "README.md"
+description = "An async HTTP/3 implementation."
+keywords = ["http3","quic","h3"]
+categories = ["network-programming", "web-programming::http-client", "web-programming::http-server"]
 
 [dependencies]
 bytes = "1"
