@@ -9,6 +9,7 @@ readme = "../README.md"
 description = "QUIC transport implementation based on Quinn."
 keywords = ["http3","quic","h3"]
 categories = ["network-programming", "web-programming"]
+license = "MIT"
 
 [dependencies]
 h3 = { version = "0.0.1", path = "../h3" }
