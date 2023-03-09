@@ -1,8 +1,14 @@
 [package]
 name = "h3-quinn"
-version = "0.0.0"
+version = "0.0.1"
 authors = ["Jean-Christophe BEGUE <jc.begue@pm.me>"]
 edition = "2018"
+documentation = "https://docs.rs/h3-quinn"
+repository = "https://github.com/hyperium/h3"
+readme = "../README.md"
+description = "QUIC transport implementation based on Quinn."
+keywords = ["http3","quic","h3"]
+categories = ["network-programming", "web-programming"]
 
 [dependencies]
 h3 = { version = "0.0.1", path = "../h3" }
