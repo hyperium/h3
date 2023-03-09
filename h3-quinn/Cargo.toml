@@ -5,7 +5,7 @@ authors = ["Jean-Christophe BEGUE <jc.begue@pm.me>"]
 edition = "2018"
 
 [dependencies]
-h3 = { path = "../h3" }
+h3 = { version = "0.0.1", path = "../h3" }
 bytes = "1"
 futures-util = { version = "0.3", default-features = false, features = ["io"] }
 quinn = { version = "0.8.0", default-features = false }
