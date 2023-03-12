@@ -89,9 +89,7 @@ impl fmt::Display for StreamId {
 }
 
 impl StreamId {
-    pub(crate) fn first_request() -> Self {
-        Self::new(0, Dir::Bi, Side::Client)
-    }
+    pub(crate) const FIRST_REQUEST: Self = Self::new(0, Dir::Bi, Side::Client);
 
     /// Is this a client-initiated request?
     pub fn is_request(&self) -> bool {
@@ -113,7 +111,7 @@ impl StreamId {
     }
 
     /// Create a new StreamId
-    fn new(index: u64, dir: Dir, initiator: Side) -> Self {
+    const fn new(index: u64, dir: Dir, initiator: Side) -> Self {
         StreamId((index as u64) << 2 | (dir as u64) << 1 | initiator as u64)
     }
 
@@ -139,6 +137,18 @@ impl TryFrom<u64> for StreamId {
             return Err(InvalidStreamId(v));
         }
         Ok(Self(v))
+    }
+}
+
+impl From<VarInt> for StreamId {
+    fn from(v: VarInt) -> Self {
+        Self(v.0)
+    }
+}
+
+impl From<StreamId> for VarInt {
+    fn from(v: StreamId) -> Self {
+        Self(v.0)
     }
 }
 

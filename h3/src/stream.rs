@@ -287,7 +287,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::proto::stream::StreamId;
 
     #[test]
     fn write_buf_encode_streamtype() {
@@ -299,7 +298,7 @@ mod tests {
 
     #[test]
     fn write_buf_encode_frame() {
-        let wbuf = WriteBuf::<Bytes>::from(Frame::Goaway(StreamId(2)));
+        let wbuf = WriteBuf::<Bytes>::from(Frame::Goaway(VarInt(2)));
 
         assert_eq!(wbuf.chunk(), b"\x07\x01\x02");
         assert_eq!(wbuf.len, 3);
@@ -307,7 +306,7 @@ mod tests {
 
     #[test]
     fn write_buf_encode_streamtype_then_frame() {
-        let wbuf = WriteBuf::<Bytes>::from((StreamType::ENCODER, Frame::Goaway(StreamId(2))));
+        let wbuf = WriteBuf::<Bytes>::from((StreamType::ENCODER, Frame::Goaway(VarInt(2))));
 
         assert_eq!(wbuf.chunk(), b"\x02\x07\x01\x02");
     }
