@@ -15,7 +15,9 @@ use crate::{
     proto::{
         coding::Encode as _,
         frame::{Frame, Settings},
-        stream::{StreamId, StreamType},
+        push::PushId,
+        stream::StreamType,
+        varint::VarInt,
     },
     quic::{self, SendStream},
     server,
@@ -368,7 +370,7 @@ async fn missing_settings() {
         //# If the first frame of the control stream is any other frame
         //# type, this MUST be treated as a connection error of type
         //# H3_MISSING_SETTINGS.
-        Frame::<Bytes>::CancelPush(StreamId(0)).encode(&mut buf);
+        Frame::<Bytes>::CancelPush(PushId(0)).encode(&mut buf);
         control_stream.write_all(&buf[..]).await.unwrap();
 
         tokio::time::sleep(Duration::from_secs(10)).await;
@@ -453,48 +455,6 @@ async fn timeout_on_control_frame_read() {
 }
 
 #[tokio::test]
-async fn goaway_from_client_not_push_id() {
-    init_tracing();
-    let mut pair = Pair::default();
-    let mut server = pair.server();
-
-    let client_fut = async {
-        let new_connection = pair.client_inner().await;
-        let mut control_stream = new_connection.connection.open_uni().await.unwrap();
-
-        let mut buf = BytesMut::new();
-        StreamType::CONTROL.encode(&mut buf);
-        Frame::<Bytes>::Settings(Settings::default()).encode(&mut buf);
-
-        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.6
-        //= type=test
-        //# A client MUST treat receipt of a GOAWAY frame containing a stream ID
-        //# of any other type as a connection error of type H3_ID_ERROR.
-
-        // StreamId(index=0 << 2 | dir=Bi << 1 | initiator=Server as u64)
-        Frame::<Bytes>::Goaway(StreamId(0u64 << 2 | 0 << 1 | 1)).encode(&mut buf);
-        control_stream.write_all(&buf[..]).await.unwrap();
-
-        tokio::time::sleep(Duration::from_secs(10)).await;
-    };
-
-    let server_fut = async {
-        let conn = server.next().await;
-        let mut incoming = server::Connection::new(conn).await.unwrap();
-        assert_matches!(
-            incoming.accept().await.map(|_| ()).unwrap_err().kind(),
-            Kind::Application {
-                // The StreamId sent in the GoAway frame from the client is not a PushId:
-                code: Code::H3_ID_ERROR,
-                ..
-            }
-        );
-    };
-
-    tokio::select! { _ = server_fut => (), _ = client_fut => panic!("client resolved first") };
-}
-
-#[tokio::test]
 async fn goaway_from_server_not_request_id() {
     init_tracing();
     let mut pair = Pair::default();
@@ -540,7 +500,7 @@ async fn goaway_from_server_not_request_id() {
         //# of any other type as a connection error of type H3_ID_ERROR.
 
         // StreamId(index=0 << 2 | dir=Uni << 1 | initiator=Server as u64)
-        Frame::<Bytes>::Goaway(StreamId(0u64 << 2 | 0 << 1 | 1)).encode(&mut buf);
+        Frame::<Bytes>::Goaway(VarInt(0u64 << 2 | 0 << 1 | 1)).encode(&mut buf);
         control_stream.write_all(&buf[..]).await.unwrap();
 
         tokio::time::sleep(Duration::from_secs(10)).await;
@@ -692,6 +652,34 @@ async fn graceful_shutdown_closes_when_idle() {
         r = tokio::time::timeout(Duration::from_millis(100), server_fut)
             => assert_matches!(r, Ok(())),
     };
+}
+
+#[tokio::test]
+async fn graceful_shutdown_client() {
+    init_tracing();
+    let mut pair = Pair::default();
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let (mut driver, mut _send_request) = client::new(pair.client().await).await.unwrap();
+        driver.shutdown(0).await.unwrap();
+        assert_matches!(
+            future::poll_fn(|cx| {
+                println!("client drive");
+                driver.poll_close(cx)
+            })
+            .await,
+            Ok(())
+        );
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming = server::Connection::new(conn).await.unwrap();
+        assert!(incoming.accept().await.unwrap().is_none());
+    };
+
+    tokio::join!(server_fut, client_fut);
 }
 
 async fn request<T, O, B>(mut send_request: T) -> Result<Response<()>, Error>

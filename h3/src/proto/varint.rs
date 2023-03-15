@@ -28,7 +28,7 @@ impl VarInt {
         if x < 2u64.pow(62) {
             Ok(VarInt(x))
         } else {
-            Err(VarIntBoundsExceeded)
+            Err(VarIntBoundsExceeded(x))
         }
     }
 
@@ -192,4 +192,4 @@ impl<T: BufMut> BufMutExt for T {
 }
 /// Error returned when constructing a `VarInt` from a value >= 2^62
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct VarIntBoundsExceeded;
+pub struct VarIntBoundsExceeded(pub(crate) u64);

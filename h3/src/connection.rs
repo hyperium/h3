@@ -15,7 +15,7 @@ use crate::{
     proto::{
         frame::{Frame, PayloadLen, SettingId, Settings},
         headers::Header,
-        stream::{StreamId, StreamType},
+        stream::StreamType,
         varint::VarInt,
     },
     qpack,
@@ -29,10 +29,8 @@ pub struct SharedState {
     pub peer_max_field_section_size: u64,
     // connection-wide error, concerns all RequestStreams and drivers
     pub error: Option<Error>,
-    // Has the connection received a GoAway frame? If so, this StreamId is the last
-    // we're willing to accept. This lets us finish the requests or pushes that were
-    // already in flight when the graceful shutdown was initiated.
-    pub closing: Option<StreamId>,
+    // Has a GOAWAY frame been sent or received?
+    pub closing: bool,
 }
 
 #[derive(Clone)]
@@ -54,7 +52,7 @@ impl Default for SharedStateRef {
         Self(Arc::new(RwLock::new(SharedState {
             peer_max_field_section_size: VarInt::MAX.0,
             error: None,
-            closing: None,
+            closing: false,
         })))
     }
 }
@@ -83,9 +81,6 @@ where
     decoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
     encoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
     pending_recv_streams: Vec<AcceptRecvStream<C::RecvStream>>,
-    // The id of the last stream received by this connection:
-    // request and push stream for server and clients respectively.
-    last_accepted_stream: Option<StreamId>,
     got_peer_settings: bool,
     pub(super) send_grease_frame: bool,
 }
@@ -180,7 +175,6 @@ where
             decoder_recv: None,
             encoder_recv: None,
             pending_recv_streams: Vec::with_capacity(3),
-            last_accepted_stream: None,
             got_peer_settings: false,
             send_grease_frame: grease,
         };
@@ -198,14 +192,24 @@ where
         Ok(conn_inner)
     }
 
-    /// Initiate graceful shutdown, accepting `max_streams` potentially in-flight streams
-    pub async fn shutdown(&mut self, max_streams: usize) -> Result<(), Error> {
-        let max_id = self
-            .last_accepted_stream
-            .map(|id| id + max_streams)
-            .unwrap_or_else(StreamId::first_request);
+    /// Send GOAWAY with specified max_id, iff max_id is smaller than the previous one.
+    pub async fn shutdown<T>(
+        &mut self,
+        sent_closing: &mut Option<T>,
+        max_id: T,
+    ) -> Result<(), Error>
+    where
+        T: From<VarInt> + PartialOrd<T> + Copy,
+        VarInt: From<T>,
+    {
+        if let Some(sent_id) = sent_closing {
+            if *sent_id <= max_id {
+                return Ok(());
+            }
+        }
 
-        self.shared.write("graceful shutdown").closing = Some(max_id);
+        *sent_closing = Some(max_id);
+        self.shared.write("shutdown").closing = true;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-3.3
         //# When either endpoint chooses to close the HTTP/3
@@ -213,7 +217,7 @@ where
         //# (Section 5.2) so that both endpoints can reliably determine whether
         //# previously sent frames have been processed and gracefully complete or
         //# terminate any necessary remaining tasks.
-        stream::write(&mut self.control_send, Frame::Goaway(max_id)).await
+        stream::write(&mut self.control_send, Frame::Goaway(max_id.into())).await
     }
 
     pub fn poll_accept_request(
@@ -370,43 +374,7 @@ where
                             .unwrap_or(VarInt::MAX.0);
                         Ok(Frame::Settings(settings))
                     }
-                    Frame::Goaway(id) => {
-                        let closing = self.shared.read("connection goaway read").closing;
-                        match closing {
-                            Some(closing_id) if closing_id.initiator() == id.initiator() => {
-                                //= https://www.rfc-editor.org/rfc/rfc9114#section-5.2
-                                //# An endpoint MAY send multiple GOAWAY frames indicating different
-                                //# identifiers, but the identifier in each frame MUST NOT be greater
-                                //# than the identifier in any previous frame, since clients might
-                                //# already have retried unprocessed requests on another HTTP connection.
-
-                                //= https://www.rfc-editor.org/rfc/rfc9114#section-5.2
-                                //# Like the server,
-                                //# the client MAY send subsequent GOAWAY frames so long as the specified
-                                //# push ID is no greater than any previously sent value.
-                                if id <= closing_id {
-                                    self.shared.write("connection goaway overwrite").closing =
-                                        Some(id);
-                                    Ok(Frame::Goaway(id))
-                                } else {
-                                    //= https://www.rfc-editor.org/rfc/rfc9114#section-5.2
-                                    //# Receiving a GOAWAY containing a larger identifier than previously
-                                    //# received MUST be treated as a connection error of type H3_ID_ERROR.
-                                    Err(self.close(
-                                        Code::H3_ID_ERROR,
-                                        format!("received a GoAway({}) greater than the former one ({})", id, closing_id)
-                                    ))
-                                }
-                            }
-                            // When closing initiator is different, the current side has already started to close
-                            // and should not be initiating any new requests / pushes anyway. So we can ignore it.
-                            Some(_) => Ok(Frame::Goaway(id)),
-                            None => {
-                                self.shared.write("connection goaway write").closing = Some(id);
-                                Ok(Frame::Goaway(id))
-                            }
-                        }
-                    }
+                    f @ Frame::Goaway(_) => Ok(f),
                     f @ Frame::CancelPush(_) | f @ Frame::MaxPushId(_) => {
                         if self.got_peer_settings {
                             //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
@@ -460,8 +428,46 @@ where
         Poll::Ready(res)
     }
 
-    pub fn start_stream(&mut self, id: StreamId) {
-        self.last_accepted_stream = Some(id);
+    pub(crate) fn process_goaway<T>(
+        &mut self,
+        recv_closing: &mut Option<T>,
+        id: VarInt,
+    ) -> Result<(), Error>
+    where
+        T: From<VarInt> + Copy,
+        VarInt: From<T>,
+    {
+        {
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-5.2
+            //# An endpoint MAY send multiple GOAWAY frames indicating different
+            //# identifiers, but the identifier in each frame MUST NOT be greater
+            //# than the identifier in any previous frame, since clients might
+            //# already have retried unprocessed requests on another HTTP connection.
+
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-5.2
+            //# Like the server,
+            //# the client MAY send subsequent GOAWAY frames so long as the specified
+            //# push ID is no greater than any previously sent value.
+            if let Some(prev_id) = recv_closing.map(VarInt::from) {
+                if prev_id < id {
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-5.2
+                    //# Receiving a GOAWAY containing a larger identifier than previously
+                    //# received MUST be treated as a connection error of type H3_ID_ERROR.
+                    return Err(self.close(
+                        Code::H3_ID_ERROR,
+                        format!(
+                            "received a GoAway({}) greater than the former one ({})",
+                            id, prev_id
+                        ),
+                    ));
+                }
+            }
+            *recv_closing = Some(id.into());
+            if !self.shared.read("connection goaway read").closing {
+                self.shared.write("connection goaway overwrite").closing = true;
+            }
+            Ok(())
+        }
     }
 
     /// Closes a Connection with code and reason.

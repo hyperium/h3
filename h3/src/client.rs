@@ -16,8 +16,10 @@ use crate::{
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
     error::{Code, Error, ErrorLevel},
     frame::FrameStream,
-    proto::{frame::Frame, headers::Header, varint::VarInt},
-    qpack, quic, stream,
+    proto::{frame::Frame, headers::Header, push::PushId, varint::VarInt},
+    qpack,
+    quic::{self, StreamId},
+    stream,
 };
 
 /// Start building a new HTTP/3 client
@@ -147,7 +149,7 @@ where
             (state.peer_max_field_section_size, state.closing)
         };
 
-        if closing.is_some() {
+        if closing {
             return Err(Error::closing());
         }
 
@@ -348,6 +350,10 @@ where
     B: Buf,
 {
     inner: ConnectionInner<C, B>,
+    // Has a GOAWAY frame been sent? If so, this PushId is the last we are willing to accept.
+    sent_closing: Option<PushId>,
+    // Has a GOAWAY frame been received? If so, this is StreamId the last the remote will accept.
+    recv_closing: Option<StreamId>,
 }
 
 impl<C, B> Connection<C, B>
@@ -355,9 +361,10 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    /// Itiniate a graceful shutdown, accepting `max_request` potentially in-flight server push
-    pub async fn shutdown(&mut self, max_requests: usize) -> Result<(), Error> {
-        self.inner.shutdown(max_requests).await
+    /// Initiate a graceful shutdown, accepting `max_push` potentially in-flight server pushes
+    pub async fn shutdown(&mut self, _max_push: usize) -> Result<(), Error> {
+        // TODO: Calculate remaining pushes once server push is implemented.
+        self.inner.shutdown(&mut self.sent_closing, PushId(0)).await
     }
 
     /// Wait until the connection is closed
@@ -396,12 +403,14 @@ where
                     //# initiated bidirectional stream encoded as a variable-length integer.
                     //# A client MUST treat receipt of a GOAWAY frame containing a stream ID
                     //# of any other type as a connection error of type H3_ID_ERROR.
-                    if !id.is_request() {
+                    if !StreamId::from(id).is_request() {
                         return Poll::Ready(Err(Code::H3_ID_ERROR.with_reason(
                             format!("non-request StreamId in a GoAway frame: {}", id),
                             ErrorLevel::ConnectionError,
                         )));
                     }
+                    self.inner.process_goaway(&mut self.recv_closing, id)?;
+
                     info!("Server initiated graceful shutdown, last: StreamId({})", id);
                 }
 
@@ -420,22 +429,18 @@ where
                     )))
                 }
                 Err(e) => {
-                    let connection_error = self
-                        .inner
-                        .shared
-                        .read("poll_close error read")
-                        .error
-                        .as_ref()
-                        .cloned();
-
-                    match connection_error {
-                        Some(e) if e.is_closed() => return Poll::Ready(Ok(())),
-                        Some(e) => return Poll::Ready(Err(e)),
+                    let connection_error = self.inner.shared.read("poll_close").error.clone();
+                    let connection_error = match connection_error {
+                        Some(e) => e,
                         None => {
-                            self.inner.shared.write("poll_close error").error = e.clone().into();
-                            return Poll::Ready(Err(e));
+                            self.inner.shared.write("poll_close error").error = Some(e.clone());
+                            e
                         }
+                    };
+                    if connection_error.is_closed() {
+                        return Poll::Ready(Ok(()));
                     }
+                    return Poll::Ready(Err(connection_error));
                 }
             }
         }
@@ -523,6 +528,8 @@ impl Builder {
                     self.send_grease,
                 )
                 .await?,
+                sent_closing: None,
+                recv_closing: None,
             },
             SendRequest {
                 open,

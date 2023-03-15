@@ -4,7 +4,8 @@ use tracing::trace;
 
 use super::{
     coding::Encode,
-    stream::{InvalidStreamId, StreamId},
+    push::{InvalidPushId, PushId},
+    stream::InvalidStreamId,
     varint::{BufExt, BufMutExt, UnexpectedEnd, VarInt},
 };
 
@@ -17,6 +18,7 @@ pub enum FrameError {
     Incomplete(usize),
     Settings(SettingsError),
     InvalidStreamId(InvalidStreamId),
+    InvalidPushId(InvalidPushId),
 }
 
 impl std::error::Error for FrameError {}
@@ -30,7 +32,8 @@ impl fmt::Display for FrameError {
             FrameError::InvalidFrameValue => write!(f, "frame value is invalid"),
             FrameError::Incomplete(x) => write!(f, "internal error: frame incomplete {}", x),
             FrameError::Settings(x) => write!(f, "invalid settings: {}", x),
-            FrameError::InvalidStreamId(x) => write!(f, "invalid stream id: {}", x),
+            FrameError::InvalidStreamId(x) => write!(f, "{}", x),
+            FrameError::InvalidPushId(x) => write!(f, "{}", x),
         }
     }
 }
@@ -38,11 +41,11 @@ impl fmt::Display for FrameError {
 pub enum Frame<B> {
     Data(B),
     Headers(Bytes),
-    CancelPush(StreamId),
+    CancelPush(PushId),
     Settings(Settings),
     PushPromise(PushPromise),
-    Goaway(StreamId),
-    MaxPushId(StreamId),
+    Goaway(VarInt),
+    MaxPushId(PushId),
     Grease,
 }
 
@@ -82,7 +85,7 @@ impl Frame<PayloadLen> {
             FrameType::SETTINGS => Ok(Frame::Settings(Settings::decode(&mut payload)?)),
             FrameType::CANCEL_PUSH => Ok(Frame::CancelPush(payload.get_var()?.try_into()?)),
             FrameType::PUSH_PROMISE => Ok(Frame::PushPromise(PushPromise::decode(&mut payload)?)),
-            FrameType::GOAWAY => Ok(Frame::Goaway(payload.get_var()?.try_into()?)),
+            FrameType::GOAWAY => Ok(Frame::Goaway(VarInt::decode(&mut payload)?)),
             FrameType::MAX_PUSH_ID => Ok(Frame::MaxPushId(payload.get_var()?.try_into()?)),
             FrameType::H2_PRIORITY
             | FrameType::H2_PING
@@ -121,9 +124,9 @@ where
             }
             Frame::Settings(f) => f.encode(buf),
             Frame::PushPromise(f) => f.encode(buf),
-            Frame::CancelPush(id) => simple_frame_encode(FrameType::CANCEL_PUSH, *id, buf),
+            Frame::CancelPush(id) => simple_frame_encode(FrameType::CANCEL_PUSH, (*id).into(), buf),
             Frame::Goaway(id) => simple_frame_encode(FrameType::GOAWAY, *id, buf),
-            Frame::MaxPushId(id) => simple_frame_encode(FrameType::MAX_PUSH_ID, *id, buf),
+            Frame::MaxPushId(id) => simple_frame_encode(FrameType::MAX_PUSH_ID, (*id).into(), buf),
             Frame::Grease => {
                 FrameType::grease().encode(buf);
                 buf.write_var(6);
@@ -324,9 +327,9 @@ impl PushPromise {
     }
 }
 
-fn simple_frame_encode<B: BufMut>(ty: FrameType, id: StreamId, buf: &mut B) {
+fn simple_frame_encode<B: BufMut>(ty: FrameType, id: VarInt, buf: &mut B) {
     ty.encode(buf);
-    buf.write_var(1);
+    buf.write_var(id.size() as u64);
     id.encode(buf);
 }
 
@@ -532,6 +535,12 @@ impl From<InvalidStreamId> for FrameError {
     }
 }
 
+impl From<InvalidPushId> for FrameError {
+    fn from(e: InvalidPushId) -> Self {
+        FrameError::InvalidPushId(e)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -542,7 +551,7 @@ mod tests {
     fn unknown_frame_type() {
         let mut buf = Cursor::new(&[22, 4, 0, 255, 128, 0, 3, 1, 2]);
         assert_matches!(Frame::decode(&mut buf), Err(FrameError::UnknownFrame(22)));
-        assert_matches!(Frame::decode(&mut buf), Ok(Frame::CancelPush(StreamId(2))));
+        assert_matches!(Frame::decode(&mut buf), Ok(Frame::CancelPush(PushId(2))));
     }
 
     #[test]
@@ -625,19 +634,19 @@ mod tests {
     #[test]
     fn simple_frames() {
         codec_frame_check(
-            Frame::CancelPush(StreamId(2)),
+            Frame::CancelPush(PushId(2)),
             &[3, 1, 2],
-            Frame::CancelPush(StreamId(2)),
+            Frame::CancelPush(PushId(2)),
         );
         codec_frame_check(
-            Frame::Goaway(StreamId(2)),
+            Frame::Goaway(VarInt(2)),
             &[7, 1, 2],
-            Frame::Goaway(StreamId(2)),
+            Frame::Goaway(VarInt(2)),
         );
         codec_frame_check(
-            Frame::MaxPushId(StreamId(2)),
+            Frame::MaxPushId(PushId(2)),
             &[13, 1, 2],
-            Frame::MaxPushId(StreamId(2)),
+            Frame::MaxPushId(PushId(2)),
         );
     }
 

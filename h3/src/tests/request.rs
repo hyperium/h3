@@ -13,7 +13,7 @@ use crate::{
         coding::Encode,
         frame::{self, Frame, FrameType},
         headers::Header,
-        stream::StreamId,
+        push::PushId,
         varint::VarInt,
     },
     qpack, server,
@@ -1135,10 +1135,10 @@ async fn request_valid_unkown_frame_after_trailers() {
 //# connection error of type H3_FRAME_UNEXPECTED.
 fn invalid_request_frames() -> Vec<Frame<Bytes>> {
     vec![
-        Frame::CancelPush(StreamId(0)),
+        Frame::CancelPush(PushId(0)),
         Frame::Settings(frame::Settings::default()),
-        Frame::Goaway(StreamId(1)),
-        Frame::MaxPushId(StreamId(1)),
+        Frame::Goaway(VarInt(1)),
+        Frame::MaxPushId(PushId(1)),
     ]
 }
 

@@ -411,7 +411,8 @@ impl From<frame::FrameStreamError> for Error {
                 .with_reason("received incomplete frame", ErrorLevel::ConnectionError),
 
             frame::FrameStreamError::Proto(e) => match e {
-                proto::frame::FrameError::InvalidStreamId(_) => Code::H3_ID_ERROR,
+                proto::frame::FrameError::InvalidStreamId(_)
+                | proto::frame::FrameError::InvalidPushId(_) => Code::H3_ID_ERROR,
                 proto::frame::FrameError::Settings(_) => Code::H3_SETTINGS_ERROR,
                 proto::frame::FrameError::UnsupportedFrame(_)
                 | proto::frame::FrameError::UnknownFrame(_) => Code::H3_FRAME_UNEXPECTED,
