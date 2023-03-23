@@ -4,6 +4,7 @@ set -e
 
 specs=(
     'https://www.rfc-editor.org/rfc/rfc9114'
+    'https://www.rfc-editor.org/rfc/rfc9204'
 )
 
 for spec in "${specs[@]}"
