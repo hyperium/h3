@@ -9,7 +9,7 @@
 //! async fn doc<C>(conn: C)
 //! where
 //! C: h3::quic::Connection<bytes::Bytes>,
-//! <C as h3::quic::Connection<bytes::Bytes>>::BidiStream: Send + 'static
+//! <C as h3::quic::OpenStreams<bytes::Bytes>>::BidiStream: Send + 'static
 //! {
 //!     let mut server_builder = h3::server::builder();
 //!     // Build the Connection
