@@ -380,7 +380,7 @@ where
                     // incoming requests not belonging to the grace interval. It's possible that
                     // some acceptable request streams arrive after rejected requests.
                     if let Some(max_id) = self.sent_closing {
-                        if s.id() > max_id.into() {
+                        if s.id() > max_id {
                             s.stop_sending(Code::H3_REQUEST_REJECTED.value());
                             s.reset(Code::H3_REQUEST_REJECTED.value());
                             if self.poll_requests_completion(cx).is_ready() {
