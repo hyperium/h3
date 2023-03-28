@@ -6,20 +6,21 @@
 use std::{
     convert::TryInto,
     fmt::{self, Display},
+    future::Future,
     pin::Pin,
     sync::Arc,
-    task::{self, Poll},
+    task::{self, ready, Poll},
 };
 
 use bytes::{Buf, Bytes};
-use futures_util::future::FutureExt as _;
-use futures_util::io::AsyncWrite as _;
-use futures_util::ready;
-use futures_util::stream::StreamExt as _;
 
+use futures::{
+    stream::{self, BoxStream},
+    FutureExt, StreamExt,
+};
+use quinn::Chunk;
 pub use quinn::{
-    self, crypto::Session, Endpoint, IncomingBiStreams, IncomingUniStreams, NewConnection, OpenBi,
-    OpenUni, VarInt, WriteError,
+    self, crypto::Session, AcceptBi, AcceptUni, Endpoint, OpenBi, OpenUni, VarInt, WriteError,
 };
 
 use h3::quic::{self, Error, StreamId, WriteBuf};
@@ -29,27 +30,26 @@ use h3::quic::{self, Error, StreamId, WriteBuf};
 /// Implements a [`quic::Connection`] backed by a [`quinn::Connection`].
 pub struct Connection {
     conn: quinn::Connection,
-    incoming_bi: IncomingBiStreams,
-    opening_bi: Option<OpenBi>,
-    incoming_uni: IncomingUniStreams,
-    opening_uni: Option<OpenUni>,
+    incoming_bi: BoxStream<'static, <AcceptBi<'static> as Future>::Output>,
+    opening_bi: Option<BoxStream<'static, <OpenBi<'static> as Future>::Output>>,
+    incoming_uni: BoxStream<'static, <AcceptUni<'static> as Future>::Output>,
+    opening_uni: Option<BoxStream<'static, <OpenUni<'static> as Future>::Output>>,
 }
 
 impl Connection {
     /// Create a [`Connection`] from a [`quinn::NewConnection`]
-    pub fn new(new_conn: NewConnection) -> Self {
-        let NewConnection {
-            uni_streams,
-            bi_streams,
-            connection,
-            ..
-        } = new_conn;
-
+    pub fn new(conn: quinn::Connection) -> Self {
         Self {
-            conn: connection,
-            incoming_bi: bi_streams,
+            conn: conn.clone(),
+            incoming_bi: Box::pin(stream::unfold(conn.clone(), |conn| async {
+                let fut = conn.accept_bi().await;
+                Some((fut, conn))
+            })),
             opening_bi: None,
-            incoming_uni: uni_streams,
+            incoming_uni: Box::pin(stream::unfold(conn.clone(), |conn| async {
+                let fut = conn.accept_uni().await;
+                Some((fut, conn))
+            })),
             opening_uni: None,
         }
     }
@@ -105,7 +105,7 @@ where
         &mut self,
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Option<Self::BidiStream>, Self::Error>> {
-        let (send, recv) = match ready!(self.incoming_bi.next().poll_unpin(cx)) {
+        let (send, recv) = match ready!(self.incoming_bi.poll_next_unpin(cx)) {
             Some(x) => x?,
             None => return Poll::Ready(Ok(None)),
         };
@@ -131,10 +131,14 @@ where
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Self::BidiStream, Self::Error>> {
         if self.opening_bi.is_none() {
-            self.opening_bi = Some(self.conn.open_bi());
+            self.opening_bi = Some(Box::pin(stream::unfold(self.conn.clone(), |conn| async {
+                let fut = conn.clone().open_bi().await;
+                Some((fut, conn))
+            })));
         }
 
-        let (send, recv) = ready!(self.opening_bi.as_mut().unwrap().poll_unpin(cx))?;
+        let (send, recv) =
+            ready!(self.opening_bi.as_mut().unwrap().poll_next_unpin(cx)).unwrap()?;
         Poll::Ready(Ok(Self::BidiStream {
             send: Self::SendStream::new(send),
             recv: Self::RecvStream::new(recv),
@@ -146,10 +150,13 @@ where
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Self::SendStream, Self::Error>> {
         if self.opening_uni.is_none() {
-            self.opening_uni = Some(self.conn.open_uni());
+            self.opening_uni = Some(Box::pin(stream::unfold(self.conn.clone(), |conn| async {
+                let fut = conn.open_uni().await;
+                Some((fut, conn))
+            })));
         }
 
-        let send = ready!(self.opening_uni.as_mut().unwrap().poll_unpin(cx))?;
+        let send = ready!(self.opening_uni.as_mut().unwrap().poll_next_unpin(cx)).unwrap()?;
         Poll::Ready(Ok(Self::SendStream::new(send)))
     }
 
@@ -175,8 +182,8 @@ where
 /// [`quinn::OpenBi`], [`quinn::OpenUni`].
 pub struct OpenStreams {
     conn: quinn::Connection,
-    opening_bi: Option<OpenBi>,
-    opening_uni: Option<OpenUni>,
+    opening_bi: Option<BoxStream<'static, <OpenBi<'static> as Future>::Output>>,
+    opening_uni: Option<BoxStream<'static, <OpenUni<'static> as Future>::Output>>,
 }
 
 impl<B> quic::OpenStreams<B> for OpenStreams
@@ -193,10 +200,14 @@ where
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Self::BidiStream, Self::Error>> {
         if self.opening_bi.is_none() {
-            self.opening_bi = Some(self.conn.open_bi());
+            self.opening_bi = Some(Box::pin(stream::unfold(self.conn.clone(), |conn| async {
+                let fut = conn.open_bi().await;
+                Some((fut, conn))
+            })));
         }
 
-        let (send, recv) = ready!(self.opening_bi.as_mut().unwrap().poll_unpin(cx))?;
+        let (send, recv) =
+            ready!(self.opening_bi.as_mut().unwrap().poll_next_unpin(cx)).unwrap()?;
         Poll::Ready(Ok(Self::BidiStream {
             send: Self::SendStream::new(send),
             recv: Self::RecvStream::new(recv),
@@ -208,10 +219,13 @@ where
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Self::SendStream, Self::Error>> {
         if self.opening_uni.is_none() {
-            self.opening_uni = Some(self.conn.open_uni());
+            self.opening_uni = Some(Box::pin(stream::unfold(self.conn.clone(), |conn| async {
+                let fut = conn.open_uni().await;
+                Some((fut, conn))
+            })));
         }
 
-        let send = ready!(self.opening_uni.as_mut().unwrap().poll_unpin(cx))?;
+        let send = ready!(self.opening_uni.as_mut().unwrap().poll_next_unpin(cx)).unwrap()?;
         Poll::Ready(Ok(Self::SendStream::new(send)))
     }
 
@@ -324,10 +338,11 @@ impl quic::RecvStream for RecvStream {
         &mut self,
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Option<Self::Buf>, Self::Error>> {
-        Poll::Ready(Ok(ready!(self
-            .stream
-            .read_chunk(usize::MAX, true)
-            .poll_unpin(cx))?
+        Poll::Ready(Ok(ready!(Box::pin(
+            self.stream.read_chunk(usize::MAX, true)
+        )
+        .as_mut()
+        .poll(cx))?
         .map(|c| (c.bytes))))
     }
 
@@ -412,24 +427,11 @@ where
     fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         if let Some(ref mut data) = self.writing {
             while data.has_remaining() {
-                match ready!(Pin::new(&mut self.stream).poll_write(cx, data.chunk())) {
+                let res = ready!(Box::pin(self.stream.write(data.chunk())).as_mut().poll(cx));
+                match res {
                     Ok(cnt) => data.advance(cnt),
                     Err(err) => {
-                        // We are forced to use AsyncWrite for now because we cannot store
-                        // the result of a call to:
-                        // quinn::send_stream::write<'a>(&'a mut self, buf: &'a [u8]) -> Write<'a, S>.
-                        //
-                        // This is why we have to unpack the error from io::Error below. This should not
-                        // panic as long as quinn's AsyncWrite impl doesn't change.
-                        return Poll::Ready(Err(SendStreamError::Write(
-                            err.into_inner()
-                                .expect("write stream returned an empty error")
-                                .downcast_ref::<WriteError>()
-                                .expect(
-                                    "write stream returned an error which type is not WriteError",
-                                )
-                                .clone(),
-                        )));
+                        return Poll::Ready(Err(SendStreamError::Write(err)));
                     }
                 }
             }
@@ -439,7 +441,7 @@ where
     }
 
     fn poll_finish(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.stream.finish().poll_unpin(cx).map_err(Into::into)
+        self.stream.poll_finish(cx).map_err(Into::into)
     }
 
     fn reset(&mut self, reset_code: u64) {

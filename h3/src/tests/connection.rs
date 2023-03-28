@@ -247,8 +247,7 @@ async fn client_error_on_bidi_recv() {
     };
 
     let server_fut = async {
-        let quinn::NewConnection { connection, .. } =
-            server.incoming.next().await.unwrap().await.unwrap();
+        let connection = server.incoming.next().await.unwrap().await.unwrap();
         let (mut send, _recv) = connection.open_bi().await.unwrap();
         for _ in 0..100 {
             match send.write(b"I'm not really a server").await {
