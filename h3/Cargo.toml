@@ -11,8 +11,12 @@ documentation = "https://docs.rs/h3"
 repository = "https://github.com/hyperium/h3"
 readme = "../README.md"
 description = "An async HTTP/3 implementation."
-keywords = ["http3","quic","h3"]
-categories = ["network-programming", "web-programming::http-client", "web-programming::http-server"]
+keywords = ["http3", "quic", "h3"]
+categories = [
+    "network-programming",
+    "web-programming::http-client",
+    "web-programming::http-server",
+]
 
 [dependencies]
 bytes = "1"
@@ -27,6 +31,7 @@ assert_matches = "1.5.0"
 futures-util = { version = "0.3", default-features = false, features = ["io"] }
 proptest = "1"
 quinn = { version = "0.9.3", default-features = false, features = [
+    "runtime-tokio",
     "tls-rustls",
     "ring",
 ] }
@@ -41,3 +46,4 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
     "time",
     "tracing-log",
 ] }
+futures = { version = "0.3.27" }

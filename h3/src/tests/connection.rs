@@ -5,7 +5,7 @@ use std::{borrow::BorrowMut, time::Duration};
 
 use assert_matches::assert_matches;
 use bytes::{Buf, Bytes, BytesMut};
-use futures_util::{future, StreamExt};
+use futures_util::future;
 use http::{Request, Response, StatusCode};
 
 use crate::{
@@ -247,7 +247,7 @@ async fn client_error_on_bidi_recv() {
     };
 
     let server_fut = async {
-        let connection = server.incoming.next().await.unwrap().await.unwrap();
+        let connection = server.endpoint.accept().await.unwrap().await.unwrap();
         let (mut send, _recv) = connection.open_bi().await.unwrap();
         for _ in 0..100 {
             match send.write(b"I'm not really a server").await {
@@ -273,7 +273,7 @@ async fn two_control_streams() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let new_connection = pair.client_inner().await;
+        let connection = pair.client_inner().await;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
         //= type=test
@@ -281,7 +281,7 @@ async fn two_control_streams() {
         //# receipt of a second stream claiming to be a control stream MUST be
         //# treated as a connection error of type H3_STREAM_CREATION_ERROR.
         for _ in 0..=1 {
-            let mut control_stream = new_connection.connection.open_uni().await.unwrap();
+            let mut control_stream = connection.open_uni().await.unwrap();
             let mut buf = BytesMut::new();
             StreamType::CONTROL.encode(&mut buf);
             control_stream.write_all(&buf[..]).await.unwrap();
@@ -312,8 +312,8 @@ async fn control_close_send_error() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let new_connection = pair.client_inner().await;
-        let mut control_stream = new_connection.connection.open_uni().await.unwrap();
+        let connection = pair.client_inner().await;
+        let mut control_stream = connection.open_uni().await.unwrap();
 
         let mut buf = BytesMut::new();
         StreamType::CONTROL.encode(&mut buf);
@@ -326,7 +326,7 @@ async fn control_close_send_error() {
         //# error of type H3_CLOSED_CRITICAL_STREAM.
         control_stream.finish().await.unwrap(); // close the client control stream immediately
 
-        let (mut driver, _send) = client::new(h3_quinn::Connection::new(new_connection))
+        let (mut driver, _send) = client::new(h3_quinn::Connection::new(connection))
             .await
             .unwrap();
 
@@ -358,8 +358,8 @@ async fn missing_settings() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let new_connection = pair.client_inner().await;
-        let mut control_stream = new_connection.connection.open_uni().await.unwrap();
+        let connection = pair.client_inner().await;
+        let mut control_stream = connection.open_uni().await.unwrap();
 
         let mut buf = BytesMut::new();
         StreamType::CONTROL.encode(&mut buf);
@@ -397,8 +397,8 @@ async fn control_stream_frame_unexpected() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let new_connection = pair.client_inner().await;
-        let mut control_stream = new_connection.connection.open_uni().await.unwrap();
+        let connection = pair.client_inner().await;
+        let mut control_stream = connection.open_uni().await.unwrap();
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.1
         //= type=test
@@ -457,18 +457,18 @@ async fn timeout_on_control_frame_read() {
 async fn goaway_from_server_not_request_id() {
     init_tracing();
     let mut pair = Pair::default();
-    let (_, mut server) = pair.server_inner();
+    let mut server = pair.server_inner();
 
     let client_fut = async {
-        let new_connection = pair.client_inner().await;
-        let mut control_stream = new_connection.connection.open_uni().await.unwrap();
+        let connection = pair.client_inner().await;
+        let mut control_stream = connection.open_uni().await.unwrap();
 
         let mut buf = BytesMut::new();
         StreamType::CONTROL.encode(&mut buf);
         control_stream.write_all(&buf[..]).await.unwrap();
         control_stream.finish().await.unwrap(); // close the client control stream immediately
 
-        let (mut driver, _send) = client::new(h3_quinn::Connection::new(new_connection))
+        let (mut driver, _send) = client::new(h3_quinn::Connection::new(connection))
             .await
             .unwrap();
 
@@ -486,8 +486,8 @@ async fn goaway_from_server_not_request_id() {
     };
 
     let server_fut = async {
-        let conn = server.next().await.unwrap().await.unwrap();
-        let mut control_stream = conn.connection.open_uni().await.unwrap();
+        let conn = server.accept().await.unwrap().await.unwrap();
+        let mut control_stream = conn.open_uni().await.unwrap();
 
         let mut buf = BytesMut::new();
         StreamType::CONTROL.encode(&mut buf);

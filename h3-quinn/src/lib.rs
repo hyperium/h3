@@ -7,7 +7,6 @@ use std::{
     convert::TryInto,
     fmt::{self, Display},
     future::Future,
-    pin::Pin,
     sync::Arc,
     task::{self, ready, Poll},
 };
@@ -16,9 +15,8 @@ use bytes::{Buf, Bytes};
 
 use futures::{
     stream::{self, BoxStream},
-    FutureExt, StreamExt,
+    StreamExt,
 };
-use quinn::Chunk;
 pub use quinn::{
     self, crypto::Session, AcceptBi, AcceptUni, Endpoint, OpenBi, OpenUni, VarInt, WriteError,
 };
