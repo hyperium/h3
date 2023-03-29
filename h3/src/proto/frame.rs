@@ -46,6 +46,7 @@ pub enum Frame<B> {
     PushPromise(PushPromise),
     Goaway(VarInt),
     MaxPushId(PushId),
+    WebTransportStream(WebTransportStream),
     Grease,
 }
 
@@ -80,6 +81,7 @@ impl Frame<PayloadLen> {
         }
 
         let mut payload = buf.take(len as usize);
+        trace!("frame ty: {:?}", ty);
         let frame = match ty {
             FrameType::HEADERS => Ok(Frame::Headers(payload.copy_to_bytes(len as usize))),
             FrameType::SETTINGS => Ok(Frame::Settings(Settings::decode(&mut payload)?)),
@@ -87,6 +89,7 @@ impl Frame<PayloadLen> {
             FrameType::PUSH_PROMISE => Ok(Frame::PushPromise(PushPromise::decode(&mut payload)?)),
             FrameType::GOAWAY => Ok(Frame::Goaway(VarInt::decode(&mut payload)?)),
             FrameType::MAX_PUSH_ID => Ok(Frame::MaxPushId(payload.get_var()?.try_into()?)),
+            FrameType::WEBTRANSPORT_STREAM =>Ok(Frame::WebTransportStream(WebTransportStream { buffer: payload.copy_to_bytes(len as usize)})),
             FrameType::H2_PRIORITY
             | FrameType::H2_PING
             | FrameType::H2_WINDOW_UPDATE
@@ -132,6 +135,7 @@ where
                 buf.write_var(6);
                 buf.put_slice(b"grease");
             }
+            Frame::WebTransportStream(_) => todo!(),
         }
     }
 }
@@ -189,6 +193,7 @@ impl fmt::Debug for Frame<PayloadLen> {
             Frame::Goaway(id) => write!(f, "GoAway({})", id),
             Frame::MaxPushId(id) => write!(f, "MaxPushId({})", id),
             Frame::Grease => write!(f, "Grease()"),
+            Frame::WebTransportStream(_) => todo!(),
         }
     }
 }
@@ -207,6 +212,7 @@ where
             Frame::Goaway(id) => write!(f, "GoAway({})", id),
             Frame::MaxPushId(id) => write!(f, "MaxPushId({})", id),
             Frame::Grease => write!(f, "Grease()"),
+            Frame::WebTransportStream(_) => write!(f, "WebTransportStream()"),
         }
     }
 }
@@ -226,6 +232,9 @@ impl<T, U> PartialEq<Frame<T>> for Frame<U> {
             Frame::Goaway(x) => matches!(other, Frame::Goaway(y) if x == y),
             Frame::MaxPushId(x) => matches!(other, Frame::MaxPushId(y) if x == y),
             Frame::Grease => matches!(other, Frame::Grease),
+            Frame::WebTransportStream(x) => {
+                matches!(other, Frame::WebTransportStream(y) if x == y)
+            }
         }
     }
 }
@@ -257,6 +266,7 @@ frame_types! {
     H2_WINDOW_UPDATE = 0x8,
     H2_CONTINUATION = 0x9,
     MAX_PUSH_ID = 0xD,
+    WEBTRANSPORT_STREAM = 0x41,
 }
 
 impl FrameType {
@@ -297,6 +307,11 @@ pub struct PushPromise {
     encoded: Bytes,
 }
 
+#[derive(Debug, PartialEq)]
+pub struct WebTransportStream 
+{
+    buffer: Bytes,
+}
 impl FrameHeader for PushPromise {
     const TYPE: FrameType = FrameType::PUSH_PROMISE;
 
@@ -389,6 +404,16 @@ setting_identifiers! {
     QPACK_MAX_TABLE_CAPACITY = 0x1,
     QPACK_MAX_BLOCKED_STREAMS = 0x7,
     MAX_HEADER_LIST_SIZE = 0x6,
+    QPACK_BLOCKED_STREAMS = 0x7,
+    // https://datatracker.ietf.org/doc/html/rfc9220#section-5
+    ENABLE_CONNECT_PROTOCOL = 0x8,
+    // https://datatracker.ietf.org/doc/html/draft-ietf-masque-h3-datagram-05#section-9.1
+    H3_DATAGRAM = 0xFFD277,
+    // https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http2-02#section-10.1
+    ENABLE_WEBTRANSPORT = 0x2B603742,
+    // Dummy setting to check it is correctly ignored by the peer.
+    // https://datatracker.ietf.org/doc/html/rfc9114#section-7.2.4.1
+    DUMMY = 0x21,
 }
 
 const SETTINGS_LEN: usize = 4;

@@ -72,7 +72,7 @@ use crate::{
     quic::{self, RecvStream as _, SendStream as _},
     stream,
 };
-use tracing::{error, trace, warn};
+use tracing::{error, trace, warn, info};
 
 /// Create a builder of HTTP/3 server connections
 ///
@@ -353,8 +353,11 @@ where
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<C::BidiStream>, Error>> {
+        info!("poll_accept_request");
         let _ = self.poll_control(cx)?;
+        info!("poll_accept_request: poll_control done");
         let _ = self.poll_requests_completion(cx);
+        info!("poll_accept_request: poll_requests_completion done");
         loop {
             match self.inner.poll_accept_request(cx) {
                 Poll::Ready(Err(x)) => break Poll::Ready(Err(x)),
@@ -400,7 +403,7 @@ where
     fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         while let Poll::Ready(frame) = self.inner.poll_control(cx)? {
             match frame {
-                Frame::Settings(_) => trace!("Got settings"),
+                Frame::Settings(w) => trace!("Got settings > {:?}", w),
                 Frame::Goaway(id) => self.inner.process_goaway(&mut self.recv_closing, id)?,
                 f @ Frame::MaxPushId(_) | f @ Frame::CancelPush(_) => {
                     warn!("Control frame ignored {:?}", f);
