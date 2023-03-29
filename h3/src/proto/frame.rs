@@ -411,6 +411,7 @@ setting_identifiers! {
     H3_DATAGRAM = 0xFFD277,
     // https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http2-02#section-10.1
     ENABLE_WEBTRANSPORT = 0x2B603742,
+    H3_SETTING_ENABLE_DATAGRAM_CHROME_SPECIFIC= 0xFFD277,
     // Dummy setting to check it is correctly ignored by the peer.
     // https://datatracker.ietf.org/doc/html/rfc9114#section-7.2.4.1
     DUMMY = 0x21,

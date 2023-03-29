@@ -109,6 +109,12 @@ where
         settings
             .insert(SettingId::MAX_HEADER_LIST_SIZE, max_field_section_size)
             .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
+        settings.insert(SettingId::ENABLE_CONNECT_PROTOCOL, 1)
+            .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
+        settings.insert(SettingId::ENABLE_WEBTRANSPORT, 1)
+            .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
+        settings.insert(SettingId::H3_DATAGRAM, 1)
+            .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
 
         if grease {
             //  Grease Settings (https://www.rfc-editor.org/rfc/rfc9114.html#name-defined-settings-parameters)
