@@ -54,15 +54,13 @@ pub struct Certs {
     pub key: PathBuf,
 }
 
-static ALPN: &[u8] = b"h3";
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_span_events(tracing_subscriber::fmt::format::FmtSpan::FULL)
         .with_writer(std::io::stderr)
-        .with_max_level(tracing::Level::INFO)
+        .with_max_level(tracing::Level::TRACE)
         .init();
 
     // process cli arguments
@@ -97,7 +95,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_single_cert(vec![cert], key)?;
 
     tls_config.max_early_data_size = u32::MAX;
-    tls_config.alpn_protocols = vec![ALPN.into()];
+    let ALPN: Vec<Vec<u8>> = vec!(b"h3".to_vec(), b"h3-32".to_vec(), b"h3-31".to_vec(), b"h3-30".to_vec(), b"h3-29".to_vec());
+    tls_config.alpn_protocols = ALPN;
 
     let server_config = quinn::ServerConfig::with_crypto(Arc::new(tls_config));
     let (endpoint, mut incoming) = quinn::Endpoint::server(server_config, opt.listen)?;

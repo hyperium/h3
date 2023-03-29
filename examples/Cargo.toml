@@ -19,7 +19,7 @@ rustls-native-certs = "0.6"
 structopt = "0.3"
 tokio = { version = "1.6", features = ["full"] }
 tracing = "0.1.10"
-tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "ansi", "env-filter", "time", "tracing-log"] }
+tracing-subscriber = { version = "0.3", default-features = true, features = ["fmt", "ansi", "env-filter", "time", "tracing-log"] }
 
 [[example]]
 name = "client"
