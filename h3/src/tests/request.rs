@@ -1402,8 +1402,8 @@ where
     let mut server = pair.server();
 
     let client_fut = async {
-        let new_connection = pair.client_inner().await;
-        let (mut req_send, mut req_recv) = new_connection.connection.open_bi().await.unwrap();
+        let connection = pair.client_inner().await;
+        let (mut req_send, mut req_recv) = connection.open_bi().await.unwrap();
 
         let mut buf = BytesMut::new();
         request(&mut buf);
@@ -1418,7 +1418,7 @@ where
             .map(|_| ());
         check(res);
 
-        let (mut driver, _send) = client::new(h3_quinn::Connection::new(new_connection))
+        let (mut driver, _send) = client::new(h3_quinn::Connection::new(connection))
             .await
             .unwrap();
 
