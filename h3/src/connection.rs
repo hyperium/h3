@@ -112,6 +112,7 @@ where
             .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
 
         if config.enable_webtransport {
+            tracing::debug!("Enabling WebTransport");
             settings
                 .insert(SettingId::ENABLE_CONNECT_PROTOCOL, 1)
                 .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
@@ -124,6 +125,7 @@ where
         }
 
         if config.send_grease {
+            tracing::debug!("Enabling send grease");
             //  Grease Settings (https://www.rfc-editor.org/rfc/rfc9114.html#name-defined-settings-parameters)
             //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
             //# Setting identifiers of the format 0x1f * N + 0x21 for non-negative

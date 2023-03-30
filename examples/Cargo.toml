@@ -12,14 +12,23 @@ futures = "0.3"
 h3 = { path = "../h3" }
 h3-quinn = { path = "../h3-quinn" }
 http = "0.2"
-quinn = { version = "0.8", default-features = false, features = ["tls-rustls", "ring"] }
+quinn = { version = "0.8", default-features = false, features = [
+    "tls-rustls",
+    "ring",
+] }
 rcgen = { version = "0.9" }
 rustls = { version = "0.20", features = ["dangerous_configuration"] }
 rustls-native-certs = "0.6"
 structopt = "0.3"
 tokio = { version = "1.6", features = ["full"] }
 tracing = "0.1.10"
-tracing-subscriber = { version = "0.3", default-features = true, features = ["fmt", "ansi", "env-filter", "time", "tracing-log"] }
+tracing-subscriber = { version = "0.3", default-features = true, features = [
+    "fmt",
+    "ansi",
+    "env-filter",
+    "time",
+    "tracing-log",
+] }
 
 [[example]]
 name = "client"
@@ -28,3 +37,7 @@ path = "client.rs"
 [[example]]
 name = "server"
 path = "server.rs"
+
+[[example]]
+name = "webtransport_server"
+path = "webtransport_server.rs"
