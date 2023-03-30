@@ -61,7 +61,6 @@ use bytes::{Buf, BytesMut};
 use futures_util::future;
 use http::{response, HeaderMap, Request, Response, StatusCode};
 use quic::StreamId;
-use tokio::sync::mpsc;
 
 use crate::{
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
@@ -73,6 +72,38 @@ use crate::{
     stream,
 };
 use tracing::{error, trace, warn};
+
+#[cfg(all(feature = "tokio", not(feature = "async-channel")))]
+use tokio::sync::mpsc;
+
+#[cfg(feature = "async-channel")]
+mod mpsc {
+    use futures_util::StreamExt;
+    use std::task::{Context, Poll};
+
+    pub fn unbounded_channel<T>() -> (UnboundedSender<T>, UnboundedReceiver<T>) {
+        let (sender, receiver) = async_channel::unbounded();
+        (UnboundedSender(sender), UnboundedReceiver(receiver))
+    }
+
+    #[derive(Clone)]
+    pub struct UnboundedSender<T>(async_channel::Sender<T>);
+
+    impl<T> UnboundedSender<T> {
+        pub fn send(&self, msg: T) -> Result<(), async_channel::TrySendError<T>> {
+            self.0.try_send(msg)
+        }
+    }
+
+    #[derive(Clone)]
+    pub struct UnboundedReceiver<T>(async_channel::Receiver<T>);
+
+    impl<T> UnboundedReceiver<T> {
+        pub fn poll_recv(&mut self, cx: &mut Context) -> Poll<Option<T>> {
+            self.0.poll_next_unpin(cx)
+        }
+    }
+}
 
 /// Create a builder of HTTP/3 server connections
 ///
