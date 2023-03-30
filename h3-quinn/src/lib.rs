@@ -8,12 +8,13 @@ use std::{
     fmt::{self, Display},
     future::Future,
     sync::Arc,
-    task::{self, ready, Poll},
+    task::{self, Poll},
 };
 
 use bytes::{Buf, Bytes};
 
 use futures::{
+    ready,
     stream::{self, BoxStream},
     StreamExt,
 };
