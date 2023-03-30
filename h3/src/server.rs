@@ -94,6 +94,7 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
+    /// TODO: find a better way to manage the connection
     inner: ConnectionInner<C, B>,
     max_field_section_size: u64,
     // List of all incoming streams that are currently running.
@@ -405,7 +406,7 @@ where
         }
     }
 
-    fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+    pub(crate) fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         while let Poll::Ready(frame) = self.inner.poll_control(cx)? {
             match frame {
                 Frame::Settings(w) => trace!("Got settings > {:?}", w),
@@ -484,6 +485,9 @@ pub struct Config {
     //=https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-3.1
     /// Sets `SETTINGS_ENABLE_WEBTRANSPORT` if enabled
     pub(crate) enable_webtransport: bool,
+    pub(crate) enable_connect: bool,
+    pub(crate) enable_datagram: bool,
+    pub(crate) max_webtransport_sessions: u64,
 }
 
 impl Config {
@@ -512,9 +516,31 @@ impl Config {
     /// Indicates to the peer that WebTransport is supported.
     ///
     /// See: [establishing a webtransport session](https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-3.1)
+    ///
+    ///
+    /// **Server**:
+    /// Supporting for webtransport also requires setting `enable_connect` `enable_datagram`
+    /// and `max_webtransport_sessions`.
     #[inline]
     pub fn enable_webtransport(&mut self, value: bool) {
         self.enable_webtransport = value;
+    }
+
+    /// Enables the CONNECT protocol
+    pub fn enable_connect(&mut self, value: bool) {
+        self.enable_connect = value;
+    }
+
+    /// Limits the maximum number of WebTransport sessions
+    pub fn max_webtransport_sessions(&mut self, value: u64) {
+        self.max_webtransport_sessions = value;
+    }
+
+    /// Indicates that the client or server supports HTTP/3 datagrams
+    ///
+    /// See: https://www.rfc-editor.org/rfc/rfc9297#section-2.1.1
+    pub fn enable_datagram(&mut self, value: bool) {
+        self.enable_datagram = value;
     }
 }
 
@@ -524,6 +550,9 @@ impl Default for Config {
             max_field_section_size: VarInt::MAX.0,
             send_grease: true,
             enable_webtransport: false,
+            enable_connect: false,
+            enable_datagram: false,
+            max_webtransport_sessions: 0,
         }
     }
 }
@@ -693,7 +722,8 @@ where
             .inner
             .conn_state
             .read("send_response")
-            .peer_max_field_section_size;
+            .config
+            .max_field_section_size;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
         //# An implementation that
@@ -785,5 +815,75 @@ impl Drop for RequestEnd {
                 self.stream_id, e
             );
         }
+    }
+}
+
+// WEBTRANSPORT
+// TODO: extract server.rs to server/mod.rs and submodules
+
+/// WebTransport session driver.
+///
+/// Maintains the session using the underlying HTTP/3 connection.
+///
+/// Similar to [`crate::Connection`] it is generic over the QUIC implementation and Buffer.
+pub struct WebTransportSession<C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    conn: Connection<C, B>,
+}
+
+impl<C, B> WebTransportSession<C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    /// Establishes a [`WebTransportSession`] using the provided HTTP/3 connection.
+    ///
+    /// Fails if the server or client do not send `SETTINGS_ENABLE_WEBTRANSPORT=1`
+    pub async fn new(mut conn: Connection<C, B>) -> Result<Self, Error> {
+        future::poll_fn(|cx| conn.poll_control(cx)).await?;
+
+        let shared = conn.shared_state().clone();
+
+        {
+            let shared = shared.write("Read WebTransport support");
+
+            tracing::debug!("Client settings: {:#?}", shared.config);
+            if !shared.config.enable_webtransport {
+                return Err(conn.inner.close(
+                    Code::H3_SETTINGS_ERROR,
+                    "webtransport is not supported by client",
+                ));
+            }
+
+            if !shared.config.enable_datagram {
+                return Err(conn.inner.close(
+                    Code::H3_SETTINGS_ERROR,
+                    "datagrams are not supported by client",
+                ));
+            }
+        }
+
+        tracing::debug!("Validated client webtransport support");
+
+        // The peer is responsible for validating our side of the webtransport support.
+        //
+        // However, it is still advantageous to show a log on the server as (attempting) to
+        // establish a WebTransportSession without the proper h3 config is usually an error
+        if !conn.inner.config.enable_webtransport {
+            tracing::warn!("Server does not support webtransport");
+        }
+
+        if !conn.inner.config.enable_datagram {
+            tracing::warn!("Server does not support datagrams");
+        }
+
+        if !conn.inner.config.enable_connect {
+            tracing::warn!("Server does not support CONNECT");
+        }
+
+        todo!()
     }
 }

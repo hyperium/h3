@@ -26,8 +26,8 @@ use crate::{
 
 #[doc(hidden)]
 pub struct SharedState {
-    // maximum size for a header we send
-    pub peer_max_field_section_size: u64,
+    // Peer settings
+    pub config: Config,
     // connection-wide error, concerns all RequestStreams and drivers
     pub error: Option<Error>,
     // Has a GOAWAY frame been sent or received?
@@ -51,7 +51,7 @@ impl SharedStateRef {
 impl Default for SharedStateRef {
     fn default() -> Self {
         Self(Arc::new(RwLock::new(SharedState {
-            peer_max_field_section_size: VarInt::MAX.0,
+            config: Config::default(),
             error: None,
             closing: false,
         })))
@@ -84,6 +84,7 @@ where
     pending_recv_streams: Vec<AcceptRecvStream<C::RecvStream>>,
     got_peer_settings: bool,
     pub(super) send_grease_frame: bool,
+    pub(super) config: Config,
 }
 
 impl<C, B> ConnectionInner<C, B>
@@ -111,18 +112,23 @@ where
             )
             .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
 
-        if config.enable_webtransport {
-            tracing::debug!("Enabling WebTransport");
-            settings
-                .insert(SettingId::ENABLE_CONNECT_PROTOCOL, 1)
-                .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
-            settings
-                .insert(SettingId::ENABLE_WEBTRANSPORT, 1)
-                .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
-            settings
-                .insert(SettingId::H3_DATAGRAM, 1)
-                .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
-        }
+        settings
+            .insert(
+                SettingId::ENABLE_CONNECT_PROTOCOL,
+                config.enable_connect as u64,
+            )
+            .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
+        settings
+            .insert(
+                SettingId::ENABLE_WEBTRANSPORT,
+                config.enable_webtransport as u64,
+            )
+            .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
+        settings
+            .insert(SettingId::H3_DATAGRAM, config.enable_datagram as u64)
+            .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
+
+        tracing::debug!("Sending server settings: {settings:?}");
 
         if config.send_grease {
             tracing::debug!("Enabling send grease");
@@ -193,6 +199,7 @@ where
             pending_recv_streams: Vec::with_capacity(3),
             got_peer_settings: false,
             send_grease_frame: config.send_grease,
+            config,
         };
         // start a grease stream
         if config.send_grease {
@@ -384,11 +391,14 @@ where
                         //= type=implication
                         //# Endpoints MUST NOT consider such settings to have
                         //# any meaning upon receipt.
-                        self.shared
-                            .write("connection settings write")
-                            .peer_max_field_section_size = settings
+                        let mut shared = self.shared.write("connection settings write");
+                        shared.config.max_field_section_size = settings
                             .get(SettingId::MAX_HEADER_LIST_SIZE)
                             .unwrap_or(VarInt::MAX.0);
+
+                        shared.config.enable_webtransport =
+                            settings.get(SettingId::ENABLE_WEBTRANSPORT).unwrap_or(0) != 0;
+
                         Ok(Frame::Settings(settings))
                     }
                     f @ Frame::Goaway(_) => Ok(f),
@@ -724,7 +734,8 @@ where
         let max_mem_size = self
             .conn_state
             .read("send_trailers shared state read")
-            .peer_max_field_section_size;
+            .config
+            .max_field_section_size;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
         //# An implementation that

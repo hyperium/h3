@@ -11,7 +11,7 @@ use tracing::{error, info, trace_span};
 use h3::{
     error::ErrorLevel,
     quic::BidiStream,
-    server::{Config, RequestStream},
+    server::{Config, RequestStream, WebTransportSession},
 };
 use h3_quinn::quinn;
 
@@ -135,34 +135,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .await
                     .unwrap();
 
-                    loop {
-                        match h3_conn.accept().await {
-                            Ok(Some((req, stream))) => {
-                                info!("new request: {:#?}", req);
+                    tracing::info!("Establishing WebTransport session");
+                    let session: WebTransportSession<_, Bytes> =
+                        WebTransportSession::new(h3_conn).await.unwrap();
+                    tracing::info!("Finished establishing webtransport session");
 
-                                let root = root.clone();
+                    // loop {
+                    //     match h3_conn.accept().await {
+                    //         Ok(Some((req, stream))) => {
+                    //             info!("new request: {:#?}", req);
 
-                                tokio::spawn(async {
-                                    if let Err(e) = handle_request(req, stream, root).await {
-                                        error!("handling request failed: {}", e);
-                                    }
-                                });
-                            }
+                    //             let root = root.clone();
 
-                            // indicating no more streams to be received
-                            Ok(None) => {
-                                break;
-                            }
+                    //             tokio::spawn(async {
+                    //                 if let Err(e) = handle_request(req, stream, root).await {
+                    //                     error!("handling request failed: {}", e);
+                    //                 }
+                    //             });
+                    //         }
 
-                            Err(err) => {
-                                error!("error on accept {}", err);
-                                match err.get_error_level() {
-                                    ErrorLevel::ConnectionError => break,
-                                    ErrorLevel::StreamError => continue,
-                                }
-                            }
-                        }
-                    }
+                    //         // indicating no more streams to be received
+                    //         Ok(None) => {
+                    //             break;
+                    //         }
+
+                    //         Err(err) => {
+                    //             error!("error on accept {}", err);
+                    //             match err.get_error_level() {
+                    //                 ErrorLevel::ConnectionError => break,
+                    //                 ErrorLevel::StreamError => continue,
+                    //             }
+                    //         }
+                    //     }
+                    // }
                 }
                 Err(err) => {
                     error!("accepting connection failed: {:?}", err);

@@ -147,7 +147,7 @@ where
     ) -> Result<RequestStream<T::BidiStream, B>, Error> {
         let (peer_max_field_section_size, closing) = {
             let state = self.conn_state.read("send request lock state");
-            (state.peer_max_field_section_size, state.closing)
+            (state.config.max_field_section_size, state.closing)
         };
 
         if closing {
