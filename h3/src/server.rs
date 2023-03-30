@@ -72,7 +72,7 @@ use crate::{
     quic::{self, RecvStream as _, SendStream as _},
     stream,
 };
-use tracing::{error, trace, warn, info};
+use tracing::{error, info, trace, warn};
 
 /// Create a builder of HTTP/3 server connections
 ///
@@ -470,6 +470,27 @@ where
     }
 }
 
+/// Configures the HTTP/3 connection
+#[derive(Debug, Clone, Copy)]
+pub struct Config {
+    pub(crate) send_grease: bool,
+    pub(crate) max_field_section_size: u64,
+
+    //=https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-3.1
+    /// Sets `SETTINGS_ENABLE_WEBTRANSPORT` if enabled
+    pub(crate) enable_webtransport: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            max_field_section_size: VarInt::MAX.0,
+            send_grease: true,
+            enable_webtransport: false,
+        }
+    }
+}
+
 //= https://www.rfc-editor.org/rfc/rfc9114#section-6.1
 //= type=TODO
 //# In order to
@@ -506,16 +527,14 @@ where
 /// }
 /// ```
 pub struct Builder {
-    pub(super) max_field_section_size: u64,
-    pub(super) send_grease: bool,
+    pub(crate) config: Config,
 }
 
 impl Builder {
     /// Creates a new [`Builder`] with default settings.
     pub(super) fn new() -> Self {
         Builder {
-            max_field_section_size: VarInt::MAX.0,
-            send_grease: true,
+            config: Default::default(),
         }
     }
     /// Set the maximum header size this client is willing to accept
@@ -524,14 +543,22 @@ impl Builder {
     ///
     /// [header size constraints]: https://www.rfc-editor.org/rfc/rfc9114.html#name-header-size-constraints
     pub fn max_field_section_size(&mut self, value: u64) -> &mut Self {
-        self.max_field_section_size = value;
+        self.config.max_field_section_size = value;
         self
     }
 
     /// Send grease values to the Client.
     /// See [setting](https://www.rfc-editor.org/rfc/rfc9114.html#settings-parameters), [frame](https://www.rfc-editor.org/rfc/rfc9114.html#frame-reserved) and [stream](https://www.rfc-editor.org/rfc/rfc9114.html#stream-grease) for more information.
     pub fn send_grease(&mut self, value: bool) -> &mut Self {
-        self.send_grease = value;
+        self.config.send_grease = value;
+        self
+    }
+
+    /// Indicates to the peer that WebTransport is supported.
+    ///
+    /// See [establishing a webtransport session](https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-3.1)
+    pub fn enable_webtransport(&mut self, value: bool) -> &mut Self {
+        self.config.enable_webtransport = value;
         self
     }
 }
@@ -547,14 +574,8 @@ impl Builder {
     {
         let (sender, receiver) = mpsc::unbounded_channel();
         Ok(Connection {
-            inner: ConnectionInner::new(
-                conn,
-                self.max_field_section_size,
-                SharedStateRef::default(),
-                self.send_grease,
-            )
-            .await?,
-            max_field_section_size: self.max_field_section_size,
+            inner: ConnectionInner::new(conn, SharedStateRef::default(), self.config).await?,
+            max_field_section_size: self.config.max_field_section_size,
             request_end_send: sender,
             request_end_recv: receiver,
             ongoing_streams: HashSet::new(),

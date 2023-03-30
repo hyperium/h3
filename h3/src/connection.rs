@@ -7,7 +7,7 @@ use std::{
 use bytes::{Buf, Bytes, BytesMut};
 use futures_util::{future, ready};
 use http::HeaderMap;
-use tracing::{warn, trace};
+use tracing::{trace, warn};
 
 use crate::{
     error::{Code, Error},
@@ -20,6 +20,7 @@ use crate::{
     },
     qpack,
     quic::{self, SendStream as _},
+    server::Config,
     stream::{self, AcceptRecvStream, AcceptedRecvStream},
 };
 
@@ -90,12 +91,7 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    pub async fn new(
-        mut conn: C,
-        max_field_section_size: u64,
-        shared: SharedStateRef,
-        grease: bool,
-    ) -> Result<Self, Error> {
+    pub async fn new(mut conn: C, shared: SharedStateRef, config: Config) -> Result<Self, Error> {
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
         //# Endpoints SHOULD create the HTTP control stream as well as the
         //# unidirectional streams required by mandatory extensions (such as the
@@ -106,17 +102,27 @@ where
             .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))?;
 
         let mut settings = Settings::default();
-        settings
-            .insert(SettingId::MAX_HEADER_LIST_SIZE, max_field_section_size)
-            .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
-        settings.insert(SettingId::ENABLE_CONNECT_PROTOCOL, 1)
-            .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
-        settings.insert(SettingId::ENABLE_WEBTRANSPORT, 1)
-            .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
-        // settings.insert(SettingId::H3_DATAGRAM, 1)
-        //     .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
 
-        if grease {
+        settings
+            .insert(
+                SettingId::MAX_HEADER_LIST_SIZE,
+                config.max_field_section_size,
+            )
+            .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
+
+        if config.enable_webtransport {
+            settings
+                .insert(SettingId::ENABLE_CONNECT_PROTOCOL, 1)
+                .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
+            settings
+                .insert(SettingId::ENABLE_WEBTRANSPORT, 1)
+                .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
+            settings
+                .insert(SettingId::H3_DATAGRAM, 1)
+                .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
+        }
+
+        if config.send_grease {
             //  Grease Settings (https://www.rfc-editor.org/rfc/rfc9114.html#name-defined-settings-parameters)
             //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
             //# Setting identifiers of the format 0x1f * N + 0x21 for non-negative
@@ -183,10 +189,10 @@ where
             encoder_recv: None,
             pending_recv_streams: Vec::with_capacity(3),
             got_peer_settings: false,
-            send_grease_frame: grease,
+            send_grease_frame: config.send_grease,
         };
         // start a grease stream
-        if grease {
+        if config.send_grease {
             //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
             //= type=implication
             //# Frame types of the format 0x1f * N + 0x21 for non-negative integer

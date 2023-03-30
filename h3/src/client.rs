@@ -16,9 +16,10 @@ use crate::{
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
     error::{Code, Error, ErrorLevel},
     frame::FrameStream,
-    proto::{frame::Frame, headers::Header, push::PushId, varint::VarInt},
+    proto::{frame::Frame, headers::Header, push::PushId},
     qpack,
     quic::{self, StreamId},
+    server::Config,
     stream,
 };
 
@@ -482,15 +483,13 @@ where
 /// # }
 /// ```
 pub struct Builder {
-    max_field_section_size: u64,
-    send_grease: bool,
+    config: Config,
 }
 
 impl Builder {
     pub(super) fn new() -> Self {
         Builder {
-            max_field_section_size: VarInt::MAX.0,
-            send_grease: true,
+            config: Default::default(),
         }
     }
 
@@ -500,7 +499,7 @@ impl Builder {
     ///
     /// [header size constraints]: https://www.rfc-editor.org/rfc/rfc9114.html#name-header-size-constraints
     pub fn max_field_section_size(&mut self, value: u64) -> &mut Self {
-        self.max_field_section_size = value;
+        self.config.max_field_section_size = value;
         self
     }
 
@@ -521,13 +520,7 @@ impl Builder {
 
         Ok((
             Connection {
-                inner: ConnectionInner::new(
-                    quic,
-                    self.max_field_section_size,
-                    conn_state.clone(),
-                    self.send_grease,
-                )
-                .await?,
+                inner: ConnectionInner::new(quic, conn_state.clone(), self.config).await?,
                 sent_closing: None,
                 recv_closing: None,
             },
@@ -535,10 +528,10 @@ impl Builder {
                 open,
                 conn_state,
                 conn_waker,
-                max_field_section_size: self.max_field_section_size,
+                max_field_section_size: self.config.max_field_section_size,
                 sender_count: Arc::new(AtomicUsize::new(1)),
                 _buf: PhantomData,
-                send_grease_frame: self.send_grease,
+                send_grease_frame: self.config.send_grease,
             },
         ))
     }
