@@ -7,7 +7,7 @@ use std::{
 use bytes::{Buf, Bytes, BytesMut};
 use futures_util::{future, ready};
 use http::HeaderMap;
-use tracing::warn;
+use tracing::{warn, trace};
 
 use crate::{
     error::{Code, Error},
@@ -113,8 +113,8 @@ where
             .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
         settings.insert(SettingId::ENABLE_WEBTRANSPORT, 1)
             .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
-        settings.insert(SettingId::H3_DATAGRAM, 1)
-            .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
+        // settings.insert(SettingId::H3_DATAGRAM, 1)
+        //     .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
 
         if grease {
             //  Grease Settings (https://www.rfc-editor.org/rfc/rfc9114.html#name-defined-settings-parameters)
@@ -162,6 +162,7 @@ where
         //# Endpoints MUST NOT require any data to be received from
         //# the peer prior to sending the SETTINGS frame; settings MUST be sent
         //# as soon as the transport is ready to send data.
+        trace!("Sending Settings frame: {:?}", settings);
         stream::write(
             &mut control_send,
             (StreamType::CONTROL, Frame::Settings(settings)),

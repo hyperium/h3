@@ -404,7 +404,6 @@ setting_identifiers! {
     QPACK_MAX_TABLE_CAPACITY = 0x1,
     QPACK_MAX_BLOCKED_STREAMS = 0x7,
     MAX_HEADER_LIST_SIZE = 0x6,
-    QPACK_BLOCKED_STREAMS = 0x7,
     // https://datatracker.ietf.org/doc/html/rfc9220#section-5
     ENABLE_CONNECT_PROTOCOL = 0x8,
     // https://datatracker.ietf.org/doc/html/draft-ietf-masque-h3-datagram-05#section-9.1
