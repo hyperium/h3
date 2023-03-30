@@ -6,6 +6,7 @@ pub mod client;
 pub mod error;
 pub mod quic;
 pub mod server;
+pub mod webtransport;
 
 pub use error::Error;
 
