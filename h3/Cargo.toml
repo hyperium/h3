@@ -1,6 +1,6 @@
 [package]
 name = "h3"
-version = "0.0.1"
+version = "0.0.2"
 rust-version = "1.57"
 authors = [
     "Sean McArthur <sean@seanmonstar.com>",
