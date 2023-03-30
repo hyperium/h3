@@ -91,6 +91,7 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
+    /// Initiates the connection and opens a control stream
     pub async fn new(mut conn: C, shared: SharedStateRef, config: Config) -> Result<Self, Error> {
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
         //# Endpoints SHOULD create the HTTP control stream as well as the
@@ -244,6 +245,7 @@ where
             }
         }
 
+        // Accept the request by accepting the next bidirectional stream
         // .into().into() converts the impl QuicError into crate::error::Error.
         // The `?` operator doesn't work here for some reason.
         self.conn.poll_accept_bidi(cx).map_err(|e| e.into().into())

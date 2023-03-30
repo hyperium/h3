@@ -337,7 +337,7 @@ where
         Ok(Some((req, request_stream)))
     }
 
-    /// Itiniate a graceful shutdown, accepting `max_request` potentially still in-flight
+    /// Initiate a graceful shutdown, accepting `max_request` potentially still in-flight
     ///
     /// See [connection shutdown](https://www.rfc-editor.org/rfc/rfc9114.html#connection-shutdown) for more information.
     pub async fn shutdown(&mut self, max_requests: usize) -> Result<(), Error> {

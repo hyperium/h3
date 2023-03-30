@@ -53,7 +53,7 @@ pub enum Frame<B> {
 /// Represents the available data len for a `Data` frame on a RecvStream
 ///
 /// Decoding received frames does not handle `Data` frames payload. Instead, receiving it
-/// and passing it to the user is left under the responsability of `RequestStream`s.
+/// and passing it to the user is left under the responsibility of `RequestStream`s.
 pub struct PayloadLen(pub usize);
 
 impl From<usize> for PayloadLen {
@@ -65,6 +65,7 @@ impl From<usize> for PayloadLen {
 impl Frame<PayloadLen> {
     pub const MAX_ENCODED_SIZE: usize = VarInt::MAX_SIZE * 3;
 
+    /// Decodes a Frame from the stream according to https://www.rfc-editor.org/rfc/rfc9114#section-7.1
     pub fn decode<T: Buf>(buf: &mut T) -> Result<Self, FrameError> {
         let remaining = buf.remaining();
         let ty = FrameType::decode(buf).map_err(|_| FrameError::Incomplete(remaining + 1))?;
@@ -89,7 +90,9 @@ impl Frame<PayloadLen> {
             FrameType::PUSH_PROMISE => Ok(Frame::PushPromise(PushPromise::decode(&mut payload)?)),
             FrameType::GOAWAY => Ok(Frame::Goaway(VarInt::decode(&mut payload)?)),
             FrameType::MAX_PUSH_ID => Ok(Frame::MaxPushId(payload.get_var()?.try_into()?)),
-            FrameType::WEBTRANSPORT_STREAM =>Ok(Frame::WebTransportStream(WebTransportStream { buffer: payload.copy_to_bytes(len as usize)})),
+            FrameType::WEBTRANSPORT_STREAM => Ok(Frame::WebTransportStream(WebTransportStream {
+                buffer: payload.copy_to_bytes(len as usize),
+            })),
             FrameType::H2_PRIORITY
             | FrameType::H2_PING
             | FrameType::H2_WINDOW_UPDATE
@@ -266,6 +269,7 @@ frame_types! {
     H2_WINDOW_UPDATE = 0x8,
     H2_CONTINUATION = 0x9,
     MAX_PUSH_ID = 0xD,
+    // Reserved frame types
     WEBTRANSPORT_STREAM = 0x41,
 }
 
@@ -308,8 +312,7 @@ pub struct PushPromise {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct WebTransportStream 
-{
+pub struct WebTransportStream {
     buffer: Bytes,
 }
 impl FrameHeader for PushPromise {

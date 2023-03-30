@@ -172,6 +172,7 @@ impl fmt::Display for VarInt {
 }
 
 pub trait BufExt {
+    /// Decodes a VarInt from the buffer and advances it
     fn get_var(&mut self) -> Result<u64, UnexpectedEnd>;
 }
 

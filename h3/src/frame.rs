@@ -17,6 +17,7 @@ use crate::{
     stream::WriteBuf,
 };
 
+/// Decodes Frames from the underlying QUIC stream
 pub struct FrameStream<S, B> {
     stream: S,
     bufs: BufList<Bytes>,
