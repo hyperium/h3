@@ -47,3 +47,4 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
     "tracing-log",
 ] }
 futures = { version = "0.3.27" }
+tokio-util = { version = "0.7.7" }

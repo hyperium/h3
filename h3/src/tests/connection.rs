@@ -218,7 +218,7 @@ async fn settings_exchange_server() {
 #[tokio::test]
 async fn client_error_on_bidi_recv() {
     let mut pair = Pair::default();
-    let mut server = pair.server();
+    let server = pair.server();
 
     macro_rules! check_err {
         ($e:expr) => {
@@ -336,7 +336,7 @@ async fn control_close_send_error() {
     let server_fut = async {
         let conn = server.next().await;
         let mut incoming = server::Connection::new(conn).await.unwrap();
-        // Driver detects that the recieving side of the control stream has been closed
+        // Driver detects that the receiving side of the control stream has been closed
         assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err().kind(),
             Kind::Application { reason: Some(reason), code: Code::H3_CLOSED_CRITICAL_STREAM, .. }
@@ -457,7 +457,7 @@ async fn timeout_on_control_frame_read() {
 async fn goaway_from_server_not_request_id() {
     init_tracing();
     let mut pair = Pair::default();
-    let mut server = pair.server_inner();
+    let server = pair.server_inner();
 
     let client_fut = async {
         let connection = pair.client_inner().await;

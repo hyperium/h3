@@ -22,6 +22,7 @@ pub use quinn::{
 };
 
 use h3::quic::{self, Error, StreamId, WriteBuf};
+use tokio_util::sync::ReusableBoxFuture;
 
 /// A QUIC connection backed by Quinn
 ///
@@ -40,13 +41,11 @@ impl Connection {
         Self {
             conn: conn.clone(),
             incoming_bi: Box::pin(stream::unfold(conn.clone(), |conn| async {
-                let fut = conn.accept_bi().await;
-                Some((fut, conn))
+                Some((conn.accept_bi().await, conn))
             })),
             opening_bi: None,
-            incoming_uni: Box::pin(stream::unfold(conn.clone(), |conn| async {
-                let fut = conn.accept_uni().await;
-                Some((fut, conn))
+            incoming_uni: Box::pin(stream::unfold(conn, |conn| async {
+                Some((conn.accept_uni().await, conn))
             })),
             opening_uni: None,
         }
@@ -130,8 +129,7 @@ where
     ) -> Poll<Result<Self::BidiStream, Self::Error>> {
         if self.opening_bi.is_none() {
             self.opening_bi = Some(Box::pin(stream::unfold(self.conn.clone(), |conn| async {
-                let fut = conn.clone().open_bi().await;
-                Some((fut, conn))
+                Some((conn.clone().open_bi().await, conn))
             })));
         }
 
@@ -149,8 +147,7 @@ where
     ) -> Poll<Result<Self::SendStream, Self::Error>> {
         if self.opening_uni.is_none() {
             self.opening_uni = Some(Box::pin(stream::unfold(self.conn.clone(), |conn| async {
-                let fut = conn.open_uni().await;
-                Some((fut, conn))
+                Some((conn.open_uni().await, conn))
             })));
         }
 
@@ -199,8 +196,7 @@ where
     ) -> Poll<Result<Self::BidiStream, Self::Error>> {
         if self.opening_bi.is_none() {
             self.opening_bi = Some(Box::pin(stream::unfold(self.conn.clone(), |conn| async {
-                let fut = conn.open_bi().await;
-                Some((fut, conn))
+                Some((conn.open_bi().await, conn))
             })));
         }
 
@@ -218,8 +214,7 @@ where
     ) -> Poll<Result<Self::SendStream, Self::Error>> {
         if self.opening_uni.is_none() {
             self.opening_uni = Some(Box::pin(stream::unfold(self.conn.clone(), |conn| async {
-                let fut = conn.open_uni().await;
-                Some((fut, conn))
+                Some((conn.open_uni().await, conn))
             })));
         }
 
@@ -319,12 +314,25 @@ where
 ///
 /// Implements a [`quic::RecvStream`] backed by a [`quinn::RecvStream`].
 pub struct RecvStream {
-    stream: quinn::RecvStream,
+    stream: Option<quinn::RecvStream>,
+    read_chunk_fut: ReadChunkFuture,
 }
+
+type ReadChunkFuture = ReusableBoxFuture<
+    'static,
+    (
+        quinn::RecvStream,
+        Result<Option<quinn::Chunk>, quinn::ReadError>,
+    ),
+>;
 
 impl RecvStream {
     fn new(stream: quinn::RecvStream) -> Self {
-        Self { stream }
+        Self {
+            stream: Some(stream),
+            // Should only allocate once the first time it's used
+            read_chunk_fut: ReusableBoxFuture::new(async { unreachable!() }),
+        }
     }
 }
 
@@ -336,18 +344,24 @@ impl quic::RecvStream for RecvStream {
         &mut self,
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Option<Self::Buf>, Self::Error>> {
-        Poll::Ready(Ok(ready!(Box::pin(
-            self.stream.read_chunk(usize::MAX, true)
-        )
-        .as_mut()
-        .poll(cx))?
-        .map(|c| (c.bytes))))
+        if let Some(mut stream) = self.stream.take() {
+            self.read_chunk_fut.set(async move {
+                let chunk = stream.read_chunk(usize::MAX, true).await;
+                (stream, chunk)
+            })
+        };
+
+        let (stream, chunk) = ready!(self.read_chunk_fut.poll(cx));
+        self.stream = Some(stream);
+        Poll::Ready(Ok(chunk?.map(|c| c.bytes)))
     }
 
     fn stop_sending(&mut self, error_code: u64) {
-        let _ = self
-            .stream
-            .stop(VarInt::from_u64(error_code).expect("invalid error_code"));
+        self.stream
+            .as_mut()
+            .unwrap()
+            .stop(VarInt::from_u64(error_code).expect("invalid error_code"))
+            .ok();
     }
 }
 
@@ -400,9 +414,13 @@ impl Error for ReadError {
 ///
 /// Implements a [`quic::SendStream`] backed by a [`quinn::SendStream`].
 pub struct SendStream<B: Buf> {
-    stream: quinn::SendStream,
+    stream: Option<quinn::SendStream>,
     writing: Option<WriteBuf<B>>,
+    write_fut: WriteFuture,
 }
+
+type WriteFuture =
+    ReusableBoxFuture<'static, (quinn::SendStream, Result<usize, quinn::WriteError>)>;
 
 impl<B> SendStream<B>
 where
@@ -410,8 +428,9 @@ where
 {
     fn new(stream: quinn::SendStream) -> SendStream<B> {
         Self {
-            stream,
+            stream: Some(stream),
             writing: None,
+            write_fut: ReusableBoxFuture::new(async { unreachable!() }),
         }
     }
 }
@@ -425,7 +444,16 @@ where
     fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         if let Some(ref mut data) = self.writing {
             while data.has_remaining() {
-                let res = ready!(Box::pin(self.stream.write(data.chunk())).as_mut().poll(cx));
+                if let Some(mut stream) = self.stream.take() {
+                    let chunk = data.chunk().to_owned(); // FIXME - avoid copy
+                    self.write_fut.set(async move {
+                        let ret = stream.write(&chunk).await;
+                        (stream, ret)
+                    });
+                }
+
+                let (stream, res) = ready!(self.write_fut.poll(cx));
+                self.stream = Some(stream);
                 match res {
                     Ok(cnt) => data.advance(cnt),
                     Err(err) => {
@@ -439,12 +467,18 @@ where
     }
 
     fn poll_finish(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.stream.poll_finish(cx).map_err(Into::into)
+        self.stream
+            .as_mut()
+            .unwrap()
+            .poll_finish(cx)
+            .map_err(Into::into)
     }
 
     fn reset(&mut self, reset_code: u64) {
         let _ = self
             .stream
+            .as_mut()
+            .unwrap()
             .reset(VarInt::from_u64(reset_code).unwrap_or(VarInt::MAX));
     }
 
@@ -457,7 +491,13 @@ where
     }
 
     fn id(&self) -> StreamId {
-        self.stream.id().0.try_into().expect("invalid stream id")
+        self.stream
+            .as_ref()
+            .unwrap()
+            .id()
+            .0
+            .try_into()
+            .expect("invalid stream id")
     }
 }
 
