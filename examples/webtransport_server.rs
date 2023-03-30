@@ -44,7 +44,7 @@ pub struct Certs {
     #[structopt(
         long,
         short,
-        default_value = "examples/server.cert",
+        default_value = "examples/localhost.crt",
         help = "Certificate for TLS. If present, `--key` is mandatory."
     )]
     pub cert: PathBuf,
@@ -52,7 +52,7 @@ pub struct Certs {
     #[structopt(
         long,
         short,
-        default_value = "examples/server.key",
+        default_value = "examples/localhost.key",
         help = "Private key for the certificate."
     )]
     pub key: PathBuf,
@@ -71,6 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let opt = Opt::from_args();
 
+    tracing::info!("Opt: {opt:#?}");
     let root = if let Some(root) = opt.root {
         if !root.is_dir() {
             return Err(format!("{}: is not a readable directory", root.display()).into());
