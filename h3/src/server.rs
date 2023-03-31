@@ -67,7 +67,12 @@ use crate::{
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
     error::{Code, Error, ErrorLevel},
     frame::FrameStream,
-    proto::{frame::Frame, headers::Header, push::PushId, varint::VarInt},
+    proto::{
+        frame::{Frame, PayloadLen},
+        headers::Header,
+        push::PushId,
+        varint::VarInt,
+    },
     qpack,
     quic::{self, RecvStream as _, SendStream as _},
     stream,
@@ -407,40 +412,48 @@ where
     }
 
     pub(crate) fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
-        while let Poll::Ready(frame) = self.inner.poll_control(cx)? {
-            match frame {
-                Frame::Settings(w) => trace!("Got settings > {:?}", w),
-                Frame::Goaway(id) => self.inner.process_goaway(&mut self.recv_closing, id)?,
-                f @ Frame::MaxPushId(_) | f @ Frame::CancelPush(_) => {
-                    warn!("Control frame ignored {:?}", f);
+        while let Poll::Ready(frame) = self.poll_next_control(cx)? {}
+        Poll::Pending
+    }
 
-                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
-                    //= type=TODO
-                    //# If a server receives a CANCEL_PUSH frame for a push
-                    //# ID that has not yet been mentioned by a PUSH_PROMISE frame, this MUST
-                    //# be treated as a connection error of type H3_ID_ERROR.
+    pub(crate) fn poll_next_control(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Frame<PayloadLen>, Error>> {
+        let frame = futures_util::ready!(self.inner.poll_control(cx))?;
 
-                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.7
-                    //= type=TODO
-                    //# A MAX_PUSH_ID frame cannot reduce the maximum push
-                    //# ID; receipt of a MAX_PUSH_ID frame that contains a smaller value than
-                    //# previously received MUST be treated as a connection error of type
-                    //# H3_ID_ERROR.
-                }
+        match &frame {
+            Frame::Settings(w) => trace!("Got settings > {:?}", w),
+            &Frame::Goaway(id) => self.inner.process_goaway(&mut self.recv_closing, id)?,
+            f @ Frame::MaxPushId(_) | f @ Frame::CancelPush(_) => {
+                warn!("Control frame ignored {:?}", f);
 
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.5
-                //# A server MUST treat the
-                //# receipt of a PUSH_PROMISE frame as a connection error of type
-                //# H3_FRAME_UNEXPECTED.
-                frame => {
-                    return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED.with_reason(
-                        format!("on server control stream: {:?}", frame),
-                        ErrorLevel::ConnectionError,
-                    )))
-                }
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
+                //= type=TODO
+                //# If a server receives a CANCEL_PUSH frame for a push
+                //# ID that has not yet been mentioned by a PUSH_PROMISE frame, this MUST
+                //# be treated as a connection error of type H3_ID_ERROR.
+
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.7
+                //= type=TODO
+                //# A MAX_PUSH_ID frame cannot reduce the maximum push
+                //# ID; receipt of a MAX_PUSH_ID frame that contains a smaller value than
+                //# previously received MUST be treated as a connection error of type
+                //# H3_ID_ERROR.
+            }
+
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.5
+            //# A server MUST treat the
+            //# receipt of a PUSH_PROMISE frame as a connection error of type
+            //# H3_FRAME_UNEXPECTED.
+            frame => {
+                return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED.with_reason(
+                    format!("on server control stream: {:?}", frame),
+                    ErrorLevel::ConnectionError,
+                )))
             }
         }
-        Poll::Pending
+        Poll::Ready(Ok(frame))
     }
 
     fn poll_requests_completion(&mut self, cx: &mut Context<'_>) -> Poll<()> {
@@ -843,22 +856,22 @@ where
     ///
     /// Fails if the server or client do not send `SETTINGS_ENABLE_WEBTRANSPORT=1`
     pub async fn new(mut conn: Connection<C, B>) -> Result<Self, Error> {
-        future::poll_fn(|cx| conn.poll_control(cx)).await?;
+        future::poll_fn(|cx| conn.poll_next_control(cx)).await?;
 
         let shared = conn.shared_state().clone();
 
         {
-            let shared = shared.write("Read WebTransport support");
+            let config = shared.write("Read WebTransport support").config;
 
-            tracing::debug!("Client settings: {:#?}", shared.config);
-            if !shared.config.enable_webtransport {
+            tracing::debug!("Client settings: {:#?}", config);
+            if !config.enable_webtransport {
                 return Err(conn.inner.close(
                     Code::H3_SETTINGS_ERROR,
                     "webtransport is not supported by client",
                 ));
             }
 
-            if !shared.config.enable_datagram {
+            if !config.enable_datagram {
                 return Err(conn.inner.close(
                     Code::H3_SETTINGS_ERROR,
                     "datagrams are not supported by client",
@@ -884,6 +897,6 @@ where
             tracing::warn!("Server does not support CONNECT");
         }
 
-        todo!()
+        Ok(Self { conn })
     }
 }

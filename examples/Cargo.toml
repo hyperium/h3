@@ -29,6 +29,10 @@ tracing-subscriber = { version = "0.3", default-features = true, features = [
     "time",
     "tracing-log",
 ] }
+tracing-tree = { version = "0.2" }
+
+[features]
+tracing-tree = []
 
 [[example]]
 name = "client"

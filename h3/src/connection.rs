@@ -399,6 +399,18 @@ where
                         shared.config.enable_webtransport =
                             settings.get(SettingId::ENABLE_WEBTRANSPORT).unwrap_or(0) != 0;
 
+                        shared.config.max_webtransport_sessions = settings
+                            .get(SettingId::WEBTRANSPORT_MAX_SESSIONS)
+                            .unwrap_or(0);
+
+                        shared.config.enable_datagram =
+                            settings.get(SettingId::H3_DATAGRAM).unwrap_or(0) != 0;
+
+                        shared.config.enable_connect = settings
+                            .get(SettingId::ENABLE_CONNECT_PROTOCOL)
+                            .unwrap_or(0)
+                            != 0;
+
                         Ok(Frame::Settings(settings))
                     }
                     f @ Frame::Goaway(_) => Ok(f),

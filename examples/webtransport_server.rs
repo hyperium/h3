@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
@@ -14,6 +14,7 @@ use h3::{
     server::{Config, RequestStream, WebTransportSession},
 };
 use h3_quinn::quinn;
+use tracing_subscriber::prelude::*;
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "server")]
@@ -60,11 +61,22 @@ pub struct Certs {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(not(feature = "tracing-tree"))]
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_span_events(tracing_subscriber::fmt::format::FmtSpan::FULL)
         .with_writer(std::io::stderr)
         .with_max_level(tracing::Level::TRACE)
+        .init();
+
+    #[cfg(feature = "tracing-tree")]
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::from_default_env())
+        .with(
+            tracing_tree::HierarchicalLayer::new(4)
+                .with_verbose_exit(true)
+                .with_bracketed_fields(true),
+        )
         .init();
 
     // process cli arguments
@@ -121,6 +133,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     h3_config.enable_connect(true);
     h3_config.enable_datagram(true);
     h3_config.max_webtransport_sessions(16);
+    h3_config.send_grease(true);
 
     while let Some(new_conn) = incoming.next().await {
         trace_span!("New connection being attempted");
@@ -143,6 +156,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let session: WebTransportSession<_, Bytes> =
                         WebTransportSession::new(h3_conn).await.unwrap();
                     tracing::info!("Finished establishing webtransport session");
+
+                    tokio::time::sleep(Duration::from_millis(10_000)).await;
 
                     // loop {
                     //     match h3_conn.accept().await {

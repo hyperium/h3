@@ -63,7 +63,7 @@ impl From<usize> for PayloadLen {
 }
 
 impl Frame<PayloadLen> {
-    pub const MAX_ENCODED_SIZE: usize = VarInt::MAX_SIZE * 3;
+    pub const MAX_ENCODED_SIZE: usize = VarInt::MAX_SIZE * 7;
 
     /// Decodes a Frame from the stream according to https://www.rfc-editor.org/rfc/rfc9114#section-7.1
     pub fn decode<T: Buf>(buf: &mut T) -> Result<Self, FrameError> {
@@ -368,7 +368,11 @@ impl SettingId {
             self,
             SettingId::MAX_HEADER_LIST_SIZE
                 | SettingId::QPACK_MAX_TABLE_CAPACITY
-                | SettingId::QPACK_MAX_BLOCKED_STREAMS,
+                | SettingId::QPACK_MAX_BLOCKED_STREAMS
+                | SettingId::ENABLE_CONNECT_PROTOCOL
+                | SettingId::ENABLE_WEBTRANSPORT
+                | SettingId::WEBTRANSPORT_MAX_SESSIONS
+                | SettingId::H3_DATAGRAM,
         )
     }
 
@@ -411,15 +415,18 @@ setting_identifiers! {
     ENABLE_CONNECT_PROTOCOL = 0x8,
     // https://datatracker.ietf.org/doc/html/draft-ietf-masque-h3-datagram-05#section-9.1
     H3_DATAGRAM = 0xFFD277,
-    // https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http2-02#section-10.1
+    // https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-8.2
     ENABLE_WEBTRANSPORT = 0x2B603742,
+    // https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-8.2
     H3_SETTING_ENABLE_DATAGRAM_CHROME_SPECIFIC= 0xFFD277,
+
+    WEBTRANSPORT_MAX_SESSIONS = 0x2b603743,
     // Dummy setting to check it is correctly ignored by the peer.
     // https://datatracker.ietf.org/doc/html/rfc9114#section-7.2.4.1
     DUMMY = 0x21,
 }
 
-const SETTINGS_LEN: usize = 4;
+const SETTINGS_LEN: usize = 8;
 
 #[derive(Debug, PartialEq)]
 pub struct Settings {
@@ -511,6 +518,8 @@ impl Settings {
                 //# their receipt MUST be treated as a connection error of type
                 //# H3_SETTINGS_ERROR.
                 settings.insert(identifier, value)?;
+            } else {
+                tracing::warn!("Unsupported setting: {identifier:?}");
             }
         }
         Ok(settings)
@@ -622,6 +631,10 @@ mod tests {
                     (SettingId::QPACK_MAX_TABLE_CAPACITY, 0xfad2),
                     (SettingId::QPACK_MAX_BLOCKED_STREAMS, 0xfad3),
                     (SettingId(95), 0),
+                    (SettingId::NONE, 0),
+                    (SettingId::NONE, 0),
+                    (SettingId::NONE, 0),
+                    (SettingId::NONE, 0),
                 ],
                 len: 4,
             }),
@@ -635,6 +648,10 @@ mod tests {
                     (SettingId::QPACK_MAX_BLOCKED_STREAMS, 0xfad3),
                     // check without the Grease setting because this is ignored
                     (SettingId(0), 0),
+                    (SettingId::NONE, 0),
+                    (SettingId::NONE, 0),
+                    (SettingId::NONE, 0),
+                    (SettingId::NONE, 0),
                 ],
                 len: 3,
             }),
