@@ -118,6 +118,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut h3_config = Config::new();
     h3_config.enable_webtransport(true);
+    h3_config.enable_connect(true);
+    h3_config.enable_datagram(true);
+    h3_config.max_webtransport_sessions(16);
 
     while let Some(new_conn) = incoming.next().await {
         trace_span!("New connection being attempted");
