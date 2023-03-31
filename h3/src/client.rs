@@ -161,7 +161,7 @@ where
             headers,
             ..
         } = parts;
-        let headers = Header::request(method, uri, headers)?;
+        let headers = Header::request(method, uri, headers, Default::default())?;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
         //= type=implication

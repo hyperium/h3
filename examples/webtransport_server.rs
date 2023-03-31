@@ -72,11 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "tracing-tree")]
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::from_default_env())
-        .with(
-            tracing_tree::HierarchicalLayer::new(4)
-                .with_verbose_exit(true)
-                .with_bracketed_fields(true),
-        )
+        .with(tracing_tree::HierarchicalLayer::new(4).with_bracketed_fields(true))
         .init();
 
     // process cli arguments

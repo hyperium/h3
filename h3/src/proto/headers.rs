@@ -8,7 +8,7 @@ use std::{
 use http::{
     header::{self, HeaderName, HeaderValue},
     uri::{self, Authority, Parts, PathAndQuery, Scheme, Uri},
-    HeaderMap, Method, StatusCode,
+    Extensions, HeaderMap, Method, StatusCode,
 };
 
 use crate::qpack::HeaderField;
@@ -22,12 +22,18 @@ pub struct Header {
 
 #[allow(clippy::len_without_is_empty)]
 impl Header {
-    pub fn request(method: Method, uri: Uri, fields: HeaderMap) -> Result<Self, HeaderError> {
+    /// Creates a new `Header` frame data suitable for sending a request
+    pub fn request(
+        method: Method,
+        uri: Uri,
+        fields: HeaderMap,
+        ext: Extensions,
+    ) -> Result<Self, HeaderError> {
         match (uri.authority(), fields.get("host")) {
             (None, None) => Err(HeaderError::MissingAuthority),
             (Some(a), Some(h)) if a.as_str() != h => Err(HeaderError::ContradictedAuthority),
             _ => Ok(Self {
-                pseudo: Pseudo::request(method, uri),
+                pseudo: Pseudo::request(method, uri, ext),
                 fields,
             }),
         }
@@ -221,6 +227,11 @@ impl TryFrom<Vec<HeaderField>> for Header {
                 Field::Header((n, v)) => {
                     fields.append(n, v);
                 }
+                Field::Protocol(p) => {
+                    tracing::info!("Got protocol");
+                    pseudo.protocol = Some(p);
+                    pseudo.len += 1;
+                }
             }
         }
 
@@ -234,6 +245,7 @@ enum Field {
     Authority(Authority),
     Path(PathAndQuery),
     Status(StatusCode),
+    Protocol(Protocol),
     Header((HeaderName, HeaderValue)),
 }
 
@@ -277,6 +289,7 @@ impl Field {
                 StatusCode::from_bytes(value.as_ref())
                     .map_err(|_| HeaderError::invalid_value(name, value))?,
             ),
+            b":protocol" => Field::Protocol(try_value(name, value)?),
             _ => return Err(HeaderError::invalid_name(name)),
         })
     }
@@ -291,6 +304,14 @@ where
     let (name, value) = (name.as_ref(), value.as_ref());
     let s = std::str::from_utf8(value).map_err(|_| HeaderError::invalid_value(name, value))?;
     R::from_str(s).map_err(|_| HeaderError::invalid_value(name, value))
+}
+
+#[derive(Copy, PartialEq, Debug, Clone)]
+pub struct Protocol(ProtocolInner);
+
+#[derive(Copy, PartialEq, Debug, Clone)]
+enum ProtocolInner {
+    WebTransport,
 }
 
 /// Pseudo-header fields have the same purpose as data from the first line of HTTP/1.X,
@@ -316,12 +337,27 @@ struct Pseudo {
     // Response
     status: Option<StatusCode>,
 
+    protocol: Option<Protocol>,
+
     len: usize,
+}
+
+pub struct InvalidProtocol;
+
+impl FromStr for Protocol {
+    type Err = InvalidProtocol;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "webtransport" => Ok(Self(ProtocolInner::WebTransport)),
+            _ => Err(InvalidProtocol),
+        }
+    }
 }
 
 #[allow(clippy::len_without_is_empty)]
 impl Pseudo {
-    fn request(method: Method, uri: Uri) -> Self {
+    fn request(method: Method, uri: Uri, ext: Extensions) -> Self {
         let Parts {
             scheme,
             authority,
@@ -345,7 +381,16 @@ impl Pseudo {
             },
         );
 
-        let len = 3 + if authority.is_some() { 1 } else { 0 };
+        // If the method is connect, the `:protocol` pseudo-header MAY be defined
+        //
+        // See: [https://www.rfc-editor.org/rfc/rfc8441#section-4]
+        let protocol = if method == Method::CONNECT {
+            ext.get::<Protocol>().copied()
+        } else {
+            None
+        };
+
+        let len = 3 + authority.is_some() as usize + protocol.is_some() as usize;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3
         //= type=implication
@@ -364,6 +409,7 @@ impl Pseudo {
             authority,
             path: Some(path),
             status: None,
+            protocol,
             len,
         }
     }
@@ -381,6 +427,7 @@ impl Pseudo {
             path: None,
             status: Some(status),
             len: 1,
+            protocol: None,
         }
     }
 

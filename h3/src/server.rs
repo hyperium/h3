@@ -59,7 +59,7 @@ use std::{
 
 use bytes::{Buf, BytesMut};
 use futures_util::future;
-use http::{response, HeaderMap, Request, Response, StatusCode};
+use http::{response, HeaderMap, Method, Request, Response, StatusCode};
 use quic::StreamId;
 use tokio::sync::mpsc;
 
@@ -895,6 +895,21 @@ where
 
         if !conn.inner.config.enable_connect {
             tracing::warn!("Server does not support CONNECT");
+        }
+
+        tracing::debug!("Waiting for the client to send a CONNECT request");
+
+        //= https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-3.3
+        // TODO: can the client send other requests than CONNECT?
+        let req = conn.accept().await?;
+        if let Some((req, mut stream)) = req {
+            if req.method() == Method::CONNECT {
+                tracing::info!("Received connect request: {req:?}");
+            }
+
+            let response = Response::builder().status(StatusCode::OK).body(()).unwrap();
+            stream.send_response(response).await?;
+            stream.finish().await?;
         }
 
         Ok(Self { conn })
