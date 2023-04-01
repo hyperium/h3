@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{net::SocketAddr, path::{PathBuf, Path}, sync::Arc, time::Duration};
 
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
@@ -7,6 +7,7 @@ use rustls::{Certificate, PrivateKey};
 use structopt::StructOpt;
 use tokio::{fs::File, io::AsyncReadExt};
 use tracing::{error, info, trace_span};
+use anyhow::{Result, anyhow};
 
 use h3::{
     error::ErrorLevel,
@@ -66,7 +67,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_span_events(tracing_subscriber::fmt::format::FmtSpan::FULL)
         .with_writer(std::io::stderr)
-        .with_max_level(tracing::Level::TRACE)
         .init();
 
     #[cfg(feature = "tracing-tree")]
@@ -140,8 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match new_conn.await {
                 Ok(conn) => {
                     info!("new connection established");
-
-                    let mut h3_conn = h3::server::Connection::with_config(
+                    let h3_conn = h3::server::Connection::with_config(
                         h3_quinn::Connection::new(conn),
                         h3_config,
                     )
@@ -149,40 +148,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .unwrap();
 
                     tracing::info!("Establishing WebTransport session");
-                    let session: WebTransportSession<_, Bytes> =
+                    let mut session: WebTransportSession<_, Bytes> =
                         WebTransportSession::new(h3_conn).await.unwrap();
                     tracing::info!("Finished establishing webtransport session");
-
-                    tokio::time::sleep(Duration::from_millis(10_000)).await;
-
-                    // loop {
-                    //     match h3_conn.accept().await {
-                    //         Ok(Some((req, stream))) => {
-                    //             info!("new request: {:#?}", req);
-
-                    //             let root = root.clone();
-
-                    //             tokio::spawn(async {
-                    //                 if let Err(e) = handle_request(req, stream, root).await {
-                    //                     error!("handling request failed: {}", e);
-                    //                 }
-                    //             });
-                    //         }
-
-                    //         // indicating no more streams to be received
-                    //         Ok(None) => {
-                    //             break;
-                    //         }
-
-                    //         Err(err) => {
-                    //             error!("error on accept {}", err);
-                    //             match err.get_error_level() {
-                    //                 ErrorLevel::ConnectionError => break,
-                    //                 ErrorLevel::StreamError => continue,
-                    //             }
-                    //         }
-                    //     }
-                    // }
+                    // Get datagrams, bidirectional streams, and unidirectional streams and wait for client requests here.
                 }
                 Err(err) => {
                     error!("accepting connection failed: {:?}", err);
@@ -198,49 +167,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn handle_request<T>(
-    req: Request<()>,
-    mut stream: RequestStream<T, Bytes>,
-    serve_root: Arc<Option<PathBuf>>,
-) -> Result<(), Box<dyn std::error::Error>>
-where
-    T: BidiStream<Bytes>,
-{
-    let (status, to_serve) = match serve_root.as_deref() {
-        None => (StatusCode::OK, None),
-        Some(_) if req.uri().path().contains("..") => (StatusCode::NOT_FOUND, None),
-        Some(root) => {
-            let to_serve = root.join(req.uri().path().strip_prefix('/').unwrap_or(""));
-            match File::open(&to_serve).await {
-                Ok(file) => (StatusCode::OK, Some(file)),
-                Err(e) => {
-                    error!("failed to open: \"{}\": {}", to_serve.to_string_lossy(), e);
-                    (StatusCode::NOT_FOUND, None)
-                }
-            }
-        }
-    };
+async fn handle_request(
+    root: Arc<Path>,
+    (mut send, recv): (quinn::SendStream, quinn::RecvStream),
+) -> Result<()> {
+    let req = recv
+        .read_to_end(64 * 1024)
+        .await
+        .map_err(|e| anyhow!("failed reading request: {}", e))?;
 
-    let resp = http::Response::builder().status(status).body(()).unwrap();
-
-    match stream.send_response(resp).await {
-        Ok(_) => {
-            info!("successfully respond to connection");
-        }
-        Err(err) => {
-            error!("unable to send response to connection peer: {:?}", err);
-        }
-    }
-
-    if let Some(mut file) = to_serve {
-        loop {
-            let mut buf = BytesMut::with_capacity(4096 * 10);
-            if file.read_buf(&mut buf).await? == 0 {
-                break;
-            }
-            stream.send_data(buf.freeze()).await?;
-        }
-    }
-
-    Ok(stream.finish().await?)
+    // Write the response
+    send.write_all(&req)
+        .await
+        .map_err(|e| anyhow!("failed to send response: {}", e))?;
+    // Gracefully terminate the stream
+    send.finish()
+        .await
+        .map_err(|e| anyhow!("failed to shutdown stream: {}", e))?;
+    info!("complete");
+    Ok(())
 }

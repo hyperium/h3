@@ -918,20 +918,4 @@ where
         Ok(Self { conn })
     }
 
-    async fn accept(&self) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error>  {
-        let req = self.conn.accept().await?;
-        if let Some((req, mut stream)) = req {
-            if req.method() == Method::CONNECT {
-                tracing::info!("Received connect request: {req:?}");
-            }
-
-            let response = Response::builder()
-                .header("server", "big_daddy")
-                .header("sec-webtransport-http3-draft", "draft02")
-                .status(StatusCode::OK).body(()).unwrap();
-            stream.send_response(response).await?;
-            stream.finish().await?;
-        }
-        Ok(())
-    }
 }
