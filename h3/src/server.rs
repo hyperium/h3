@@ -58,7 +58,7 @@ use std::{
 };
 
 use bytes::{Buf, BytesMut};
-use futures_util::future;
+use futures_util::{future, Future};
 use http::{response, HeaderMap, Method, Request, Response, StatusCode};
 use quic::StreamId;
 use tokio::sync::mpsc;
@@ -344,7 +344,7 @@ where
         *req.version_mut() = http::Version::HTTP_3;
         // send the grease frame only once
         self.inner.send_grease_frame = false;
-
+        trace!("replying with: {:?}", req);
         Ok(Some((req, request_stream)))
     }
 
@@ -844,7 +844,7 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    conn: Connection<C, B>,
+     conn: Connection<C, B>,
 }
 
 impl<C, B> WebTransportSession<C, B>
@@ -907,11 +907,31 @@ where
                 tracing::info!("Received connect request: {req:?}");
             }
 
-            let response = Response::builder().status(StatusCode::OK).body(()).unwrap();
+            let response = Response::builder()
+                .header("server", "big_daddy")
+                .header("sec-webtransport-http3-draft", "draft02")
+                .status(StatusCode::OK).body(()).unwrap();
             stream.send_response(response).await?;
             stream.finish().await?;
         }
 
         Ok(Self { conn })
+    }
+
+    async fn accept(&self) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error>  {
+        let req = self.conn.accept().await?;
+        if let Some((req, mut stream)) = req {
+            if req.method() == Method::CONNECT {
+                tracing::info!("Received connect request: {req:?}");
+            }
+
+            let response = Response::builder()
+                .header("server", "big_daddy")
+                .header("sec-webtransport-http3-draft", "draft02")
+                .status(StatusCode::OK).body(()).unwrap();
+            stream.send_response(response).await?;
+            stream.finish().await?;
+        }
+        Ok(())
     }
 }
