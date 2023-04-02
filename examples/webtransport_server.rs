@@ -5,7 +5,7 @@ use futures::StreamExt;
 use http::{Request, StatusCode};
 use rustls::{Certificate, PrivateKey};
 use structopt::StructOpt;
-use tokio::{fs::File, io::AsyncReadExt};
+use tokio::{fs::File, io::AsyncReadExt, time::sleep};
 use tracing::{error, info, trace_span};
 use anyhow::{Result, anyhow};
 
@@ -62,6 +62,7 @@ pub struct Certs {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // 0. Setup tracing
     #[cfg(not(feature = "tracing-tree"))]
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -122,8 +123,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("listening on {}", opt.listen);
 
-    // handle incoming connections and requests
-
+    // 1. Configure h3 server, since this is a webtransport server, we need to enable webtransport, connect, and datagram
     let mut h3_config = Config::new();
     h3_config.enable_webtransport(true);
     h3_config.enable_connect(true);
@@ -131,6 +131,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     h3_config.max_webtransport_sessions(16);
     h3_config.send_grease(true);
 
+    // 2. Accept new quic connections and spawn a new task to handle them
     while let Some(new_conn) = incoming.next().await {
         trace_span!("New connection being attempted");
 
@@ -139,7 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tokio::spawn(async move {
             match new_conn.await {
                 Ok(conn) => {
-                    info!("new connection established");
+                    info!("new http3 established");
                     let h3_conn = h3::server::Connection::with_config(
                         h3_quinn::Connection::new(conn),
                         h3_config,
@@ -148,10 +149,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .unwrap();
 
                     tracing::info!("Establishing WebTransport session");
+                    // 3. TODO: Conditionally, if the client indicated that this is a webtransport session, we should accept it here, else use regular h3.
+                    // if this is a webtransport session, then h3 needs to stop handing the datagrams, bidirectional streams, and unidirectional streams and give them 
+                    // to the webtransport session.
                     let mut session: WebTransportSession<_, Bytes> =
                         WebTransportSession::new(h3_conn).await.unwrap();
                     tracing::info!("Finished establishing webtransport session");
-                    // Get datagrams, bidirectional streams, and unidirectional streams and wait for client requests here.
+                    // 4. Get datagrams, bidirectional streams, and unidirectional streams and wait for client requests here.
+                    // h3_conn needs to handover the datagrams, bidirectional streams, and unidirectional streams to the webtransport session.
+                    // session.echo_all_web_transport_requests().await;
+                    sleep(Duration::from_secs(100)).await;
                 }
                 Err(err) => {
                     error!("accepting connection failed: {:?}", err);

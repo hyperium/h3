@@ -1,7 +1,7 @@
 use std::{
     convert::TryFrom,
     sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
-    task::{Context, Poll},
+    task::{Context, Poll}, mem,
 };
 
 use bytes::{Buf, Bytes, BytesMut};
@@ -76,7 +76,8 @@ where
     B: Buf,
 {
     pub(super) shared: SharedStateRef,
-    conn: C,
+    // TODO: breaking encapsulation just to see if we can get this to work, will fix before merging
+    pub conn: C,
     control_send: C::SendStream,
     control_recv: Option<FrameStream<C::RecvStream, B>>,
     decoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
@@ -214,9 +215,9 @@ where
 
         Ok(conn_inner)
     }
-
     /// Send GOAWAY with specified max_id, iff max_id is smaller than the previous one.
-    pub async fn shutdown<T>(
+    
+        pub async fn shutdown<T>(
         &mut self,
         sent_closing: &mut Option<T>,
         max_id: T,

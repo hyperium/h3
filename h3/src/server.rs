@@ -58,10 +58,10 @@ use std::{
 };
 
 use bytes::{Buf, BytesMut};
-use futures_util::{future, Future};
+use futures_util::{future};
 use http::{response, HeaderMap, Method, Request, Response, StatusCode};
 use quic::StreamId;
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc};
 
 use crate::{
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
@@ -144,6 +144,7 @@ where
         Builder { config }.build(conn).await
     }
 }
+
 
 impl<C, B> Connection<C, B>
 where
@@ -845,6 +846,7 @@ where
     B: Buf,
 {
      conn: Connection<C, B>,
+     connect_stream: RequestStream<C::BidiStream, B>,
 }
 
 impl<C, B> WebTransportSession<C, B>
@@ -908,14 +910,40 @@ where
             }
 
             let response = Response::builder()
-                .header("server", "big_daddy")
+                // This is the only header that chrome cares about.
                 .header("sec-webtransport-http3-draft", "draft02")
                 .status(StatusCode::OK).body(()).unwrap();
             stream.send_response(response).await?;
-            stream.finish().await?;
+
+        Ok(Self { conn, connect_stream:stream })
+        } else {
+            return Err(conn.inner.close(
+                Code::H3_REQUEST_REJECTED,
+                "expected CONNECT request",
+            ));
         }
-
-        Ok(Self { conn })
     }
+}
 
+impl<C, B> WebTransportSession<C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    // Test method to poll the connection for incoming requests.
+    // pub async fn echo_all_web_transport_requests(&self) -> JoinHandle<()> {
+    //     let conn = self.conn;
+    //     let poll_datagrams = tokio::spawn(async move {
+    //         while let Ok(Some(result)) = future::poll_fn(|cx| conn.inner.conn.poll_accept_datagram(cx)).await {
+    //             info!("Received datagram: {:?}", result);
+    //         }
+    //     });
+
+    //     // let poll_bidi_streams = tokio::spawn(async move {
+    //     //     while let Ok(Some(result)) = future::poll_fn(|cx| conn.inner.conn.poll_accept_bidi(cx)).await {
+    //     //         info!("Received bidi stream");
+    //     //     }
+    //     // });
+    //     poll_datagrams
+    // }
 }

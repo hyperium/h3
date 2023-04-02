@@ -5,7 +5,7 @@
 
 use std::task::{self, Poll};
 
-use bytes::Buf;
+use bytes::{Buf, Bytes};
 
 pub use crate::proto::stream::{InvalidStreamId, StreamId};
 pub use crate::stream::WriteBuf;
@@ -75,6 +75,12 @@ pub trait Connection<B: Buf> {
 
     /// Close the connection immediately
     fn close(&mut self, code: crate::error::Code, reason: &[u8]);
+
+    /// Poll the connection for incoming datagrams.
+    fn poll_accept_datagram(
+        &mut self,
+        cx: &mut task::Context<'_>,
+    ) -> Poll<Result<Option<Bytes>, Self::Error>>;
 }
 
 /// Trait for opening outgoing streams

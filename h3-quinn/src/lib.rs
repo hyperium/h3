@@ -33,6 +33,7 @@ pub struct Connection {
     opening_bi: Option<OpenBi>,
     incoming_uni: IncomingUniStreams,
     opening_uni: Option<OpenUni>,
+    datagrams: quinn::Datagrams,
 }
 
 impl Connection {
@@ -42,6 +43,7 @@ impl Connection {
             uni_streams,
             bi_streams,
             connection,
+            datagrams,
             ..
         } = new_conn;
 
@@ -51,6 +53,7 @@ impl Connection {
             opening_bi: None,
             incoming_uni: uni_streams,
             opening_uni: None,
+            datagrams: datagrams
         }
     }
 }
@@ -100,6 +103,17 @@ where
     type BidiStream = BidiStream<B>;
     type OpenStreams = OpenStreams;
     type Error = ConnectionError;
+
+    fn poll_accept_datagram(
+        &mut self,
+        cx: &mut task::Context<'_>,
+    ) -> Poll<Result<Option<Bytes>, Self::Error>> {
+        match ready!(self.datagrams.poll_next_unpin(cx)) {
+            Some(Ok(x)) => Poll::Ready(Ok(Some(x))),
+            Some(Err(e)) => Poll::Ready(Err(e.into())),
+            None => Poll::Ready(Ok(None)),
+        }
+    }
 
     fn poll_accept_bidi(
         &mut self,
