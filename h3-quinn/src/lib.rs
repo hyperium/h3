@@ -167,6 +167,14 @@ where
         Poll::Ready(Ok(Self::SendStream::new(send)))
     }
 
+    fn send_datagram(
+        &mut self,
+        data: Bytes,
+    ) -> Result<(), Self::Error> {
+        let _ = self.conn.send_datagram(data).unwrap();
+        Ok(())
+    }
+
     fn opener(&self) -> Self::OpenStreams {
         OpenStreams {
             conn: self.conn.clone(),

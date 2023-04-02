@@ -158,7 +158,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // 4. Get datagrams, bidirectional streams, and unidirectional streams and wait for client requests here.
                     // h3_conn needs to handover the datagrams, bidirectional streams, and unidirectional streams to the webtransport session.
                     // session.echo_all_web_transport_requests().await;
-                    sleep(Duration::from_secs(100)).await;
+                    let handle = session.echo_all_web_transport_requests().await;
+                    let result = handle.await;
                 }
                 Err(err) => {
                     error!("accepting connection failed: {:?}", err);
