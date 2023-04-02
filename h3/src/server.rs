@@ -61,7 +61,7 @@ use bytes::{Buf, BytesMut};
 use futures_util::{future};
 use http::{response, HeaderMap, Method, Request, Response, StatusCode};
 use quic::StreamId;
-use tokio::{sync::mpsc};
+use tokio::{sync::{mpsc, Mutex}, task::JoinHandle};
 
 use crate::{
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
@@ -927,23 +927,31 @@ where
 
 impl<C, B> WebTransportSession<C, B>
 where
-    C: quic::Connection<B>,
+    C: quic::Connection<B> + std::marker::Send + 'static,
     B: Buf,
 {
-    // Test method to poll the connection for incoming requests.
-    // pub async fn echo_all_web_transport_requests(&self) -> JoinHandle<()> {
-    //     let conn = self.conn;
-    //     let poll_datagrams = tokio::spawn(async move {
-    //         while let Ok(Some(result)) = future::poll_fn(|cx| conn.inner.conn.poll_accept_datagram(cx)).await {
-    //             info!("Received datagram: {:?}", result);
-    //         }
-    //     });
+    /// Test method to poll the connection for incoming requests.
+    pub async fn echo_all_web_transport_requests(&self) -> JoinHandle<()> {
+        let conn = self.conn.inner.conn.clone();
+        let poll_datagrams = tokio::spawn(async move {
+            let conn = conn.clone();
+            while let Ok(Some(result)) = future::poll_fn(|cx| {
+                let mut conn = conn.lock().unwrap();
+                conn.poll_accept_datagram(cx)
+            }).await {
+                info!("Received datagram: {:?}", result);
+                let mut conn = conn.lock().unwrap();
+                let result = conn.send_datagram(result);
+                info!("Sent datagram");
+            }
+            trace!("poll_accept_datagram finished");
+        });
 
-    //     // let poll_bidi_streams = tokio::spawn(async move {
-    //     //     while let Ok(Some(result)) = future::poll_fn(|cx| conn.inner.conn.poll_accept_bidi(cx)).await {
-    //     //         info!("Received bidi stream");
-    //     //     }
-    //     // });
-    //     poll_datagrams
-    // }
+        // let poll_bidi_streams = tokio::spawn(async move {
+        //     while let Ok(Some(result)) = future::poll_fn(|cx| conn.inner.conn.poll_accept_bidi(cx)).await {
+        //         info!("Received bidi stream");
+        //     }
+        // });
+        poll_datagrams
+    }
 }

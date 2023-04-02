@@ -81,6 +81,13 @@ pub trait Connection<B: Buf> {
         &mut self,
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Option<Bytes>, Self::Error>>;
+
+    /// Send a datagram
+    fn send_datagram(
+        &mut self,
+        data: Bytes,
+    ) -> Result<(), Self::Error>;
+
 }
 
 /// Trait for opening outgoing streams
