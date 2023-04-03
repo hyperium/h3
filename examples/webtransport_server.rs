@@ -244,7 +244,8 @@ where
     C: 'static + Send + h3::quic::Connection<B>,
     B: Buf,
 {
-    session.echo_all_web_transport_requests().await;
+    session.echo_all_web_transport_requests().await.await?;
+    tracing::info!("Finished handling session");
 
     Ok(())
 }
