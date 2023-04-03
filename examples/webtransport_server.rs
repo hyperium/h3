@@ -6,7 +6,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Result};
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use futures::StreamExt;
 use http::{Method, Request, StatusCode};
 use rustls::{Certificate, PrivateKey};
@@ -31,7 +31,7 @@ struct Opt {
         short,
         long,
         help = "Root directory of the files to serve. \
-                If omitted, server will respond OK."
+            If omitted, server will respond OK."
     )]
     pub root: Option<PathBuf>,
 
@@ -244,7 +244,26 @@ where
     C: 'static + Send + h3::quic::Connection<B>,
     B: Buf,
 {
-    session.echo_all_web_transport_requests().await.await?;
+    // session.echo_all_web_transport_requests().await;
+    loop {
+        tokio::select! {
+            datagram = session.read_datagram() => {
+                let datagram = datagram?;
+                if let Some(datagram) = datagram {
+                    // let mut response = BytesMut::from("echo: ");
+                    // response.put(datagram);
+
+                    tracing::info!("Responding with {datagram:?}");
+                    session.send_datagram(datagram).unwrap();
+                    tracing::info!("Finished sending datagram");
+                }
+            }
+            else => {
+                break
+            }
+        }
+    }
+
     tracing::info!("Finished handling session");
 
     Ok(())

@@ -273,7 +273,13 @@ where
         }
 
         loop {
-            match self.conn.lock().unwrap().poll_accept_recv(cx)? {
+            match self
+                .conn
+                .lock()
+                .unwrap()
+                .poll_accept_recv(cx)
+                .map_err(|v| Error::from(v))?
+            {
                 Poll::Ready(Some(stream)) => self
                     .pending_recv_streams
                     .push(AcceptRecvStream::new(stream)),

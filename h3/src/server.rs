@@ -53,18 +53,19 @@
 use std::{
     collections::HashSet,
     convert::TryFrom,
+    marker::PhantomData,
     sync::Arc,
     task::{Context, Poll},
 };
 
-use bytes::{Buf, BytesMut};
-use futures_util::future;
+use bytes::{Buf, Bytes, BytesMut};
+use futures_util::{
+    future::{self, Future},
+    ready,
+};
 use http::{response, HeaderMap, Method, Request, Response, StatusCode};
 use quic::StreamId;
-use tokio::{
-    sync::{mpsc, Mutex},
-    task::JoinHandle,
-};
+use tokio::sync::mpsc;
 
 use crate::{
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
@@ -421,7 +422,7 @@ where
     }
 
     pub(crate) fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
-        while let Poll::Ready(_) = self.poll_next_control(cx)? {}
+        while (self.poll_next_control(cx)?).is_ready() {}
         Poll::Pending
     }
 
@@ -429,7 +430,7 @@ where
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Frame<PayloadLen>, Error>> {
-        let frame = futures_util::ready!(self.inner.poll_control(cx))?;
+        let frame = ready!(self.inner.poll_control(cx))?;
 
         match &frame {
             Frame::Settings(w) => trace!("Got settings > {:?}", w),
@@ -897,7 +898,7 @@ where
         // The peer is responsible for validating our side of the webtransport support.
         //
         // However, it is still advantageous to show a log on the server as (attempting) to
-        // establish a WebTransportSession without the proper h3 config is usually an error
+        // establish a WebTransportSession without the proper h3 config is usually a mistake.
         if !conn.inner.config.enable_webtransport {
             tracing::warn!("Server does not support webtransport");
         }
@@ -935,41 +936,55 @@ where
             connect_stream: stream,
         })
     }
+
+    /// Receive a datagram from the client
+    pub fn read_datagram(&self) -> ReadDatagram<C, B> {
+        ReadDatagram {
+            conn: &self.conn.inner.conn,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Sends a datagram
+    ///
+    /// TODO: maybe make async. `quinn` does not require an async send
+    pub fn send_datagram(&self, data: Bytes) -> Result<(), Error> {
+        self.conn.inner.conn.lock().unwrap().send_datagram(data)?;
+        tracing::info!("Sent datagram");
+
+        Ok(())
+    }
+}
+
+/// Future for [`WebTransportSession::read_datagram`]
+pub struct ReadDatagram<'a, C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    conn: &'a std::sync::Mutex<C>,
+    _marker: PhantomData<B>,
+}
+
+impl<'a, C, B> Future for ReadDatagram<'a, C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    type Output = Result<Option<Bytes>, Error>;
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        tracing::trace!("poll: read_datagram");
+        let res = match ready!(self.conn.lock().unwrap().poll_accept_datagram(cx)) {
+            Ok(v) => Ok(v),
+            Err(err) => Err(Error::from(err)),
+        };
+
+        tracing::info!("Got datagram: {res:?}");
+        Poll::Ready(res)
+    }
 }
 
 fn validate_wt_connect(request: &Request<()>) -> bool {
     matches!((request.method(), request.extensions().get::<Protocol>()), (&Method::CONNECT, Some(p)) if p == &Protocol::WEB_TRANSPORT)
-}
-
-impl<C, B> WebTransportSession<C, B>
-where
-    C: quic::Connection<B> + std::marker::Send + 'static,
-    B: Buf,
-{
-    /// Test method to poll the connection for incoming requests.
-    pub async fn echo_all_web_transport_requests(&self) -> JoinHandle<()> {
-        let conn = self.conn.inner.conn.clone();
-        let poll_datagrams = tokio::spawn(async move {
-            let conn = conn.clone();
-            while let Ok(Some(result)) = future::poll_fn(|cx| {
-                let mut conn = conn.lock().unwrap();
-                conn.poll_accept_datagram(cx)
-            })
-            .await
-            {
-                info!("Received datagram: {:?}", result);
-                let mut conn = conn.lock().unwrap();
-                let result = conn.send_datagram(result);
-                info!("Sent datagram");
-            }
-            trace!("poll_accept_datagram finished");
-        });
-
-        // let poll_bidi_streams = tokio::spawn(async move {
-        //     while let Ok(Some(result)) = future::poll_fn(|cx| conn.inner.conn.poll_accept_bidi(cx)).await {
-        //         info!("Received bidi stream");
-        //     }
-        // });
-        poll_datagrams
-    }
 }

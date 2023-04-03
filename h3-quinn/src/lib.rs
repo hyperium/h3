@@ -17,6 +17,7 @@ use futures_util::io::AsyncWrite as _;
 use futures_util::ready;
 use futures_util::stream::StreamExt as _;
 
+use quinn::SendDatagramError;
 pub use quinn::{
     self, crypto::Session, Endpoint, IncomingBiStreams, IncomingUniStreams, NewConnection, OpenBi,
     OpenUni, VarInt, WriteError,
@@ -53,7 +54,7 @@ impl Connection {
             opening_bi: None,
             incoming_uni: uni_streams,
             opening_uni: None,
-            datagrams: datagrams
+            datagrams,
         }
     }
 }
@@ -104,6 +105,7 @@ where
     type OpenStreams = OpenStreams;
     type Error = ConnectionError;
 
+    #[inline]
     fn poll_accept_datagram(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -167,12 +169,18 @@ where
         Poll::Ready(Ok(Self::SendStream::new(send)))
     }
 
-    fn send_datagram(
-        &mut self,
-        data: Bytes,
-    ) -> Result<(), Self::Error> {
-        let _ = self.conn.send_datagram(data).unwrap();
-        Ok(())
+    fn send_datagram(&mut self, data: Bytes) -> Result<(), quic::SendDatagramError> {
+        match self.conn.send_datagram(data) {
+            Ok(v) => Ok(v),
+            Err(SendDatagramError::Disabled) => Err(quic::SendDatagramError::Disabled),
+            Err(SendDatagramError::TooLarge) => Err(quic::SendDatagramError::TooLarge),
+            Err(SendDatagramError::UnsupportedByPeer) => {
+                Err(quic::SendDatagramError::UnsupportedByPeer)
+            }
+            Err(SendDatagramError::ConnectionLost(err)) => Err(
+                quic::SendDatagramError::ConnectionLost(ConnectionError::from(err).into()),
+            ),
+        }
     }
 
     fn opener(&self) -> Self::OpenStreams {
