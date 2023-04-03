@@ -1,5 +1,8 @@
 use bytes::{Buf, BufMut, Bytes};
-use std::{convert::TryInto, fmt};
+use std::{
+    convert::TryInto,
+    fmt::{self, Debug},
+};
 use tracing::trace;
 
 use super::{
@@ -519,7 +522,7 @@ impl Settings {
                 //# H3_SETTINGS_ERROR.
                 settings.insert(identifier, value)?;
             } else {
-                tracing::warn!("Unsupported setting: {identifier:?}");
+                tracing::warn!("Unsupported setting: {identifier:#x?}");
             }
         }
         Ok(settings)

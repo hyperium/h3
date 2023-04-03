@@ -57,7 +57,9 @@ impl Header {
         }
     }
 
-    pub fn into_request_parts(self) -> Result<(Method, Uri, HeaderMap), HeaderError> {
+    pub fn into_request_parts(
+        self,
+    ) -> Result<(Method, Uri, Option<Protocol>, HeaderMap), HeaderError> {
         let mut uri = Uri::builder();
 
         if let Some(path) = self.pseudo.path {
@@ -100,6 +102,7 @@ impl Header {
         Ok((
             self.pseudo.method.ok_or(HeaderError::MissingMethod)?,
             uri.build().map_err(HeaderError::InvalidRequest)?,
+            self.pseudo.protocol,
             self.fields,
         ))
     }
@@ -309,7 +312,15 @@ where
 }
 
 #[derive(Copy, PartialEq, Debug, Clone)]
+/// Describes the `:protocol` pseudo-header for extended connect
+///
+/// See: [https://www.rfc-editor.org/rfc/rfc8441#section-4]
 pub struct Protocol(ProtocolInner);
+
+impl Protocol {
+    /// WebTransport protocol
+    pub const WEB_TRANSPORT: Protocol = Protocol(ProtocolInner::WebTransport);
+}
 
 #[derive(Copy, PartialEq, Debug, Clone)]
 enum ProtocolInner {

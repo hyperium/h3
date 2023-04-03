@@ -1,18 +1,24 @@
-use std::{net::SocketAddr, path::{PathBuf, Path}, sync::Arc, time::Duration};
+use std::{
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 
-use bytes::{Bytes, BytesMut};
+use anyhow::{anyhow, Result};
+use bytes::{Buf, Bytes, BytesMut};
 use futures::StreamExt;
-use http::{Request, StatusCode};
+use http::{Method, Request, StatusCode};
 use rustls::{Certificate, PrivateKey};
 use structopt::StructOpt;
 use tokio::{fs::File, io::AsyncReadExt, time::sleep};
 use tracing::{error, info, trace_span};
-use anyhow::{Result, anyhow};
 
 use h3::{
     error::ErrorLevel,
-    quic::BidiStream,
-    server::{Config, RequestStream, WebTransportSession},
+    quic::{self, BidiStream},
+    server::{Config, Connection, RequestStream, WebTransportSession},
+    Protocol,
 };
 use h3_quinn::quinn;
 use tracing_subscriber::prelude::*;
@@ -148,18 +154,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .await
                     .unwrap();
 
-                    tracing::info!("Establishing WebTransport session");
-                    // 3. TODO: Conditionally, if the client indicated that this is a webtransport session, we should accept it here, else use regular h3.
-                    // if this is a webtransport session, then h3 needs to stop handing the datagrams, bidirectional streams, and unidirectional streams and give them 
-                    // to the webtransport session.
-                    let mut session: WebTransportSession<_, Bytes> =
-                        WebTransportSession::new(h3_conn).await.unwrap();
-                    tracing::info!("Finished establishing webtransport session");
-                    // 4. Get datagrams, bidirectional streams, and unidirectional streams and wait for client requests here.
-                    // h3_conn needs to handover the datagrams, bidirectional streams, and unidirectional streams to the webtransport session.
-                    // session.echo_all_web_transport_requests().await;
-                    let handle = session.echo_all_web_transport_requests().await;
-                    let result = handle.await;
+                    // tracing::info!("Establishing WebTransport session");
+                    // // 3. TODO: Conditionally, if the client indicated that this is a webtransport session, we should accept it here, else use regular h3.
+                    // // if this is a webtransport session, then h3 needs to stop handing the datagrams, bidirectional streams, and unidirectional streams and give them
+                    // // to the webtransport session.
+
+                    tokio::spawn(async move {
+                        if let Err(err) = handle_connection(h3_conn).await {
+                            tracing::error!("Failed to handle connection: {err:?}");
+                        }
+                    });
+                    // let mut session: WebTransportSession<_, Bytes> =
+                    //     WebTransportSession::accept(h3_conn).await.unwrap();
+                    // tracing::info!("Finished establishing webtransport session");
+                    // // 4. Get datagrams, bidirectional streams, and unidirectional streams and wait for client requests here.
+                    // // h3_conn needs to handover the datagrams, bidirectional streams, and unidirectional streams to the webtransport session.
+                    // // session.echo_all_web_transport_requests().await;
+                    // let handle = session.echo_all_web_transport_requests().await;
+                    // let result = handle.await;
                 }
                 Err(err) => {
                     error!("accepting connection failed: {:?}", err);
@@ -175,23 +187,64 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn handle_request(
-    root: Arc<Path>,
-    (mut send, recv): (quinn::SendStream, quinn::RecvStream),
-) -> Result<()> {
-    let req = recv
-        .read_to_end(64 * 1024)
-        .await
-        .map_err(|e| anyhow!("failed reading request: {}", e))?;
+async fn handle_connection<C>(mut conn: Connection<C, Bytes>) -> Result<()>
+where
+    C: 'static + Send + quic::Connection<Bytes>,
+{
+    // 3. TODO: Conditionally, if the client indicated that this is a webtransport session, we should accept it here, else use regular h3.
+    // if this is a webtransport session, then h3 needs to stop handing the datagrams, bidirectional streams, and unidirectional streams and give them
+    // to the webtransport session.
 
-    // Write the response
-    send.write_all(&req)
-        .await
-        .map_err(|e| anyhow!("failed to send response: {}", e))?;
-    // Gracefully terminate the stream
-    send.finish()
-        .await
-        .map_err(|e| anyhow!("failed to shutdown stream: {}", e))?;
-    info!("complete");
+    loop {
+        match conn.accept().await {
+            Ok(Some((req, stream))) => {
+                info!("new request: {:#?}", req);
+
+                let ext = req.extensions();
+                match req.method() {
+                    &Method::CONNECT if ext.get::<Protocol>() == Some(&Protocol::WEB_TRANSPORT) => {
+                        tracing::info!("Peer wants to initiate a webtransport session");
+
+                        tracing::info!("Handing over connection to WebTransport");
+                        let session = WebTransportSession::accept(req, stream, conn).await?;
+                        tracing::info!("Established webtransport session");
+                        // 4. Get datagrams, bidirectional streams, and unidirectional streams and wait for client requests here.
+                        // h3_conn needs to handover the datagrams, bidirectional streams, and unidirectional streams to the webtransport session.
+                        // session.echo_all_web_transport_requests().await;
+                        handle_session(session).await?;
+
+                        return Ok(());
+                    }
+                    _ => {
+                        tracing::info!(?req, "Received request");
+                    }
+                }
+            }
+
+            // indicating no more streams to be received
+            Ok(None) => {
+                break;
+            }
+
+            Err(err) => {
+                error!("Error on accept {}", err);
+                match err.get_error_level() {
+                    ErrorLevel::ConnectionError => break,
+                    ErrorLevel::StreamError => continue,
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tracing::instrument(level = "info", skip(session))]
+async fn handle_session<C, B>(session: WebTransportSession<C, B>) -> anyhow::Result<()>
+where
+    C: 'static + Send + h3::quic::Connection<B>,
+    B: Buf,
+{
+    session.echo_all_web_transport_requests().await;
+
     Ok(())
 }

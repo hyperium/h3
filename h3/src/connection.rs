@@ -1,7 +1,8 @@
 use std::{
     convert::TryFrom,
-    sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard, Mutex},
-    task::{Context, Poll}, mem,
+    mem,
+    sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard},
+    task::{Context, Poll},
 };
 
 use bytes::{Buf, Bytes, BytesMut};
@@ -129,7 +130,7 @@ where
             .insert(SettingId::H3_DATAGRAM, config.enable_datagram as u64)
             .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
 
-        tracing::debug!("Sending server settings: {settings:?}");
+        tracing::debug!("Sending server settings: {settings:#x?}");
 
         if config.send_grease {
             tracing::debug!("Enabling send grease");
@@ -178,7 +179,7 @@ where
         //# Endpoints MUST NOT require any data to be received from
         //# the peer prior to sending the SETTINGS frame; settings MUST be sent
         //# as soon as the transport is ready to send data.
-        trace!("Sending Settings frame: {:?}", settings);
+        trace!("Sending Settings frame: {settings:#x?}");
         stream::write(
             &mut control_send,
             (StreamType::CONTROL, Frame::Settings(settings)),
@@ -217,8 +218,8 @@ where
         Ok(conn_inner)
     }
     /// Send GOAWAY with specified max_id, iff max_id is smaller than the previous one.
-    
-        pub async fn shutdown<T>(
+
+    pub async fn shutdown<T>(
         &mut self,
         sent_closing: &mut Option<T>,
         max_id: T,
@@ -259,7 +260,11 @@ where
         // Accept the request by accepting the next bidirectional stream
         // .into().into() converts the impl QuicError into crate::error::Error.
         // The `?` operator doesn't work here for some reason.
-        self.conn.lock().unwrap().poll_accept_bidi(cx).map_err(|e| e.into().into())
+        self.conn
+            .lock()
+            .unwrap()
+            .poll_accept_bidi(cx)
+            .map_err(|e| e.into().into())
     }
 
     pub fn poll_accept_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
@@ -516,7 +521,10 @@ where
     pub fn close<T: AsRef<str>>(&mut self, code: Code, reason: T) -> Error {
         self.shared.write("connection close err").error =
             Some(code.with_reason(reason.as_ref(), crate::error::ErrorLevel::ConnectionError));
-        self.conn.lock().unwrap().close(code, reason.as_ref().as_bytes());
+        self.conn
+            .lock()
+            .unwrap()
+            .close(code, reason.as_ref().as_bytes());
         code.with_reason(reason.as_ref(), crate::error::ErrorLevel::ConnectionError)
     }
 
@@ -524,16 +532,17 @@ where
     /// https://www.rfc-editor.org/rfc/rfc9114.html#stream-grease
     async fn start_grease_stream(&mut self) {
         // start the stream
-        let mut grease_stream = match future::poll_fn(|cx| self.conn.lock().unwrap().poll_open_send(cx))
-            .await
-            .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))
-        {
-            Err(err) => {
-                warn!("grease stream creation failed with {}", err);
-                return;
-            }
-            Ok(grease) => grease,
-        };
+        let mut grease_stream =
+            match future::poll_fn(|cx| self.conn.lock().unwrap().poll_open_send(cx))
+                .await
+                .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))
+            {
+                Err(err) => {
+                    warn!("grease stream creation failed with {}", err);
+                    return;
+                }
+                Ok(grease) => grease,
+            };
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
         //# Stream types of the format 0x1f * N + 0x21 for non-negative integer
@@ -564,6 +573,10 @@ where
             Ok(()) => (),
             Err(err) => warn!("grease stream error on close {}", err),
         };
+    }
+
+    pub fn got_peer_settings(&self) -> bool {
+        self.got_peer_settings
     }
 }
 

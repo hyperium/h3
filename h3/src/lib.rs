@@ -9,6 +9,7 @@ pub mod server;
 pub mod webtransport;
 
 pub use error::Error;
+pub use proto::headers::Protocol;
 
 mod buf;
 mod connection;

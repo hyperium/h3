@@ -58,10 +58,13 @@ use std::{
 };
 
 use bytes::{Buf, BytesMut};
-use futures_util::{future};
+use futures_util::future;
 use http::{response, HeaderMap, Method, Request, Response, StatusCode};
 use quic::StreamId;
-use tokio::{sync::{mpsc, Mutex}, task::JoinHandle};
+use tokio::{
+    sync::{mpsc, Mutex},
+    task::JoinHandle,
+};
 
 use crate::{
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
@@ -69,7 +72,7 @@ use crate::{
     frame::FrameStream,
     proto::{
         frame::{Frame, PayloadLen},
-        headers::Header,
+        headers::{Header, Protocol},
         push::PushId,
         varint::VarInt,
     },
@@ -144,7 +147,6 @@ where
         Builder { config }.build(conn).await
     }
 }
-
 
 impl<C, B> Connection<C, B>
 where
@@ -315,7 +317,7 @@ where
             };
 
         // Parse the request headers
-        let (method, uri, headers) = match Header::try_from(fields) {
+        let (method, uri, protocol, headers) = match Header::try_from(fields) {
             Ok(header) => match header.into_request_parts() {
                 Ok(parts) => parts,
                 Err(err) => {
@@ -337,11 +339,17 @@ where
                 return Err(error);
             }
         };
+
+        tracing::info!("Protocol: {protocol:?}");
         //  request_stream.stop_stream(Code::H3_MESSAGE_ERROR).await;
         let mut req = http::Request::new(());
         *req.method_mut() = method;
         *req.uri_mut() = uri;
         *req.headers_mut() = headers;
+        // NOTE: insert `Protocol` and not `Option<Protocol>`
+        if let Some(protocol) = protocol {
+            req.extensions_mut().insert(protocol);
+        }
         *req.version_mut() = http::Version::HTTP_3;
         // send the grease frame only once
         self.inner.send_grease_frame = false;
@@ -413,7 +421,7 @@ where
     }
 
     pub(crate) fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
-        while let Poll::Ready(frame) = self.poll_next_control(cx)? {}
+        while let Poll::Ready(_) = self.poll_next_control(cx)? {}
         Poll::Pending
     }
 
@@ -845,8 +853,8 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-     conn: Connection<C, B>,
-     connect_stream: RequestStream<C::BidiStream, B>,
+    conn: Connection<C, B>,
+    connect_stream: RequestStream<C::BidiStream, B>,
 }
 
 impl<C, B> WebTransportSession<C, B>
@@ -854,14 +862,17 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    /// Establishes a [`WebTransportSession`] using the provided HTTP/3 connection.
+    /// Accepts a *CONNECT* request for establishing a WebTransport session.
     ///
-    /// Fails if the server or client do not send `SETTINGS_ENABLE_WEBTRANSPORT=1`
-    pub async fn new(mut conn: Connection<C, B>) -> Result<Self, Error> {
-        future::poll_fn(|cx| conn.poll_next_control(cx)).await?;
+    /// TODO: is the API or the user responsible for validating the CONNECT request?
+    pub async fn accept(
+        request: Request<()>,
+        mut stream: RequestStream<C::BidiStream, B>,
+        mut conn: Connection<C, B>,
+    ) -> Result<Self, Error> {
+        // future::poll_fn(|cx| conn.poll_control(cx)).await?;
 
         let shared = conn.shared_state().clone();
-
         {
             let config = shared.write("Read WebTransport support").config;
 
@@ -899,30 +910,35 @@ where
             tracing::warn!("Server does not support CONNECT");
         }
 
-        tracing::debug!("Waiting for the client to send a CONNECT request");
+        // Respond to the CONNECT request.
 
         //= https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-3.3
-        // TODO: can the client send other requests than CONNECT?
-        let req = conn.accept().await?;
-        if let Some((req, mut stream)) = req {
-            if req.method() == Method::CONNECT {
-                tracing::info!("Received connect request: {req:?}");
-            }
-
-            let response = Response::builder()
+        let response = if validate_wt_connect(&request) {
+            Response::builder()
                 // This is the only header that chrome cares about.
                 .header("sec-webtransport-http3-draft", "draft02")
-                .status(StatusCode::OK).body(()).unwrap();
-            stream.send_response(response).await?;
-
-        Ok(Self { conn, connect_stream:stream })
+                .status(StatusCode::OK)
+                .body(())
+                .unwrap()
         } else {
-            return Err(conn.inner.close(
-                Code::H3_REQUEST_REJECTED,
-                "expected CONNECT request",
-            ));
-        }
+            Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(())
+                .unwrap()
+        };
+
+        tracing::info!("Sending response: {response:?}");
+        stream.send_response(response).await?;
+
+        Ok(Self {
+            conn,
+            connect_stream: stream,
+        })
     }
+}
+
+fn validate_wt_connect(request: &Request<()>) -> bool {
+    matches!((request.method(), request.extensions().get::<Protocol>()), (&Method::CONNECT, Some(p)) if p == &Protocol::WEB_TRANSPORT)
 }
 
 impl<C, B> WebTransportSession<C, B>
@@ -938,7 +954,9 @@ where
             while let Ok(Some(result)) = future::poll_fn(|cx| {
                 let mut conn = conn.lock().unwrap();
                 conn.poll_accept_datagram(cx)
-            }).await {
+            })
+            .await
+            {
                 info!("Received datagram: {:?}", result);
                 let mut conn = conn.lock().unwrap();
                 let result = conn.send_datagram(result);
