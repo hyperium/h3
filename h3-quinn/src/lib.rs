@@ -17,7 +17,7 @@ use futures_util::io::AsyncWrite as _;
 use futures_util::ready;
 use futures_util::stream::StreamExt as _;
 
-use quinn::{SendDatagramError, ReadToEndError};
+use quinn::SendDatagramError;
 pub use quinn::{
     self, crypto::Session, Endpoint, IncomingBiStreams, IncomingUniStreams, NewConnection, OpenBi,
     OpenUni, VarInt, WriteError,
@@ -304,6 +304,10 @@ where
     fn stop_sending(&mut self, error_code: u64) {
         self.recv.stop_sending(error_code)
     }
+
+    fn recv_id(&self) -> StreamId {
+        self.recv.recv_id()
+    }
 }
 
 impl<B> quic::SendStream<B> for BidiStream<B>
@@ -328,8 +332,8 @@ where
         self.send.send_data(data)
     }
 
-    fn id(&self) -> StreamId {
-        self.send.id()
+    fn send_id(&self) -> StreamId {
+        self.send.send_id()
     }
 }
 
@@ -365,6 +369,10 @@ impl quic::RecvStream for RecvStream {
         let _ = self
             .stream
             .stop(VarInt::from_u64(error_code).expect("invalid error_code"));
+    }
+
+    fn recv_id(&self) -> StreamId {
+        self.stream.id().0.try_into().expect("invalid stream id")
     }
 }
 
@@ -486,7 +494,7 @@ where
         Ok(())
     }
 
-    fn id(&self) -> StreamId {
+    fn send_id(&self) -> StreamId {
         self.stream.id().0.try_into().expect("invalid stream id")
     }
 }

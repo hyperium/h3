@@ -171,7 +171,7 @@ pub trait SendStream<B: Buf> {
     fn reset(&mut self, reset_code: u64);
 
     /// Get QUIC send stream id
-    fn id(&self) -> StreamId;
+    fn send_id(&self) -> StreamId;
 }
 
 /// A trait describing the "receive" actions of a QUIC stream.
@@ -192,6 +192,9 @@ pub trait RecvStream {
 
     /// Send a `STOP_SENDING` QUIC code.
     fn stop_sending(&mut self, error_code: u64);
+
+    /// Get QUIC send stream id
+    fn recv_id(&self) -> StreamId;
 }
 
 /// Optional trait to allow "splitting" a bidirectional stream into two sides.

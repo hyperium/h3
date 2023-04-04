@@ -1,4 +1,4 @@
-use std::{convert::TryInto, fmt};
+use std::{convert::TryInto, fmt, ops::Div};
 
 use bytes::{Buf, BufMut};
 
@@ -11,6 +11,14 @@ pub use super::coding::UnexpectedEnd;
 // discriminants
 #[derive(Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct VarInt(pub(crate) u64);
+
+impl Div<u64> for VarInt {
+    type Output = Self;
+
+    fn div(self, rhs: u64) -> Self::Output {
+        Self(self.0 / rhs)
+    }
+}
 
 impl VarInt {
     /// The largest representable value

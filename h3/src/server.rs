@@ -1,4 +1,4 @@
-//! This module provides methods to create a http/3 Server.
+//! This mofield1ule provides methods to create a http/3 Server.
 //!
 //! It allows to accept incoming requests, and send responses.
 //!
@@ -61,11 +61,12 @@ use std::{
 use bytes::{Buf, Bytes, BytesMut};
 use futures_util::{
     future::{self, Future},
-    ready,
+    ready, FutureExt,
 };
 use http::{response, HeaderMap, Method, Request, Response, StatusCode};
-use quic::StreamId;
+use pin_project::pin_project;
 use quic::RecvStream;
+use quic::StreamId;
 use tokio::sync::mpsc;
 
 use crate::{
@@ -73,13 +74,14 @@ use crate::{
     error::{Code, Error, ErrorLevel},
     frame::FrameStream,
     proto::{
+        datagram::Datagram,
         frame::{Frame, PayloadLen},
         headers::{Header, Protocol},
         push::PushId,
         varint::VarInt,
     },
     qpack,
-    quic::{self, RecvStream as _, SendStream as _},
+    quic::{self, SendStream as _},
     stream,
 };
 use tracing::{error, info, trace, warn};
@@ -258,7 +260,7 @@ where
         let mut request_stream = RequestStream {
             request_end: Arc::new(RequestEnd {
                 request_end: self.request_end_send.clone(),
-                stream_id: stream.id(),
+                stream_id: stream.send_id(),
             }),
             inner: connection::RequestStream::new(
                 stream,
@@ -359,6 +361,28 @@ where
         Ok(Some((req, request_stream)))
     }
 
+    /// Reads an incoming datagram
+    pub fn read_datagram(&self) -> ReadDatagram<C, B> {
+        ReadDatagram {
+            conn: &self.inner.conn,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Sends a datagram
+    pub fn send_datagram(&self, stream_id: StreamId, data: impl Buf) -> Result<(), Error> {
+        let mut buf = BytesMut::with_capacity(8 + data.remaining());
+
+        // Encode::encode(&Datagram::new(stream_id, data), &mut buf);
+        Datagram::new(stream_id, data).encode(&mut buf);
+
+        let buf = buf.freeze();
+        self.inner.conn.lock().unwrap().send_datagram(buf)?;
+        tracing::info!("Sent datagram");
+
+        Ok(())
+    }
+
     /// Initiate a graceful shutdown, accepting `max_request` potentially still in-flight
     ///
     /// See [connection shutdown](https://www.rfc-editor.org/rfc/rfc9114.html#connection-shutdown) for more information.
@@ -405,7 +429,7 @@ where
                     // incoming requests not belonging to the grace interval. It's possible that
                     // some acceptable request streams arrive after rejected requests.
                     if let Some(max_id) = self.sent_closing {
-                        if s.id() > max_id {
+                        if s.send_id() > max_id {
                             s.stop_sending(Code::H3_REQUEST_REJECTED.value());
                             s.reset(Code::H3_REQUEST_REJECTED.value());
                             if self.poll_requests_completion(cx).is_ready() {
@@ -414,8 +438,8 @@ where
                             continue;
                         }
                     }
-                    self.last_accepted_stream = Some(s.id());
-                    self.ongoing_streams.insert(s.id());
+                    self.last_accepted_stream = Some(s.send_id());
+                    self.ongoing_streams.insert(s.send_id());
                     break Poll::Ready(Ok(Some(s)));
                 }
             };
@@ -721,6 +745,11 @@ where
     pub fn stop_sending(&mut self, error_code: crate::error::Code) {
         self.inner.stream.stop_sending(error_code)
     }
+
+    /// Returns the underlying stream id
+    pub fn id(&self) -> StreamId {
+        self.inner.stream.id()
+    }
 }
 
 impl<S, B> RequestStream<S, B>
@@ -939,19 +968,17 @@ where
     }
 
     /// Receive a datagram from the client
-    pub fn read_datagram(&self) -> ReadDatagram<C, B> {
-        ReadDatagram {
-            conn: &self.conn.inner.conn,
-            _marker: PhantomData,
+    pub fn read_datagram(&self) -> WebTransportReadDatagram<C, B> {
+        WebTransportReadDatagram {
+            inner: self.conn.read_datagram(),
         }
     }
 
     /// Sends a datagram
     ///
     /// TODO: maybe make async. `quinn` does not require an async send
-    pub fn send_datagram(&self, data: Bytes) -> Result<(), Error> {
-        self.conn.inner.conn.lock().unwrap().send_datagram(data)?;
-        tracing::info!("Sent datagram");
+    pub fn send_datagram(&self, data: impl Buf) -> Result<(), Error> {
+        self.conn.send_datagram(self.connect_stream.id(), data)?;
 
         Ok(())
     }
@@ -963,10 +990,9 @@ where
             _marker: PhantomData,
         }
     }
-
 }
 
-/// Future for [`WebTransportSession::read_datagram`]
+/// Future for [`Connection::read_datagram`]
 pub struct ReadDatagram<'a, C, B>
 where
     C: quic::Connection<B>,
@@ -981,17 +1007,44 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
+    type Output = Result<Option<Datagram>, Error>;
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        tracing::trace!("poll: read_datagram");
+        match ready!(self.conn.lock().unwrap().poll_accept_datagram(cx))? {
+            Some(v) => Poll::Ready(Ok(Some(Datagram::decode(v)?))),
+            None => Poll::Ready(Ok(None)),
+        }
+    }
+}
+
+/// Future for [`Connection::read_datagram`]
+#[pin_project]
+pub struct WebTransportReadDatagram<'a, C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    #[pin]
+    inner: ReadDatagram<'a, C, B>,
+}
+
+impl<'a, C, B> Future for WebTransportReadDatagram<'a, C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
     type Output = Result<Option<Bytes>, Error>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         tracing::trace!("poll: read_datagram");
-        let res = match ready!(self.conn.lock().unwrap().poll_accept_datagram(cx)) {
-            Ok(v) => Ok(v),
-            Err(err) => Err(Error::from(err)),
+        let mut p = self.project();
+        let val = match ready!(p.inner.poll_unpin(cx))? {
+            Some(v) => Some(v.payload),
+            None => None,
         };
 
-        tracing::info!("Got datagram: {res:?}");
-        Poll::Ready(res)
+        Poll::Ready(Ok(val))
     }
 }
 
@@ -1010,10 +1063,9 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-
     type Output = Result<Option<<C as quic::Connection<B>>::RecvStream>, Error>;
 
-    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output>  {
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         tracing::trace!("poll: read_uni_stream");
         let res = match ready!(self.conn.lock().unwrap().poll_accept_recv(cx)) {
             Ok(v) => Ok(v),
@@ -1023,9 +1075,7 @@ where
         tracing::info!("Got uni stream");
         Poll::Ready(res)
     }
-
 }
-
 
 fn validate_wt_connect(request: &Request<()>) -> bool {
     matches!((request.method(), request.extensions().get::<Protocol>()), (&Method::CONNECT, Some(p)) if p == &Protocol::WEB_TRANSPORT)

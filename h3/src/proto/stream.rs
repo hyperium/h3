@@ -129,6 +129,10 @@ impl StreamId {
             Dir::Uni
         }
     }
+
+    pub(crate) fn into_inner(self) -> u64 {
+        self.0
+    }
 }
 
 impl TryFrom<u64> for StreamId {

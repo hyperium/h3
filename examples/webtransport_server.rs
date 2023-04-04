@@ -7,8 +7,8 @@ use std::{
 
 use anyhow::{anyhow, Result};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use futures::StreamExt;
 use futures::future::poll_fn;
+use futures::StreamExt;
 use http::{Method, Request, StatusCode};
 use rustls::{Certificate, PrivateKey};
 use structopt::StructOpt;
@@ -236,7 +236,9 @@ where
 
 /// This method will echo all inbound datagrams, unidirectional and bidirectional streams.
 #[tracing::instrument(level = "info", skip(session))]
-async fn handle_session_and_echo_all_inbound_messages<C, B>(session: WebTransportSession<C, B>) -> anyhow::Result<()>
+async fn handle_session_and_echo_all_inbound_messages<C, B>(
+    session: WebTransportSession<C, B>,
+) -> anyhow::Result<()>
 where
     C: 'static + Send + h3::quic::Connection<B>,
     B: Buf,
@@ -247,13 +249,18 @@ where
                 let datagram = datagram?;
                 if let Some(datagram) = datagram {
                     tracing::info!("Responding with {datagram:?}");
-                    session.send_datagram(datagram).unwrap();
+                    // Put something before to make sure encoding and decoding works and don't just
+                    // pass through
+                    let mut resp = BytesMut::from(&b"Response: "[..]);
+                    resp.put(datagram);
+
+                    session.send_datagram(resp).unwrap();
                     tracing::info!("Finished sending datagram");
                 }
             }
             stream = session.read_uni_stream() => {
                 let mut stream = stream?.unwrap();
-                // TODO: got stuck polling this future!!! 
+                // TODO: got stuck polling this future!!!
                 if let Ok(Some(mut bytes)) = poll_fn(|cx| stream.poll_data(cx)).await {
                     tracing::info!("Received unidirectional stream with {}", bytes.get_u8());
                 }

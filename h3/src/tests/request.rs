@@ -630,7 +630,8 @@ async fn header_too_big_discard_from_client_trailers() {
         incoming_req
             .shared_state()
             .write("server")
-            .peer_max_field_section_size = u64::MAX;
+            .config
+            .max_field_section_size = u64::MAX;
 
         request_stream
             .send_response(
@@ -701,7 +702,8 @@ async fn header_too_big_server_error() {
         incoming_req
             .shared_state()
             .write("server")
-            .peer_max_field_section_size = 12;
+            .config
+            .max_field_section_size = 12;
 
         let err_kind = request_stream
             .send_response(
@@ -781,7 +783,8 @@ async fn header_too_big_server_error_trailers() {
         incoming_req
             .shared_state()
             .write("write")
-            .peer_max_field_section_size = 200;
+            .config
+            .max_field_section_size = 200;
 
         let mut trailers = HeaderMap::new();
         trailers.insert("trailer", "value".repeat(100).parse().unwrap());
@@ -1335,7 +1338,7 @@ fn request_encode<B: BufMut>(buf: &mut B, req: http::Request<()>) {
         headers,
         ..
     } = parts;
-    let headers = Header::request(method, uri, headers).unwrap();
+    let headers = Header::request(method, uri, headers, Default::default()).unwrap();
     let mut block = BytesMut::new();
     qpack::encode_stateless(&mut block, headers).unwrap();
     Frame::headers(block).encode_with_payload(buf);

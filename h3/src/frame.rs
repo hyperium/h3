@@ -140,6 +140,10 @@ where
             }
         }
     }
+
+    pub fn id(&self) -> StreamId {
+        self.stream.recv_id()
+    }
 }
 
 impl<T, B> SendStream<B> for FrameStream<T, B>
@@ -165,8 +169,8 @@ where
         self.stream.reset(reset_code)
     }
 
-    fn id(&self) -> StreamId {
-        self.stream.id()
+    fn send_id(&self) -> StreamId {
+        self.stream.send_id()
     }
 }
 
@@ -568,6 +572,10 @@ mod tests {
         }
 
         fn stop_sending(&mut self, _: u64) {
+            unimplemented!()
+        }
+
+        fn recv_id(&self) -> StreamId {
             unimplemented!()
         }
     }
