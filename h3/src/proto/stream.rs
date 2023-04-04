@@ -26,7 +26,7 @@ stream_types! {
     PUSH = 0x01,
     ENCODER = 0x02,
     DECODER = 0x03,
-    WEBTRANSPORT = 0x54,
+    WEBTRANSPORT_UNI = 0x54,
 }
 
 impl StreamType {
@@ -60,6 +60,7 @@ impl fmt::Display for StreamType {
             &StreamType::CONTROL => write!(f, "Control"),
             &StreamType::ENCODER => write!(f, "Encoder"),
             &StreamType::DECODER => write!(f, "Decoder"),
+            &StreamType::WEBTRANSPORT_UNI => write!(f, "WebTransportUni"),
             x => write!(f, "StreamType({})", x.0),
         }
     }

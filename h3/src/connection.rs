@@ -1,6 +1,5 @@
 use std::{
     convert::TryFrom,
-    mem,
     sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard},
     task::{Context, Poll},
 };
@@ -78,7 +77,8 @@ where
 {
     pub(super) shared: SharedStateRef,
     // TODO: breaking encapsulation just to see if we can get this to work, will fix before merging
-    pub conn: Arc<Mutex<C>>,
+    // TODO: Remove Mutex as *every* operation congests on this
+    pub(super) conn: Arc<Mutex<C>>,
     control_send: C::SendStream,
     control_recv: Option<FrameStream<C::RecvStream, B>>,
     decoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
@@ -267,6 +267,7 @@ where
             .map_err(|e| e.into().into())
     }
 
+    /// Processes *all* incoming uni streams
     pub fn poll_accept_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
             return Poll::Ready(Err(e.clone()));
@@ -318,6 +319,7 @@ where
                 //# receipt of a second stream claiming to be a control stream MUST be
                 //# treated as a connection error of type H3_STREAM_CREATION_ERROR.
                 AcceptedRecvStream::Control(s) => {
+                    tracing::debug!("Received control stream");
                     if self.control_recv.is_some() {
                         return Poll::Ready(Err(
                             self.close(Code::H3_STREAM_CREATION_ERROR, "got two control streams")

@@ -18,7 +18,8 @@ use tracing::{error, info, trace_span};
 use h3::{
     error::ErrorLevel,
     quic::{self, BidiStream, RecvStream},
-    server::{Config, Connection, RequestStream, WebTransportSession},
+    server::{Config, Connection, RequestStream},
+    webtransport::server::WebTransportSession,
     Protocol,
 };
 use h3_quinn::quinn;
@@ -258,7 +259,7 @@ where
                     tracing::info!("Finished sending datagram");
                 }
             }
-            stream = session.read_uni_stream() => {
+            stream = session.accept_uni() => {
                 let mut stream = stream?.unwrap();
                 // TODO: got stuck polling this future!!!
                 if let Ok(Some(mut bytes)) = poll_fn(|cx| stream.poll_data(cx)).await {

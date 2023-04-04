@@ -54,6 +54,8 @@ use std::{
     collections::HashSet,
     convert::TryFrom,
     marker::PhantomData,
+    option::Option,
+    result::Result,
     sync::Arc,
     task::{Context, Poll},
 };
@@ -106,8 +108,8 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    /// TODO: find a better way to manage the connection
-    inner: ConnectionInner<C, B>,
+    /// TODO: temporarily break encapsulation for `WebTransportSession`
+    pub(crate) inner: ConnectionInner<C, B>,
     max_field_section_size: u64,
     // List of all incoming streams that are currently running.
     ongoing_streams: HashSet<StreamId>,
@@ -149,6 +151,11 @@ where
     /// Create a new HTTP/3 server connection using the provided settings.
     pub async fn with_config(conn: C, config: Config) -> Result<Self, Error> {
         Builder { config }.build(conn).await
+    }
+
+    /// Closes the connection with a code and a reason.
+    pub(crate) fn close<T: AsRef<str>>(&mut self, code: Code, reason: T) -> Error {
+        self.inner.close(code, reason)
     }
 }
 
@@ -489,6 +496,17 @@ where
             }
         }
         Poll::Ready(Ok(frame))
+    }
+
+    /// Accepts an incoming recv stream
+    fn poll_accept_uni(
+        &self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<<C as quic::Connection<B>>::RecvStream>, Error>> {
+        todo!()
+        // let recv = ready!(self.inner.poll_accept_recv(cx))?;
+
+        // Poll::Ready(Ok(recv))
     }
 
     fn poll_requests_completion(&mut self, cx: &mut Context<'_>) -> Poll<()> {
@@ -871,127 +889,6 @@ impl Drop for RequestEnd {
     }
 }
 
-// WEBTRANSPORT
-// TODO: extract server.rs to server/mod.rs and submodules
-
-/// WebTransport session driver.
-///
-/// Maintains the session using the underlying HTTP/3 connection.
-///
-/// Similar to [`crate::Connection`] it is generic over the QUIC implementation and Buffer.
-pub struct WebTransportSession<C, B>
-where
-    C: quic::Connection<B>,
-    B: Buf,
-{
-    conn: Connection<C, B>,
-    connect_stream: RequestStream<C::BidiStream, B>,
-}
-
-impl<C, B> WebTransportSession<C, B>
-where
-    C: quic::Connection<B>,
-    B: Buf,
-{
-    /// Accepts a *CONNECT* request for establishing a WebTransport session.
-    ///
-    /// TODO: is the API or the user responsible for validating the CONNECT request?
-    pub async fn accept(
-        request: Request<()>,
-        mut stream: RequestStream<C::BidiStream, B>,
-        mut conn: Connection<C, B>,
-    ) -> Result<Self, Error> {
-        // future::poll_fn(|cx| conn.poll_control(cx)).await?;
-
-        let shared = conn.shared_state().clone();
-        {
-            let config = shared.write("Read WebTransport support").config;
-
-            tracing::debug!("Client settings: {:#?}", config);
-            if !config.enable_webtransport {
-                return Err(conn.inner.close(
-                    Code::H3_SETTINGS_ERROR,
-                    "webtransport is not supported by client",
-                ));
-            }
-
-            if !config.enable_datagram {
-                return Err(conn.inner.close(
-                    Code::H3_SETTINGS_ERROR,
-                    "datagrams are not supported by client",
-                ));
-            }
-        }
-
-        tracing::debug!("Validated client webtransport support");
-
-        // The peer is responsible for validating our side of the webtransport support.
-        //
-        // However, it is still advantageous to show a log on the server as (attempting) to
-        // establish a WebTransportSession without the proper h3 config is usually a mistake.
-        if !conn.inner.config.enable_webtransport {
-            tracing::warn!("Server does not support webtransport");
-        }
-
-        if !conn.inner.config.enable_datagram {
-            tracing::warn!("Server does not support datagrams");
-        }
-
-        if !conn.inner.config.enable_connect {
-            tracing::warn!("Server does not support CONNECT");
-        }
-
-        // Respond to the CONNECT request.
-
-        //= https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-3.3
-        let response = if validate_wt_connect(&request) {
-            Response::builder()
-                // This is the only header that chrome cares about.
-                .header("sec-webtransport-http3-draft", "draft02")
-                .status(StatusCode::OK)
-                .body(())
-                .unwrap()
-        } else {
-            Response::builder()
-                .status(StatusCode::BAD_REQUEST)
-                .body(())
-                .unwrap()
-        };
-
-        tracing::info!("Sending response: {response:?}");
-        stream.send_response(response).await?;
-
-        Ok(Self {
-            conn,
-            connect_stream: stream,
-        })
-    }
-
-    /// Receive a datagram from the client
-    pub fn read_datagram(&self) -> WebTransportReadDatagram<C, B> {
-        WebTransportReadDatagram {
-            inner: self.conn.read_datagram(),
-        }
-    }
-
-    /// Sends a datagram
-    ///
-    /// TODO: maybe make async. `quinn` does not require an async send
-    pub fn send_datagram(&self, data: impl Buf) -> Result<(), Error> {
-        self.conn.send_datagram(self.connect_stream.id(), data)?;
-
-        Ok(())
-    }
-
-    /// Receive a unidirectional stream from the client, it reads the stream until EOF.
-    pub fn read_uni_stream(&self) -> ReadUniStream<C, B> {
-        ReadUniStream {
-            conn: &self.conn.inner.conn,
-            _marker: PhantomData,
-        }
-    }
-}
-
 /// Future for [`Connection::read_datagram`]
 pub struct ReadDatagram<'a, C, B>
 where
@@ -1016,67 +913,4 @@ where
             None => Poll::Ready(Ok(None)),
         }
     }
-}
-
-/// Future for [`Connection::read_datagram`]
-#[pin_project]
-pub struct WebTransportReadDatagram<'a, C, B>
-where
-    C: quic::Connection<B>,
-    B: Buf,
-{
-    #[pin]
-    inner: ReadDatagram<'a, C, B>,
-}
-
-impl<'a, C, B> Future for WebTransportReadDatagram<'a, C, B>
-where
-    C: quic::Connection<B>,
-    B: Buf,
-{
-    type Output = Result<Option<Bytes>, Error>;
-
-    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        tracing::trace!("poll: read_datagram");
-        let mut p = self.project();
-        let val = match ready!(p.inner.poll_unpin(cx))? {
-            Some(v) => Some(v.payload),
-            None => None,
-        };
-
-        Poll::Ready(Ok(val))
-    }
-}
-
-/// Future for [`WebTransportSession::read_uni_stream`]
-pub struct ReadUniStream<'a, C, B>
-where
-    C: quic::Connection<B>,
-    B: Buf,
-{
-    conn: &'a std::sync::Mutex<C>,
-    _marker: PhantomData<B>,
-}
-
-impl<'a, C, B> Future for ReadUniStream<'a, C, B>
-where
-    C: quic::Connection<B>,
-    B: Buf,
-{
-    type Output = Result<Option<<C as quic::Connection<B>>::RecvStream>, Error>;
-
-    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        tracing::trace!("poll: read_uni_stream");
-        let res = match ready!(self.conn.lock().unwrap().poll_accept_recv(cx)) {
-            Ok(v) => Ok(v),
-            Err(err) => Err(Error::from(err)),
-        };
-
-        tracing::info!("Got uni stream");
-        Poll::Ready(res)
-    }
-}
-
-fn validate_wt_connect(request: &Request<()>) -> bool {
-    matches!((request.method(), request.extensions().get::<Protocol>()), (&Method::CONNECT, Some(p)) if p == &Protocol::WEB_TRANSPORT)
 }

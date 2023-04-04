@@ -167,6 +167,7 @@ where
     Push(u64, FrameStream<S, B>),
     Encoder(S),
     Decoder(S),
+    WebSocketUni(S),
     Reserved,
 }
 
