@@ -65,6 +65,7 @@ use futures_util::{
 };
 use http::{response, HeaderMap, Method, Request, Response, StatusCode};
 use quic::StreamId;
+use quic::RecvStream;
 use tokio::sync::mpsc;
 
 use crate::{
@@ -954,6 +955,15 @@ where
 
         Ok(())
     }
+
+    /// Receive a unidirectional stream from the client, it reads the stream until EOF.
+    pub fn read_uni_stream(&self) -> ReadUniStream<C, B> {
+        ReadUniStream {
+            conn: &self.conn.inner.conn,
+            _marker: PhantomData,
+        }
+    }
+
 }
 
 /// Future for [`WebTransportSession::read_datagram`]
@@ -984,6 +994,38 @@ where
         Poll::Ready(res)
     }
 }
+
+/// Future for [`WebTransportSession::read_uni_stream`]
+pub struct ReadUniStream<'a, C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    conn: &'a std::sync::Mutex<C>,
+    _marker: PhantomData<B>,
+}
+
+impl<'a, C, B> Future for ReadUniStream<'a, C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+
+    type Output = Result<Option<<C as quic::Connection<B>>::RecvStream>, Error>;
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output>  {
+        tracing::trace!("poll: read_uni_stream");
+        let res = match ready!(self.conn.lock().unwrap().poll_accept_recv(cx)) {
+            Ok(v) => Ok(v),
+            Err(err) => Err(Error::from(err)),
+        };
+
+        tracing::info!("Got uni stream");
+        Poll::Ready(res)
+    }
+
+}
+
 
 fn validate_wt_connect(request: &Request<()>) -> bool {
     matches!((request.method(), request.extensions().get::<Protocol>()), (&Method::CONNECT, Some(p)) if p == &Protocol::WEB_TRANSPORT)

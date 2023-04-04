@@ -8,6 +8,7 @@ use std::{
 use anyhow::{anyhow, Result};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use futures::StreamExt;
+use futures::future::poll_fn;
 use http::{Method, Request, StatusCode};
 use rustls::{Certificate, PrivateKey};
 use structopt::StructOpt;
@@ -16,7 +17,7 @@ use tracing::{error, info, trace_span};
 
 use h3::{
     error::ErrorLevel,
-    quic::{self, BidiStream},
+    quic::{self, BidiStream, RecvStream},
     server::{Config, Connection, RequestStream, WebTransportSession},
     Protocol,
 };
@@ -141,8 +142,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     while let Some(new_conn) = incoming.next().await {
         trace_span!("New connection being attempted");
 
-        let root = root.clone();
-
         tokio::spawn(async move {
             match new_conn.await {
                 Ok(conn) => {
@@ -169,8 +168,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // tracing::info!("Finished establishing webtransport session");
                     // // 4. Get datagrams, bidirectional streams, and unidirectional streams and wait for client requests here.
                     // // h3_conn needs to handover the datagrams, bidirectional streams, and unidirectional streams to the webtransport session.
-                    // // session.echo_all_web_transport_requests().await;
-                    // let handle = session.echo_all_web_transport_requests().await;
                     // let result = handle.await;
                 }
                 Err(err) => {
@@ -210,8 +207,7 @@ where
                         tracing::info!("Established webtransport session");
                         // 4. Get datagrams, bidirectional streams, and unidirectional streams and wait for client requests here.
                         // h3_conn needs to handover the datagrams, bidirectional streams, and unidirectional streams to the webtransport session.
-                        // session.echo_all_web_transport_requests().await;
-                        handle_session(session).await?;
+                        handle_session_and_echo_all_inbound_messages(session).await?;
 
                         return Ok(());
                     }
@@ -238,26 +234,33 @@ where
     Ok(())
 }
 
+/// This method will echo all inbound datagrams, unidirectional and bidirectional streams.
 #[tracing::instrument(level = "info", skip(session))]
-async fn handle_session<C, B>(session: WebTransportSession<C, B>) -> anyhow::Result<()>
+async fn handle_session_and_echo_all_inbound_messages<C, B>(session: WebTransportSession<C, B>) -> anyhow::Result<()>
 where
     C: 'static + Send + h3::quic::Connection<B>,
     B: Buf,
 {
-    // session.echo_all_web_transport_requests().await;
     loop {
         tokio::select! {
             datagram = session.read_datagram() => {
                 let datagram = datagram?;
                 if let Some(datagram) = datagram {
-                    // let mut response = BytesMut::from("echo: ");
-                    // response.put(datagram);
-
                     tracing::info!("Responding with {datagram:?}");
                     session.send_datagram(datagram).unwrap();
                     tracing::info!("Finished sending datagram");
                 }
             }
+            stream = session.read_uni_stream() => {
+                let mut stream = stream?.unwrap();
+                // TODO: got stuck polling this future!!! 
+                if let Ok(Some(mut bytes)) = poll_fn(|cx| stream.poll_data(cx)).await {
+                    tracing::info!("Received unidirectional stream with {}", bytes.get_u8());
+                }
+            }
+            // stream = session = session.read_bi_stream() => {
+            //     let mut stream = stream?.unwrap();
+            // }
             else => {
                 break
             }

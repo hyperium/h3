@@ -17,7 +17,7 @@ use futures_util::io::AsyncWrite as _;
 use futures_util::ready;
 use futures_util::stream::StreamExt as _;
 
-use quinn::SendDatagramError;
+use quinn::{SendDatagramError, ReadToEndError};
 pub use quinn::{
     self, crypto::Session, Endpoint, IncomingBiStreams, IncomingUniStreams, NewConnection, OpenBi,
     OpenUni, VarInt, WriteError,
