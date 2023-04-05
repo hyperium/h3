@@ -5,7 +5,7 @@ use std::{
 };
 
 use bytes::{Buf, Bytes, BytesMut};
-use futures_util::{future, ready};
+use futures_util::{future, ready, stream::FuturesUnordered, StreamExt};
 use http::HeaderMap;
 use tracing::{trace, warn};
 
@@ -21,7 +21,7 @@ use crate::{
     qpack,
     quic::{self, SendStream as _},
     server::Config,
-    stream::{self, AcceptRecvStream, AcceptedRecvStream},
+    stream::{self, AcceptRecvStream, AcceptRecvStreamFuture, AcceptedRecvStream},
 };
 
 #[doc(hidden)]
@@ -70,6 +70,18 @@ pub trait ConnectionState {
     }
 }
 
+pub(crate) struct AcceptedStreams<R> {
+    pub uni_streams: Vec<R>,
+}
+
+impl<R> Default for AcceptedStreams<R> {
+    fn default() -> Self {
+        Self {
+            uni_streams: Default::default(),
+        }
+    }
+}
+
 pub struct ConnectionInner<C, B>
 where
     C: quic::Connection<B>,
@@ -83,7 +95,13 @@ where
     control_recv: Option<FrameStream<C::RecvStream, B>>,
     decoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
     encoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
-    pending_recv_streams: Vec<AcceptRecvStream<C::RecvStream>>,
+    /// Stores incoming uni/recv streams which have yet to be claimed.
+    ///
+    /// This is opposed to discarding them by returning in `poll_accept_recv`, which may cause them to be missed by something else polling.
+    accepted_streams: AcceptedStreams<C::RecvStream>,
+
+    pending_recv_streams: FuturesUnordered<AcceptRecvStreamFuture<C::RecvStream, B>>,
+
     got_peer_settings: bool,
     pub(super) send_grease_frame: bool,
     pub(super) config: Config,
@@ -199,10 +217,11 @@ where
             control_recv: None,
             decoder_recv: None,
             encoder_recv: None,
-            pending_recv_streams: Vec::with_capacity(3),
+            pending_recv_streams: FuturesUnordered::new(),
             got_peer_settings: false,
             send_grease_frame: config.send_grease,
             config,
+            accepted_streams: Default::default(),
         };
         // start a grease stream
         if config.send_grease {
@@ -267,52 +286,38 @@ where
             .map_err(|e| e.into().into())
     }
 
-    /// Processes *all* incoming uni streams
-    pub fn poll_accept_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+    /// Polls incoming streams
+    ///
+    /// Accepted streams which are not control, decoder, or encoder streams are buffer in `accepted_recv_streams`
+    pub fn poll_accept_recv(&mut self, cx: &mut Context<'_>) -> Result<(), Error> {
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
-            return Poll::Ready(Err(e.clone()));
+            return Err(e.clone());
         }
 
+        // Get all currently pending streams
         loop {
-            match self
-                .conn
-                .lock()
-                .unwrap()
-                .poll_accept_recv(cx)
-                .map_err(|v| Error::from(v))?
-            {
+            match self.conn.lock().unwrap().poll_accept_recv(cx)? {
                 Poll::Ready(Some(stream)) => self
                     .pending_recv_streams
-                    .push(AcceptRecvStream::new(stream)),
+                    .push(AcceptRecvStreamFuture::new(AcceptRecvStream::new(stream))),
                 Poll::Ready(None) => {
-                    return Poll::Ready(Err(Code::H3_GENERAL_PROTOCOL_ERROR.with_reason(
+                    return Err(Code::H3_GENERAL_PROTOCOL_ERROR.with_reason(
                         "Connection closed unexpected",
                         crate::error::ErrorLevel::ConnectionError,
-                    )))
+                    ))
                 }
                 Poll::Pending => break,
             }
         }
 
-        let mut resolved = vec![];
-
-        for (index, pending) in self.pending_recv_streams.iter_mut().enumerate() {
-            match pending.poll_type(cx)? {
-                Poll::Ready(()) => resolved.push(index),
-                Poll::Pending => (),
-            }
-        }
-
-        for (removed, index) in resolved.into_iter().enumerate() {
+        // Get all currently ready streams
+        while let Poll::Ready(Some(stream)) = self.pending_recv_streams.poll_next_unpin(cx) {
             //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
             //= type=implication
             //# As certain stream types can affect connection state, a recipient
             //# SHOULD NOT discard data from incoming unidirectional streams prior to
             //# reading the stream type.
-            let stream = self
-                .pending_recv_streams
-                .remove(index - removed)
-                .into_stream()?;
+            let stream = stream?;
             match stream {
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
                 //# Only one control stream per peer is permitted;
@@ -321,25 +326,30 @@ where
                 AcceptedRecvStream::Control(s) => {
                     tracing::debug!("Received control stream");
                     if self.control_recv.is_some() {
-                        return Poll::Ready(Err(
+                        return Err(
                             self.close(Code::H3_STREAM_CREATION_ERROR, "got two control streams")
-                        ));
+                        );
                     }
                     self.control_recv = Some(s);
                 }
                 enc @ AcceptedRecvStream::Encoder(_) => {
                     if let Some(_prev) = self.encoder_recv.replace(enc) {
-                        return Poll::Ready(Err(
+                        return Err(
                             self.close(Code::H3_STREAM_CREATION_ERROR, "got two encoder streams")
-                        ));
+                        );
                     }
                 }
                 dec @ AcceptedRecvStream::Decoder(_) => {
                     if let Some(_prev) = self.decoder_recv.replace(dec) {
-                        return Poll::Ready(Err(
+                        return Err(
                             self.close(Code::H3_STREAM_CREATION_ERROR, "got two decoder streams")
-                        ));
+                        );
                     }
+                }
+                AcceptedRecvStream::WebTransportUni(s) => {
+                    // Store until someone else picks it up, like a webtransport session which is
+                    // not yet established.
+                    self.accepted_streams.uni_streams.push(s)
                 }
 
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
@@ -350,28 +360,24 @@ where
             }
         }
 
-        Poll::Pending
+        Ok(())
     }
 
+    /// Waits for the control stream to be received and reads subsequent frames.
     pub fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<Frame<PayloadLen>, Error>> {
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
             return Poll::Ready(Err(e.clone()));
         }
 
-        loop {
-            match self.poll_accept_recv(cx) {
-                Poll::Ready(Ok(_)) => continue,
-                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
-                Poll::Pending if self.control_recv.is_none() => return Poll::Pending,
-                _ => break,
+        let recv = loop {
+            // TODO
+            self.poll_accept_recv(cx)?;
+            if let Some(v) = &mut self.control_recv {
+                break v;
             }
-        }
+        };
 
-        let recvd = ready!(self
-            .control_recv
-            .as_mut()
-            .expect("control_recv")
-            .poll_next(cx))?;
+        let recvd = ready!(recv.poll_next(cx))?;
 
         let res = match recvd {
             //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
@@ -583,8 +589,8 @@ where
         };
     }
 
-    pub fn got_peer_settings(&self) -> bool {
-        self.got_peer_settings
+    pub(crate) fn accepted_streams_mut(&mut self) -> &mut AcceptedStreams<C::RecvStream> {
+        &mut self.accepted_streams
     }
 }
 

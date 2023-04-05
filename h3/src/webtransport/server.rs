@@ -3,21 +3,21 @@
 use std::{
     marker::PhantomData,
     pin::Pin,
+    sync::{Arc, Mutex},
     task::{Context, Poll},
 };
-
-use bytes::{Buf, Bytes};
-use futures_util::{future, ready, Future};
-use http::{Method, Request, Response, StatusCode};
-use pin_project::pin_project;
 
 use crate::{
     connection::ConnectionState,
     error::Code,
+    proto::datagram::Datagram,
     quic,
-    server::{self, Connection, ReadDatagram, RequestStream},
+    server::{self, Connection, RequestStream},
     Error, Protocol,
 };
+use bytes::{Buf, Bytes};
+use futures_util::{ready, Future};
+use http::{Method, Request, Response, StatusCode};
 
 /// WebTransport session driver.
 ///
@@ -29,7 +29,7 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    conn: Connection<C, B>,
+    conn: Mutex<Connection<C, B>>,
     connect_stream: RequestStream<C::BidiStream, B>,
 }
 
@@ -107,15 +107,16 @@ where
         stream.send_response(response).await?;
 
         Ok(Self {
-            conn,
+            conn: Mutex::new(conn),
             connect_stream: stream,
         })
     }
 
     /// Receive a datagram from the client
-    pub fn read_datagram(&self) -> WebTransportReadDatagram<C, B> {
-        WebTransportReadDatagram {
-            inner: self.conn.read_datagram(),
+    pub fn read_datagram(&self) -> ReadDatagram<C, B> {
+        ReadDatagram {
+            conn: self.conn.lock().unwrap().inner.conn.clone(),
+            _marker: PhantomData,
         }
     }
 
@@ -123,7 +124,10 @@ where
     ///
     /// TODO: maybe make async. `quinn` does not require an async send
     pub fn send_datagram(&self, data: impl Buf) -> Result<(), Error> {
-        self.conn.send_datagram(self.connect_stream.id(), data)?;
+        self.conn
+            .lock()
+            .unwrap()
+            .send_datagram(self.connect_stream.id(), data)?;
 
         Ok(())
     }
@@ -131,24 +135,23 @@ where
     /// Accept an incoming unidirectional stream from the client, it reads the stream until EOF.
     pub fn accept_uni(&self) -> AcceptUni<C, B> {
         AcceptUni {
-            conn: &self.conn.inner.conn,
+            conn: &self.conn,
             _marker: PhantomData,
         }
     }
 }
 
 /// Future for [`Connection::read_datagram`]
-#[pin_project]
-pub struct WebTransportReadDatagram<'a, C, B>
+pub struct ReadDatagram<C, B>
 where
     C: quic::Connection<B>,
     B: Buf,
 {
-    #[pin]
-    inner: ReadDatagram<'a, C, B>,
+    conn: Arc<Mutex<C>>,
+    _marker: PhantomData<B>,
 }
 
-impl<'a, C, B> Future for WebTransportReadDatagram<'a, C, B>
+impl<C, B> Future for ReadDatagram<C, B>
 where
     C: quic::Connection<B>,
     B: Buf,
@@ -157,13 +160,12 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         tracing::trace!("poll: read_datagram");
-        let mut p = self.project();
-        let val = match ready!(p.inner.poll(cx))? {
-            Some(v) => Some(v.payload),
-            None => None,
-        };
 
-        Poll::Ready(Ok(val))
+        let mut conn = self.conn.lock().unwrap();
+        match ready!(conn.poll_accept_datagram(cx))? {
+            Some(v) => Poll::Ready(Ok(Some(Datagram::decode(v)?.payload))),
+            None => Poll::Ready(Ok(None)),
+        }
     }
 }
 
@@ -173,7 +175,7 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    conn: &'a std::sync::Mutex<C>,
+    conn: &'a Mutex<server::Connection<C, B>>,
     _marker: PhantomData<B>,
 }
 
@@ -186,13 +188,20 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         tracing::trace!("poll: read_uni_stream");
-        let res = match ready!(self.conn.lock().unwrap().poll_accept_recv(cx)) {
-            Ok(v) => Ok(v),
-            Err(err) => Err(Error::from(err)),
-        };
 
-        tracing::info!("Got uni stream");
-        Poll::Ready(res)
+        let mut conn = self.conn.lock().unwrap();
+        conn.inner.poll_accept_recv(cx)?;
+
+        // Get the currently available streams
+        let streams = conn.inner.accepted_streams_mut();
+        if let Some(stream) = streams.uni_streams.pop() {
+            tracing::info!("Got uni stream");
+            return Poll::Ready(Ok(Some(stream)));
+        }
+
+        tracing::debug!("Waiting on incoming streams");
+
+        Poll::Pending
     }
 }
 

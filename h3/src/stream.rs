@@ -1,7 +1,11 @@
-use std::task::{Context, Poll};
+use std::{
+    marker::PhantomData,
+    task::{Context, Poll},
+};
 
 use bytes::{Buf, BufMut as _, Bytes};
-use futures_util::{future, ready};
+use futures_util::{future, ready, Future};
+use pin_project::pin_project;
 use quic::RecvStream;
 
 use crate::{
@@ -167,14 +171,24 @@ where
     Push(u64, FrameStream<S, B>),
     Encoder(S),
     Decoder(S),
-    WebSocketUni(S),
+    WebTransportUni(S),
     Reserved,
 }
 
-pub(super) struct AcceptRecvStream<S>
+impl<S, B> AcceptedRecvStream<S, B>
 where
     S: quic::RecvStream,
 {
+    /// Returns `true` if the accepted recv stream is [`WebTransportUni`].
+    ///
+    /// [`WebTransportUni`]: AcceptedRecvStream::WebTransportUni
+    #[must_use]
+    pub fn is_web_transport_uni(&self) -> bool {
+        matches!(self, Self::WebTransportUni(..))
+    }
+}
+
+pub(super) struct AcceptRecvStream<S> {
     stream: S,
     ty: Option<StreamType>,
     push_id: Option<u64>,
@@ -207,6 +221,7 @@ where
             ),
             StreamType::ENCODER => AcceptedRecvStream::Encoder(self.stream),
             StreamType::DECODER => AcceptedRecvStream::Decoder(self.stream),
+            StreamType::WEBTRANSPORT_UNI => AcceptedRecvStream::WebTransportUni(self.stream),
             t if t.value() > 0x21 && (t.value() - 0x21) % 0x1f == 0 => AcceptedRecvStream::Reserved,
 
             //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
@@ -282,6 +297,38 @@ where
                 })?);
             }
         }
+    }
+}
+
+/// Future for accepting a receive stream and reading the type
+#[pin_project] // Allows moving out of `inner`
+pub(super) struct AcceptRecvStreamFuture<S, B> {
+    inner: Option<AcceptRecvStream<S>>,
+    _marker: PhantomData<B>,
+}
+
+impl<S, B> AcceptRecvStreamFuture<S, B> {
+    pub(super) fn new(recv: AcceptRecvStream<S>) -> Self {
+        Self {
+            inner: Some(recv),
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<S, B> Future for AcceptRecvStreamFuture<S, B>
+where
+    S: RecvStream,
+    B: Buf,
+{
+    type Output = Result<AcceptedRecvStream<S, B>, Error>;
+
+    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let inner = self.inner.as_mut().unwrap();
+        ready!(inner.poll_type(cx))?;
+
+        let stream = self.inner.take().unwrap().into_stream()?;
+        Poll::Ready(Ok(stream))
     }
 }
 
