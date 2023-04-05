@@ -18,6 +18,7 @@ use crate::{
 use bytes::{Buf, Bytes};
 use futures_util::{ready, Future};
 use http::{Method, Request, Response, StatusCode};
+use quic::StreamId;
 
 /// WebTransport session driver.
 ///
@@ -29,6 +30,8 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
+    // See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-2-3
+    session_id: StreamId,
     conn: Mutex<Connection<C, B>>,
     connect_stream: RequestStream<C::BidiStream, B>,
 }
@@ -106,7 +109,10 @@ where
         tracing::info!("Sending response: {response:?}");
         stream.send_response(response).await?;
 
+        let session_id = stream.send_id();
+        tracing::info!("Established new WebTransport session with id {session_id:?}");
         Ok(Self {
+            session_id,
             conn: Mutex::new(conn),
             connect_stream: stream,
         })

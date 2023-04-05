@@ -849,6 +849,11 @@ where
     //# implementation resets the sending parts of streams and aborts reading
     //# on the receiving parts of streams; see Section 2.4 of
     //# [QUIC-TRANSPORT].
+
+    /// Returns the underlying stream id
+    pub fn send_id(&self) -> StreamId {
+        self.inner.stream.send_id()
+    }
 }
 
 impl<S, B> RequestStream<S, B>
