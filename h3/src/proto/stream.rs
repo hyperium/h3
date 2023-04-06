@@ -160,7 +160,7 @@ impl From<StreamId> for VarInt {
 
 /// Invalid StreamId, for example because it's too large
 #[derive(Debug, PartialEq)]
-pub struct InvalidStreamId(u64);
+pub struct InvalidStreamId(pub(crate) u64);
 
 impl Display for InvalidStreamId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -184,6 +184,12 @@ impl Add<usize> for StreamId {
             VarInt::MAX.0 >> 2,
         );
         Self::new(index, self.dir(), self.initiator())
+    }
+}
+
+impl From<crate::webtransport::SessionId> for StreamId {
+    fn from(value: crate::webtransport::SessionId) -> Self {
+        Self(value.into_inner())
     }
 }
 

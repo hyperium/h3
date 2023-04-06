@@ -20,6 +20,8 @@ use futures_util::{ready, Future};
 use http::{Method, Request, Response, StatusCode};
 use quic::StreamId;
 
+use super::SessionId;
+
 /// WebTransport session driver.
 ///
 /// Maintains the session using the underlying HTTP/3 connection.
@@ -162,14 +164,18 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    type Output = Result<Option<Bytes>, Error>;
+    type Output = Result<Option<(SessionId, Bytes)>, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         tracing::trace!("poll: read_datagram");
 
         let mut conn = self.conn.lock().unwrap();
         match ready!(conn.poll_accept_datagram(cx))? {
-            Some(v) => Poll::Ready(Ok(Some(Datagram::decode(v)?.payload))),
+            // Some(v) => Poll::Ready(Ok(Some(Datagram::decode(v)?.payload))),
+            Some(v) => {
+                let datagram = Datagram::decode(v)?;
+                Poll::Ready(Ok(Some((datagram.stream_id().into(), datagram.payload))))
+            }
             None => Poll::Ready(Ok(None)),
         }
     }
@@ -190,7 +196,7 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    type Output = Result<Option<<C as quic::Connection<B>>::RecvStream>, Error>;
+    type Output = Result<Option<(SessionId, C::RecvStream)>, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         tracing::trace!("poll: read_uni_stream");
@@ -200,9 +206,9 @@ where
 
         // Get the currently available streams
         let streams = conn.inner.accepted_streams_mut();
-        if let Some(stream) = streams.uni_streams.pop() {
+        if let Some(v) = streams.uni_streams.pop() {
             tracing::info!("Got uni stream");
-            return Poll::Ready(Ok(Some(stream)));
+            return Poll::Ready(Ok(Some(v)));
         }
 
         tracing::debug!("Waiting on incoming streams");

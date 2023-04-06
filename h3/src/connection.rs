@@ -5,7 +5,7 @@ use std::{
 };
 
 use bytes::{Buf, Bytes, BytesMut};
-use futures_util::{future, ready, stream::FuturesUnordered, StreamExt};
+use futures_util::{future, ready};
 use http::HeaderMap;
 use tracing::{trace, warn};
 
@@ -21,7 +21,8 @@ use crate::{
     qpack,
     quic::{self, SendStream as _},
     server::Config,
-    stream::{self, AcceptRecvStream, AcceptRecvStreamFuture, AcceptedRecvStream},
+    stream::{self, AcceptRecvStream, AcceptedRecvStream},
+    webtransport::SessionId,
 };
 
 #[doc(hidden)]
@@ -71,7 +72,7 @@ pub trait ConnectionState {
 }
 
 pub(crate) struct AcceptedStreams<R> {
-    pub uni_streams: Vec<R>,
+    pub uni_streams: Vec<(SessionId, R)>,
 }
 
 impl<R> Default for AcceptedStreams<R> {
@@ -100,7 +101,7 @@ where
     /// This is opposed to discarding them by returning in `poll_accept_recv`, which may cause them to be missed by something else polling.
     accepted_streams: AcceptedStreams<C::RecvStream>,
 
-    pending_recv_streams: FuturesUnordered<AcceptRecvStreamFuture<C::RecvStream, B>>,
+    pending_recv_streams: Vec<AcceptRecvStream<C::RecvStream>>,
 
     got_peer_settings: bool,
     pub(super) send_grease_frame: bool,
@@ -217,7 +218,7 @@ where
             control_recv: None,
             decoder_recv: None,
             encoder_recv: None,
-            pending_recv_streams: FuturesUnordered::new(),
+            pending_recv_streams: Vec::with_capacity(3),
             got_peer_settings: false,
             send_grease_frame: config.send_grease,
             config,
@@ -299,7 +300,7 @@ where
             match self.conn.lock().unwrap().poll_accept_recv(cx)? {
                 Poll::Ready(Some(stream)) => self
                     .pending_recv_streams
-                    .push(AcceptRecvStreamFuture::new(AcceptRecvStream::new(stream))),
+                    .push(AcceptRecvStream::new(stream)),
                 Poll::Ready(None) => {
                     return Err(Code::H3_GENERAL_PROTOCOL_ERROR.with_reason(
                         "Connection closed unexpected",
@@ -310,14 +311,26 @@ where
             }
         }
 
-        // Get all currently ready streams
-        while let Poll::Ready(Some(stream)) = self.pending_recv_streams.poll_next_unpin(cx) {
+        let mut resolved = vec![];
+
+        for (index, pending) in self.pending_recv_streams.iter_mut().enumerate() {
+            match pending.poll_type(cx)? {
+                Poll::Ready(()) => resolved.push(index),
+                Poll::Pending => (),
+            }
+        }
+
+        for (removed, index) in resolved.into_iter().enumerate() {
             //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
             //= type=implication
             //# As certain stream types can affect connection state, a recipient
             //# SHOULD NOT discard data from incoming unidirectional streams prior to
             //# reading the stream type.
-            let stream = stream?;
+            let stream = self
+                .pending_recv_streams
+                .remove(index - removed)
+                .into_stream()?;
+
             match stream {
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
                 //# Only one control stream per peer is permitted;
@@ -346,10 +359,10 @@ where
                         );
                     }
                 }
-                AcceptedRecvStream::WebTransportUni(s) => {
+                AcceptedRecvStream::WebTransportUni(id, s) => {
                     // Store until someone else picks it up, like a webtransport session which is
                     // not yet established.
-                    self.accepted_streams.uni_streams.push(s)
+                    self.accepted_streams.uni_streams.push((id, s))
                 }
 
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
@@ -369,11 +382,14 @@ where
             return Poll::Ready(Err(e.clone()));
         }
 
-        let recv = loop {
+        let recv = {
             // TODO
             self.poll_accept_recv(cx)?;
             if let Some(v) = &mut self.control_recv {
-                break v;
+                v
+            } else {
+                // Try later
+                return Poll::Pending;
             }
         };
 

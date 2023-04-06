@@ -248,7 +248,7 @@ where
         tokio::select! {
             datagram = session.read_datagram() => {
                 let datagram = datagram?;
-                if let Some(datagram) = datagram {
+                if let Some((id, datagram)) = datagram {
                     tracing::info!("Responding with {datagram:?}");
                     // Put something before to make sure encoding and decoding works and don't just
                     // pass through
@@ -260,7 +260,8 @@ where
                 }
             }
             stream = session.accept_uni() => {
-                let mut stream = stream?.unwrap();
+                let (id, mut stream) = stream?.unwrap();
+                tracing::info!("Received uni stream {:?} for {id:?}", stream.recv_id());
                 // TODO: got stuck polling this future!!!
                 if let Ok(Some(mut bytes)) = poll_fn(|cx| stream.poll_data(cx)).await {
                     tracing::info!("Received unidirectional stream with {}", bytes.get_u8());

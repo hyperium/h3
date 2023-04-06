@@ -1,12 +1,7 @@
-use std::{
-    marker::PhantomData,
-    task::{Context, Poll},
-};
+use std::task::{Context, Poll};
 
 use bytes::{Buf, BufMut as _, Bytes};
-use futures_util::{future, ready, Future};
-use pin_project::pin_project;
-use quic::RecvStream;
+use futures_util::{future, ready};
 
 use crate::{
     buf::BufList,
@@ -18,7 +13,8 @@ use crate::{
         stream::StreamType,
         varint::VarInt,
     },
-    quic::{self, SendStream},
+    quic::{self, RecvStream, SendStream},
+    webtransport::SessionId,
     Error,
 };
 
@@ -171,7 +167,7 @@ where
     Push(u64, FrameStream<S, B>),
     Encoder(S),
     Decoder(S),
-    WebTransportUni(S),
+    WebTransportUni(SessionId, S),
     Reserved,
 }
 
@@ -188,10 +184,12 @@ where
     }
 }
 
+/// Resolves an incoming streams type as well as `PUSH_ID`s and `SESSION_ID`s
 pub(super) struct AcceptRecvStream<S> {
     stream: S,
     ty: Option<StreamType>,
-    push_id: Option<u64>,
+    /// push_id or session_id
+    id: Option<VarInt>,
     buf: BufList<Bytes>,
     expected: Option<usize>,
 }
@@ -204,7 +202,7 @@ where
         Self {
             stream,
             ty: None,
-            push_id: None,
+            id: None,
             buf: BufList::new(),
             expected: None,
         }
@@ -216,12 +214,15 @@ where
                 AcceptedRecvStream::Control(FrameStream::with_bufs(self.stream, self.buf))
             }
             StreamType::PUSH => AcceptedRecvStream::Push(
-                self.push_id.expect("Push ID not resolved yet"),
+                self.id.expect("Push ID not resolved yet").into_inner(),
                 FrameStream::with_bufs(self.stream, self.buf),
             ),
             StreamType::ENCODER => AcceptedRecvStream::Encoder(self.stream),
             StreamType::DECODER => AcceptedRecvStream::Decoder(self.stream),
-            StreamType::WEBTRANSPORT_UNI => AcceptedRecvStream::WebTransportUni(self.stream),
+            StreamType::WEBTRANSPORT_UNI => AcceptedRecvStream::WebTransportUni(
+                SessionId::from_varint(self.id.expect("Session ID not resolved yet")),
+                self.stream,
+            ),
             t if t.value() > 0x21 && (t.value() - 0x21) % 0x1f == 0 => AcceptedRecvStream::Reserved,
 
             //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
@@ -249,11 +250,16 @@ where
 
     pub fn poll_type(&mut self, cx: &mut Context) -> Poll<Result<(), Error>> {
         loop {
-            match (self.ty.as_ref(), self.push_id) {
-                // When accepting a Push stream, we want to parse two VarInts: [StreamType, PUSH_ID]
-                (Some(&StreamType::PUSH), Some(_)) | (Some(_), _) => return Poll::Ready(Ok(())),
-                _ => (),
-            }
+            // Return if all identification data is met
+            match self.ty {
+                Some(StreamType::PUSH | StreamType::WEBTRANSPORT_UNI) => {
+                    if self.id.is_some() {
+                        return Poll::Ready(Ok(()));
+                    }
+                }
+                Some(_) => return Poll::Ready(Ok(())),
+                None => (),
+            };
 
             match ready!(self.stream.poll_data(cx))? {
                 Some(mut b) => self.buf.push_bytes(&mut b),
@@ -277,6 +283,7 @@ where
                 continue;
             }
 
+            // Parse ty and then id
             if self.ty.is_none() {
                 // Parse StreamType
                 self.ty = Some(StreamType::decode(&mut self.buf).map_err(|_| {
@@ -289,46 +296,14 @@ where
                 self.expected = None;
             } else {
                 // Parse PUSH_ID
-                self.push_id = Some(self.buf.get_var().map_err(|_| {
+                self.id = Some(VarInt::decode(&mut self.buf).map_err(|_| {
                     Code::H3_INTERNAL_ERROR.with_reason(
-                        "Unexpected end parsing stream type",
+                        "Unexpected end parsing push or session id",
                         ErrorLevel::ConnectionError,
                     )
                 })?);
             }
         }
-    }
-}
-
-/// Future for accepting a receive stream and reading the type
-#[pin_project] // Allows moving out of `inner`
-pub(super) struct AcceptRecvStreamFuture<S, B> {
-    inner: Option<AcceptRecvStream<S>>,
-    _marker: PhantomData<B>,
-}
-
-impl<S, B> AcceptRecvStreamFuture<S, B> {
-    pub(super) fn new(recv: AcceptRecvStream<S>) -> Self {
-        Self {
-            inner: Some(recv),
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<S, B> Future for AcceptRecvStreamFuture<S, B>
-where
-    S: RecvStream,
-    B: Buf,
-{
-    type Output = Result<AcceptedRecvStream<S, B>, Error>;
-
-    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let inner = self.inner.as_mut().unwrap();
-        ready!(inner.poll_type(cx))?;
-
-        let stream = self.inner.take().unwrap().into_stream()?;
-        Poll::Ready(Ok(stream))
     }
 }
 
