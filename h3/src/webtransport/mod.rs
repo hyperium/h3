@@ -12,6 +12,8 @@ use crate::proto::{
     varint::VarInt,
 };
 pub mod server;
+/// Send and Receive streams
+pub mod stream;
 
 /// Identifies a WebTransport session
 ///

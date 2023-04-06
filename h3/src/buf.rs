@@ -32,6 +32,10 @@ impl<T: Buf> BufList<T> {
 }
 
 impl BufList<Bytes> {
+    pub fn take_first_chunk(&mut self) -> Option<Bytes> {
+        self.bufs.pop_front()
+    }
+
     pub fn take_chunk(&mut self, max_len: usize) -> Option<Bytes> {
         let chunk = self
             .bufs

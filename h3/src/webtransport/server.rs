@@ -20,7 +20,7 @@ use futures_util::{ready, Future};
 use http::{Method, Request, Response, StatusCode};
 use quic::StreamId;
 
-use super::SessionId;
+use super::{stream::RecvStream, SessionId};
 
 /// WebTransport session driver.
 ///
@@ -196,7 +196,7 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    type Output = Result<Option<(SessionId, C::RecvStream)>, Error>;
+    type Output = Result<Option<(SessionId, RecvStream<C::RecvStream>)>, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         tracing::trace!("poll: read_uni_stream");

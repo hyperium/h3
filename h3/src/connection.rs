@@ -22,7 +22,7 @@ use crate::{
     quic::{self, SendStream as _},
     server::Config,
     stream::{self, AcceptRecvStream, AcceptedRecvStream},
-    webtransport::SessionId,
+    webtransport::{self, SessionId},
 };
 
 #[doc(hidden)]
@@ -72,7 +72,7 @@ pub trait ConnectionState {
 }
 
 pub(crate) struct AcceptedStreams<R> {
-    pub uni_streams: Vec<(SessionId, R)>,
+    pub uni_streams: Vec<(SessionId, webtransport::stream::RecvStream<R>)>,
 }
 
 impl<R> Default for AcceptedStreams<R> {
