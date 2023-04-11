@@ -62,6 +62,7 @@ use std::{
 
 use bytes::{Buf, Bytes, BytesMut};
 use futures_util::{
+    future::ready,
     future::{self, Future},
     ready, FutureExt,
 };
@@ -74,7 +75,7 @@ use tokio::sync::mpsc;
 use crate::{
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
     error::{Code, Error, ErrorLevel},
-    frame::FrameStream,
+    frame::{FrameStream, FrameStreamError},
     proto::{
         datagram::Datagram,
         frame::{Frame, PayloadLen},
@@ -200,7 +201,20 @@ where
         };
 
         let frame = future::poll_fn(|cx| stream.poll_next(cx)).await;
+        self.accept_with_frame(stream, frame).await
+    }
 
+    /// Accepts an http request where the first frame has already been read and decoded.
+    ///
+    ///
+    /// This is needed as a bidirectional stream may be read as part of incoming webtransport
+    /// bi-streams. If it turns out that the stream is *not* a `WEBTRANSPORT_STREAM` the request
+    /// may still want to be handled and passed to the user.
+    pub(crate) async fn accept_with_frame(
+        &mut self,
+        mut stream: FrameStream<C::BidiStream, B>,
+        frame: Result<Option<Frame<PayloadLen>>, FrameStreamError>,
+    ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
         let mut encoded = match frame {
             Ok(Some(Frame::Headers(h))) => h,
 
@@ -213,7 +227,7 @@ where
                 return Err(self.inner.close(
                     Code::H3_REQUEST_INCOMPLETE,
                     "request stream closed before headers",
-                ))
+                ));
             }
 
             //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
@@ -291,6 +305,7 @@ where
                                 .expect("header too big response"),
                         )
                         .await?;
+
                     return Err(Error::header_too_big(
                         cancel_size,
                         self.max_field_section_size,
@@ -402,7 +417,11 @@ where
         self.inner.shutdown(&mut self.sent_closing, max_id).await
     }
 
-    fn poll_accept_request(
+    /// Accepts an incoming bidirectional stream.
+    ///
+    /// This could be either a *Request* or a *WebTransportBiStream*, the first frame's type
+    /// decides.
+    pub(crate) fn poll_accept_request(
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<C::BidiStream>, Error>> {

@@ -5,10 +5,10 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use futures::future::poll_fn;
-use futures::StreamExt;
+use futures::{future, StreamExt};
+use futures::{future::poll_fn, AsyncRead};
 use http::{Method, Request, StatusCode};
 use rustls::{Certificate, PrivateKey};
 use structopt::StructOpt;
@@ -17,7 +17,7 @@ use tracing::{error, info, trace_span};
 
 use h3::{
     error::ErrorLevel,
-    quic::{self, BidiStream, RecvStream},
+    quic::{self, BidiStream, RecvStream, SendStream},
     server::{Config, Connection, RequestStream},
     webtransport::server::WebTransportSession,
     Protocol,
@@ -248,7 +248,7 @@ where
         tokio::select! {
             datagram = session.read_datagram() => {
                 let datagram = datagram?;
-                if let Some((id, datagram)) = datagram {
+                if let Some((_, datagram)) = datagram {
                     tracing::info!("Responding with {datagram:?}");
                     // Put something before to make sure encoding and decoding works and don't just
                     // pass through
@@ -262,14 +262,25 @@ where
             stream = session.accept_uni() => {
                 let (id, mut stream) = stream?.unwrap();
                 tracing::info!("Received uni stream {:?} for {id:?}", stream.recv_id());
-                // TODO: got stuck polling this future!!!
-                if let Ok(Some(mut bytes)) = poll_fn(|cx| stream.poll_data(cx)).await {
-                    tracing::info!("Received unidirectional stream with {}", bytes.get_u8());
+                if let Some(bytes) = poll_fn(|cx| stream.poll_data(cx)).await? {
+                    tracing::info!("Received data {:?}", bytes);
                 }
             }
-            // stream = session = session.read_bi_stream() => {
-            //     let mut stream = stream?.unwrap();
-            // }
+            stream = session.accept_bi() => {
+                let (session_id, mut send, mut recv) = stream?.unwrap();
+                tracing::info!("Got bi stream");
+                let mut message = BytesMut::new();
+                while let Some(bytes) = poll_fn(|cx| recv.poll_data(cx)).await? {
+                    tracing::info!("Received data {:?}", bytes);
+                    message.put(bytes);
+
+                }
+
+                tracing::info!("Got message: {message:?}");
+
+                // send.send_data(message.freeze()).context("Failed to send response");
+                // future::poll_fn(|cx| send.poll_ready(cx)).await?;
+            }
             else => {
                 break
             }

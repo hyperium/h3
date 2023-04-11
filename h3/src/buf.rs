@@ -3,6 +3,7 @@ use std::io::IoSlice;
 
 use bytes::{Buf, Bytes};
 
+#[derive(Debug)]
 pub(crate) struct BufList<T> {
     bufs: VecDeque<T>,
 }

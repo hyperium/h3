@@ -9,18 +9,22 @@ use std::{
 
 use crate::{
     connection::ConnectionState,
-    error::Code,
-    proto::datagram::Datagram,
-    quic,
+    error::{Code, ErrorLevel},
+    frame::FrameStream,
+    proto::{datagram::Datagram, frame::Frame},
+    quic::{self, BidiStream, SendStream},
     server::{self, Connection, RequestStream},
     Error, Protocol,
 };
 use bytes::{Buf, Bytes};
-use futures_util::{ready, Future};
+use futures_util::{future::poll_fn, ready, Future};
 use http::{Method, Request, Response, StatusCode};
 use quic::StreamId;
 
-use super::{stream::RecvStream, SessionId};
+use super::{
+    stream::{self, RecvStream},
+    SessionId,
+};
 
 /// WebTransport session driver.
 ///
@@ -142,9 +146,115 @@ where
 
     /// Accept an incoming unidirectional stream from the client, it reads the stream until EOF.
     pub fn accept_uni(&self) -> AcceptUni<C, B> {
-        AcceptUni {
-            conn: &self.conn,
-            _marker: PhantomData,
+        AcceptUni { conn: &self.conn }
+    }
+
+    /// Accepts an incoming bidirectional stream
+    /// TODO: should this return an enum of BiStream/Request to allow ordinary HTTP/3 requests to
+    /// pass through?
+    ///
+    /// Currently, they are ignored, and the function loops until it receives a *webtransport*
+    /// stream.
+    pub async fn accept_bi(
+        &self,
+    ) -> Result<
+        Option<(
+            SessionId,
+            stream::SendStream<C::SendStream, B>,
+            stream::RecvStream<C::RecvStream>,
+        )>,
+        Error,
+    > {
+        loop {
+            // Get the next stream
+            // Accept the incoming stream
+            let stream = poll_fn(|cx| {
+                let mut conn = self.conn.lock().unwrap();
+                conn.poll_accept_request(cx)
+            })
+            .await;
+
+            tracing::debug!("Received biderectional stream");
+
+            let mut stream = match stream {
+                Ok(Some(s)) => FrameStream::new(s),
+                Ok(None) => {
+                    // We always send a last GoAway frame to the client, so it knows which was the last
+                    // non-rejected request.
+                    // self.shutdown(0).await?;
+                    todo!("shutdown");
+                    // return Ok(None);
+                }
+                Err(err) => {
+                    match err.inner.kind {
+                        crate::error::Kind::Closed => return Ok(None),
+                        crate::error::Kind::Application {
+                            code,
+                            reason,
+                            level: ErrorLevel::ConnectionError,
+                        } => {
+                            return Err(self.conn.lock().unwrap().close(
+                                code,
+                                reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
+                            ))
+                        }
+                        _ => return Err(err),
+                    };
+                }
+            };
+
+            tracing::debug!("Reading first frame");
+            // Read the first frame.
+            //
+            // This wil determine if it is a webtransport bi-stream or a request stream
+            let frame = poll_fn(|cx| stream.poll_next(cx)).await;
+
+            let mut conn = self.conn.lock().unwrap();
+            match frame {
+                Ok(None) => return Ok(None),
+                Ok(Some(Frame::WebTransportStream(session_id))) => {
+                    tracing::info!("Got webtransport stream");
+                    // Take the stream out of the framed reader
+                    let (stream, buf) = stream.into_inner();
+                    let (send, recv) = stream.split();
+                    // Don't lose already read data
+                    let recv = stream::RecvStream::new(buf, recv);
+                    let send = stream::SendStream::new(send);
+                    return Ok(Some((session_id, send, recv)));
+                }
+                // Not a webtransport stream, discard
+                //
+                // Find a workaround to return this request, in order to accept more sessions
+                Ok(Some(_frame)) => continue,
+                Err(e) => {
+                    let err: Error = e.into();
+                    if err.is_closed() {
+                        return Ok(None);
+                    }
+                    match err.inner.kind {
+                        crate::error::Kind::Closed => return Ok(None),
+                        crate::error::Kind::Application {
+                            code,
+                            reason,
+                            level: ErrorLevel::ConnectionError,
+                        } => {
+                            return Err(conn.close(
+                                code,
+                                reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
+                            ))
+                        }
+                        crate::error::Kind::Application {
+                            code,
+                            reason: _,
+                            level: ErrorLevel::StreamError,
+                        } => {
+                            stream.reset(code.into());
+                            return Err(err);
+                        }
+                        _ => return Err(err),
+                    };
+                }
+            }
         }
     }
 }
@@ -188,7 +298,6 @@ where
     B: Buf,
 {
     conn: &'a Mutex<server::Connection<C, B>>,
-    _marker: PhantomData<B>,
 }
 
 impl<'a, C, B> Future for AcceptUni<'a, C, B>
@@ -196,7 +305,7 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    type Output = Result<Option<(SessionId, RecvStream<C::RecvStream>)>, Error>;
+    type Output = Result<Option<(SessionId, stream::RecvStream<C::RecvStream>)>, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         tracing::trace!("poll: read_uni_stream");
@@ -218,5 +327,6 @@ where
 }
 
 fn validate_wt_connect(request: &Request<()>) -> bool {
-    matches!((request.method(), request.extensions().get::<Protocol>()), (&Method::CONNECT, Some(p)) if p == &Protocol::WEB_TRANSPORT)
+    let protocol = request.extensions().get::<Protocol>();
+    matches!((request.method(), protocol), (&Method::CONNECT, Some(p)) if p == &Protocol::WEB_TRANSPORT)
 }

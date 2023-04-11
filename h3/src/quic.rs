@@ -72,7 +72,7 @@ impl Error for SendDatagramError {
 /// Trait representing a QUIC connection.
 pub trait Connection<B: Buf> {
     /// The type produced by `poll_accept_bidi()`
-    type BidiStream: SendStream<B> + RecvStream;
+    type BidiStream: BidiStream<B, RecvStream = Self::RecvStream, SendStream = Self::SendStream>;
     /// The type of the sending part of `BidiStream`
     type SendStream: SendStream<B>;
     /// The type produced by `poll_accept_recv()`
@@ -179,7 +179,7 @@ pub trait RecvStream {
     /// The type of `Buf` for data received on this stream.
     type Buf: Buf;
     /// The error type that can occur when receiving data.
-    type Error: Into<Box<dyn Error>>;
+    type Error: 'static + Error;
 
     /// Poll the stream for more data.
     ///

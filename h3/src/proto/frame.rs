@@ -5,8 +5,10 @@ use std::{
 };
 use tracing::trace;
 
+use crate::webtransport::SessionId;
+
 use super::{
-    coding::Encode,
+    coding::{Decode, Encode},
     push::{InvalidPushId, PushId},
     stream::InvalidStreamId,
     varint::{BufExt, BufMutExt, UnexpectedEnd, VarInt},
@@ -49,7 +51,10 @@ pub enum Frame<B> {
     PushPromise(PushPromise),
     Goaway(VarInt),
     MaxPushId(PushId),
-    WebTransportStream(WebTransportStream),
+    /// A webtransport frame is a frame without a length.
+    ///
+    /// The data is streaming
+    WebTransportStream(SessionId),
     Grease,
 }
 
@@ -72,6 +77,15 @@ impl Frame<PayloadLen> {
     pub fn decode<T: Buf>(buf: &mut T) -> Result<Self, FrameError> {
         let remaining = buf.remaining();
         let ty = FrameType::decode(buf).map_err(|_| FrameError::Incomplete(remaining + 1))?;
+
+        // Webtransport streams need special handling as they have no length.
+        //
+        // See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-4.2
+        if ty == FrameType::WEBTRANSPORT_STREAM {
+            tracing::trace!("webtransport frame");
+            return Ok(Frame::WebTransportStream(SessionId::decode(buf)?));
+        }
+
         let len = buf
             .get_var()
             .map_err(|_| FrameError::Incomplete(remaining + 1))?;
@@ -93,18 +107,17 @@ impl Frame<PayloadLen> {
             FrameType::PUSH_PROMISE => Ok(Frame::PushPromise(PushPromise::decode(&mut payload)?)),
             FrameType::GOAWAY => Ok(Frame::Goaway(VarInt::decode(&mut payload)?)),
             FrameType::MAX_PUSH_ID => Ok(Frame::MaxPushId(payload.get_var()?.try_into()?)),
-            FrameType::WEBTRANSPORT_STREAM => Ok(Frame::WebTransportStream(WebTransportStream {
-                buffer: payload.copy_to_bytes(len as usize),
-            })),
             FrameType::H2_PRIORITY
             | FrameType::H2_PING
             | FrameType::H2_WINDOW_UPDATE
             | FrameType::H2_CONTINUATION => Err(FrameError::UnsupportedFrame(ty.0)),
+            FrameType::WEBTRANSPORT_STREAM | FrameType::DATA => unreachable!(),
             _ => {
                 buf.advance(len as usize);
                 Err(FrameError::UnknownFrame(ty.0))
             }
         };
+
         if let Ok(frame) = &frame {
             trace!(
                 "got frame {:?}, len: {}, remaining: {}",
@@ -314,10 +327,6 @@ pub struct PushPromise {
     encoded: Bytes,
 }
 
-#[derive(Debug, PartialEq)]
-pub struct WebTransportStream {
-    buffer: Bytes,
-}
 impl FrameHeader for PushPromise {
     const TYPE: FrameType = FrameType::PUSH_PROMISE;
 

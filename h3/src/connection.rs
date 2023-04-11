@@ -71,11 +71,19 @@ pub trait ConnectionState {
     }
 }
 
-pub(crate) struct AcceptedStreams<R> {
-    pub uni_streams: Vec<(SessionId, webtransport::stream::RecvStream<R>)>,
+pub(crate) struct AcceptedStreams<C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    pub uni_streams: Vec<(SessionId, webtransport::stream::RecvStream<C::RecvStream>)>,
 }
 
-impl<R> Default for AcceptedStreams<R> {
+impl<C, B> Default for AcceptedStreams<C, B>
+where
+    C: quic::Connection<B>,
+    B: bytes::Buf,
+{
     fn default() -> Self {
         Self {
             uni_streams: Default::default(),
@@ -90,7 +98,6 @@ where
 {
     pub(super) shared: SharedStateRef,
     // TODO: breaking encapsulation just to see if we can get this to work, will fix before merging
-    // TODO: Remove Mutex as *every* operation congests on this
     pub(super) conn: Arc<Mutex<C>>,
     control_send: C::SendStream,
     control_recv: Option<FrameStream<C::RecvStream, B>>,
@@ -99,7 +106,7 @@ where
     /// Stores incoming uni/recv streams which have yet to be claimed.
     ///
     /// This is opposed to discarding them by returning in `poll_accept_recv`, which may cause them to be missed by something else polling.
-    accepted_streams: AcceptedStreams<C::RecvStream>,
+    accepted_streams: AcceptedStreams<C, B>,
 
     pending_recv_streams: Vec<AcceptRecvStream<C::RecvStream>>,
 
@@ -237,6 +244,7 @@ where
 
         Ok(conn_inner)
     }
+
     /// Send GOAWAY with specified max_id, iff max_id is smaller than the previous one.
 
     pub async fn shutdown<T>(
@@ -605,7 +613,7 @@ where
         };
     }
 
-    pub(crate) fn accepted_streams_mut(&mut self) -> &mut AcceptedStreams<C::RecvStream> {
+    pub(crate) fn accepted_streams_mut(&mut self) -> &mut AcceptedStreams<C, B> {
         &mut self.accepted_streams
     }
 }

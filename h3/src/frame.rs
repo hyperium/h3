@@ -43,6 +43,10 @@ impl<S, B> FrameStream<S, B> {
             _phantom_buffer: PhantomData,
         }
     }
+
+    pub(crate) fn into_inner(self) -> (S, BufList<Bytes>) {
+        (self.stream, self.bufs)
+    }
 }
 
 impl<S, B> FrameStream<S, B>
