@@ -320,16 +320,24 @@ where
         self.send.poll_ready(cx)
     }
 
+    fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), Self::Error> {
+        self.send.send_data(data)
+    }
+
+    fn poll_send<D: Buf>(
+        &mut self,
+        cx: &mut task::Context<'_>,
+        buf: &mut D,
+    ) -> Poll<Result<usize, Self::Error>> {
+        self.send.poll_send(cx, buf)
+    }
+
     fn poll_finish(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.send.poll_finish(cx)
     }
 
     fn reset(&mut self, reset_code: u64) {
         self.send.reset(reset_code)
-    }
-
-    fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), Self::Error> {
-        self.send.send_data(data)
     }
 
     fn send_id(&self) -> StreamId {
@@ -447,33 +455,70 @@ where
 {
     type Error = SendStreamError;
 
-    fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        if let Some(ref mut data) = self.writing {
-            while data.has_remaining() {
-                match ready!(Pin::new(&mut self.stream).poll_write(cx, data.chunk())) {
-                    Ok(cnt) => data.advance(cnt),
-                    Err(err) => {
-                        // We are forced to use AsyncWrite for now because we cannot store
-                        // the result of a call to:
-                        // quinn::send_stream::write<'a>(&'a mut self, buf: &'a [u8]) -> Write<'a, S>.
-                        //
-                        // This is why we have to unpack the error from io::Error below. This should not
-                        // panic as long as quinn's AsyncWrite impl doesn't change.
-                        return Poll::Ready(Err(SendStreamError::Write(
-                            err.into_inner()
-                                .expect("write stream returned an empty error")
-                                .downcast_ref::<WriteError>()
-                                .expect(
-                                    "write stream returned an error which type is not WriteError",
-                                )
-                                .clone(),
-                        )));
-                    }
-                }
+    fn poll_ready(&mut self, _: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        unimplemented!()
+        //if let Some(ref mut data) = self.writing {
+        //    while data.has_remaining() {
+        //        match ready!(Pin::new(&mut self.stream).poll_write(cx, data.chunk())) {
+        //            Ok(cnt) => data.advance(cnt),
+        //            Err(err) => {
+        //                // We are forced to use AsyncWrite for now because we cannot store
+        //                // the result of a call to:
+        //                // quinn::send_stream::write<'a>(&'a mut self, buf: &'a [u8]) -> Write<'a, S>.
+        //                //
+        //                // This is why we have to unpack the error from io::Error below. This should not
+        //                // panic as long as quinn's AsyncWrite impl doesn't change.
+        //                return Poll::Ready(Err(SendStreamError::Write(
+        //                    err.into_inner()
+        //                        .expect("write stream returned an empty error")
+        //                        .downcast_ref::<WriteError>()
+        //                        .expect(
+        //                            "write stream returned an error which type is not WriteError",
+        //                        )
+        //                        .clone(),
+        //                )));
+        //            }
+        //        }
+        //    }
+        //}
+        //self.writing = None;
+        //Poll::Ready(Ok(()))
+    }
+
+    fn poll_send<D: Buf>(
+        &mut self,
+        cx: &mut task::Context<'_>,
+        buf: &mut D,
+    ) -> Poll<Result<usize, Self::Error>> {
+        if self.writing.is_some() {
+            return Poll::Ready(Err(Self::Error::NotReady));
+        }
+
+        let s = Pin::new(&mut self.stream);
+
+        let res = ready!(s.poll_write(cx, buf.chunk()));
+        match res {
+            Ok(written) => {
+                buf.advance(written);
+                Poll::Ready(Ok(written))
+            }
+            Err(err) => {
+                // We are forced to use AsyncWrite for now because we cannot store
+                // the result of a call to:
+                // quinn::send_stream::write<'a>(&'a mut self, buf: &'a [u8]) -> Result<usize, WriteError>.
+                //
+                // This is why we have to unpack the error from io::Error instead of having it
+                // returned directly. This should not panic as long as quinn's AsyncWrite impl
+                // doesn't change.
+                let err = err
+                    .into_inner()
+                    .expect("write stream returned an empty error")
+                    .downcast::<WriteError>()
+                    .expect("write stream returned an error which type is not WriteError");
+
+                Poll::Ready(Err(SendStreamError::Write(*err)))
             }
         }
-        self.writing = None;
-        Poll::Ready(Ok(()))
     }
 
     fn poll_finish(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {

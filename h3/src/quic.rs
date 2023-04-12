@@ -164,6 +164,19 @@ pub trait SendStream<B: Buf> {
     /// Send more data on the stream.
     fn send_data<T: Into<WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error>;
 
+    /// Attempts write data into the stream.
+    ///
+    /// Returns the number of bytes written.
+    ///
+    /// `buf` is advanced by the number of bytes written.
+    ///
+    /// This allows writing arbitrary data to the stream as well as complete encoded frames.
+    fn poll_send<D: Buf>(
+        &mut self,
+        cx: &mut task::Context<'_>,
+        buf: &mut D,
+    ) -> Poll<Result<usize, Self::Error>>;
+
     /// Poll to finish the sending side of the stream.
     fn poll_finish(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>>;
 

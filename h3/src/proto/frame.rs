@@ -51,9 +51,13 @@ pub enum Frame<B> {
     PushPromise(PushPromise),
     Goaway(VarInt),
     MaxPushId(PushId),
-    /// A webtransport frame is a frame without a length.
+    /// Describes the header for a webtransport stream.
     ///
-    /// The data is streaming
+    /// The payload is sent streaming until the stream is closed
+    ///
+    /// Unwrap the framed streamer and read the inner stream until the end.
+    ///
+    /// Conversely, when sending, send this frame and unwrap the stream
     WebTransportStream(SessionId),
     Grease,
 }
@@ -81,7 +85,7 @@ impl Frame<PayloadLen> {
         // Webtransport streams need special handling as they have no length.
         //
         // See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-4.2
-        if ty == FrameType::WEBTRANSPORT_STREAM {
+        if ty == FrameType::WEBTRANSPORT_BI_STREAM {
             tracing::trace!("webtransport frame");
             return Ok(Frame::WebTransportStream(SessionId::decode(buf)?));
         }
@@ -111,7 +115,7 @@ impl Frame<PayloadLen> {
             | FrameType::H2_PING
             | FrameType::H2_WINDOW_UPDATE
             | FrameType::H2_CONTINUATION => Err(FrameError::UnsupportedFrame(ty.0)),
-            FrameType::WEBTRANSPORT_STREAM | FrameType::DATA => unreachable!(),
+            FrameType::WEBTRANSPORT_BI_STREAM | FrameType::DATA => unreachable!(),
             _ => {
                 buf.advance(len as usize);
                 Err(FrameError::UnknownFrame(ty.0))
@@ -212,7 +216,7 @@ impl fmt::Debug for Frame<PayloadLen> {
             Frame::Goaway(id) => write!(f, "GoAway({})", id),
             Frame::MaxPushId(id) => write!(f, "MaxPushId({})", id),
             Frame::Grease => write!(f, "Grease()"),
-            Frame::WebTransportStream(_) => todo!(),
+            Frame::WebTransportStream(session) => write!(f, "WebTransportStream({session:?})"),
         }
     }
 }
@@ -286,7 +290,7 @@ frame_types! {
     H2_CONTINUATION = 0x9,
     MAX_PUSH_ID = 0xD,
     // Reserved frame types
-    WEBTRANSPORT_STREAM = 0x41,
+    WEBTRANSPORT_BI_STREAM = 0x41,
 }
 
 impl FrameType {

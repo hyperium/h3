@@ -20,6 +20,7 @@ use crate::{
 /// Decodes Frames from the underlying QUIC stream
 pub struct FrameStream<S, B> {
     stream: S,
+    // Already read data from the stream
     bufs: BufList<Bytes>,
     decoder: FrameDecoder,
     remaining_data: usize,
@@ -70,6 +71,10 @@ where
                     self.remaining_data = len;
                     Poll::Ready(Ok(Some(Frame::Data(PayloadLen(len)))))
                 }
+                frame @ Some(Frame::WebTransportStream(_)) => {
+                    self.remaining_data = usize::MAX;
+                    Poll::Ready(Ok(frame))
+                }
                 Some(frame) => Poll::Ready(Ok(Some(frame))),
                 None => match end {
                     // Received a chunk but frame is incomplete, poll until we get `Pending`.
@@ -89,6 +94,10 @@ where
         }
     }
 
+    /// Retrieves the next piece of data in an incoming data packet or webtransport stream
+    ///
+    ///
+    /// WebTransport bidirectional payload has no finite length and is processed until the end of the stream.
     pub fn poll_data(
         &mut self,
         cx: &mut Context<'_>,
@@ -115,6 +124,7 @@ where
         }
     }
 
+    /// Stops the underlying stream with the provided error code
     pub(crate) fn stop_sending(&mut self, error_code: crate::error::Code) {
         self.stream.stop_sending(error_code.into());
     }
@@ -175,6 +185,14 @@ where
 
     fn send_id(&self) -> StreamId {
         self.stream.send_id()
+    }
+
+    fn poll_send<D: Buf>(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut D,
+    ) -> Poll<Result<usize, Self::Error>> {
+        self.stream.poll_send(cx, buf)
     }
 }
 

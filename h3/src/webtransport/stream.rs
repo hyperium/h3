@@ -1,12 +1,12 @@
 use std::{marker::PhantomData, task::Poll};
 
 use bytes::{Buf, Bytes};
-use futures_util::{ready, AsyncRead};
+use futures_util::{future, ready, AsyncRead};
 
 use crate::{
     buf::BufList,
     proto::varint::UnexpectedEnd,
-    quic::{self},
+    quic::{self, SendStream as QSendStream},
 };
 
 use super::SessionId;
@@ -73,19 +73,49 @@ impl<S, B> SendStream<S, B> {
     }
 }
 
-impl<S, B> quic::SendStream<B> for SendStream<S, B>
+impl<S, B> SendStream<S, B>
 where
     S: quic::SendStream<B>,
+    B: Buf,
+{
+    /// Write bytes to the stream.
+    ///
+    /// Returns the number of bytes written
+    pub async fn write(&mut self, buf: &mut impl Buf) -> Result<usize, S::Error> {
+        future::poll_fn(|cx| quic::SendStream::poll_send(self, cx, buf)).await
+    }
+
+    /// Writes the entire buffer to the stream
+    pub async fn write_all(&mut self, mut buf: impl Buf) -> Result<(), S::Error> {
+        while buf.has_remaining() {
+            self.write(&mut buf).await?;
+        }
+
+        Ok(())
+    }
+}
+
+impl<S, B> QSendStream<B> for SendStream<S, B>
+where
+    S: QSendStream<B>,
     B: Buf,
 {
     type Error = S::Error;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.stream.poll_ready(cx)
+        todo!()
     }
 
     fn send_data<T: Into<quic::WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error> {
-        self.stream.send_data(data)
+        todo!()
+    }
+
+    fn poll_send<D: Buf>(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut D,
+    ) -> Poll<Result<usize, Self::Error>> {
+        self.stream.poll_send(cx, buf)
     }
 
     fn poll_finish(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {

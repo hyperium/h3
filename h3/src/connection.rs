@@ -830,9 +830,7 @@ where
                 .map_err(|e| self.maybe_conn_err(e))?;
             self.send_grease_frame = false;
         }
-        future::poll_fn(|cx| self.stream.poll_ready(cx))
-            .await
-            .map_err(|e| self.maybe_conn_err(e))?;
+
         future::poll_fn(|cx| self.stream.poll_finish(cx))
             .await
             .map_err(|e| self.maybe_conn_err(e))

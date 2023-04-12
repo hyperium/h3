@@ -19,14 +19,17 @@ use crate::{
 };
 
 #[inline]
+/// Transmits data by encoding in wire format.
 pub(crate) async fn write<S, D, B>(stream: &mut S, data: D) -> Result<(), Error>
 where
     S: SendStream<B>,
     D: Into<WriteBuf<B>>,
     B: Buf,
 {
-    stream.send_data(data)?;
-    future::poll_fn(|cx| stream.poll_ready(cx)).await?;
+    let mut write_buf = data.into();
+    while write_buf.has_remaining() {
+        future::poll_fn(|cx| stream.poll_send(cx, &mut write_buf)).await?;
+    }
 
     Ok(())
 }
