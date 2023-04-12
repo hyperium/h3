@@ -188,8 +188,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn handle_connection<C>(mut conn: Connection<C, Bytes>) -> Result<()>
 where
     C: 'static + Send + quic::Connection<Bytes>,
-    <C::SendStream as h3::quic::SendStream<Bytes>>::Error:
-        'static + std::error::Error + Send + Sync,
+    <C::SendStream as h3::quic::SendStream>::Error: 'static + std::error::Error + Send + Sync,
 {
     // 3. TODO: Conditionally, if the client indicated that this is a webtransport session, we should accept it here, else use regular h3.
     // if this is a webtransport session, then h3 needs to stop handing the datagrams, bidirectional streams, and unidirectional streams and give them
@@ -244,7 +243,7 @@ async fn handle_session_and_echo_all_inbound_messages<C, B>(
 ) -> anyhow::Result<()>
 where
     C: 'static + Send + h3::quic::Connection<B>,
-    <C::SendStream as h3::quic::SendStream<B>>::Error: 'static + std::error::Error + Send + Sync,
+    <C::SendStream as h3::quic::SendStream>::Error: 'static + std::error::Error + Send + Sync,
     B: Buf,
 {
     loop {

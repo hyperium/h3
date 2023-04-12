@@ -116,9 +116,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(conn) => {
                     info!("new connection established");
 
-                    let mut h3_conn = h3::server::Connection::new(h3_quinn::Connection::new(conn))
-                        .await
-                        .unwrap();
+                    let mut h3_conn: h3::server::Connection<_, Bytes> =
+                        h3::server::Connection::new(h3_quinn::Connection::new(conn))
+                            .await
+                            .unwrap();
 
                     loop {
                         match h3_conn.accept().await {
@@ -165,11 +166,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn handle_request<T>(
     req: Request<()>,
-    mut stream: RequestStream<T, Bytes>,
+    mut stream: RequestStream<T>,
     serve_root: Arc<Option<PathBuf>>,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
-    T: BidiStream<Bytes>,
+    T: BidiStream,
 {
     let (status, to_serve) = match serve_root.as_deref() {
         None => (StatusCode::OK, None),

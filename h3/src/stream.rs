@@ -8,7 +8,7 @@ use crate::{
     error::{Code, ErrorLevel},
     frame::FrameStream,
     proto::{
-        coding::{BufExt, Decode as _, Encode},
+        coding::{Decode as _, Encode},
         frame::Frame,
         stream::StreamType,
         varint::VarInt,
@@ -22,7 +22,7 @@ use crate::{
 /// Transmits data by encoding in wire format.
 pub(crate) async fn write<S, D, B>(stream: &mut S, data: D) -> Result<(), Error>
 where
-    S: SendStream<B>,
+    S: SendStream,
     D: Into<WriteBuf<B>>,
     B: Buf,
 {
@@ -162,19 +162,19 @@ where
     }
 }
 
-pub(super) enum AcceptedRecvStream<S, B>
+pub(super) enum AcceptedRecvStream<S>
 where
     S: quic::RecvStream,
 {
-    Control(FrameStream<S, B>),
-    Push(u64, FrameStream<S, B>),
+    Control(FrameStream<S>),
+    Push(u64, FrameStream<S>),
     Encoder(S),
     Decoder(S),
     WebTransportUni(SessionId, webtransport::stream::RecvStream<S>),
     Reserved,
 }
 
-impl<S, B> AcceptedRecvStream<S, B>
+impl<S> AcceptedRecvStream<S>
 where
     S: quic::RecvStream,
 {
@@ -211,7 +211,7 @@ where
         }
     }
 
-    pub fn into_stream<B>(self) -> Result<AcceptedRecvStream<S, B>, Error> {
+    pub fn into_stream(self) -> Result<AcceptedRecvStream<S>, Error> {
         Ok(match self.ty.expect("Stream type not resolved yet") {
             StreamType::CONTROL => {
                 AcceptedRecvStream::Control(FrameStream::with_bufs(self.stream, self.buf))

@@ -6,7 +6,7 @@ use futures_util::{future, ready, AsyncRead};
 use crate::{
     buf::BufList,
     proto::varint::UnexpectedEnd,
-    quic::{self, SendStream as QSendStream},
+    quic::{self, RecvStream as _, SendStream as _},
 };
 
 use super::SessionId;
@@ -59,24 +59,19 @@ where
 }
 
 /// WebTransport send stream
-pub struct SendStream<S, B> {
+pub struct SendStream<S> {
     stream: S,
-    _marker: PhantomData<B>,
 }
 
-impl<S, B> SendStream<S, B> {
+impl<S> SendStream<S> {
     pub(crate) fn new(stream: S) -> Self {
-        Self {
-            stream,
-            _marker: PhantomData,
-        }
+        Self { stream }
     }
 }
 
-impl<S, B> SendStream<S, B>
+impl<S> SendStream<S>
 where
-    S: quic::SendStream<B>,
-    B: Buf,
+    S: quic::SendStream,
 {
     /// Write bytes to the stream.
     ///
@@ -95,20 +90,11 @@ where
     }
 }
 
-impl<S, B> QSendStream<B> for SendStream<S, B>
+impl<S> quic::SendStream for SendStream<S>
 where
-    S: QSendStream<B>,
-    B: Buf,
+    S: quic::SendStream,
 {
     type Error = S::Error;
-
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        todo!()
-    }
-
-    fn send_data<T: Into<quic::WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error> {
-        todo!()
-    }
 
     fn poll_send<D: Buf>(
         &mut self,
@@ -128,5 +114,76 @@ where
 
     fn send_id(&self) -> quic::StreamId {
         self.stream.send_id()
+    }
+}
+
+/// A biderectional webtransport stream.
+///
+/// May be split into a sender and a receiver part
+pub struct BidiStream<S> {
+    send: SendStream<S>,
+    recv: RecvStream<S>,
+}
+
+impl<S> quic::BidiStream for BidiStream<S>
+where
+    S: quic::SendStream + quic::RecvStream,
+{
+    type SendStream = SendStream<S>;
+    type RecvStream = RecvStream<S>;
+
+    fn split(self) -> (Self::SendStream, Self::RecvStream) {
+        (self.send, self.recv)
+    }
+}
+
+impl<S> quic::SendStream for BidiStream<S>
+where
+    S: quic::SendStream,
+{
+    type Error = S::Error;
+
+    fn poll_send<D: Buf>(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut D,
+    ) -> Poll<Result<usize, Self::Error>> {
+        self.send.poll_send(cx, buf)
+    }
+
+    fn poll_finish(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.send.poll_finish(cx)
+    }
+
+    fn reset(&mut self, reset_code: u64) {
+        self.send.reset(reset_code)
+    }
+
+    fn send_id(&self) -> quic::StreamId {
+        self.send.send_id()
+    }
+}
+
+impl<S> quic::RecvStream for BidiStream<S>
+where
+    S: quic::RecvStream,
+{
+    type Buf = Bytes;
+
+    type Error = S::Error;
+
+    fn poll_data(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<Option<Self::Buf>, Self::Error>> {
+        self.recv.poll_data(cx)
+    }
+
+    fn stop_sending(&mut self, error_code: u64) {
+        self.recv.stop_sending(error_code)
+    }
+
+    fn recv_id(&self) -> quic::StreamId {
+        self.recv.recv_id()
     }
 }

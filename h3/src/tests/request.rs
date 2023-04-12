@@ -214,7 +214,7 @@ async fn post() {
                 .expect("request");
 
             request_stream
-                .send_data("wonderful json".into())
+                .send_data("wonderful json".as_bytes())
                 .await
                 .expect("send_data");
             request_stream.finish().await.expect("client finish");
@@ -319,7 +319,7 @@ async fn header_too_big_response_from_server_trailers() {
                 .await
                 .expect("request");
             request_stream
-                .send_data("wonderful json".into())
+                .send_data("wonderful json".as_bytes())
                 .await
                 .expect("send_data");
 
@@ -441,7 +441,7 @@ async fn header_too_big_client_error_trailer() {
                 .await
                 .expect("request");
             request_stream
-                .send_data("wonderful json".into())
+                .send_data("wonderful json".as_bytes())
                 .await
                 .expect("send_data");
 

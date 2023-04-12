@@ -29,10 +29,10 @@ pub fn builder() -> Builder {
 }
 
 /// Create a new HTTP/3 client with default settings
-pub async fn new<C, O>(conn: C) -> Result<(Connection<C, Bytes>, SendRequest<O, Bytes>), Error>
+pub async fn new<C, O>(conn: C) -> Result<(Connection<C, Bytes>, SendRequest<O>), Error>
 where
     C: quic::Connection<Bytes, OpenStreams = O>,
-    O: quic::OpenStreams<Bytes>,
+    O: quic::OpenStreams,
 {
     //= https://www.rfc-editor.org/rfc/rfc9114#section-3.3
     //= type=implication
@@ -65,7 +65,7 @@ where
 /// # use h3::{quic, client::*};
 /// # use http::{Request, Response};
 /// # use bytes::Buf;
-/// # async fn doc<T,B>(mut send_request: SendRequest<T, B>) -> Result<(), Box<dyn std::error::Error>>
+/// # async fn doc<T>(mut send_request: SendRequest<T>) -> Result<(), Box<dyn std::error::Error>>
 /// # where
 /// #     T: quic::OpenStreams<B>,
 /// #     B: Buf,
@@ -91,7 +91,7 @@ where
 /// # use h3::{quic, client::*};
 /// # use http::{Request, Response, HeaderMap};
 /// # use bytes::{Buf, Bytes};
-/// # async fn doc<T,B>(mut send_request: SendRequest<T, Bytes>) -> Result<(), Box<dyn std::error::Error>>
+/// # async fn doc<T>(mut send_request: SendRequest<T, Bytes>) -> Result<(), Box<dyn std::error::Error>>
 /// # where
 /// #     T: quic::OpenStreams<Bytes>,
 /// # {
@@ -120,10 +120,9 @@ where
 /// [`send_request()`]: struct.SendRequest.html#method.send_request
 /// [`RequestStream`]: struct.RequestStream.html
 /// [`RequestStream::finish()`]: struct.RequestStream.html#method.finish
-pub struct SendRequest<T, B>
+pub struct SendRequest<T>
 where
-    T: quic::OpenStreams<B>,
-    B: Buf,
+    T: quic::OpenStreams,
 {
     open: T,
     conn_state: SharedStateRef,
@@ -131,20 +130,18 @@ where
     // counts instances of SendRequest to close the connection when the last is dropped.
     sender_count: Arc<AtomicUsize>,
     conn_waker: Option<Waker>,
-    _buf: PhantomData<fn(B)>,
     send_grease_frame: bool,
 }
 
-impl<T, B> SendRequest<T, B>
+impl<T> SendRequest<T>
 where
-    T: quic::OpenStreams<B>,
-    B: Buf,
+    T: quic::OpenStreams,
 {
     /// Send a HTTP/3 request to the server
     pub async fn send_request(
         &mut self,
         req: http::Request<()>,
-    ) -> Result<RequestStream<T::BidiStream, B>, Error> {
+    ) -> Result<RequestStream<T::BidiStream>, Error> {
         let (peer_max_field_section_size, closing) = {
             let state = self.conn_state.read("send request lock state");
             (state.config.max_field_section_size, state.closing)
@@ -194,7 +191,7 @@ where
             return Err(Error::header_too_big(mem_size, peer_max_field_section_size));
         }
 
-        stream::write(&mut stream, Frame::Headers(block.freeze()))
+        stream::write::<_, _, Bytes>(&mut stream, Frame::Headers(block.freeze()))
             .await
             .map_err(|e| self.maybe_conn_err(e))?;
 
@@ -212,20 +209,18 @@ where
     }
 }
 
-impl<T, B> ConnectionState for SendRequest<T, B>
+impl<T> ConnectionState for SendRequest<T>
 where
-    T: quic::OpenStreams<B>,
-    B: Buf,
+    T: quic::OpenStreams,
 {
     fn shared_state(&self) -> &SharedStateRef {
         &self.conn_state
     }
 }
 
-impl<T, B> Clone for SendRequest<T, B>
+impl<T> Clone for SendRequest<T>
 where
-    T: quic::OpenStreams<B> + Clone,
-    B: Buf,
+    T: quic::OpenStreams + Clone,
 {
     fn clone(&self) -> Self {
         self.sender_count
@@ -237,16 +232,14 @@ where
             max_field_section_size: self.max_field_section_size,
             sender_count: self.sender_count.clone(),
             conn_waker: self.conn_waker.clone(),
-            _buf: PhantomData,
             send_grease_frame: self.send_grease_frame,
         }
     }
 }
 
-impl<T, B> Drop for SendRequest<T, B>
+impl<T> Drop for SendRequest<T>
 where
-    T: quic::OpenStreams<B>,
-    B: Buf,
+    T: quic::OpenStreams,
 {
     fn drop(&mut self) {
         if self
@@ -284,7 +277,7 @@ where
 /// # use futures_util::future;
 /// # use h3::{client::*, quic};
 /// # use tokio::task::JoinHandle;
-/// # async fn doc<C, B>(mut connection: Connection<C, B>)
+/// # async fn doc<C>(mut connection: Connection<C>)
 /// #    -> JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>
 /// # where
 /// #    C: quic::Connection<B> + Send + 'static,
@@ -307,7 +300,7 @@ where
 /// # use futures_util::future;
 /// # use h3::{client::*, quic};
 /// # use tokio::{self, sync::oneshot, task::JoinHandle};
-/// # async fn doc<C, B>(mut connection: Connection<C, B>)
+/// # async fn doc<C>(mut connection: Connection<C>)
 /// #    -> Result<(), Box<dyn std::error::Error + Send + Sync>>
 /// # where
 /// #    C: quic::Connection<B> + Send + 'static,
@@ -469,7 +462,7 @@ where
 /// # Examples
 /// ```rust
 /// # use h3::quic;
-/// # async fn doc<C, O, B>(quic: C)
+/// # async fn doc<C, O>(quic: C)
 /// # where
 /// #   C: quic::Connection<B, OpenStreams = O>,
 /// #   O: quic::OpenStreams<B>,
@@ -507,10 +500,10 @@ impl Builder {
     pub async fn build<C, O, B>(
         &mut self,
         quic: C,
-    ) -> Result<(Connection<C, B>, SendRequest<O, B>), Error>
+    ) -> Result<(Connection<C, B>, SendRequest<O>), Error>
     where
         C: quic::Connection<B, OpenStreams = O>,
-        O: quic::OpenStreams<B>,
+        O: quic::OpenStreams,
         B: Buf,
     {
         let open = quic.opener();
@@ -530,7 +523,6 @@ impl Builder {
                 conn_waker,
                 max_field_section_size: self.config.max_field_section_size,
                 sender_count: Arc::new(AtomicUsize::new(1)),
-                _buf: PhantomData,
                 send_grease_frame: self.config.send_grease,
             },
         ))
@@ -561,7 +553,7 @@ impl Builder {
 /// # use http::{Request, Response};
 /// # use bytes::Buf;
 /// # use tokio::io::AsyncWriteExt;
-/// # async fn doc<T,B>(mut req_stream: RequestStream<T, B>) -> Result<(), Box<dyn std::error::Error>>
+/// # async fn doc<T>(mut req_stream: RequestStream<T>) -> Result<(), Box<dyn std::error::Error>>
 /// # where
 /// #     T: quic::RecvStream,
 /// #     B: Buf,
@@ -590,17 +582,17 @@ impl Builder {
 /// [`recv_trailers()`]: #method.recv_trailers
 /// [`finish()`]: #method.finish
 /// [`stop_sending()`]: #method.stop_sending
-pub struct RequestStream<S, B> {
-    inner: connection::RequestStream<S, B>,
+pub struct RequestStream<S> {
+    inner: connection::RequestStream<S>,
 }
 
-impl<S, B> ConnectionState for RequestStream<S, B> {
+impl<S> ConnectionState for RequestStream<S> {
     fn shared_state(&self) -> &SharedStateRef {
         &self.inner.conn_state
     }
 }
 
-impl<S, B> RequestStream<S, B>
+impl<S> RequestStream<S>
 where
     S: quic::RecvStream,
 {
@@ -691,13 +683,12 @@ where
     }
 }
 
-impl<S, B> RequestStream<S, B>
+impl<S> RequestStream<S>
 where
-    S: quic::SendStream<B>,
-    B: Buf,
+    S: quic::SendStream,
 {
     /// Send some data on the request body.
-    pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
+    pub async fn send_data(&mut self, buf: impl Buf) -> Result<(), Error> {
         self.inner.send_data(buf).await
     }
 
@@ -728,18 +719,12 @@ where
     //# [QUIC-TRANSPORT].
 }
 
-impl<S, B> RequestStream<S, B>
+impl<S> RequestStream<S>
 where
-    S: quic::BidiStream<B>,
-    B: Buf,
+    S: quic::BidiStream,
 {
     /// Split this stream into two halves that can be driven independently.
-    pub fn split(
-        self,
-    ) -> (
-        RequestStream<S::SendStream, B>,
-        RequestStream<S::RecvStream, B>,
-    ) {
+    pub fn split(self) -> (RequestStream<S::SendStream>, RequestStream<S::RecvStream>) {
         let (send, recv) = self.inner.split();
         (RequestStream { inner: send }, RequestStream { inner: recv })
     }

@@ -22,7 +22,7 @@ use http::{Method, Request, Response, StatusCode};
 use quic::StreamId;
 
 use super::{
-    stream::{self, RecvStream},
+    stream::{self},
     SessionId,
 };
 
@@ -39,7 +39,7 @@ where
     // See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-2-3
     session_id: StreamId,
     conn: Mutex<Connection<C, B>>,
-    connect_stream: RequestStream<C::BidiStream, B>,
+    connect_stream: RequestStream<C::BidiStream>,
 }
 
 impl<C, B> WebTransportSession<C, B>
@@ -52,7 +52,7 @@ where
     /// TODO: is the API or the user responsible for validating the CONNECT request?
     pub async fn accept(
         request: Request<()>,
-        mut stream: RequestStream<C::BidiStream, B>,
+        mut stream: RequestStream<C::BidiStream>,
         mut conn: Connection<C, B>,
     ) -> Result<Self, Error> {
         // future::poll_fn(|cx| conn.poll_control(cx)).await?;
@@ -160,7 +160,7 @@ where
     ) -> Result<
         Option<(
             SessionId,
-            stream::SendStream<C::SendStream, B>,
+            stream::SendStream<C::SendStream>,
             stream::RecvStream<C::RecvStream>,
         )>,
         Error,

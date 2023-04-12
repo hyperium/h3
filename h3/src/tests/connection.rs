@@ -683,11 +683,10 @@ async fn graceful_shutdown_client() {
     tokio::join!(server_fut, client_fut);
 }
 
-async fn request<T, O, B>(mut send_request: T) -> Result<Response<()>, Error>
+async fn request<T, O>(mut send_request: T) -> Result<Response<()>, Error>
 where
-    T: BorrowMut<SendRequest<O, B>>,
-    O: quic::OpenStreams<B>,
-    B: Buf,
+    T: BorrowMut<SendRequest<O>>,
+    O: quic::OpenStreams,
 {
     let mut request_stream = send_request
         .borrow_mut()
@@ -696,10 +695,9 @@ where
     request_stream.recv_response().await
 }
 
-async fn response<S, B>(mut stream: server::RequestStream<S, B>)
+async fn response<S>(mut stream: server::RequestStream<S>)
 where
-    S: quic::RecvStream + SendStream<B>,
-    B: Buf,
+    S: quic::RecvStream + SendStream,
 {
     stream
         .send_response(

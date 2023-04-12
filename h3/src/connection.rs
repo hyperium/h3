@@ -1,5 +1,6 @@
 use std::{
     convert::TryFrom,
+    marker::PhantomData,
     sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard},
     task::{Context, Poll},
 };
@@ -100,9 +101,9 @@ where
     // TODO: breaking encapsulation just to see if we can get this to work, will fix before merging
     pub(super) conn: Arc<Mutex<C>>,
     control_send: C::SendStream,
-    control_recv: Option<FrameStream<C::RecvStream, B>>,
-    decoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
-    encoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
+    control_recv: Option<FrameStream<C::RecvStream>>,
+    decoder_recv: Option<AcceptedRecvStream<C::RecvStream>>,
+    encoder_recv: Option<AcceptedRecvStream<C::RecvStream>>,
     /// Stores incoming uni/recv streams which have yet to be claimed.
     ///
     /// This is opposed to discarding them by returning in `poll_accept_recv`, which may cause them to be missed by something else polling.
@@ -113,6 +114,7 @@ where
     got_peer_settings: bool,
     pub(super) send_grease_frame: bool,
     pub(super) config: Config,
+    _marker: PhantomData<B>,
 }
 
 impl<C, B> ConnectionInner<C, B>
@@ -206,7 +208,7 @@ where
         //# the peer prior to sending the SETTINGS frame; settings MUST be sent
         //# as soon as the transport is ready to send data.
         trace!("Sending Settings frame: {settings:#x?}");
-        stream::write(
+        stream::write::<_, _, B>(
             &mut control_send,
             (StreamType::CONTROL, Frame::Settings(settings)),
         )
@@ -230,6 +232,7 @@ where
             send_grease_frame: config.send_grease,
             config,
             accepted_streams: Default::default(),
+            _marker: PhantomData,
         };
         // start a grease stream
         if config.send_grease {
@@ -271,7 +274,7 @@ where
         //# (Section 5.2) so that both endpoints can reliably determine whether
         //# previously sent frames have been processed and gracefully complete or
         //# terminate any necessary remaining tasks.
-        stream::write(&mut self.control_send, Frame::Goaway(max_id.into())).await
+        stream::write::<_, _, B>(&mut self.control_send, Frame::Goaway(max_id.into())).await
     }
 
     pub fn poll_accept_request(
@@ -588,7 +591,9 @@ where
         //# types be ignored.  These streams have no semantics, and they can be
         //# sent when application-layer padding is desired.  They MAY also be
         //# sent on connections where no data is currently being transferred.
-        match stream::write(&mut grease_stream, (StreamType::grease(), Frame::Grease)).await {
+        match stream::write::<_, _, B>(&mut grease_stream, (StreamType::grease(), Frame::Grease))
+            .await
+        {
             Ok(()) => (),
             Err(err) => {
                 warn!("write data on grease stream failed with {}", err);
@@ -618,17 +623,17 @@ where
     }
 }
 
-pub struct RequestStream<S, B> {
-    pub(super) stream: FrameStream<S, B>,
+pub struct RequestStream<S> {
+    pub(super) stream: FrameStream<S>,
     pub(super) trailers: Option<Bytes>,
     pub(super) conn_state: SharedStateRef,
     pub(super) max_field_section_size: u64,
     send_grease_frame: bool,
 }
 
-impl<S, B> RequestStream<S, B> {
+impl<S> RequestStream<S> {
     pub fn new(
-        stream: FrameStream<S, B>,
+        stream: FrameStream<S>,
         max_field_section_size: u64,
         conn_state: SharedStateRef,
         grease: bool,
@@ -643,13 +648,13 @@ impl<S, B> RequestStream<S, B> {
     }
 }
 
-impl<S, B> ConnectionState for RequestStream<S, B> {
+impl<S> ConnectionState for RequestStream<S> {
     fn shared_state(&self) -> &SharedStateRef {
         &self.conn_state
     }
 }
 
-impl<S, B> RequestStream<S, B>
+impl<S> RequestStream<S>
 where
     S: quic::RecvStream,
 {
@@ -772,13 +777,12 @@ where
     }
 }
 
-impl<S, B> RequestStream<S, B>
+impl<S> RequestStream<S>
 where
-    S: quic::SendStream<B>,
-    B: Buf,
+    S: quic::SendStream,
 {
     /// Send some data on the response body.
-    pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
+    pub async fn send_data(&mut self, buf: impl Buf) -> Result<(), Error> {
         let frame = Frame::Data(buf);
 
         stream::write(&mut self.stream, frame)
@@ -810,7 +814,7 @@ where
         if mem_size > max_mem_size {
             return Err(Error::header_too_big(mem_size, max_mem_size));
         }
-        stream::write(&mut self.stream, Frame::Headers(block.freeze()))
+        stream::write::<_, _, Bytes>(&mut self.stream, Frame::Headers(block.freeze()))
             .await
             .map_err(|e| self.maybe_conn_err(e))?;
 
@@ -825,7 +829,7 @@ where
     pub async fn finish(&mut self) -> Result<(), Error> {
         if self.send_grease_frame {
             // send a grease frame once per Connection
-            stream::write(&mut self.stream, Frame::Grease)
+            stream::write::<_, _, Bytes>(&mut self.stream, Frame::Grease)
                 .await
                 .map_err(|e| self.maybe_conn_err(e))?;
             self.send_grease_frame = false;
@@ -837,17 +841,11 @@ where
     }
 }
 
-impl<S, B> RequestStream<S, B>
+impl<S> RequestStream<S>
 where
-    S: quic::BidiStream<B>,
-    B: Buf,
+    S: quic::BidiStream,
 {
-    pub(crate) fn split(
-        self,
-    ) -> (
-        RequestStream<S::SendStream, B>,
-        RequestStream<S::RecvStream, B>,
-    ) {
+    pub(crate) fn split(self) -> (RequestStream<S::SendStream>, RequestStream<S::RecvStream>) {
         let (send, recv) = self.stream.split();
 
         (

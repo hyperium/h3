@@ -18,7 +18,7 @@ use crate::{
 };
 
 /// Decodes Frames from the underlying QUIC stream
-pub struct FrameStream<S, B> {
+pub struct FrameStream<S> {
     stream: S,
     // Already read data from the stream
     bufs: BufList<Bytes>,
@@ -26,10 +26,9 @@ pub struct FrameStream<S, B> {
     remaining_data: usize,
     /// Set to true when `stream` reaches the end.
     is_eos: bool,
-    _phantom_buffer: PhantomData<B>,
 }
 
-impl<S, B> FrameStream<S, B> {
+impl<S> FrameStream<S> {
     pub fn new(stream: S) -> Self {
         Self::with_bufs(stream, BufList::new())
     }
@@ -41,7 +40,6 @@ impl<S, B> FrameStream<S, B> {
             decoder: FrameDecoder::default(),
             remaining_data: 0,
             is_eos: false,
-            _phantom_buffer: PhantomData,
         }
     }
 
@@ -50,7 +48,7 @@ impl<S, B> FrameStream<S, B> {
     }
 }
 
-impl<S, B> FrameStream<S, B>
+impl<S> FrameStream<S>
 where
     S: RecvStream,
 {
@@ -160,20 +158,11 @@ where
     }
 }
 
-impl<T, B> SendStream<B> for FrameStream<T, B>
+impl<T> SendStream for FrameStream<T>
 where
-    T: SendStream<B>,
-    B: Buf,
+    T: SendStream,
 {
-    type Error = <T as SendStream<B>>::Error;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.stream.poll_ready(cx)
-    }
-
-    fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), Self::Error> {
-        self.stream.send_data(data)
-    }
+    type Error = <T as SendStream>::Error;
 
     fn poll_finish(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.stream.poll_finish(cx)
@@ -196,12 +185,11 @@ where
     }
 }
 
-impl<S, B> FrameStream<S, B>
+impl<S> FrameStream<S>
 where
-    S: BidiStream<B>,
-    B: Buf,
+    S: BidiStream,
 {
-    pub(crate) fn split(self) -> (FrameStream<S::SendStream, B>, FrameStream<S::RecvStream, B>) {
+    pub(crate) fn split(self) -> (FrameStream<S::SendStream>, FrameStream<S::RecvStream>) {
         let (send, recv) = self.stream.split();
         (
             FrameStream {
@@ -210,7 +198,6 @@ where
                 decoder: FrameDecoder::default(),
                 remaining_data: 0,
                 is_eos: false,
-                _phantom_buffer: PhantomData,
             },
             FrameStream {
                 stream: recv,
@@ -218,7 +205,6 @@ where
                 decoder: self.decoder,
                 remaining_data: self.remaining_data,
                 is_eos: self.is_eos,
-                _phantom_buffer: PhantomData,
             },
         )
     }
@@ -400,7 +386,7 @@ mod tests {
         Frame::headers(&b"trailer"[..]).encode_with_payload(&mut buf);
         recv.chunk(buf.freeze());
 
-        let mut stream: FrameStream<_, ()> = FrameStream::new(recv);
+        let mut stream: FrameStream<_> = FrameStream::new(recv);
 
         assert_poll_matches!(|cx| stream.poll_next(cx), Ok(Some(Frame::Headers(_))));
         assert_poll_matches!(
@@ -422,7 +408,7 @@ mod tests {
         Frame::headers(&b"header"[..]).encode_with_payload(&mut buf);
         let mut buf = buf.freeze();
         recv.chunk(buf.split_to(buf.len() - 1));
-        let mut stream: FrameStream<_, ()> = FrameStream::new(recv);
+        let mut stream: FrameStream<_> = FrameStream::new(recv);
 
         assert_poll_matches!(
             |cx| stream.poll_next(cx),
@@ -441,7 +427,7 @@ mod tests {
         FrameType::DATA.encode(&mut buf);
         VarInt::from(4u32).encode(&mut buf);
         recv.chunk(buf.freeze());
-        let mut stream: FrameStream<_, ()> = FrameStream::new(recv);
+        let mut stream: FrameStream<_> = FrameStream::new(recv);
 
         assert_poll_matches!(
             |cx| stream.poll_next(cx),
@@ -463,7 +449,7 @@ mod tests {
         let mut buf = buf.freeze();
         recv.chunk(buf.split_to(buf.len() - 2));
         recv.chunk(buf);
-        let mut stream: FrameStream<_, ()> = FrameStream::new(recv);
+        let mut stream: FrameStream<_> = FrameStream::new(recv);
 
         // We get the total size of data about to be received
         assert_poll_matches!(
@@ -492,7 +478,7 @@ mod tests {
         VarInt::from(4u32).encode(&mut buf);
         buf.put_slice(&b"b"[..]);
         recv.chunk(buf.freeze());
-        let mut stream: FrameStream<_, ()> = FrameStream::new(recv);
+        let mut stream: FrameStream<_> = FrameStream::new(recv);
 
         assert_poll_matches!(
             |cx| stream.poll_next(cx),
@@ -524,7 +510,7 @@ mod tests {
         Frame::Data(Bytes::from("body")).encode_with_payload(&mut buf);
 
         recv.chunk(buf.freeze());
-        let mut stream: FrameStream<_, ()> = FrameStream::new(recv);
+        let mut stream: FrameStream<_> = FrameStream::new(recv);
 
         assert_poll_matches!(
             |cx| stream.poll_next(cx),
@@ -546,7 +532,7 @@ mod tests {
         buf.put_slice(&b"bo"[..]);
         recv.chunk(buf.clone().freeze());
 
-        let mut stream: FrameStream<_, ()> = FrameStream::new(recv);
+        let mut stream: FrameStream<_> = FrameStream::new(recv);
 
         assert_poll_matches!(
             |cx| stream.poll_next(cx),

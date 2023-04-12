@@ -172,7 +172,7 @@ where
     /// The [`RequestStream`] can be used to send the response.
     pub async fn accept(
         &mut self,
-    ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
+    ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream>)>, Error> {
         // Accept the incoming stream
         let mut stream = match future::poll_fn(|cx| self.poll_accept_request(cx)).await {
             Ok(Some(s)) => FrameStream::new(s),
@@ -212,9 +212,9 @@ where
     /// may still want to be handled and passed to the user.
     pub(crate) async fn accept_with_frame(
         &mut self,
-        mut stream: FrameStream<C::BidiStream, B>,
+        mut stream: FrameStream<C::BidiStream>,
         frame: Result<Option<Frame<PayloadLen>>, FrameStreamError>,
-    ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
+    ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream>)>, Error> {
         let mut encoded = match frame {
             Ok(Some(Frame::Headers(h))) => h,
 
@@ -747,24 +747,24 @@ struct RequestEnd {
 ///
 /// The [`RequestStream`] struct is used to send and/or receive
 /// information from the client.
-pub struct RequestStream<S, B> {
-    inner: connection::RequestStream<S, B>,
+pub struct RequestStream<S> {
+    inner: connection::RequestStream<S>,
     request_end: Arc<RequestEnd>,
 }
 
-impl<S, B> AsMut<connection::RequestStream<S, B>> for RequestStream<S, B> {
-    fn as_mut(&mut self) -> &mut connection::RequestStream<S, B> {
+impl<S> AsMut<connection::RequestStream<S>> for RequestStream<S> {
+    fn as_mut(&mut self) -> &mut connection::RequestStream<S> {
         &mut self.inner
     }
 }
 
-impl<S, B> ConnectionState for RequestStream<S, B> {
+impl<S> ConnectionState for RequestStream<S> {
     fn shared_state(&self) -> &SharedStateRef {
         &self.inner.conn_state
     }
 }
 
-impl<S, B> RequestStream<S, B>
+impl<S> RequestStream<S>
 where
     S: quic::RecvStream,
 {
@@ -789,10 +789,9 @@ where
     }
 }
 
-impl<S, B> RequestStream<S, B>
+impl<S> RequestStream<S>
 where
-    S: quic::SendStream<B>,
-    B: Buf,
+    S: quic::SendStream,
 {
     /// Send the HTTP/3 response
     ///
@@ -824,7 +823,7 @@ where
             return Err(Error::header_too_big(mem_size, max_mem_size));
         }
 
-        stream::write(&mut self.inner.stream, Frame::Headers(block.freeze()))
+        stream::write::<_, _, Bytes>(&mut self.inner.stream, Frame::Headers(block.freeze()))
             .await
             .map_err(|e| self.maybe_conn_err(e))?;
 
@@ -832,7 +831,7 @@ where
     }
 
     /// Send some data on the response body.
-    pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
+    pub async fn send_data(&mut self, buf: Bytes) -> Result<(), Error> {
         self.inner.send_data(buf).await
     }
 
@@ -875,19 +874,13 @@ where
     }
 }
 
-impl<S, B> RequestStream<S, B>
+impl<S> RequestStream<S>
 where
-    S: quic::BidiStream<B>,
-    B: Buf,
+    S: quic::BidiStream,
 {
     /// Splits the Request-Stream into send and receive.
     /// This can be used the send and receive data on different tasks.
-    pub fn split(
-        self,
-    ) -> (
-        RequestStream<S::SendStream, B>,
-        RequestStream<S::RecvStream, B>,
-    ) {
+    pub fn split(self) -> (RequestStream<S::SendStream>, RequestStream<S::RecvStream>) {
         let (send, recv) = self.inner.split();
         (
             RequestStream {
