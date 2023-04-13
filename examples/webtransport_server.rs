@@ -180,7 +180,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn handle_connection<C>(mut conn: Connection<C>) -> Result<()>
 where
     C: 'static + Send + quic::Connection,
-    <C::SendStream as h3::quic::SendStream>::Error: 'static + std::error::Error + Send + Sync,
+    <C::SendStream as h3::quic::SendStream>::Error:
+        'static + std::error::Error + Send + Sync + Into<std::io::Error>,
+    C::SendStream: Unpin,
 {
     // 3. TODO: Conditionally, if the client indicated that this is a webtransport session, we should accept it here, else use regular h3.
     // if this is a webtransport session, then h3 needs to stop handing the datagrams, bidirectional streams, and unidirectional streams and give them
@@ -235,7 +237,9 @@ async fn handle_session_and_echo_all_inbound_messages<C>(
 ) -> anyhow::Result<()>
 where
     C: 'static + Send + h3::quic::Connection,
-    <C::SendStream as h3::quic::SendStream>::Error: 'static + std::error::Error + Send + Sync,
+    <C::SendStream as h3::quic::SendStream>::Error:
+        'static + std::error::Error + Send + Sync + Into<std::io::Error>,
+    C::SendStream: Unpin,
 {
     loop {
         tokio::select! {
@@ -276,7 +280,7 @@ where
                 response.put(format!("I got your message of {} bytes: ", message.len()).as_bytes());
                 response.put(message);
 
-                send.write_all(response).await.context("Failed to respond")?;
+                    futures::AsyncWriteExt::write_all(&mut send, &response).await.context("Failed to respond")?;
                 }
             }
             else => {

@@ -514,6 +514,16 @@ pub enum SendStreamError {
     NotReady,
 }
 
+impl From<SendStreamError> for std::io::Error {
+    fn from(value: SendStreamError) -> Self {
+        match value {
+            SendStreamError::Write(err) => err.into(),
+            // TODO: remove
+            SendStreamError::NotReady => unreachable!(),
+        }
+    }
+}
+
 impl std::error::Error for SendStreamError {}
 
 impl Display for SendStreamError {

@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, task::Poll};
 
 use bytes::{Buf, Bytes};
-use futures_util::{future, ready, AsyncRead};
+use futures_util::{future, ready, AsyncRead, AsyncWrite};
 
 use crate::{
     buf::BufList,
@@ -105,5 +105,33 @@ where
 
     fn send_id(&self) -> quic::StreamId {
         self.stream.send_id()
+    }
+}
+
+impl<S> AsyncWrite for SendStream<S>
+where
+    S: Unpin + quic::SendStream,
+    S::Error: Into<std::io::Error>,
+{
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        mut buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        self.poll_send(cx, &mut buf).map_err(Into::into)
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_close(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        self.poll_finish(cx).map_err(Into::into)
     }
 }
