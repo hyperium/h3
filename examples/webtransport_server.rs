@@ -126,11 +126,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
     tls_config.alpn_protocols = alpn;
 
-    let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(tls_config)); 
+    let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(tls_config));
     let mut transport_config = quinn::TransportConfig::default();
     transport_config.keep_alive_interval(Some(Duration::from_secs(2)));
     server_config.transport = Arc::new(transport_config);
-    let (endpoint, mut incoming) = quinn::Endpoint::server(server_config, opt.listen)?;
+    let endpoint = quinn::Endpoint::server(server_config, opt.listen)?;
 
     info!("listening on {}", opt.listen);
 
@@ -143,7 +143,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     h3_config.send_grease(true);
 
     // 2. Accept new quic connections and spawn a new task to handle them
-    while let Some(new_conn) = incoming.next().await {
+    while let Some(new_conn) = endpoint.accept().await {
         trace_span!("New connection being attempted");
 
         tokio::spawn(async move {

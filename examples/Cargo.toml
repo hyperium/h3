@@ -13,23 +13,25 @@ futures = "0.3"
 h3 = { path = "../h3" }
 h3-quinn = { path = "../h3-quinn" }
 http = "0.2"
-quinn = { version = "0.8", default-features = false, features = [
+quinn = { version = "0.9", default-features = false, features = [
+    "runtime-tokio",
     "tls-rustls",
     "ring",
 ] }
-rcgen = { version = "0.9" }
+rcgen = { version = "0.10" }
 rustls = { version = "0.20", features = ["dangerous_configuration"] }
 rustls-native-certs = "0.6"
 structopt = "0.3"
-tokio = { version = "1.6", features = ["full"] }
-tracing = "0.1.10"
-tracing-subscriber = { version = "0.3", default-features = true, features = [
+tokio = { version = "1.27", features = ["full"] }
+tracing = "0.1.37"
+tracing-subscriber = { version = "0.3", default-features = false, features = [
     "fmt",
     "ansi",
     "env-filter",
     "time",
     "tracing-log",
 ] }
+
 tracing-tree = { version = "0.2" }
 
 [features]

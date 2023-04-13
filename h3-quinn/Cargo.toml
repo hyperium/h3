@@ -1,19 +1,23 @@
 [package]
 name = "h3-quinn"
-version = "0.0.1"
+version = "0.0.2"
+rust-version = "1.59"
 authors = ["Jean-Christophe BEGUE <jc.begue@pm.me>"]
 edition = "2018"
 documentation = "https://docs.rs/h3-quinn"
 repository = "https://github.com/hyperium/h3"
 readme = "../README.md"
 description = "QUIC transport implementation based on Quinn."
-keywords = ["http3","quic","h3"]
+keywords = ["http3", "quic", "h3"]
 categories = ["network-programming", "web-programming"]
 license = "MIT"
 
 [dependencies]
-h3 = { version = "0.0.1", path = "../h3" }
+h3 = { version = "0.0.2", path = "../h3" }
 bytes = "1"
-futures-util = { version = "0.3", default-features = false, features = ["io"] }
-quinn = { version = "0.8.0", default-features = false }
-quinn-proto = { version = "0.8.0", default-features = false }
+quinn = { version = "0.9.3", default-features = false, features = [
+    "futures-io",
+] }
+quinn-proto = { version = "0.9.2", default-features = false }
+tokio-util = { version = "0.7.7" }
+futures = { version = "0.3.27" }
