@@ -42,6 +42,7 @@ impl BufList<Bytes> {
             .bufs
             .front_mut()
             .map(|chunk| chunk.split_to(usize::min(max_len, chunk.remaining())));
+
         if let Some(front) = self.bufs.front() {
             if front.remaining() == 0 {
                 let _ = self.bufs.pop_front();

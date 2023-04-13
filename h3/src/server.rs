@@ -85,7 +85,7 @@ use crate::{
     },
     qpack,
     quic::{self, SendStream as _},
-    stream,
+    stream::{self, BufRecvStream},
 };
 use tracing::{error, info, trace, warn};
 
@@ -171,7 +171,7 @@ where
     ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream>)>, Error> {
         // Accept the incoming stream
         let mut stream = match future::poll_fn(|cx| self.poll_accept_request(cx)).await {
-            Ok(Some(s)) => FrameStream::new(s),
+            Ok(Some(s)) => FrameStream::new(BufRecvStream::new(s)),
             Ok(None) => {
                 // We always send a last GoAway frame to the client, so it knows which was the last
                 // non-rejected request.

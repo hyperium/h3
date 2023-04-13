@@ -5,6 +5,7 @@
 pub mod client;
 pub mod error;
 pub mod quic;
+pub(crate) mod request;
 pub mod server;
 pub mod webtransport;
 

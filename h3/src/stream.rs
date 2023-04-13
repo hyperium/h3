@@ -13,7 +13,7 @@ use crate::{
         stream::StreamType,
         varint::VarInt,
     },
-    quic::{self, RecvStream, SendStream},
+    quic::{self, BidiStream, RecvStream, SendStream},
     webtransport::{self, SessionId},
     Error,
 };
@@ -168,8 +168,8 @@ where
 {
     Control(FrameStream<S>),
     Push(u64, FrameStream<S>),
-    Encoder(S),
-    Decoder(S),
+    Encoder(BufRecvStream<S>),
+    Decoder(BufRecvStream<S>),
     WebTransportUni(SessionId, webtransport::stream::RecvStream<S>),
     Reserved,
 }
@@ -189,11 +189,10 @@ where
 
 /// Resolves an incoming streams type as well as `PUSH_ID`s and `SESSION_ID`s
 pub(super) struct AcceptRecvStream<S> {
-    stream: S,
+    stream: BufRecvStream<S>,
     ty: Option<StreamType>,
     /// push_id or session_id
     id: Option<VarInt>,
-    buf: BufList<Bytes>,
     expected: Option<usize>,
 }
 
@@ -203,28 +202,25 @@ where
 {
     pub fn new(stream: S) -> Self {
         Self {
-            stream,
+            stream: BufRecvStream::new(stream),
             ty: None,
             id: None,
-            buf: BufList::new(),
             expected: None,
         }
     }
 
     pub fn into_stream(self) -> Result<AcceptedRecvStream<S>, Error> {
         Ok(match self.ty.expect("Stream type not resolved yet") {
-            StreamType::CONTROL => {
-                AcceptedRecvStream::Control(FrameStream::with_bufs(self.stream, self.buf))
-            }
+            StreamType::CONTROL => AcceptedRecvStream::Control(FrameStream::new(self.stream)),
             StreamType::PUSH => AcceptedRecvStream::Push(
                 self.id.expect("Push ID not resolved yet").into_inner(),
-                FrameStream::with_bufs(self.stream, self.buf),
+                FrameStream::new(self.stream),
             ),
             StreamType::ENCODER => AcceptedRecvStream::Encoder(self.stream),
             StreamType::DECODER => AcceptedRecvStream::Decoder(self.stream),
             StreamType::WEBTRANSPORT_UNI => AcceptedRecvStream::WebTransportUni(
                 SessionId::from_varint(self.id.expect("Session ID not resolved yet")),
-                webtransport::stream::RecvStream::new(self.buf, self.stream),
+                webtransport::stream::RecvStream::new(self.stream),
             ),
             t if t.value() > 0x21 && (t.value() - 0x21) % 0x1f == 0 => AcceptedRecvStream::Reserved,
 
@@ -264,22 +260,21 @@ where
                 None => (),
             };
 
-            match ready!(self.stream.poll_data(cx))? {
-                Some(mut b) => self.buf.push_bytes(&mut b),
-                None => {
-                    return Poll::Ready(Err(Code::H3_STREAM_CREATION_ERROR.with_reason(
-                        "Stream closed before type received",
-                        ErrorLevel::ConnectionError,
-                    )));
-                }
+            if ready!(self.stream.poll_read(cx))? {
+                return Poll::Ready(Err(Code::H3_STREAM_CREATION_ERROR.with_reason(
+                    "Stream closed before type received",
+                    ErrorLevel::ConnectionError,
+                )));
             };
 
-            if self.expected.is_none() && self.buf.remaining() >= 1 {
-                self.expected = Some(VarInt::encoded_size(self.buf.chunk()[0]));
+            let mut buf = self.stream.buf_mut();
+            if self.expected.is_none() && buf.remaining() >= 1 {
+                self.expected = Some(VarInt::encoded_size(buf.chunk()[0]));
             }
 
             if let Some(expected) = self.expected {
-                if self.buf.remaining() < expected {
+                // Poll for more data
+                if buf.remaining() < expected {
                     continue;
                 }
             } else {
@@ -289,7 +284,7 @@ where
             // Parse ty and then id
             if self.ty.is_none() {
                 // Parse StreamType
-                self.ty = Some(StreamType::decode(&mut self.buf).map_err(|_| {
+                self.ty = Some(StreamType::decode(&mut buf).map_err(|_| {
                     Code::H3_INTERNAL_ERROR.with_reason(
                         "Unexpected end parsing stream type",
                         ErrorLevel::ConnectionError,
@@ -299,7 +294,7 @@ where
                 self.expected = None;
             } else {
                 // Parse PUSH_ID
-                self.id = Some(VarInt::decode(&mut self.buf).map_err(|_| {
+                self.id = Some(VarInt::decode(&mut buf).map_err(|_| {
                     Code::H3_INTERNAL_ERROR.with_reason(
                         "Unexpected end parsing push or session id",
                         ErrorLevel::ConnectionError,
@@ -307,6 +302,151 @@ where
                 })?);
             }
         }
+    }
+}
+
+/// A stream which allows partial reading of the data without data loss.
+///
+/// This fixes the problem where `poll_data` returns more than the needed amount of bytes,
+/// requiring correct implementations to hold on to that extra data and return it later.
+///
+/// # Usage
+///
+/// Implements `quic::RecvStream` which will first return buffered data, and then read from the
+/// stream
+pub(crate) struct BufRecvStream<S> {
+    buf: BufList<Bytes>,
+    /// Indicates that the end of the stream has been reached
+    ///
+    /// Data may still be available as buffered
+    eos: bool,
+    stream: S,
+}
+
+impl<S: RecvStream> BufRecvStream<S> {
+    pub(crate) fn new(stream: S) -> Self {
+        Self {
+            buf: BufList::new(),
+            eos: false,
+            stream,
+        }
+    }
+
+    pub(crate) fn with_bufs(stream: S, bufs: BufList<Bytes>) -> Self {
+        Self {
+            buf: bufs,
+            eos: false,
+            stream,
+        }
+    }
+
+    /// Reads more data into the buffer, returning the number of bytes read.
+    ///
+    /// Returns `true` if the end of the stream is reached.
+    pub fn poll_read(&mut self, cx: &mut Context<'_>) -> Poll<Result<bool, S::Error>> {
+        let data = ready!(self.stream.poll_data(cx))?;
+
+        if let Some(mut data) = data {
+            self.buf.push_bytes(&mut data);
+            Poll::Ready(Ok(false))
+        } else {
+            self.eos = true;
+            Poll::Ready(Ok(true))
+        }
+    }
+
+    /// Returns the currently buffered data, allowing it to be partially read
+    #[inline]
+    pub fn buf_mut(&mut self) -> &mut BufList<Bytes> {
+        &mut self.buf
+    }
+
+    #[inline]
+    pub(crate) fn buf(&self) -> &BufList<Bytes> {
+        &self.buf
+    }
+
+    pub fn is_eos(&self) -> bool {
+        self.eos
+    }
+}
+
+impl<S: RecvStream> RecvStream for BufRecvStream<S> {
+    type Buf = Bytes;
+
+    type Error = S::Error;
+
+    fn poll_data(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<Option<Self::Buf>, Self::Error>> {
+        // There is data buffered, return that immediately
+        if let Some(chunk) = self.buf.take_first_chunk() {
+            return Poll::Ready(Ok(Some(chunk)));
+        }
+
+        if let Some(mut data) = ready!(self.stream.poll_data(cx))? {
+            Poll::Ready(Ok(Some(data.copy_to_bytes(data.remaining()))))
+        } else {
+            self.eos = true;
+            Poll::Ready(Ok(None))
+        }
+    }
+
+    fn stop_sending(&mut self, error_code: u64) {
+        self.stream.stop_sending(error_code)
+    }
+
+    fn recv_id(&self) -> quic::StreamId {
+        self.stream.recv_id()
+    }
+}
+
+impl<S: SendStream> SendStream for BufRecvStream<S> {
+    type Error = S::Error;
+
+    #[inline]
+    fn poll_send<D: Buf>(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut D,
+    ) -> Poll<Result<usize, Self::Error>> {
+        self.stream.poll_send(cx, buf)
+    }
+
+    fn poll_finish(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.stream.poll_finish(cx)
+    }
+
+    fn reset(&mut self, reset_code: u64) {
+        self.stream.reset(reset_code)
+    }
+
+    fn send_id(&self) -> quic::StreamId {
+        self.stream.send_id()
+    }
+}
+
+impl<S: BidiStream> BidiStream for BufRecvStream<S> {
+    type SendStream = BufRecvStream<S::SendStream>;
+
+    type RecvStream = BufRecvStream<S::RecvStream>;
+
+    fn split(self) -> (Self::SendStream, Self::RecvStream) {
+        let (send, recv) = self.stream.split();
+        (
+            BufRecvStream {
+                // Sending is not buffered
+                buf: BufList::new(),
+                eos: self.eos,
+                stream: send,
+            },
+            BufRecvStream {
+                buf: self.buf,
+                eos: self.eos,
+                stream: recv,
+            },
+        )
     }
 }
 

@@ -597,6 +597,7 @@ async fn header_too_big_discard_from_client_trailers() {
             .build(pair.client().await)
             .await
             .expect("client init");
+
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
         let req_fut = async {
             let mut request_stream = client

@@ -21,7 +21,7 @@ use crate::{
     qpack,
     quic::{self, SendStream as _},
     server::Config,
-    stream::{self, AcceptRecvStream, AcceptedRecvStream},
+    stream::{self, AcceptRecvStream, AcceptedRecvStream, BufRecvStream},
     webtransport::{self, SessionId},
 };
 

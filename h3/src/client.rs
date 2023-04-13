@@ -19,7 +19,7 @@ use crate::{
     qpack,
     quic::{self, StreamId},
     server::Config,
-    stream,
+    stream::{self, BufRecvStream},
 };
 
 /// Start building a new HTTP/3 client
@@ -196,7 +196,7 @@ where
 
         let request_stream = RequestStream {
             inner: connection::RequestStream::new(
-                FrameStream::new(stream),
+                FrameStream::new(BufRecvStream::new(stream)),
                 self.max_field_section_size,
                 self.conn_state.clone(),
                 self.send_grease_frame,
@@ -246,7 +246,7 @@ where
             .fetch_sub(1, std::sync::atomic::Ordering::AcqRel)
             == 1
         {
-            if let Some(w) = self.conn_waker.take() {
+            if let Some(w) = Option::take(&mut self.conn_waker) {
                 w.wake()
             }
             self.shared_state().write("SendRequest drop").error = Some(Error::closed());
