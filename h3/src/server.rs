@@ -425,11 +425,8 @@ where
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<C::BidiStream>, Error>> {
-        info!("poll_accept_request");
         let _ = self.poll_control(cx)?;
-        info!("poll_accept_request: poll_control done");
         let _ = self.poll_requests_completion(cx);
-        info!("poll_accept_request: poll_requests_completion done");
         loop {
             match self.inner.poll_accept_request(cx) {
                 Poll::Ready(Err(x)) => break Poll::Ready(Err(x)),
