@@ -12,8 +12,9 @@ use crate::{
     error::{Code, ErrorLevel},
     frame::FrameStream,
     proto::{datagram::Datagram, frame::Frame},
-    quic::{self, BidiStream, SendStream},
+    quic::{self, BidiStream as _, SendStream as _},
     server::{self, Connection, RequestStream},
+    stream::BufRecvStream,
     Error, Protocol,
 };
 use bytes::{Buf, Bytes};
@@ -22,7 +23,7 @@ use http::{Method, Request, Response, StatusCode};
 use quic::StreamId;
 
 use super::{
-    stream::{self},
+    stream::{self, RecvStream, SendStream},
     SessionId,
 };
 
@@ -146,114 +147,93 @@ where
         AcceptUni { conn: &self.conn }
     }
 
-    /// Accepts an incoming bidirectional stream
-    /// TODO: should this return an enum of BiStream/Request to allow ordinary HTTP/3 requests to
-    /// pass through?
-    ///
-    /// Currently, they are ignored, and the function loops until it receives a *webtransport*
-    /// stream.
-    pub async fn accept_bi(
-        &self,
-    ) -> Result<
-        Option<(
-            SessionId,
-            stream::SendStream<C::SendStream>,
-            stream::RecvStream<C::RecvStream>,
-        )>,
-        Error,
-    > {
-        loop {
-            // Get the next stream
-            // Accept the incoming stream
-            let stream = poll_fn(|cx| {
-                let mut conn = self.conn.lock().unwrap();
-                conn.poll_accept_request(cx)
-            })
-            .await;
-
-            tracing::debug!("Received biderectional stream");
-
-            let mut stream = match stream {
-                Ok(Some(s)) => FrameStream::new(s),
-                Ok(None) => {
-                    // We always send a last GoAway frame to the client, so it knows which was the last
-                    // non-rejected request.
-                    // self.shutdown(0).await?;
-                    todo!("shutdown");
-                    // return Ok(None);
-                }
-                Err(err) => {
-                    match err.inner.kind {
-                        crate::error::Kind::Closed => return Ok(None),
-                        crate::error::Kind::Application {
-                            code,
-                            reason,
-                            level: ErrorLevel::ConnectionError,
-                        } => {
-                            return Err(self.conn.lock().unwrap().close(
-                                code,
-                                reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
-                            ))
-                        }
-                        _ => return Err(err),
-                    };
-                }
-            };
-
-            tracing::debug!("Reading first frame");
-            // Read the first frame.
-            //
-            // This wil determine if it is a webtransport bi-stream or a request stream
-            let frame = poll_fn(|cx| stream.poll_next(cx)).await;
-
+    /// Accepts an incoming bidirectional stream or request
+    pub async fn accept_bi(&self) -> Result<Option<AcceptedBi<C>>, Error> {
+        // Get the next stream
+        // Accept the incoming stream
+        let stream = poll_fn(|cx| {
             let mut conn = self.conn.lock().unwrap();
-            match frame {
-                Ok(None) => return Ok(None),
-                Ok(Some(Frame::WebTransportStream(session_id))) => {
-                    tracing::info!("Got webtransport stream");
-                    // Take the stream out of the framed reader
-                    let (stream, buf) = stream.into_inner();
-                    let (send, recv) = stream.split();
-                    // Don't lose already read data
-                    let recv = stream::RecvStream::new(buf, recv);
-                    let send = stream::SendStream::new(send);
-                    return Ok(Some((session_id, send, recv)));
-                }
-                // Not a webtransport stream, discard
-                //
-                // Find a workaround to return this request, in order to accept more sessions
-                Ok(Some(_frame)) => continue,
-                Err(e) => {
-                    let err: Error = e.into();
-                    if err.is_closed() {
-                        return Ok(None);
+            conn.poll_accept_request(cx)
+        })
+        .await;
+
+        tracing::debug!("Received biderectional stream");
+
+        let mut stream = match stream {
+            Ok(Some(s)) => FrameStream::new(BufRecvStream::new(s)),
+            Ok(None) => {
+                // We always send a last GoAway frame to the client, so it knows which was the last
+                // non-rejected request.
+                // self.shutdown(0).await?;
+                todo!("shutdown");
+                // return Ok(None);
+            }
+            Err(err) => {
+                match err.inner.kind {
+                    crate::error::Kind::Closed => return Ok(None),
+                    crate::error::Kind::Application {
+                        code,
+                        reason,
+                        level: ErrorLevel::ConnectionError,
+                    } => {
+                        return Err(self.conn.lock().unwrap().close(
+                            code,
+                            reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
+                        ))
                     }
-                    match err.inner.kind {
-                        crate::error::Kind::Closed => return Ok(None),
-                        crate::error::Kind::Application {
-                            code,
-                            reason,
-                            level: ErrorLevel::ConnectionError,
-                        } => {
-                            return Err(conn.close(
-                                code,
-                                reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
-                            ))
-                        }
-                        crate::error::Kind::Application {
-                            code,
-                            reason: _,
-                            level: ErrorLevel::StreamError,
-                        } => {
-                            stream.reset(code.into());
-                            return Err(err);
-                        }
-                        _ => return Err(err),
-                    };
+                    _ => return Err(err),
+                };
+            }
+        };
+
+        tracing::debug!("Reading first frame");
+        // Read the first frame.
+        //
+        // This will determine if it is a webtransport bi-stream or a request stream
+        let frame = poll_fn(|cx| stream.poll_next(cx)).await;
+
+        match frame {
+            Ok(None) => Ok(None),
+            Ok(Some(Frame::WebTransportStream(session_id))) => {
+                tracing::info!("Got webtransport stream");
+                // Take the stream out of the framed reader and split it in half like Paul Allen
+                let (send, recv) = stream.into_inner().split();
+                let send = SendStream::new(send);
+                let recv = RecvStream::new(recv);
+
+                Ok(Some(AcceptedBi::BidiStream(session_id, send, recv)))
+            }
+            // Make the underlying HTTP/3 connection handle the rest
+            frame => {
+                let req = {
+                    let mut conn = self.conn.lock().unwrap();
+                    conn.accept_with_frame(stream, frame)?
+                };
+                if let Some(req) = req {
+                    let (req, resp) = req.resolve().await?;
+                    Ok(Some(AcceptedBi::Request(req, resp)))
+                } else {
+                    Ok(None)
                 }
             }
         }
     }
+}
+
+/// An accepted incoming bidirectional stream.
+///
+/// Since
+pub enum AcceptedBi<C: quic::Connection> {
+    /// An incoming bidirectional stream
+    BidiStream(
+        SessionId,
+        SendStream<C::SendStream>,
+        RecvStream<C::RecvStream>,
+    ),
+    /// An incoming HTTP/3 request, passed through a webtransport session.
+    ///
+    /// This makes it possible to respond to multiple CONNECT requests
+    Request(Request<()>, RequestStream<C::BidiStream>),
 }
 
 /// Future for [`Connection::read_datagram`]

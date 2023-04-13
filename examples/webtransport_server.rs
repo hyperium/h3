@@ -260,7 +260,8 @@ where
                 }
             }
             stream = session.accept_bi() => {
-                let (session_id, mut send, mut recv) = stream?.unwrap();
+                if let Some(h3::webtransport::server::AcceptedBi::BidiStream(_, mut send, mut recv)) = stream? {
+
                 tracing::info!("Got bi stream");
                 let mut message = BytesMut::new();
                 while let Some(bytes) = poll_fn(|cx| recv.poll_data(cx)).await? {
@@ -271,9 +272,12 @@ where
 
                 tracing::info!("Got message: {message:?}");
 
-                send.write_all(&mut format!("I got your message: {message:?}").as_bytes()).await.context("Failed to respond")?;
-                // send.send_data(message.freeze()).context("Failed to send response");
-                // future::poll_fn(|cx| send.poll_ready(cx)).await?;
+                let mut response = BytesMut::new();
+                response.put(format!("I got your message of {} bytes: ", message.len()).as_bytes());
+                response.put(message);
+
+                send.write_all(response).await.context("Failed to respond")?;
+                }
             }
             else => {
                 break
