@@ -89,17 +89,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let opt = Opt::from_args();
 
     tracing::info!("Opt: {opt:#?}");
-    let root = if let Some(root) = opt.root {
-        if !root.is_dir() {
-            return Err(format!("{}: is not a readable directory", root.display()).into());
-        } else {
-            info!("serving {}", root.display());
-            Arc::new(Some(root))
-        }
-    } else {
-        Arc::new(None)
-    };
-
     let Certs { cert, key } = opt.certs;
 
     // create quinn server endpoint and bind UDP socket
@@ -188,9 +177,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn handle_connection<C>(mut conn: Connection<C, Bytes>) -> Result<()>
+async fn handle_connection<C>(mut conn: Connection<C>) -> Result<()>
 where
-    C: 'static + Send + quic::Connection<Bytes>,
+    C: 'static + Send + quic::Connection,
     <C::SendStream as h3::quic::SendStream>::Error: 'static + std::error::Error + Send + Sync,
 {
     // 3. TODO: Conditionally, if the client indicated that this is a webtransport session, we should accept it here, else use regular h3.
@@ -241,13 +230,12 @@ where
 
 /// This method will echo all inbound datagrams, unidirectional and bidirectional streams.
 #[tracing::instrument(level = "info", skip(session))]
-async fn handle_session_and_echo_all_inbound_messages<C, B>(
-    session: WebTransportSession<C, B>,
+async fn handle_session_and_echo_all_inbound_messages<C>(
+    session: WebTransportSession<C>,
 ) -> anyhow::Result<()>
 where
-    C: 'static + Send + h3::quic::Connection<B>,
+    C: 'static + Send + h3::quic::Connection,
     <C::SendStream as h3::quic::SendStream>::Error: 'static + std::error::Error + Send + Sync,
-    B: Buf,
 {
     loop {
         tokio::select! {

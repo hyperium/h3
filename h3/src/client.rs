@@ -2,7 +2,6 @@
 
 use std::{
     convert::TryFrom,
-    marker::PhantomData,
     sync::{atomic::AtomicUsize, Arc},
     task::{Context, Poll, Waker},
 };
@@ -29,9 +28,9 @@ pub fn builder() -> Builder {
 }
 
 /// Create a new HTTP/3 client with default settings
-pub async fn new<C, O>(conn: C) -> Result<(Connection<C, Bytes>, SendRequest<O>), Error>
+pub async fn new<C, O>(conn: C) -> Result<(Connection<C>, SendRequest<O>), Error>
 where
-    C: quic::Connection<Bytes, OpenStreams = O>,
+    C: quic::Connection<OpenStreams = O>,
     O: quic::OpenStreams,
 {
     //= https://www.rfc-editor.org/rfc/rfc9114#section-3.3
@@ -338,22 +337,20 @@ where
 /// ```
 /// [`poll_close()`]: struct.Connection.html#method.poll_close
 /// [`shutdown()`]: struct.Connection.html#method.shutdown
-pub struct Connection<C, B>
+pub struct Connection<C>
 where
-    C: quic::Connection<B>,
-    B: Buf,
+    C: quic::Connection,
 {
-    inner: ConnectionInner<C, B>,
+    inner: ConnectionInner<C>,
     // Has a GOAWAY frame been sent? If so, this PushId is the last we are willing to accept.
     sent_closing: Option<PushId>,
     // Has a GOAWAY frame been received? If so, this is StreamId the last the remote will accept.
     recv_closing: Option<StreamId>,
 }
 
-impl<C, B> Connection<C, B>
+impl<C> Connection<C>
 where
-    C: quic::Connection<B>,
-    B: Buf,
+    C: quic::Connection,
 {
     /// Initiate a graceful shutdown, accepting `max_push` potentially in-flight server pushes
     pub async fn shutdown(&mut self, _max_push: usize) -> Result<(), Error> {
@@ -497,14 +494,10 @@ impl Builder {
     }
 
     /// Create a new HTTP/3 client from a `quic` connection
-    pub async fn build<C, O, B>(
-        &mut self,
-        quic: C,
-    ) -> Result<(Connection<C, B>, SendRequest<O>), Error>
+    pub async fn build<C, O>(&mut self, quic: C) -> Result<(Connection<C>, SendRequest<O>), Error>
     where
-        C: quic::Connection<B, OpenStreams = O>,
+        C: quic::Connection<OpenStreams = O>,
         O: quic::OpenStreams,
-        B: Buf,
     {
         let open = quic.opener();
         let conn_state = SharedStateRef::default();

@@ -4,7 +4,7 @@
 use std::{borrow::BorrowMut, time::Duration};
 
 use assert_matches::assert_matches;
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Bytes, BytesMut};
 use futures_util::future;
 use http::{Request, Response, StatusCode};
 
@@ -184,7 +184,7 @@ async fn settings_exchange_server() {
     let client_fut = async {
         let (mut conn, _client) = client::builder()
             .max_field_section_size(12)
-            .build::<_, _, Bytes>(pair.client().await)
+            .build(pair.client().await)
             .await
             .expect("client init");
         let drive = async move {

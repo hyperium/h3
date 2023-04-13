@@ -24,7 +24,7 @@ pub use quinn::{
 };
 use quinn::{ReadDatagram, SendDatagramError};
 
-use h3::quic::{self, Error, StreamId, WriteBuf};
+use h3::quic::{self, Error, StreamId};
 use tokio_util::sync::ReusableBoxFuture;
 
 /// A QUIC connection backed by Quinn
@@ -95,10 +95,7 @@ impl From<quinn::ConnectionError> for ConnectionError {
     }
 }
 
-impl<B> quic::Connection<B> for Connection
-where
-    B: Buf,
-{
+impl quic::Connection for Connection {
     type SendStream = SendStream;
     type RecvStream = RecvStream;
     type BidiStream = BidiStream;

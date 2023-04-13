@@ -31,21 +31,19 @@ use super::{
 /// Maintains the session using the underlying HTTP/3 connection.
 ///
 /// Similar to [`crate::Connection`] it is generic over the QUIC implementation and Buffer.
-pub struct WebTransportSession<C, B>
+pub struct WebTransportSession<C>
 where
-    C: quic::Connection<B>,
-    B: Buf,
+    C: quic::Connection,
 {
     // See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-2-3
     session_id: StreamId,
-    conn: Mutex<Connection<C, B>>,
+    conn: Mutex<Connection<C>>,
     connect_stream: RequestStream<C::BidiStream>,
 }
 
-impl<C, B> WebTransportSession<C, B>
+impl<C> WebTransportSession<C>
 where
-    C: quic::Connection<B>,
-    B: Buf,
+    C: quic::Connection,
 {
     /// Accepts a *CONNECT* request for establishing a WebTransport session.
     ///
@@ -53,7 +51,7 @@ where
     pub async fn accept(
         request: Request<()>,
         mut stream: RequestStream<C::BidiStream>,
-        mut conn: Connection<C, B>,
+        mut conn: Connection<C>,
     ) -> Result<Self, Error> {
         // future::poll_fn(|cx| conn.poll_control(cx)).await?;
 
@@ -125,10 +123,9 @@ where
     }
 
     /// Receive a datagram from the client
-    pub fn read_datagram(&self) -> ReadDatagram<C, B> {
+    pub fn read_datagram(&self) -> ReadDatagram<C> {
         ReadDatagram {
             conn: self.conn.lock().unwrap().inner.conn.clone(),
-            _marker: PhantomData,
         }
     }
 
@@ -145,7 +142,7 @@ where
     }
 
     /// Accept an incoming unidirectional stream from the client, it reads the stream until EOF.
-    pub fn accept_uni(&self) -> AcceptUni<C, B> {
+    pub fn accept_uni(&self) -> AcceptUni<C> {
         AcceptUni { conn: &self.conn }
     }
 
@@ -260,19 +257,16 @@ where
 }
 
 /// Future for [`Connection::read_datagram`]
-pub struct ReadDatagram<C, B>
+pub struct ReadDatagram<C>
 where
-    C: quic::Connection<B>,
-    B: Buf,
+    C: quic::Connection,
 {
     conn: Arc<Mutex<C>>,
-    _marker: PhantomData<B>,
 }
 
-impl<C, B> Future for ReadDatagram<C, B>
+impl<C> Future for ReadDatagram<C>
 where
-    C: quic::Connection<B>,
-    B: Buf,
+    C: quic::Connection,
 {
     type Output = Result<Option<(SessionId, Bytes)>, Error>;
 
@@ -292,18 +286,16 @@ where
 }
 
 /// Future for [`WebTransportSession::accept_uni`]
-pub struct AcceptUni<'a, C, B>
+pub struct AcceptUni<'a, C>
 where
-    C: quic::Connection<B>,
-    B: Buf,
+    C: quic::Connection,
 {
-    conn: &'a Mutex<server::Connection<C, B>>,
+    conn: &'a Mutex<server::Connection<C>>,
 }
 
-impl<'a, C, B> Future for AcceptUni<'a, C, B>
+impl<'a, C> Future for AcceptUni<'a, C>
 where
-    C: quic::Connection<B>,
-    B: Buf,
+    C: quic::Connection,
 {
     type Output = Result<Option<(SessionId, stream::RecvStream<C::RecvStream>)>, Error>;
 

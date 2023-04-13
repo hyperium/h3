@@ -508,7 +508,7 @@ async fn header_too_big_discard_from_client() {
         // Do not poll driver so client doesn't know about server's max_field section size setting
         let (_conn, mut client) = client::builder()
             .max_field_section_size(12)
-            .build::<_, _, Bytes>(pair.client().await)
+            .build(pair.client().await)
             .await
             .expect("client init");
         let mut request_stream = client
@@ -594,7 +594,7 @@ async fn header_too_big_discard_from_client_trailers() {
         // Do not poll driver so client doesn't know about server's max_field section size setting
         let (mut driver, mut client) = client::builder()
             .max_field_section_size(200)
-            .build::<_, _, Bytes>(pair.client().await)
+            .build(pair.client().await)
             .await
             .expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };

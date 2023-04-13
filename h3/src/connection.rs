@@ -1,6 +1,5 @@
 use std::{
     convert::TryFrom,
-    marker::PhantomData,
     sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard},
     task::{Context, Poll},
 };
@@ -72,18 +71,16 @@ pub trait ConnectionState {
     }
 }
 
-pub(crate) struct AcceptedStreams<C, B>
+pub(crate) struct AcceptedStreams<C>
 where
-    C: quic::Connection<B>,
-    B: Buf,
+    C: quic::Connection,
 {
     pub uni_streams: Vec<(SessionId, webtransport::stream::RecvStream<C::RecvStream>)>,
 }
 
-impl<C, B> Default for AcceptedStreams<C, B>
+impl<C> Default for AcceptedStreams<C>
 where
-    C: quic::Connection<B>,
-    B: bytes::Buf,
+    C: quic::Connection,
 {
     fn default() -> Self {
         Self {
@@ -92,10 +89,9 @@ where
     }
 }
 
-pub struct ConnectionInner<C, B>
+pub struct ConnectionInner<C>
 where
-    C: quic::Connection<B>,
-    B: Buf,
+    C: quic::Connection,
 {
     pub(super) shared: SharedStateRef,
     // TODO: breaking encapsulation just to see if we can get this to work, will fix before merging
@@ -104,23 +100,37 @@ where
     control_recv: Option<FrameStream<C::RecvStream>>,
     decoder_recv: Option<AcceptedRecvStream<C::RecvStream>>,
     encoder_recv: Option<AcceptedRecvStream<C::RecvStream>>,
-    /// Stores incoming uni/recv streams which have yet to be claimed.
+    /// Buffers incoming uni/recv streams which have yet to be claimed.
     ///
     /// This is opposed to discarding them by returning in `poll_accept_recv`, which may cause them to be missed by something else polling.
-    accepted_streams: AcceptedStreams<C, B>,
+    ///
+    /// See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-4.5
+    ///
+    /// In WebTransport over HTTP/3, the client MAY send its SETTINGS frame, as well as
+    /// multiple WebTransport CONNECT requests, WebTransport data streams and WebTransport
+    /// datagrams, all within a single flight. As those can arrive out of order, a WebTransport
+    /// server could be put into a situation where it receives a stream or a datagram without a
+    /// corresponding session. Similarly, a client may receive a server-initiated stream or a
+    /// datagram before receiving the CONNECT response headers from the server.To handle this
+    /// case, WebTransport endpoints SHOULD buffer streams and datagrams until those can be
+    /// associated with an established session. To avoid resource exhaustion, the endpoints
+    /// MUST limit the number of buffered streams and datagrams. When the number of buffered
+    /// streams is exceeded, a stream SHALL be closed by sending a RESET_STREAM and/or
+    /// STOP_SENDING with the H3_WEBTRANSPORT_BUFFERED_STREAM_REJECTED error code. When the
+    /// number of buffered datagrams is exceeded, a datagram SHALL be dropped. It is up to an
+    /// implementation to choose what stream or datagram to discard.
+    accepted_streams: AcceptedStreams<C>,
 
     pending_recv_streams: Vec<AcceptRecvStream<C::RecvStream>>,
 
     got_peer_settings: bool,
     pub(super) send_grease_frame: bool,
     pub(super) config: Config,
-    _marker: PhantomData<B>,
 }
 
-impl<C, B> ConnectionInner<C, B>
+impl<C> ConnectionInner<C>
 where
-    C: quic::Connection<B>,
-    B: Buf,
+    C: quic::Connection,
 {
     /// Initiates the connection and opens a control stream
     pub async fn new(mut conn: C, shared: SharedStateRef, config: Config) -> Result<Self, Error> {
@@ -208,7 +218,7 @@ where
         //# the peer prior to sending the SETTINGS frame; settings MUST be sent
         //# as soon as the transport is ready to send data.
         trace!("Sending Settings frame: {settings:#x?}");
-        stream::write::<_, _, B>(
+        stream::write::<_, _, Bytes>(
             &mut control_send,
             (StreamType::CONTROL, Frame::Settings(settings)),
         )
@@ -232,7 +242,6 @@ where
             send_grease_frame: config.send_grease,
             config,
             accepted_streams: Default::default(),
-            _marker: PhantomData,
         };
         // start a grease stream
         if config.send_grease {
@@ -274,7 +283,7 @@ where
         //# (Section 5.2) so that both endpoints can reliably determine whether
         //# previously sent frames have been processed and gracefully complete or
         //# terminate any necessary remaining tasks.
-        stream::write::<_, _, B>(&mut self.control_send, Frame::Goaway(max_id.into())).await
+        stream::write::<_, _, Bytes>(&mut self.control_send, Frame::Goaway(max_id.into())).await
     }
 
     pub fn poll_accept_request(
@@ -591,8 +600,11 @@ where
         //# types be ignored.  These streams have no semantics, and they can be
         //# sent when application-layer padding is desired.  They MAY also be
         //# sent on connections where no data is currently being transferred.
-        match stream::write::<_, _, B>(&mut grease_stream, (StreamType::grease(), Frame::Grease))
-            .await
+        match stream::write::<_, _, Bytes>(
+            &mut grease_stream,
+            (StreamType::grease(), Frame::Grease),
+        )
+        .await
         {
             Ok(()) => (),
             Err(err) => {
@@ -618,7 +630,7 @@ where
         };
     }
 
-    pub(crate) fn accepted_streams_mut(&mut self) -> &mut AcceptedStreams<C, B> {
+    pub(crate) fn accepted_streams_mut(&mut self) -> &mut AcceptedStreams<C> {
         &mut self.accepted_streams
     }
 }

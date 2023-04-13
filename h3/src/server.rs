@@ -8,8 +8,8 @@
 //! ```rust
 //! async fn doc<C>(conn: C)
 //! where
-//! C: h3::quic::Connection<bytes::Bytes>,
-//! <C as h3::quic::Connection<bytes::Bytes>>::BidiStream: Send + 'static
+//! C: h3::quic::Connection,
+//! <C as h3::quic::Connection>::BidiStream: Send + 'static
 //! {
 //!     let mut server_builder = h3::server::builder();
 //!     // Build the Connection
@@ -104,13 +104,12 @@ pub fn builder() -> Builder {
 /// Create a new Instance with [`Connection::new()`].
 /// Accept incoming requests with [`Connection::accept()`].
 /// And shutdown a connection with [`Connection::shutdown()`].
-pub struct Connection<C, B>
+pub struct Connection<C>
 where
-    C: quic::Connection<B>,
-    B: Buf,
+    C: quic::Connection,
 {
     /// TODO: temporarily break encapsulation for `WebTransportSession`
-    pub(crate) inner: ConnectionInner<C, B>,
+    pub(crate) inner: ConnectionInner<C>,
     max_field_section_size: u64,
     // List of all incoming streams that are currently running.
     ongoing_streams: HashSet<StreamId>,
@@ -125,20 +124,18 @@ where
     last_accepted_stream: Option<StreamId>,
 }
 
-impl<C, B> ConnectionState for Connection<C, B>
+impl<C> ConnectionState for Connection<C>
 where
-    C: quic::Connection<B>,
-    B: Buf,
+    C: quic::Connection,
 {
     fn shared_state(&self) -> &SharedStateRef {
         &self.inner.shared
     }
 }
 
-impl<C, B> Connection<C, B>
+impl<C> Connection<C>
 where
-    C: quic::Connection<B>,
-    B: Buf,
+    C: quic::Connection,
 {
     /// Create a new HTTP/3 server connection with default settings
     ///
@@ -160,10 +157,9 @@ where
     }
 }
 
-impl<C, B> Connection<C, B>
+impl<C> Connection<C>
 where
-    C: quic::Connection<B>,
-    B: Buf,
+    C: quic::Connection,
 {
     /// Accept an incoming request.
     ///
@@ -384,10 +380,9 @@ where
     }
 
     /// Reads an incoming datagram
-    pub fn read_datagram(&self) -> ReadDatagram<C, B> {
+    pub fn read_datagram(&self) -> ReadDatagram<C> {
         ReadDatagram {
             conn: &self.inner.conn,
-            _marker: PhantomData,
         }
     }
 
@@ -518,7 +513,7 @@ where
     fn poll_accept_uni(
         &self,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<<C as quic::Connection<B>>::RecvStream>, Error>> {
+    ) -> Poll<Result<Option<<C as quic::Connection>::RecvStream>, Error>> {
         todo!()
         // let recv = ready!(self.inner.poll_accept_recv(cx))?;
 
@@ -548,10 +543,9 @@ where
     }
 }
 
-impl<C, B> Drop for Connection<C, B>
+impl<C> Drop for Connection<C>
 where
-    C: quic::Connection<B>,
-    B: Buf,
+    C: quic::Connection,
 {
     fn drop(&mut self) {
         self.inner.close(Code::H3_NO_ERROR, "");
@@ -716,10 +710,9 @@ impl Builder {
     /// Build an HTTP/3 connection from a QUIC connection
     ///
     /// This method creates a [`Connection`] instance with the settings in the [`Builder`].
-    pub async fn build<C, B>(&self, conn: C) -> Result<Connection<C, B>, Error>
+    pub async fn build<C>(&self, conn: C) -> Result<Connection<C>, Error>
     where
-        C: quic::Connection<B>,
-        B: Buf,
+        C: quic::Connection,
     {
         let (sender, receiver) = mpsc::unbounded_channel();
         Ok(Connection {
@@ -904,19 +897,16 @@ impl Drop for RequestEnd {
 }
 
 /// Future for [`Connection::read_datagram`]
-pub struct ReadDatagram<'a, C, B>
+pub struct ReadDatagram<'a, C>
 where
-    C: quic::Connection<B>,
-    B: Buf,
+    C: quic::Connection,
 {
     conn: &'a std::sync::Mutex<C>,
-    _marker: PhantomData<B>,
 }
 
-impl<'a, C, B> Future for ReadDatagram<'a, C, B>
+impl<'a, C> Future for ReadDatagram<'a, C>
 where
-    C: quic::Connection<B>,
-    B: Buf,
+    C: quic::Connection,
 {
     type Output = Result<Option<Datagram>, Error>;
 
