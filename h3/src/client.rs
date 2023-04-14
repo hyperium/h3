@@ -66,14 +66,13 @@ where
 /// # use bytes::Buf;
 /// # async fn doc<T>(mut send_request: SendRequest<T>) -> Result<(), Box<dyn std::error::Error>>
 /// # where
-/// #     T: quic::OpenStreams<B>,
-/// #     B: Buf,
+/// #     T: quic::OpenStreams,
 /// # {
 /// // Prepare the HTTP request to send to the server
 /// let request = Request::get("https://www.example.com/").body(())?;
 ///
 /// // Send the request to the server
-/// let mut req_stream: RequestStream<_, _> = send_request.send_request(request).await?;
+/// let mut req_stream: RequestStream<_> = send_request.send_request(request).await?;
 /// // Don't forget to end up the request by finishing the send stream.
 /// req_stream.finish().await?;
 /// // Receive the response
@@ -90,9 +89,9 @@ where
 /// # use h3::{quic, client::*};
 /// # use http::{Request, Response, HeaderMap};
 /// # use bytes::{Buf, Bytes};
-/// # async fn doc<T>(mut send_request: SendRequest<T, Bytes>) -> Result<(), Box<dyn std::error::Error>>
+/// # async fn doc<T>(mut send_request: SendRequest<T>) -> Result<(), Box<dyn std::error::Error>>
 /// # where
-/// #     T: quic::OpenStreams<Bytes>,
+/// #     T: quic::OpenStreams,
 /// # {
 /// // Prepare the HTTP request to send to the server
 /// let request = Request::get("https://www.example.com/").body(())?;
@@ -100,7 +99,7 @@ where
 /// // Send the request to the server
 /// let mut req_stream = send_request.send_request(request).await?;
 /// // Send some data
-/// req_stream.send_data("body".into()).await?;
+/// req_stream.send_data("body".as_bytes()).await?;
 /// // Prepare the trailers
 /// let mut trailers = HeaderMap::new();
 /// trailers.insert("trailer", "value".parse()?);
@@ -279,10 +278,9 @@ where
 /// # async fn doc<C>(mut connection: Connection<C>)
 /// #    -> JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>
 /// # where
-/// #    C: quic::Connection<B> + Send + 'static,
+/// #    C: quic::Connection + Send + 'static,
 /// #    C::SendStream: Send + 'static,
 /// #    C::RecvStream: Send + 'static,
-/// #    B: Buf + Send + 'static,
 /// # {
 /// // Run the driver on a different task
 /// tokio::spawn(async move {
@@ -302,10 +300,9 @@ where
 /// # async fn doc<C>(mut connection: Connection<C>)
 /// #    -> Result<(), Box<dyn std::error::Error + Send + Sync>>
 /// # where
-/// #    C: quic::Connection<B> + Send + 'static,
+/// #    C: quic::Connection + Send + 'static,
 /// #    C::SendStream: Send + 'static,
 /// #    C::RecvStream: Send + 'static,
-/// #    B: Buf + Send + 'static,
 /// # {
 /// // Prepare a channel to stop the driver thread
 /// let (shutdown_tx, shutdown_rx) = oneshot::channel();
@@ -461,9 +458,8 @@ where
 /// # use h3::quic;
 /// # async fn doc<C, O>(quic: C)
 /// # where
-/// #   C: quic::Connection<B, OpenStreams = O>,
-/// #   O: quic::OpenStreams<B>,
-/// #   B: bytes::Buf,
+/// #   C: quic::Connection<OpenStreams = O>,
+/// #   O: quic::OpenStreams,
 /// # {
 /// let h3_conn = h3::client::builder()
 ///     .max_field_section_size(8192)
@@ -549,7 +545,6 @@ impl Builder {
 /// # async fn doc<T>(mut req_stream: RequestStream<T>) -> Result<(), Box<dyn std::error::Error>>
 /// # where
 /// #     T: quic::RecvStream,
-/// #     B: Buf,
 /// # {
 /// // Prepare the HTTP request to send to the server
 /// let request = Request::get("https://www.example.com/").body(())?;

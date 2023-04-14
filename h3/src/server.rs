@@ -615,10 +615,9 @@ impl Default for Config {
 /// # Example
 ///
 /// ```rust
-/// fn doc<C,B>(conn: C)
+/// fn doc<C>(conn: C)
 /// where
-/// C: h3::quic::Connection<B>,
-/// B: bytes::Buf,
+/// C: h3::quic::Connection,
 /// {
 ///     let mut server_builder = h3::server::builder();
 ///     // Set the maximum header size
