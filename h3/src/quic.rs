@@ -78,7 +78,11 @@ pub trait Connection {
     /// The type produced by `poll_accept_recv()`
     type RecvStream: RecvStream;
     /// A producer of outgoing Unidirectional and Bidirectional streams.
-    type OpenStreams: OpenStreams;
+    type OpenStreams: OpenStreams<
+        SendStream = Self::SendStream,
+        RecvStream = Self::RecvStream,
+        BidiStream = Self::BidiStream,
+    >;
     /// Error type yielded by this trait methods
     type Error: Into<Box<dyn Error>>;
 
@@ -129,7 +133,7 @@ pub trait Connection {
 /// Trait for opening outgoing streams
 pub trait OpenStreams {
     /// The type produced by `poll_open_bidi()`
-    type BidiStream: SendStream + RecvStream;
+    type BidiStream: BidiStream;
     /// The type produced by `poll_open_send()`
     type SendStream: SendStream;
     /// The type of the receiving part of `BidiStream`

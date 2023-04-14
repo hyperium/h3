@@ -1,7 +1,6 @@
 //! Provides the server side WebTransport session
 
 use std::{
-    marker::PhantomData,
     pin::Pin,
     sync::{Arc, Mutex},
     task::{Context, Poll},
@@ -12,7 +11,7 @@ use crate::{
     error::{Code, ErrorLevel},
     frame::FrameStream,
     proto::{datagram::Datagram, frame::Frame},
-    quic::{self, BidiStream as _, SendStream as _},
+    quic::{self, BidiStream as _, OpenStreams, SendStream as _, WriteBuf},
     server::{self, Connection, RequestStream},
     stream::BufRecvStream,
     Error, Protocol,
@@ -20,7 +19,6 @@ use crate::{
 use bytes::{Buf, Bytes};
 use futures_util::{future::poll_fn, ready, Future};
 use http::{Method, Request, Response, StatusCode};
-use quic::StreamId;
 
 use super::{
     stream::{self, RecvStream, SendStream},
@@ -37,9 +35,10 @@ where
     C: quic::Connection,
 {
     // See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-2-3
-    session_id: StreamId,
+    session_id: SessionId,
     conn: Mutex<Connection<C>>,
     connect_stream: RequestStream<C::BidiStream>,
+    opener: Mutex<C::OpenStreams>,
 }
 
 impl<C> WebTransportSession<C>
@@ -114,10 +113,15 @@ where
         tracing::info!("Sending response: {response:?}");
         stream.send_response(response).await?;
 
-        let session_id = stream.send_id();
+        let session_id = stream.send_id().into();
         tracing::info!("Established new WebTransport session with id {session_id:?}");
+        let conn_inner = conn.inner.conn.lock().unwrap();
+        let opener = Mutex::new(conn_inner.opener());
+        drop(conn_inner);
+
         Ok(Self {
             session_id,
+            opener,
             conn: Mutex::new(conn),
             connect_stream: stream,
         })
@@ -214,6 +218,71 @@ where
                     Ok(Some(AcceptedBi::Request(req, resp)))
                 } else {
                     Ok(None)
+                }
+            }
+        }
+    }
+
+    /// Open a new bidirectional stream
+    pub fn open_bi(&self, session_id: SessionId) -> OpenBi<C> {
+        OpenBi {
+            opener: &self.opener,
+            stream: None,
+            session_id,
+        }
+    }
+
+    /// Returns the session id
+    pub fn session_id(&self) -> SessionId {
+        self.session_id
+    }
+}
+
+/// Streams are opened, but the initial webtransport header has not been sent
+type PendingStreams<C> = (
+    SendStream<<C as quic::Connection>::SendStream>,
+    RecvStream<<C as quic::Connection>::RecvStream>,
+    WriteBuf<&'static [u8]>,
+);
+
+#[pin_project::pin_project]
+/// Future for opening a bidi stream
+pub struct OpenBi<'a, C: quic::Connection> {
+    opener: &'a Mutex<C::OpenStreams>,
+    stream: Option<PendingStreams<C>>,
+    session_id: SessionId,
+}
+
+impl<'a, C: quic::Connection> Future for OpenBi<'a, C> {
+    type Output = Result<(SendStream<C::SendStream>, RecvStream<C::RecvStream>), Error>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut p = self.project();
+        loop {
+            match &mut p.stream {
+                Some((send, _, buf)) => {
+                    while buf.has_remaining() {
+                        ready!(send.poll_send(cx, buf))?;
+                    }
+
+                    tracing::debug!("Finished sending header frame");
+
+                    let (send, recv, _) = p.stream.take().unwrap();
+                    return Poll::Ready(Ok((send, recv)));
+                }
+                None => {
+                    let mut opener = (*p.opener).lock().unwrap();
+                    // Open the stream first
+                    let res = ready!(opener.poll_open_bidi(cx))?;
+                    let (send, recv) = BufRecvStream::new(res).split();
+
+                    let send: SendStream<C::SendStream> = SendStream::new(send);
+                    let recv = RecvStream::new(recv);
+                    *p.stream = Some((
+                        send,
+                        recv,
+                        WriteBuf::from(Frame::WebTransportStream(*p.session_id)),
+                    ));
                 }
             }
         }

@@ -46,10 +46,7 @@ const WRITE_BUF_ENCODE_SIZE: usize = StreamType::MAX_ENCODED_SIZE + Frame::MAX_E
 /// data is necessary (say, in `quic::SendStream::send_data`). It also has a public API ergonomy
 /// advantage: `WriteBuf` doesn't have to appear in public associated types. On the other hand,
 /// QUIC implementers have to call `into()`, which will encode the header in `Self::buf`.
-pub struct WriteBuf<B>
-where
-    B: Buf,
-{
+pub struct WriteBuf<B> {
     buf: [u8; WRITE_BUF_ENCODE_SIZE],
     len: usize,
     pos: usize,
@@ -323,7 +320,7 @@ pub(crate) struct BufRecvStream<S> {
     stream: S,
 }
 
-impl<S: RecvStream> BufRecvStream<S> {
+impl<S> BufRecvStream<S> {
     pub(crate) fn new(stream: S) -> Self {
         Self {
             buf: BufList::new(),
@@ -339,7 +336,9 @@ impl<S: RecvStream> BufRecvStream<S> {
             stream,
         }
     }
+}
 
+impl<S: RecvStream> BufRecvStream<S> {
     /// Reads more data into the buffer, returning the number of bytes read.
     ///
     /// Returns `true` if the end of the stream is reached.

@@ -158,7 +158,11 @@ where
                 buf.write_var(6);
                 buf.put_slice(b"grease");
             }
-            Frame::WebTransportStream(_) => todo!(),
+            Frame::WebTransportStream(id) => {
+                FrameType::WEBTRANSPORT_BI_STREAM.encode(buf);
+                id.encode(buf);
+                // rest of the data is sent streaming
+            }
         }
     }
 }

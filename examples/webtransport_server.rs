@@ -7,12 +7,12 @@ use std::{
 
 use anyhow::{anyhow, Context, Result};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use futures::{future, StreamExt};
+use futures::{future, AsyncWriteExt, StreamExt};
 use futures::{future::poll_fn, AsyncRead};
 use http::{Method, Request, StatusCode};
 use rustls::{Certificate, PrivateKey};
 use structopt::StructOpt;
-use tokio::{fs::File, io::AsyncReadExt, time::sleep};
+use tokio::{fs::File, io::AsyncReadExt, pin, time::sleep};
 use tracing::{error, info, trace_span};
 
 use h3::{
@@ -71,14 +71,14 @@ pub struct Certs {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 0. Setup tracing
-    #[cfg(not(feature = "tracing-tree"))]
+    #[cfg(not(feature = "tree"))]
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_span_events(tracing_subscriber::fmt::format::FmtSpan::FULL)
         .with_writer(std::io::stderr)
         .init();
 
-    #[cfg(feature = "tracing-tree")]
+    #[cfg(feature = "tree")]
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .with(tracing_tree::HierarchicalLayer::new(4).with_bracketed_fields(true))
@@ -241,6 +241,10 @@ where
         'static + std::error::Error + Send + Sync + Into<std::io::Error>,
     C::SendStream: Unpin,
 {
+    let open_bi_timer = sleep(Duration::from_millis(10000));
+    pin!(open_bi_timer);
+    let session_id = session.session_id();
+
     loop {
         tokio::select! {
             datagram = session.read_datagram() => {
@@ -263,22 +267,30 @@ where
                     tracing::info!("Received data {:?}", bytes);
                 }
             }
+            _ = &mut open_bi_timer => {
+                tracing::info!("Opening bidirectional stream");
+                let (mut send, recv) = session.open_bi(session_id).await?;
+
+                send.write_all("Hello, World!".as_bytes()).await?;
+                tracing::info!("Sent data");
+
+            }
             stream = session.accept_bi() => {
                 if let Some(h3::webtransport::server::AcceptedBi::BidiStream(_, mut send, mut recv)) = stream? {
 
-                tracing::info!("Got bi stream");
-                let mut message = BytesMut::new();
-                while let Some(bytes) = poll_fn(|cx| recv.poll_data(cx)).await? {
-                    tracing::info!("Received data {:?}", bytes);
-                    message.put(bytes);
+                    tracing::info!("Got bi stream");
+                    let mut message = BytesMut::new();
+                    while let Some(bytes) = poll_fn(|cx| recv.poll_data(cx)).await? {
+                        tracing::info!("Received data {:?}", bytes);
+                        message.put(bytes);
 
-                }
+                    }
 
-                tracing::info!("Got message: {message:?}");
+                    tracing::info!("Got message: {message:?}");
 
-                let mut response = BytesMut::new();
-                response.put(format!("I got your message of {} bytes: ", message.len()).as_bytes());
-                response.put(message);
+                    let mut response = BytesMut::new();
+                    response.put(format!("I got your message of {} bytes: ", message.len()).as_bytes());
+                    response.put(message);
 
                     futures::AsyncWriteExt::write_all(&mut send, &response).await.context("Failed to respond")?;
                 }
