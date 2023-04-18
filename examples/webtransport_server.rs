@@ -263,18 +263,27 @@ where
             stream = session.accept_uni() => {
                 let (id, mut stream) = stream?.unwrap();
                 tracing::info!("Received uni stream {:?} for {id:?}", stream.recv_id());
-                if let Some(bytes) = poll_fn(|cx| stream.poll_data(cx)).await? {
-                    tracing::info!("Received data {:?}", bytes);
+                // create a buffer
+                let mut message = BytesMut::new();
+                while let Some(bytes) = poll_fn(|cx| stream.poll_data(cx)).await? {
+                    tracing::info!("Received chunk {:?}", &bytes);
+                    message.put(bytes);
                 }
-            }
-            _ = &mut open_bi_timer => {
-                tracing::info!("Opening bidirectional stream");
-                let (mut send, recv) = session.open_bi(session_id).await?;
+                // send the message back
+                tracing::info!("Got message: {message:?}"); 
+                // TODO: commented this because it's not working yet
+                // let mut send = session.open_uni(session_id).await?;
+                // send.write_all(&message).await?;
+            } 
+            // TODO: commented this because it's not working yet
+            // _ = &mut open_bi_timer => {
+            //     tracing::info!("Opening bidirectional stream");
+            //     let (mut send, recv) = session.open_bi(session_id).await?;
 
-                send.write_all("Hello, World!".as_bytes()).await?;
-                tracing::info!("Sent data");
+            //     send.write_all("Hello, World!".as_bytes()).await?;
+            //     tracing::info!("Sent data");
 
-            }
+            // }
             stream = session.accept_bi() => {
                 if let Some(h3::webtransport::server::AcceptedBi::BidiStream(_, mut send, mut recv)) = stream? {
 
