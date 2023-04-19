@@ -67,6 +67,10 @@ pub struct Certs {
     pub key: PathBuf,
 }
 
+// TODO: Move this to h3::webtransport::server
+const WEBTRANSPORT_UNI_STREAM_TYPE: u64 = 0x54;
+const WEBTRANSPORT_BIDI_FRAME_TYPE: u64 = 0x41;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 0. Setup tracing
@@ -273,7 +277,26 @@ where
                 let mut send = session.open_uni(session_id).await?;
                 let message = message.to_vec();
                 let message = message.as_slice();
+               
+                // TODO: move this into the library
+                // send stream type
+                {
+                    let mut data = [0u8; 8];
+                    let mut buf = octets::OctetsMut::with_slice(&mut data);
+                    futures::AsyncWriteExt::write(&mut send, buf.put_varint(WEBTRANSPORT_UNI_STREAM_TYPE).unwrap()).await.context("Failed to respond")?;
+                }
+
+                // Send session id
+                {
+                    let mut data = [0u8; 8];
+                    let mut buf = octets::OctetsMut::with_slice(&mut data);
+                    buf.put_varint(session_id.0).unwrap();
+                    let data = buf.buf();
+                    futures::AsyncWriteExt::write(&mut send, &data[..buf.off()]).await.context("Failed to respond")?;
+                }
+                // Send actual data.
                 futures::AsyncWriteExt::write_all(&mut send, message).await.context("Failed to respond")?;
+                send.close().await?;
             } 
             // TODO: commented this because it's not working yet
             // _ = &mut open_bi_timer => {
