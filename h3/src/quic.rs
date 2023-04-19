@@ -148,7 +148,7 @@ pub trait OpenStreams {
     ) -> Poll<Result<Self::BidiStream, Self::Error>>;
 
     /// Poll the connection to create a new unidirectional stream.
-    fn poll_open_send(
+    fn poll_open_uni(
         &mut self,
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Self::SendStream, Self::Error>>;

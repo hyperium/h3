@@ -235,7 +235,7 @@ impl quic::OpenStreams for OpenStreams {
         }))
     }
 
-    fn poll_open_send(
+    fn poll_open_uni(
         &mut self,
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Self::SendStream, Self::Error>> {

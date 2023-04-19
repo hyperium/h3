@@ -1,29 +1,28 @@
 use std::{
     net::SocketAddr,
-    path::{Path, PathBuf},
+    path::{PathBuf},
     sync::Arc,
-    time::Duration,
+    time::Duration
 };
 
-use anyhow::{anyhow, Context, Result};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-use futures::{future, AsyncWriteExt, StreamExt};
-use futures::{future::poll_fn, AsyncRead};
-use http::{Method, Request, StatusCode};
+use anyhow::{Result};
+use bytes::{BufMut, BytesMut};
+use futures::{AsyncWriteExt};
+use futures::{future::poll_fn};
+use http::{Method};
 use rustls::{Certificate, PrivateKey};
 use structopt::StructOpt;
-use tokio::{fs::File, io::AsyncReadExt, pin, time::sleep};
+use tokio::{pin, time::sleep};
 use tracing::{error, info, trace_span};
 
 use h3::{
     error::ErrorLevel,
-    quic::{self, BidiStream, RecvStream, SendStream},
-    server::{Config, Connection, RequestStream},
+    quic::{self, RecvStream},
+    server::{Config, Connection},
     webtransport::server::WebTransportSession,
     Protocol,
 };
 use h3_quinn::quinn;
-use tracing_subscriber::prelude::*;
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "server")]
@@ -247,7 +246,7 @@ where
 
     loop {
         tokio::select! {
-            datagram = session.read_datagram() => {
+            datagram = session.accept_datagram() => {
                 let datagram = datagram?;
                 if let Some((_, datagram)) = datagram {
                     tracing::info!("Responding with {datagram:?}");
@@ -260,48 +259,38 @@ where
                     tracing::info!("Finished sending datagram");
                 }
             }
-            stream = session.accept_uni() => {
-                let (id, mut stream) = stream?.unwrap();
+            uni_stream = session.accept_uni() => {
+                let (id, mut stream) = uni_stream?.unwrap();
                 tracing::info!("Received uni stream {:?} for {id:?}", stream.recv_id());
-                // create a buffer
+
                 let mut message = BytesMut::new();
                 while let Some(bytes) = poll_fn(|cx| stream.poll_data(cx)).await? {
                     tracing::info!("Received chunk {:?}", &bytes);
-                    message.put(bytes);
+                    message.put(bytes.clone());
                 }
-                // send the message back
+
                 tracing::info!("Got message: {message:?}"); 
-                // TODO: commented this because it's not working yet
-                // let mut send = session.open_uni(session_id).await?;
-                // send.write_all(&message).await?;
+                let mut send = session.open_uni(session_id).await?;
+                let message = message.to_vec();
+                let message = message.as_slice();
+                futures::AsyncWriteExt::write_all(&mut send, message).await.context("Failed to respond")?;
             } 
             // TODO: commented this because it's not working yet
             // _ = &mut open_bi_timer => {
             //     tracing::info!("Opening bidirectional stream");
-            //     let (mut send, recv) = session.open_bi(session_id).await?;
+            // let (mut send, recv) = session.open_bi(session_id).await?;
 
-            //     send.write_all("Hello, World!".as_bytes()).await?;
-            //     tracing::info!("Sent data");
-
+            // send.write_all("Hello, World!".as_bytes()).await?;
+            // tracing::info!("Sent data");
             // }
             stream = session.accept_bi() => {
                 if let Some(h3::webtransport::server::AcceptedBi::BidiStream(_, mut send, mut recv)) = stream? {
-
                     tracing::info!("Got bi stream");
-                    let mut message = BytesMut::new();
                     while let Some(bytes) = poll_fn(|cx| recv.poll_data(cx)).await? {
-                        tracing::info!("Received data {:?}", bytes);
-                        message.put(bytes);
-
+                        tracing::info!("Received data {:?}", &bytes);
+                        futures::AsyncWriteExt::write_all(&mut send, &bytes).await.context("Failed to respond")?;
                     }
-
-                    tracing::info!("Got message: {message:?}");
-
-                    let mut response = BytesMut::new();
-                    response.put(format!("I got your message of {} bytes: ", message.len()).as_bytes());
-                    response.put(message);
-
-                    futures::AsyncWriteExt::write_all(&mut send, &response).await.context("Failed to respond")?;
+                    send.close().await?;        
                 }
             }
             else => {

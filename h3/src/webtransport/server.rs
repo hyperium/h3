@@ -128,7 +128,7 @@ where
     }
 
     /// Receive a datagram from the client
-    pub fn read_datagram(&self) -> ReadDatagram<C> {
+    pub fn accept_datagram(&self) -> ReadDatagram<C> {
         ReadDatagram {
             conn: self.conn.lock().unwrap().inner.conn.clone(),
         }
@@ -232,6 +232,15 @@ where
         }
     }
 
+    /// Open a new unidirectional stream
+    pub fn open_uni(&self, session_id: SessionId) -> OpenUni<C> {
+        OpenUni {
+            opener: &self.opener,
+            stream: None,
+            session_id,
+        }
+    }
+
     /// Returns the session id
     pub fn session_id(&self) -> SessionId {
         self.session_id
@@ -242,6 +251,12 @@ where
 type PendingStreams<C> = (
     SendStream<<C as quic::Connection>::SendStream>,
     RecvStream<<C as quic::Connection>::RecvStream>,
+    WriteBuf<&'static [u8]>,
+);
+
+/// Streams are opened, but the initial webtransport header has not been sent
+type PendingUniStreams<C> = (
+    SendStream<<C as quic::Connection>::SendStream>,
     WriteBuf<&'static [u8]>,
 );
 
@@ -288,6 +303,45 @@ impl<'a, C: quic::Connection> Future for OpenBi<'a, C> {
         }
     }
 }
+
+#[pin_project::pin_project]
+/// Future for opening a uni stream
+pub struct OpenUni<'a, C: quic::Connection> {
+    opener: &'a Mutex<C::OpenStreams>,
+    stream: Option<PendingUniStreams<C>>,
+    session_id: SessionId,
+}
+
+impl<'a, C: quic::Connection> Future for OpenUni<'a, C> {
+    type Output = Result<SendStream<C::SendStream>, Error>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut p = self.project();
+        loop {
+            match &mut p.stream {
+                Some((send, buf)) => {
+                    while buf.has_remaining() {
+                        ready!(send.poll_send(cx, buf))?; 
+                    }
+                    tracing::debug!("Finished sending header frame");
+                    let (send, _) = p.stream.take().unwrap();
+                    return Poll::Ready(Ok(send));
+                }
+                None => {
+                    let mut opener = (*p.opener).lock().unwrap();
+                    let send = ready!(opener.poll_open_uni(cx))?;
+                    let send = BufRecvStream::new(send);
+                    let send = SendStream::new(send);
+                    *p.stream = Some(
+                        (send,
+                        WriteBuf::from(Frame::WebTransportStream(*p.session_id))),
+                    );
+                }
+            }
+        }
+    }
+}
+
 
 /// An accepted incoming bidirectional stream.
 ///
