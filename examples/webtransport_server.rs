@@ -276,14 +276,15 @@ where
                 tracing::info!("Got message: {message:?}"); 
                 let mut send = session.open_uni(session_id).await?;
                 let message = message.to_vec();
-                let message = message.as_slice();
+                let mut message = message.as_slice();
                
                 // TODO: move this into the library
                 // send stream type
                 {
                     let mut data = [0u8; 8];
                     let mut buf = octets::OctetsMut::with_slice(&mut data);
-                    futures::AsyncWriteExt::write(&mut send, buf.put_varint(WEBTRANSPORT_UNI_STREAM_TYPE).unwrap()).await.context("Failed to respond")?;
+                    buf.put_varint(WEBTRANSPORT_UNI_STREAM_TYPE).unwrap();
+                    send.write(&mut buf.buf()).await.context("Failed to respond")?;
                 }
 
                 // Send session id
@@ -291,11 +292,10 @@ where
                     let mut data = [0u8; 8];
                     let mut buf = octets::OctetsMut::with_slice(&mut data);
                     buf.put_varint(session_id.0).unwrap();
-                    let data = buf.buf();
-                    futures::AsyncWriteExt::write(&mut send, &data[..buf.off()]).await.context("Failed to respond")?;
+                    send.write(&mut buf.buf()).await.context("Failed to respond")?;
                 }
                 // Send actual data.
-                futures::AsyncWriteExt::write_all(&mut send, message).await.context("Failed to respond")?;
+                send.write(&mut message).await.context("Failed to respond")?;
                 send.close().await?;
             } 
             // TODO: commented this because it's not working yet
