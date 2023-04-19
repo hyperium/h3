@@ -288,6 +288,7 @@ where
 
                 for byte in message {
                     tokio::time::sleep(Duration::from_millis(100)).await;
+                    tracing::info!("Sending {byte:?}");
                     send.write_all(&[byte][..]).await?;
                 }
                 // futures::AsyncWriteExt::write_all(&mut send, &message).await.context("Failed to respond")?;

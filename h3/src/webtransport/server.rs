@@ -322,19 +322,14 @@ impl<'a, C: quic::Connection> Future for OpenUni<'a, C> {
         loop {
             match &mut p.stream {
                 Some((send, buf)) => {
-                    tracing::debug!("Sending uni stream header");
-                    tracing::debug!("Sending buffer: {send:?}");
                     while buf.has_remaining() {
                         let n = ready!(send.poll_send(cx, buf))?;
-                        tracing::debug!("Wrote {n} bytes");
                     }
-                    tracing::debug!("Finished sending header frame");
                     let (send, buf) = p.stream.take().unwrap();
                     assert!(!buf.has_remaining());
                     return Poll::Ready(Ok(send));
                 }
                 None => {
-                    tracing::debug!("Opening stream");
                     let mut opener = (*p.opener).lock().unwrap();
                     let send = ready!(opener.poll_open_uni(cx))?;
                     let send = BufRecvStream::new(send);
