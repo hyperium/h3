@@ -54,6 +54,6 @@ impl Decode for SessionId {
 
 impl From<StreamId> for SessionId {
     fn from(value: StreamId) -> Self {
-        Self(value.into_inner())
+        Self(value.index())
     }
 }

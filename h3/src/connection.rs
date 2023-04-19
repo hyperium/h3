@@ -7,6 +7,7 @@ use std::{
 use bytes::{Buf, Bytes, BytesMut};
 use futures_util::{future, ready};
 use http::HeaderMap;
+use stream::WriteBuf;
 use tracing::{trace, warn};
 
 use crate::{
@@ -21,7 +22,7 @@ use crate::{
     qpack,
     quic::{self, SendStream as _},
     server::Config,
-    stream::{self, AcceptRecvStream, AcceptedRecvStream, BufRecvStream},
+    stream::{self, AcceptRecvStream, AcceptedRecvStream, BufRecvStream, UniStreamHeader},
     webtransport::{self, SessionId},
 };
 
@@ -220,7 +221,8 @@ where
         trace!("Sending Settings frame: {settings:#x?}");
         stream::write::<_, _, Bytes>(
             &mut control_send,
-            (StreamType::CONTROL, Frame::Settings(settings)),
+            // (StreamType::CONTROL, Frame::Settings(settings)),
+            WriteBuf::from(UniStreamHeader::Control(settings)),
         )
         .await?;
 

@@ -118,7 +118,7 @@ impl StreamId {
     }
 
     /// Distinguishes streams of the same initiator and directionality
-    fn index(self) -> u64 {
+    pub fn index(self) -> u64 {
         self.0 >> 2
     }
 

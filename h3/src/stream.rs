@@ -1,6 +1,6 @@
 use std::task::{Context, Poll};
 
-use bytes::{Buf, BufMut as _, Bytes};
+use bytes::{Buf, BufMut, Bytes};
 use futures_util::{future, ready};
 
 use crate::{
@@ -9,7 +9,7 @@ use crate::{
     frame::FrameStream,
     proto::{
         coding::{Decode as _, Encode},
-        frame::Frame,
+        frame::{Frame, Settings},
         stream::StreamType,
         varint::VarInt,
     },
@@ -59,7 +59,14 @@ where
 {
     fn encode_stream_type(&mut self, ty: StreamType) {
         let mut buf_mut = &mut self.buf[self.len..];
+
         ty.encode(&mut buf_mut);
+        self.len = WRITE_BUF_ENCODE_SIZE - buf_mut.remaining_mut();
+    }
+
+    fn encode_value(&mut self, value: impl Encode) {
+        let mut buf_mut = &mut self.buf[self.len..];
+        value.encode(&mut buf_mut);
         self.len = WRITE_BUF_ENCODE_SIZE - buf_mut.remaining_mut();
     }
 
@@ -85,6 +92,44 @@ where
         };
         me.encode_stream_type(ty);
         me
+    }
+}
+
+impl<B> From<UniStreamHeader> for WriteBuf<B>
+where
+    B: Buf,
+{
+    fn from(header: UniStreamHeader) -> Self {
+        let mut this = Self {
+            buf: [0; WRITE_BUF_ENCODE_SIZE],
+            len: 0,
+            pos: 0,
+            frame: None,
+        };
+
+        this.encode_value(header);
+        tracing::debug!("encoded header: {:?} len: {}", this.buf, this.len);
+        this
+    }
+}
+
+pub enum UniStreamHeader {
+    Control(Settings),
+    WebTransportUni(SessionId),
+}
+
+impl Encode for UniStreamHeader {
+    fn encode<B: BufMut>(&self, buf: &mut B) {
+        match self {
+            Self::Control(settings) => {
+                StreamType::CONTROL.encode(buf);
+                settings.encode(buf);
+            }
+            Self::WebTransportUni(session_id) => {
+                StreamType::WEBTRANSPORT_UNI.encode(buf);
+                session_id.encode(buf);
+            }
+        }
     }
 }
 
@@ -116,7 +161,7 @@ where
             pos: 0,
             frame: Some(frame),
         };
-        me.encode_stream_type(ty);
+        me.encode_value(ty);
         me.encode_frame_header();
         me
     }
@@ -320,18 +365,20 @@ pub(crate) struct BufRecvStream<S> {
     stream: S,
 }
 
+impl<S> std::fmt::Debug for BufRecvStream<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BufRecvStream")
+            .field("buf", &self.buf)
+            .field("eos", &self.eos)
+            .field("stream", &"...")
+            .finish()
+    }
+}
+
 impl<S> BufRecvStream<S> {
     pub(crate) fn new(stream: S) -> Self {
         Self {
             buf: BufList::new(),
-            eos: false,
-            stream,
-        }
-    }
-
-    pub(crate) fn with_bufs(stream: S, bufs: BufList<Bytes>) -> Self {
-        Self {
-            buf: bufs,
             eos: false,
             stream,
         }
@@ -451,7 +498,24 @@ impl<S: BidiStream> BidiStream for BufRecvStream<S> {
 
 #[cfg(test)]
 mod tests {
+    use quic::StreamId;
+    use quinn_proto::coding::BufExt;
+
     use super::*;
+
+    #[test]
+    fn write_wt_uni_header() {
+        let mut w = WriteBuf::<Bytes>::from(UniStreamHeader::WebTransportUni(
+            SessionId::from_varint(VarInt(5)),
+        ));
+
+        let ty = w.get_var().unwrap();
+        println!("Got type: {ty} {ty:#x}");
+        assert_eq!(ty, 0x54);
+
+        let id = w.get_var().unwrap();
+        println!("Got id: {id}");
+    }
 
     #[test]
     fn write_buf_encode_streamtype() {

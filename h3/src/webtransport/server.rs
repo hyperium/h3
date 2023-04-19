@@ -13,7 +13,7 @@ use crate::{
     proto::{datagram::Datagram, frame::Frame},
     quic::{self, BidiStream as _, OpenStreams, SendStream as _, WriteBuf},
     server::{self, Connection, RequestStream},
-    stream::BufRecvStream,
+    stream::{BufRecvStream, UniStreamHeader},
     Error, Protocol,
 };
 use bytes::{Buf, Bytes};
@@ -113,6 +113,7 @@ where
         tracing::info!("Sending response: {response:?}");
         stream.send_response(response).await?;
 
+        tracing::info!("Stream id: {}", stream.id());
         let session_id = stream.send_id().into();
         tracing::info!("Established new WebTransport session with id {session_id:?}");
         let conn_inner = conn.inner.conn.lock().unwrap();
@@ -277,7 +278,8 @@ impl<'a, C: quic::Connection> Future for OpenBi<'a, C> {
             match &mut p.stream {
                 Some((send, _, buf)) => {
                     while buf.has_remaining() {
-                        ready!(send.poll_send(cx, buf))?;
+                        let n = ready!(send.poll_send(cx, buf))?;
+                        tracing::debug!("Wrote {n} bytes");
                     }
 
                     tracing::debug!("Finished sending header frame");
@@ -320,28 +322,31 @@ impl<'a, C: quic::Connection> Future for OpenUni<'a, C> {
         loop {
             match &mut p.stream {
                 Some((send, buf)) => {
+                    tracing::debug!("Sending uni stream header");
+                    tracing::debug!("Sending buffer: {send:?}");
                     while buf.has_remaining() {
-                        ready!(send.poll_send(cx, buf))?; 
+                        let n = ready!(send.poll_send(cx, buf))?;
+                        tracing::debug!("Wrote {n} bytes");
                     }
                     tracing::debug!("Finished sending header frame");
-                    let (send, _) = p.stream.take().unwrap();
+                    let (send, buf) = p.stream.take().unwrap();
+                    assert!(!buf.has_remaining());
                     return Poll::Ready(Ok(send));
                 }
                 None => {
+                    tracing::debug!("Opening stream");
                     let mut opener = (*p.opener).lock().unwrap();
                     let send = ready!(opener.poll_open_uni(cx))?;
                     let send = BufRecvStream::new(send);
                     let send = SendStream::new(send);
-                    *p.stream = Some(
-                        (send,
-                        WriteBuf::from(Frame::WebTransportStream(*p.session_id))),
-                    );
+
+                    let buf = WriteBuf::from(UniStreamHeader::WebTransportUni(*p.session_id));
+                    *p.stream = Some((send, buf));
                 }
             }
         }
     }
 }
-
 
 /// An accepted incoming bidirectional stream.
 ///

@@ -400,7 +400,17 @@ impl quic::RecvStream for RecvStream {
 #[derive(Debug)]
 pub struct ReadError(quinn::ReadError);
 
-impl std::error::Error for ReadError {}
+impl From<ReadError> for std::io::Error {
+    fn from(value: ReadError) -> Self {
+        value.0.into()
+    }
+}
+
+impl std::error::Error for ReadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.0.source()
+    }
+}
 
 impl fmt::Display for ReadError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -482,7 +492,7 @@ impl quic::SendStream for SendStream {
                     .downcast::<WriteError>()
                     .expect("write stream returned an error which type is not WriteError");
 
-                Poll::Ready(Err(SendStreamError::Write(*err)))
+                Poll::Ready(Err(SendStreamError(*err)))
             }
         }
     }
@@ -506,21 +516,11 @@ impl quic::SendStream for SendStream {
 ///
 /// Wraps errors that can happen writing to or polling a send stream.
 #[derive(Debug)]
-pub enum SendStreamError {
-    /// Errors when writing, wrapping a [`quinn::WriteError`]
-    Write(WriteError),
-    /// Error when the stream is not ready, because it is still sending
-    /// data from a previous call
-    NotReady,
-}
+pub struct SendStreamError(WriteError);
 
 impl From<SendStreamError> for std::io::Error {
     fn from(value: SendStreamError) -> Self {
-        match value {
-            SendStreamError::Write(err) => err.into(),
-            // TODO: remove
-            SendStreamError::NotReady => unreachable!(),
-        }
+        value.0.into()
     }
 }
 
@@ -534,7 +534,7 @@ impl Display for SendStreamError {
 
 impl From<WriteError> for SendStreamError {
     fn from(e: WriteError) -> Self {
-        Self::Write(e)
+        Self(e)
     }
 }
 
@@ -542,7 +542,7 @@ impl Error for SendStreamError {
     fn is_timeout(&self) -> bool {
         matches!(
             self,
-            Self::Write(quinn::WriteError::ConnectionLost(
+            Self(quinn::WriteError::ConnectionLost(
                 quinn::ConnectionError::TimedOut
             ))
         )
@@ -550,13 +550,10 @@ impl Error for SendStreamError {
 
     fn err_code(&self) -> Option<u64> {
         match self {
-            Self::Write(quinn::WriteError::Stopped(error_code)) => Some(error_code.into_inner()),
-            Self::Write(quinn::WriteError::ConnectionLost(
-                quinn::ConnectionError::ApplicationClosed(quinn_proto::ApplicationClose {
-                    error_code,
-                    ..
-                }),
-            )) => Some(error_code.into_inner()),
+            Self(quinn::WriteError::Stopped(error_code)) => Some(error_code.into_inner()),
+            Self(quinn::WriteError::ConnectionLost(quinn::ConnectionError::ApplicationClosed(
+                quinn_proto::ApplicationClose { error_code, .. },
+            ))) => Some(error_code.into_inner()),
             _ => None,
         }
     }

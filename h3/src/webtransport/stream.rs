@@ -49,9 +49,50 @@ where
     }
 }
 
+impl<S> AsyncRead for RecvStream<S>
+where
+    S: Unpin + quic::RecvStream,
+    S::Error: Into<std::io::Error>,
+{
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut [u8],
+    ) -> Poll<std::io::Result<usize>> {
+        // If the buffer i empty, poll for more data
+        if !self.stream.buf_mut().has_remaining() {
+            let res = ready!(self.stream.poll_read(cx).map_err(Into::into))?;
+            if res {
+                return Poll::Ready(Ok(0));
+            };
+        }
+
+        let bytes = self.stream.buf_mut();
+
+        // Do not overfill
+        if let Some(chunk) = bytes.take_chunk(buf.len()) {
+            assert!(chunk.len() <= buf.len());
+            let len = chunk.len().min(buf.len());
+            buf[..len].copy_from_slice(&chunk);
+
+            Poll::Ready(Ok(len))
+        } else {
+            Poll::Ready(Ok(0))
+        }
+    }
+}
+
 /// WebTransport send stream
 pub struct SendStream<S> {
     stream: BufRecvStream<S>,
+}
+
+impl<S> std::fmt::Debug for SendStream<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SendStream")
+            .field("stream", &self.stream)
+            .finish()
+    }
 }
 
 impl<S> SendStream<S> {
@@ -118,12 +159,15 @@ where
         cx: &mut std::task::Context<'_>,
         mut buf: &[u8],
     ) -> Poll<std::io::Result<usize>> {
-        self.poll_send(cx, &mut buf).map_err(Into::into)
+        let res = self.poll_send(cx, &mut buf).map_err(Into::into);
+
+        tracing::debug!("poll_write {res:?}");
+        res
     }
 
     fn poll_flush(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        _: &mut std::task::Context<'_>,
     ) -> Poll<std::io::Result<()>> {
         Poll::Ready(Ok(()))
     }

@@ -58,7 +58,7 @@ where
         loop {
             let end = self.try_recv(cx)?;
 
-            return match self.decoder.decode(&mut self.stream.buf_mut())? {
+            return match self.decoder.decode(self.stream.buf_mut())? {
                 Some(Frame::Data(PayloadLen(len))) => {
                     self.remaining_data = len;
                     Poll::Ready(Ok(Some(Frame::Data(PayloadLen(len)))))

@@ -1,19 +1,17 @@
-use std::{
-    net::SocketAddr,
-    path::{PathBuf},
-    sync::Arc,
-    time::Duration
-};
 use anyhow::Context;
-use anyhow::{Result};
+use anyhow::Result;
+use bytes::Bytes;
 use bytes::{BufMut, BytesMut};
-use futures::{AsyncWriteExt};
-use futures::{future::poll_fn};
-use http::{Method};
+use futures::future::poll_fn;
+use futures::AsyncReadExt;
+use futures::AsyncWriteExt;
+use http::Method;
 use rustls::{Certificate, PrivateKey};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use structopt::StructOpt;
 use tokio::{pin, time::sleep};
 use tracing::{error, info, trace_span};
+use tracing_subscriber::prelude::*;
 
 use h3::{
     error::ErrorLevel,
@@ -185,7 +183,11 @@ where
     C: 'static + Send + quic::Connection,
     <C::SendStream as h3::quic::SendStream>::Error:
         'static + std::error::Error + Send + Sync + Into<std::io::Error>,
-    C::SendStream: Unpin,
+    <C::RecvStream as h3::quic::RecvStream>::Error:
+        'static + std::error::Error + Send + Sync + Into<std::io::Error>,
+    C::SendStream: Send + Unpin,
+    C::RecvStream: Send + Unpin,
+    C::OpenStreams: Send,
 {
     // 3. TODO: Conditionally, if the client indicated that this is a webtransport session, we should accept it here, else use regular h3.
     // if this is a webtransport session, then h3 needs to stop handing the datagrams, bidirectional streams, and unidirectional streams and give them
@@ -242,11 +244,19 @@ where
     C: 'static + Send + h3::quic::Connection,
     <C::SendStream as h3::quic::SendStream>::Error:
         'static + std::error::Error + Send + Sync + Into<std::io::Error>,
-    C::SendStream: Unpin,
+    <C::RecvStream as h3::quic::RecvStream>::Error:
+        'static + std::error::Error + Send + Sync + Into<std::io::Error>,
+    C::SendStream: Send + Unpin,
+    C::RecvStream: Send + Unpin,
 {
     let open_bi_timer = sleep(Duration::from_millis(10000));
     pin!(open_bi_timer);
     let session_id = session.session_id();
+
+    // {
+    //     let mut stream = session.open_uni(session_id).await?;
+    //     stream.write_all("Enrsetnersntensn".as_bytes()).await?;
+    // }
 
     loop {
         tokio::select! {
@@ -267,37 +277,22 @@ where
                 let (id, mut stream) = uni_stream?.unwrap();
                 tracing::info!("Received uni stream {:?} for {id:?}", stream.recv_id());
 
-                let mut message = BytesMut::new();
-                while let Some(bytes) = poll_fn(|cx| stream.poll_data(cx)).await? {
-                    tracing::info!("Received chunk {:?}", &bytes);
-                    message.put(bytes.clone());
-                }
+                let mut message = Vec::new();
 
-                tracing::info!("Got message: {message:?}"); 
+                AsyncReadExt::read_to_end(&mut stream, &mut message).await.context("Failed to read message")?;
+                let message = Bytes::from(message);
+
+                tracing::info!("Got message: {message:?}");
                 let mut send = session.open_uni(session_id).await?;
-                let message = message.to_vec();
-                let mut message = message.as_slice();
-               
-                // TODO: move this into the library
-                // send stream type
-                {
-                    let mut data = [0u8; 8];
-                    let mut buf = octets::OctetsMut::with_slice(&mut data);
-                    buf.put_varint(WEBTRANSPORT_UNI_STREAM_TYPE).unwrap();
-                    send.write(&mut buf.buf()).await.context("Failed to respond")?;
-                }
+                tracing::info!("Opened unidirectional stream");
 
-                // Send session id
-                {
-                    let mut data = [0u8; 8];
-                    let mut buf = octets::OctetsMut::with_slice(&mut data);
-                    buf.put_varint(session_id.0).unwrap();
-                    send.write(&mut buf.buf()).await.context("Failed to respond")?;
+                for byte in message {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    send.write_all(&[byte][..]).await?;
                 }
-                // Send actual data.
-                send.write(&mut message).await.context("Failed to respond")?;
-                send.close().await?;
-            } 
+                // futures::AsyncWriteExt::write_all(&mut send, &message).await.context("Failed to respond")?;
+                tracing::info!("Wrote response");
+            }
             // TODO: commented this because it's not working yet
             // _ = &mut open_bi_timer => {
             //     tracing::info!("Opening bidirectional stream");
@@ -313,7 +308,7 @@ where
                         tracing::info!("Received data {:?}", &bytes);
                         futures::AsyncWriteExt::write_all(&mut send, &bytes).await.context("Failed to respond")?;
                     }
-                    send.close().await?;        
+                    send.close().await?;
                 }
             }
             else => {

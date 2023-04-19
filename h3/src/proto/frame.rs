@@ -501,7 +501,7 @@ impl Settings {
         None
     }
 
-    pub(super) fn encode<T: BufMut>(&self, buf: &mut T) {
+    pub(crate) fn encode<T: BufMut>(&self, buf: &mut T) {
         self.encode_header(buf);
         for (id, val) in self.entries[..self.len].iter() {
             id.encode(buf);
