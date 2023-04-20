@@ -108,7 +108,6 @@ where
         };
 
         this.encode_value(header);
-        tracing::debug!("encoded header: {:?} len: {}", this.buf, this.len);
         this
     }
 }
