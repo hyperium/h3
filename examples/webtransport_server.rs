@@ -9,7 +9,6 @@ use http::Method;
 use rustls::{Certificate, PrivateKey};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use structopt::StructOpt;
-use tokio::{pin, time::sleep};
 use tracing::{error, info, trace_span};
 use tracing_subscriber::prelude::*;
 
@@ -245,14 +244,17 @@ where
     C::SendStream: Send + Unpin,
     C::RecvStream: Send + Unpin,
 {
-    let open_bi_timer = sleep(Duration::from_millis(10000));
-    pin!(open_bi_timer);
     let session_id = session.session_id();
 
-    // {
-    //     let mut stream = session.open_uni(session_id).await?;
-    //     stream.write_all("Enrsetnersntensn".as_bytes()).await?;
-    // }
+    // This will open a bidirectional stream and send a message to the client right after connecting!
+    let (mut send, _read_bidi) = session.open_bi(session_id).await.unwrap();
+    tracing::info!("Opening bidirectional stream");
+    let bytes = Bytes::from("Hello from server");
+    futures::AsyncWriteExt::write_all(&mut send, &bytes)
+        .await
+        .context("Failed to respond")
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(1000)).await;
 
     loop {
         tokio::select! {
@@ -290,14 +292,6 @@ where
                 // futures::AsyncWriteExt::write_all(&mut send, &message).await.context("Failed to respond")?;
                 tracing::info!("Wrote response");
             }
-            // TODO: commented this because it's not working yet
-            // _ = &mut open_bi_timer => {
-            //     tracing::info!("Opening bidirectional stream");
-            // let (mut send, recv) = session.open_bi(session_id).await?;
-
-            // send.write_all("Hello, World!".as_bytes()).await?;
-            // tracing::info!("Sent data");
-            // }
             stream = session.accept_bi() => {
                 if let Some(h3::webtransport::server::AcceptedBi::BidiStream(_, mut send, mut recv)) = stream? {
                     tracing::info!("Got bi stream");

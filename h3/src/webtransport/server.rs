@@ -13,7 +13,7 @@ use crate::{
     proto::{datagram::Datagram, frame::Frame},
     quic::{self, BidiStream as _, OpenStreams, SendStream as _, WriteBuf},
     server::{self, Connection, RequestStream},
-    stream::{BufRecvStream, UniStreamHeader},
+    stream::{BidiStreamHeader, BufRecvStream, UniStreamHeader},
     Error, Protocol,
 };
 use bytes::{Buf, Bytes};
@@ -53,8 +53,6 @@ where
         mut stream: RequestStream<C::BidiStream>,
         mut conn: Connection<C>,
     ) -> Result<Self, Error> {
-        // future::poll_fn(|cx| conn.poll_control(cx)).await?;
-
         let shared = conn.shared_state().clone();
         {
             let config = shared.write("Read WebTransport support").config;
@@ -295,11 +293,9 @@ impl<'a, C: quic::Connection> Future for OpenBi<'a, C> {
 
                     let send: SendStream<C::SendStream> = SendStream::new(send);
                     let recv = RecvStream::new(recv);
-                    *p.stream = Some((
-                        send,
-                        recv,
-                        WriteBuf::from(Frame::WebTransportStream(*p.session_id)),
-                    ));
+
+                    let buf = WriteBuf::from(BidiStreamHeader::WebTransportBidi(*p.session_id));
+                    *p.stream = Some((send, recv, buf));
                 }
             }
         }
@@ -378,7 +374,6 @@ where
 
         let mut conn = self.conn.lock().unwrap();
         match ready!(conn.poll_accept_datagram(cx))? {
-            // Some(v) => Poll::Ready(Ok(Some(Datagram::decode(v)?.payload))),
             Some(v) => {
                 let datagram = Datagram::decode(v)?;
                 Poll::Ready(Ok(Some((datagram.stream_id().into(), datagram.payload))))

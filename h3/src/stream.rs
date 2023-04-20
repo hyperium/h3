@@ -132,6 +132,43 @@ impl Encode for UniStreamHeader {
     }
 }
 
+impl<B> From<BidiStreamHeader> for WriteBuf<B>
+where
+    B: Buf,
+{
+    fn from(header: BidiStreamHeader) -> Self {
+        let mut this = Self {
+            buf: [0; WRITE_BUF_ENCODE_SIZE],
+            len: 0,
+            pos: 0,
+            frame: None,
+        };
+
+        this.encode_value(header);
+        this
+    }
+}
+
+pub enum BidiStreamHeader {
+    Control(Settings),
+    WebTransportBidi(SessionId),
+}
+
+impl Encode for BidiStreamHeader {
+    fn encode<B: BufMut>(&self, buf: &mut B) {
+        match self {
+            Self::Control(settings) => {
+                StreamType::CONTROL.encode(buf);
+                settings.encode(buf);
+            }
+            Self::WebTransportBidi(session_id) => {
+                StreamType::WEBTRANSPORT_BIDI.encode(buf);
+                session_id.encode(buf);
+            }
+        }
+    }
+}
+
 impl<B> From<Frame<B>> for WriteBuf<B>
 where
     B: Buf,

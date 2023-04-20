@@ -221,7 +221,6 @@ where
         trace!("Sending Settings frame: {settings:#x?}");
         stream::write::<_, _, Bytes>(
             &mut control_send,
-            // (StreamType::CONTROL, Frame::Settings(settings)),
             WriteBuf::from(UniStreamHeader::Control(settings)),
         )
         .await?;
