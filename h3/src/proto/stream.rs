@@ -204,7 +204,7 @@ pub enum Side {
 
 /// Whether a stream communicates data in both directions or only from the initiator
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-enum Dir {
+pub(crate) enum Dir {
     /// Data flows in both directions
     Bi = 0,
     /// Data flows only from the stream's initiator

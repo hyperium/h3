@@ -82,14 +82,6 @@ impl Frame<PayloadLen> {
         let remaining = buf.remaining();
         let ty = FrameType::decode(buf).map_err(|_| FrameError::Incomplete(remaining + 1))?;
 
-        // Webtransport streams need special handling as they have no length.
-        //
-        // See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-4.2
-        if ty == FrameType::WEBTRANSPORT_BI_STREAM {
-            tracing::trace!("webtransport frame");
-            return Ok(Frame::WebTransportStream(SessionId::decode(buf)?));
-        }
-
         let len = buf
             .get_var()
             .map_err(|_| FrameError::Incomplete(remaining + 1))?;
@@ -115,7 +107,7 @@ impl Frame<PayloadLen> {
             | FrameType::H2_PING
             | FrameType::H2_WINDOW_UPDATE
             | FrameType::H2_CONTINUATION => Err(FrameError::UnsupportedFrame(ty.0)),
-            FrameType::WEBTRANSPORT_BI_STREAM | FrameType::DATA => unreachable!(),
+            FrameType::DATA => unreachable!(),
             _ => {
                 buf.advance(len as usize);
                 Err(FrameError::UnknownFrame(ty.0))
