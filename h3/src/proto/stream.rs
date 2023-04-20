@@ -26,6 +26,7 @@ stream_types! {
     PUSH = 0x01,
     ENCODER = 0x02,
     DECODER = 0x03,
+    WEBTRANSPORT_BIDI = 0x41,
     WEBTRANSPORT_UNI = 0x54,
 }
 

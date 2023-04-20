@@ -65,10 +65,6 @@ pub struct Certs {
     pub key: PathBuf,
 }
 
-// TODO: Move this to h3::webtransport::server
-const WEBTRANSPORT_UNI_STREAM_TYPE: u64 = 0x54;
-const WEBTRANSPORT_BIDI_FRAME_TYPE: u64 = 0x41;
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 0. Setup tracing
