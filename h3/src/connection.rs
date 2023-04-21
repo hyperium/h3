@@ -23,7 +23,7 @@ use crate::{
     quic::{self, SendStream as _},
     server::Config,
     stream::{self, AcceptRecvStream, AcceptedRecvStream, BufRecvStream, UniStreamHeader},
-    webtransport::{self, SessionId},
+    webtransport::{self, session_id::SessionId},
 };
 
 #[doc(hidden)]
@@ -60,6 +60,7 @@ impl Default for SharedStateRef {
     }
 }
 
+#[allow(missing_docs)]
 pub trait ConnectionState {
     fn shared_state(&self) -> &SharedStateRef;
 
@@ -72,10 +73,12 @@ pub trait ConnectionState {
     }
 }
 
-pub(crate) struct AcceptedStreams<C>
+#[allow(missing_docs)]
+pub struct AcceptedStreams<C>
 where
     C: quic::Connection,
 {
+    #[allow(missing_docs)]
     pub uni_streams: Vec<(SessionId, webtransport::stream::RecvStream<C::RecvStream>)>,
 }
 
@@ -90,13 +93,14 @@ where
     }
 }
 
+#[allow(missing_docs)]
 pub struct ConnectionInner<C>
 where
     C: quic::Connection,
 {
     pub(super) shared: SharedStateRef,
-    // TODO: breaking encapsulation just to see if we can get this to work, will fix before merging
-    pub(super) conn: Arc<Mutex<C>>,
+    /// TODO: breaking encapsulation just to see if we can get this to work, will fix before merging
+    pub conn: Arc<Mutex<C>>,
     control_send: C::SendStream,
     control_recv: Option<FrameStream<C::RecvStream>>,
     decoder_recv: Option<AcceptedRecvStream<C::RecvStream>>,
@@ -125,8 +129,8 @@ where
     pending_recv_streams: Vec<AcceptRecvStream<C::RecvStream>>,
 
     got_peer_settings: bool,
-    pub(super) send_grease_frame: bool,
-    pub(super) config: Config,
+    pub send_grease_frame: bool,
+    pub config: Config,
 }
 
 impl<C> ConnectionInner<C>
@@ -156,7 +160,7 @@ where
         settings
             .insert(
                 SettingId::ENABLE_CONNECT_PROTOCOL,
-                config.enable_connect as u64,
+                config.enable_extended_connect as u64,
             )
             .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
         settings
@@ -287,6 +291,7 @@ where
         stream::write::<_, _, Bytes>(&mut self.control_send, Frame::Goaway(max_id.into())).await
     }
 
+    #[allow(missing_docs)]
     pub fn poll_accept_request(
         &mut self,
         cx: &mut Context<'_>,
@@ -464,7 +469,7 @@ where
                         shared.config.enable_datagram =
                             settings.get(SettingId::H3_DATAGRAM).unwrap_or(0) != 0;
 
-                        shared.config.enable_connect = settings
+                        shared.config.enable_extended_connect = settings
                             .get(SettingId::ENABLE_CONNECT_PROTOCOL)
                             .unwrap_or(0)
                             != 0;
@@ -631,11 +636,13 @@ where
         };
     }
 
-    pub(crate) fn accepted_streams_mut(&mut self) -> &mut AcceptedStreams<C> {
+    #[allow(missing_docs)]
+    pub fn accepted_streams_mut(&mut self) -> &mut AcceptedStreams<C> {
         &mut self.accepted_streams
     }
 }
 
+#[allow(missing_docs)]
 pub struct RequestStream<S> {
     pub(super) stream: FrameStream<S>,
     pub(super) trailers: Option<Bytes>,
@@ -645,6 +652,7 @@ pub struct RequestStream<S> {
 }
 
 impl<S> RequestStream<S> {
+    #[allow(missing_docs)]
     pub fn new(
         stream: FrameStream<S>,
         max_field_section_size: u64,
@@ -785,6 +793,7 @@ where
         Ok(Some(Header::try_from(fields)?.into_fields()))
     }
 
+    #[allow(missing_docs)]
     pub fn stop_sending(&mut self, err_code: Code) {
         self.stream.stop_sending(err_code);
     }
@@ -839,6 +848,7 @@ where
         self.stream.reset(code.into());
     }
 
+    #[allow(missing_docs)]
     pub async fn finish(&mut self) -> Result<(), Error> {
         if self.send_grease_frame {
             // send a grease frame once per Connection

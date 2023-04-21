@@ -1,16 +1,12 @@
-use std::{marker::PhantomData, task::Poll};
+use std::task::Poll;
 
 use bytes::{Buf, Bytes};
 use futures_util::{future, ready, AsyncRead, AsyncWrite};
 
 use crate::{
-    buf::BufList,
-    proto::varint::UnexpectedEnd,
     quic::{self, RecvStream as _, SendStream as _},
     stream::BufRecvStream,
 };
-
-use super::SessionId;
 
 /// WebTransport receive stream
 pub struct RecvStream<S> {
@@ -18,7 +14,8 @@ pub struct RecvStream<S> {
 }
 
 impl<S> RecvStream<S> {
-    pub(crate) fn new(stream: BufRecvStream<S>) -> Self {
+    #[allow(missing_docs)]
+    pub fn new(stream: BufRecvStream<S>) -> Self {
         Self { stream }
     }
 }
@@ -96,7 +93,8 @@ impl<S> std::fmt::Debug for SendStream<S> {
 }
 
 impl<S> SendStream<S> {
-    pub(crate) fn new(stream: BufRecvStream<S>) -> Self {
+    #[allow(missing_docs)]
+    pub fn new(stream: BufRecvStream<S>) -> Self {
         Self { stream }
     }
 }

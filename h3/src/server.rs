@@ -110,7 +110,7 @@ where
     C: quic::Connection,
 {
     /// TODO: temporarily break encapsulation for `WebTransportSession`
-    pub(crate) inner: ConnectionInner<C>,
+    pub inner: ConnectionInner<C>,
     max_field_section_size: u64,
     // List of all incoming streams that are currently running.
     ongoing_streams: HashSet<StreamId>,
@@ -153,7 +153,7 @@ where
     }
 
     /// Closes the connection with a code and a reason.
-    pub(crate) fn close<T: AsRef<str>>(&mut self, code: Code, reason: T) -> Error {
+    pub fn close<T: AsRef<str>>(&mut self, code: Code, reason: T) -> Error {
         self.inner.close(code, reason)
     }
 }
@@ -212,7 +212,7 @@ where
     /// This is needed as a bidirectional stream may be read as part of incoming webtransport
     /// bi-streams. If it turns out that the stream is *not* a `WEBTRANSPORT_STREAM` the request
     /// may still want to be handled and passed to the user.
-    pub(crate) fn accept_with_frame(
+    pub fn accept_with_frame(
         &mut self,
         mut stream: FrameStream<C::BidiStream>,
         frame: Result<Option<Frame<PayloadLen>>, FrameStreamError>,
@@ -377,7 +377,7 @@ where
     ///
     /// This could be either a *Request* or a *WebTransportBiStream*, the first frame's type
     /// decides.
-    pub(crate) fn poll_accept_request(
+    pub fn poll_accept_request(
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<C::BidiStream>, Error>> {
@@ -516,15 +516,30 @@ where
 /// Configures the HTTP/3 connection
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
-    pub(crate) send_grease: bool,
-    pub(crate) max_field_section_size: u64,
+    /// Just like in HTTP/2, HTTP/3 also uses the concept of "grease"
+    /// to prevent potential interoperability issues in the future.
+    /// In HTTP/3, the concept of grease is used to ensure that the protocol can evolve
+    /// and accommodate future changes without breaking existing implementations.
+    pub send_grease: bool,
+    /// The MAX_FIELD_SECTION_SIZE in HTTP/3 refers to the maximum size of the dynamic table used in HPACK compression.
+    /// HPACK is the compression algorithm used in HTTP/3 to reduce the size of the header fields in HTTP requests and responses.
+
+    /// In HTTP/3, the MAX_FIELD_SECTION_SIZE is set to 12.
+    /// This means that the dynamic table used for HPACK compression can have a maximum size of 2^12 bytes, which is 4KB.
+    pub max_field_section_size: u64,
 
     //=https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-3.1
     /// Sets `SETTINGS_ENABLE_WEBTRANSPORT` if enabled
-    pub(crate) enable_webtransport: bool,
-    pub(crate) enable_connect: bool,
-    pub(crate) enable_datagram: bool,
-    pub(crate) max_webtransport_sessions: u64,
+    pub enable_webtransport: bool,
+    /// https://www.rfc-editor.org/info/rfc8441 defines an extended CONNECT method in Section 4,
+    /// enabled by the SETTINGS_ENABLE_CONNECT_PROTOCOL parameter.
+    /// That parameter is only defined for HTTP/2.
+    /// for extended CONNECT in HTTP/3; instead, the SETTINGS_ENABLE_WEBTRANSPORT setting implies that an endpoint supports extended CONNECT.
+    pub enable_extended_connect: bool,
+    /// Enable HTTP Datagrams, see https://datatracker.ietf.org/doc/rfc9297/ for details
+    pub enable_datagram: bool,
+    /// The maximum number of concurrent streams that can be opened by the peer.
+    pub max_webtransport_sessions: u64,
 }
 
 impl Config {
@@ -565,7 +580,7 @@ impl Config {
 
     /// Enables the CONNECT protocol
     pub fn enable_connect(&mut self, value: bool) {
-        self.enable_connect = value;
+        self.enable_extended_connect = value;
     }
 
     /// Limits the maximum number of WebTransport sessions
@@ -587,7 +602,7 @@ impl Default for Config {
             max_field_section_size: VarInt::MAX.0,
             send_grease: true,
             enable_webtransport: false,
-            enable_connect: false,
+            enable_extended_connect: false,
             enable_datagram: false,
             max_webtransport_sessions: 0,
         }

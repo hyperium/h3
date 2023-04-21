@@ -5,6 +5,8 @@ use std::{
     ops::Add,
 };
 
+use crate::webtransport::session_id::SessionId;
+
 use super::{
     coding::{BufExt, BufMutExt, Decode, Encode, UnexpectedEnd},
     varint::VarInt,
@@ -188,8 +190,8 @@ impl Add<usize> for StreamId {
     }
 }
 
-impl From<crate::webtransport::SessionId> for StreamId {
-    fn from(value: crate::webtransport::SessionId) -> Self {
+impl From<SessionId> for StreamId {
+    fn from(value: SessionId) -> Self {
         Self(value.into_inner())
     }
 }

@@ -5,6 +5,7 @@ use bytes::{BufMut, BytesMut};
 use futures::future::poll_fn;
 use futures::AsyncReadExt;
 use futures::AsyncWriteExt;
+use h3_webtransport::server;
 use http::Method;
 use rustls::{Certificate, PrivateKey};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
@@ -16,10 +17,10 @@ use h3::{
     error::ErrorLevel,
     quic::{self, RecvStream},
     server::{Config, Connection},
-    webtransport::server::WebTransportSession,
     Protocol,
 };
 use h3_quinn::quinn;
+use h3_webtransport::server::WebTransportSession;
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "server")]
@@ -293,7 +294,7 @@ where
                 tracing::info!("Wrote response");
             }
             stream = session.accept_bi() => {
-                if let Some(h3::webtransport::server::AcceptedBi::BidiStream(_, mut send, mut recv)) = stream? {
+                if let Some(server::AcceptedBi::BidiStream(_, mut send, mut recv)) = stream? {
                     tracing::info!("Got bi stream");
                     while let Some(bytes) = poll_fn(|cx| recv.poll_data(cx)).await? {
                         tracing::info!("Received data {:?}", &bytes);

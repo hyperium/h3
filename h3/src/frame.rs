@@ -20,14 +20,14 @@ use crate::{
 
 /// Decodes Frames from the underlying QUIC stream
 pub struct FrameStream<S> {
-    stream: BufRecvStream<S>,
+    pub stream: BufRecvStream<S>,
     // Already read data from the stream
     decoder: FrameDecoder,
     remaining_data: usize,
 }
 
 impl<S> FrameStream<S> {
-    pub(crate) fn new(stream: BufRecvStream<S>) -> Self {
+    pub fn new(stream: BufRecvStream<S>) -> Self {
         Self {
             stream,
             decoder: FrameDecoder::default(),
@@ -37,7 +37,7 @@ impl<S> FrameStream<S> {
 
     /// Unwraps the Framed streamer and returns the underlying stream **without** data loss for
     /// partially received/read frames.
-    pub(crate) fn into_inner(self) -> BufRecvStream<S> {
+    pub fn into_inner(self) -> BufRecvStream<S> {
         self.stream
     }
 }

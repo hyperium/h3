@@ -11,7 +11,7 @@ use crate::{
     Error,
 };
 
-pub(crate) struct ResolveRequest<C: quic::Connection> {
+pub struct ResolveRequest<C: quic::Connection> {
     request_stream: RequestStream<C::BidiStream>,
     // Ok or `REQUEST_HEADER_FIELDS_TO_LARGE` which neeeds to be sent
     decoded: Result<(qpack::Decoded), u64>,

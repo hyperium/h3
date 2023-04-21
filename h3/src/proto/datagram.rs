@@ -12,7 +12,7 @@ pub struct Datagram<B = Bytes> {
     /// Stream id divided by 4
     stream_id: StreamId,
     /// The data contained in the datagram
-    pub(crate) payload: B,
+    pub payload: B,
 }
 
 impl<B> Datagram<B>
@@ -28,7 +28,7 @@ where
     }
 
     /// Decodes a datagram frame from the QUIC datagram
-    pub(crate) fn decode(mut buf: B) -> Result<Self, Error> {
+    pub fn decode(mut buf: B) -> Result<Self, Error> {
         let q_stream_id = VarInt::decode(&mut buf)
             .map_err(|_| Code::H3_DATAGRAM_ERROR.with_cause("Malformed datagram frame"))?;
 

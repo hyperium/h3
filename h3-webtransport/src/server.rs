@@ -6,23 +6,23 @@ use std::{
     task::{Context, Poll},
 };
 
-use crate::{
+use bytes::{Buf, Bytes};
+use futures_util::{future::poll_fn, ready, Future};
+use h3::stream::{BidiStreamHeader, BufRecvStream, UniStreamHeader};
+use h3::{
     connection::ConnectionState,
     error::{Code, ErrorLevel},
     frame::FrameStream,
     proto::{datagram::Datagram, frame::Frame},
     quic::{self, BidiStream as _, OpenStreams, SendStream as _, WriteBuf},
     server::{self, Connection, RequestStream},
-    stream::{BidiStreamHeader, BufRecvStream, UniStreamHeader},
     Error, Protocol,
 };
-use bytes::{Buf, Bytes};
-use futures_util::{future::poll_fn, ready, Future};
 use http::{Method, Request, Response, StatusCode};
 
-use super::{
+use h3::webtransport::{
+    session_id::SessionId,
     stream::{self, RecvStream, SendStream},
-    SessionId,
 };
 
 /// WebTransport session driver.
@@ -36,7 +36,7 @@ where
 {
     // See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-2-3
     session_id: SessionId,
-    conn: Mutex<Connection<C>>,
+    pub conn: Mutex<Connection<C>>,
     connect_stream: RequestStream<C::BidiStream>,
     opener: Mutex<C::OpenStreams>,
 }
@@ -87,7 +87,7 @@ where
             tracing::warn!("Server does not support datagrams");
         }
 
-        if !conn.inner.config.enable_connect {
+        if !conn.inner.config.enable_extended_connect {
             tracing::warn!("Server does not support CONNECT");
         }
 
@@ -173,17 +173,17 @@ where
             }
             Err(err) => {
                 match err.inner.kind {
-                    crate::error::Kind::Closed => return Ok(None),
-                    crate::error::Kind::Application {
-                        code,
-                        reason,
-                        level: ErrorLevel::ConnectionError,
-                    } => {
-                        return Err(self.conn.lock().unwrap().close(
-                            code,
-                            reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
-                        ))
-                    }
+                    h3::error::Kind::Closed => return Ok(None),
+                    // h3::error::Kind::Application {
+                    //     code,
+                    //     reason,
+                    //     level: ErrorLevel::ConnectionError,
+                    // } => {
+                    //     return Err(self.conn.lock().unwrap().close(
+                    //         code,
+                    //         reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
+                    //     ))
+                    // },
                     _ => return Err(err),
                 };
             }

@@ -12,7 +12,8 @@ pub(crate) type TransportError = Box<dyn quic::Error>;
 /// A general error that can occur when handling the HTTP/3 protocol.
 #[derive(Clone)]
 pub struct Error {
-    pub(crate) inner: Box<ErrorImpl>,
+    /// The error kind.
+    pub inner: Box<ErrorImpl>,
 }
 
 /// An HTTP/3 "application error code".
@@ -37,9 +38,11 @@ impl PartialEq<u64> for Code {
     }
 }
 
+/// The error kind.
 #[derive(Clone)]
-pub(crate) struct ErrorImpl {
-    pub(crate) kind: Kind,
+pub struct ErrorImpl {
+    /// The error kind.
+    pub kind: Kind,
     cause: Option<Arc<Cause>>,
 }
 

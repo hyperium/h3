@@ -14,7 +14,7 @@ use crate::{
         varint::VarInt,
     },
     quic::{self, BidiStream, RecvStream, SendStream},
-    webtransport::{self, SessionId},
+    webtransport::{self, session_id::SessionId},
     Error,
 };
 
@@ -392,7 +392,7 @@ where
 ///
 /// Implements `quic::RecvStream` which will first return buffered data, and then read from the
 /// stream
-pub(crate) struct BufRecvStream<S> {
+pub struct BufRecvStream<S> {
     buf: BufList<Bytes>,
     /// Indicates that the end of the stream has been reached
     ///
@@ -412,7 +412,7 @@ impl<S> std::fmt::Debug for BufRecvStream<S> {
 }
 
 impl<S> BufRecvStream<S> {
-    pub(crate) fn new(stream: S) -> Self {
+    pub fn new(stream: S) -> Self {
         Self {
             buf: BufList::new(),
             eos: false,

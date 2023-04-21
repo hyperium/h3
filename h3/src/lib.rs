@@ -7,18 +7,23 @@ pub mod error;
 pub mod quic;
 pub(crate) mod request;
 pub mod server;
-pub mod webtransport;
 
 pub use error::Error;
 pub use proto::headers::Protocol;
 
 mod buf;
-mod connection;
-mod frame;
-mod proto;
+#[allow(missing_docs)]
+pub mod connection;
+#[allow(missing_docs)]
+pub mod frame;
+#[allow(missing_docs)]
+pub mod proto;
 #[allow(dead_code)]
 mod qpack;
-mod stream;
+#[allow(missing_docs)]
+pub mod stream;
+#[allow(missing_docs)]
+pub mod webtransport;
 
 #[cfg(test)]
 mod tests;

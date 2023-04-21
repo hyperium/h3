@@ -5,7 +5,7 @@ use std::{
 };
 use tracing::trace;
 
-use crate::webtransport::SessionId;
+use crate::webtransport::session_id::SessionId;
 
 use super::{
     coding::{Decode, Encode},
