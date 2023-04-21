@@ -12,21 +12,37 @@ pub use error::Error;
 pub use proto::headers::Protocol;
 
 mod buf;
+
+#[cfg(feature="allow_access_to_core")]
 #[allow(missing_docs)]
 pub mod connection;
+#[cfg(feature="allow_access_to_core")]
 #[allow(missing_docs)]
 pub mod frame;
+#[cfg(feature="allow_access_to_core")]
 #[allow(missing_docs)]
 pub mod proto;
-#[allow(dead_code)]
-mod qpack;
+#[cfg(feature="allow_access_to_core")]
 #[allow(missing_docs)]
 pub mod stream;
+#[cfg(feature="allow_access_to_core")]
 #[allow(missing_docs)]
 pub mod webtransport;
 
+#[cfg(not(feature = "allow_access_to_core"))]
+mod connection;
+#[cfg(not(feature = "allow_access_to_core"))]
+mod frame;
+#[cfg(not(feature = "allow_access_to_core"))]
+mod proto;
+#[cfg(not(feature = "allow_access_to_core"))]
+mod stream;
+#[cfg(not(feature = "allow_access_to_core"))]
+mod webtransport;
+
+#[allow(dead_code)]
+mod qpack;
 #[cfg(test)]
 mod tests;
-
 #[cfg(test)]
 extern crate self as h3;
