@@ -5,7 +5,6 @@ use bytes::{BufMut, BytesMut};
 use futures::future::poll_fn;
 use futures::AsyncReadExt;
 use futures::AsyncWriteExt;
-use h3::webtransport::server::WebTransportServer;
 use http::Method;
 use rustls::{Certificate, PrivateKey};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
@@ -189,12 +188,29 @@ where
     // if this is a webtransport session, then h3 needs to stop handing the datagrams, bidirectional streams, and unidirectional streams and give them
     // to the webtransport session.
 
-    let conn = WebTransportServer::new(conn);
-
     loop {
-        match conn.accept_session().await {
-            Ok(Some((session))) => {
-                handle_session_and_echo_all_inbound_messages(session).await?;
+        match conn.accept().await {
+            Ok(Some((req, stream))) => {
+                info!("new request: {:#?}", req);
+
+                let ext = req.extensions();
+                match req.method() {
+                    &Method::CONNECT if ext.get::<Protocol>() == Some(&Protocol::WEB_TRANSPORT) => {
+                        tracing::info!("Peer wants to initiate a webtransport session");
+
+                        tracing::info!("Handing over connection to WebTransport");
+                        let session = WebTransportSession::accept(req, stream, conn).await?;
+                        tracing::info!("Established webtransport session");
+                        // 4. Get datagrams, bidirectional streams, and unidirectional streams and wait for client requests here.
+                        // h3_conn needs to handover the datagrams, bidirectional streams, and unidirectional streams to the webtransport session.
+                        handle_session_and_echo_all_inbound_messages(session).await?;
+
+                        return Ok(());
+                    }
+                    _ => {
+                        tracing::info!(?req, "Received request");
+                    }
+                }
             }
 
             // indicating no more streams to be received
@@ -229,48 +245,55 @@ where
     C::RecvStream: Send + Unpin,
 {
     let session_id = session.session_id();
-    tracing::info!("Handling session: {session_id:?}");
 
     // This will open a bidirectional stream and send a message to the client right after connecting!
+    let (mut send, _read_bidi) = session.open_bi(session_id).await.unwrap();
+    tracing::info!("Opening bidirectional stream");
+    let bytes = Bytes::from("Hello from server");
+    futures::AsyncWriteExt::write_all(&mut send, &bytes)
+        .await
+        .context("Failed to respond")
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(1000)).await;
 
     loop {
         tokio::select! {
-            // datagram = session.accept_datagram() => {
-            //     let datagram = datagram?;
-            //     if let Some((_, datagram)) = datagram {
-            //         tracing::info!("Responding with {datagram:?}");
-            //         // Put something before to make sure encoding and decoding works and don't just
-            //         // pass through
-            //         let mut resp = BytesMut::from(&b"Response: "[..]);
-            //         resp.put(datagram);
+            datagram = session.accept_datagram() => {
+                let datagram = datagram?;
+                if let Some((_, datagram)) = datagram {
+                    tracing::info!("Responding with {datagram:?}");
+                    // Put something before to make sure encoding and decoding works and don't just
+                    // pass through
+                    let mut resp = BytesMut::from(&b"Response: "[..]);
+                    resp.put(datagram);
 
-            //         session.send_datagram(resp).unwrap();
-            //         tracing::info!("Finished sending datagram");
-            //     }
-            // }
-            // uni_stream = session.accept_uni() => {
-            //     let (id, mut stream) = uni_stream?.unwrap();
-            //     tracing::info!("Received uni stream {:?} for {id:?}", stream.recv_id());
+                    session.send_datagram(resp).unwrap();
+                    tracing::info!("Finished sending datagram");
+                }
+            }
+            uni_stream = session.accept_uni() => {
+                let (id, mut stream) = uni_stream?.unwrap();
+                tracing::info!("Received uni stream {:?} for {id:?}", stream.recv_id());
 
-            //     let mut message = Vec::new();
+                let mut message = Vec::new();
 
-            //     AsyncReadExt::read_to_end(&mut stream, &mut message).await.context("Failed to read message")?;
-            //     let message = Bytes::from(message);
+                AsyncReadExt::read_to_end(&mut stream, &mut message).await.context("Failed to read message")?;
+                let message = Bytes::from(message);
 
-            //     tracing::info!("Got message: {message:?}");
-            //     let mut send = session.open_uni(session_id).await?;
-            //     tracing::info!("Opened unidirectional stream");
+                tracing::info!("Got message: {message:?}");
+                let mut send = session.open_uni(session_id).await?;
+                tracing::info!("Opened unidirectional stream");
 
-            //     for byte in message {
-            //         tokio::time::sleep(Duration::from_millis(100)).await;
-            //         tracing::info!("Sending {byte:?}");
-            //         send.write_all(&[byte][..]).await?;
-            //     }
-            //     // futures::AsyncWriteExt::write_all(&mut send, &message).await.context("Failed to respond")?;
-            //     tracing::info!("Wrote response");
-            // }
+                for byte in message {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    tracing::info!("Sending {byte:?}");
+                    send.write_all(&[byte][..]).await?;
+                }
+                // futures::AsyncWriteExt::write_all(&mut send, &message).await.context("Failed to respond")?;
+                tracing::info!("Wrote response");
+            }
             stream = session.accept_bi() => {
-                if let Some((mut send, mut recv)) = stream? {
+                if let Some(h3::webtransport::server::AcceptedBi::BidiStream(_, mut send, mut recv)) = stream? {
                     tracing::info!("Got bi stream");
                     while let Some(bytes) = poll_fn(|cx| recv.poll_data(cx)).await? {
                         tracing::info!("Received data {:?}", &bytes);

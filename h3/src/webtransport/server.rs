@@ -1,9 +1,9 @@
 //! Provides the server side WebTransport session
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     pin::Pin,
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{Arc, Mutex},
     task::{Context, Poll},
 };
 
@@ -12,7 +12,7 @@ use crate::{
     error::{Code, ErrorLevel},
     frame::FrameStream,
     proto::{datagram::Datagram, frame::Frame, stream::Dir},
-    quic::{self, BidiStream as _, OpenStreams, RecvStream as _, SendStream as _, WriteBuf},
+    quic::{self, BidiStream as _, OpenStreams, SendStream as _, WriteBuf},
     request::ResolveRequest,
     server::{self, Connection, RequestStream},
     stream::{BidiStreamHeader, BufRecvStream, UniStreamHeader},
@@ -24,160 +24,41 @@ use http::{Method, Request, Response, StatusCode};
 use tokio::sync::mpsc;
 
 use super::{
-    accept::AcceptBi as AcceptIncomingBi,
+    accept::AcceptBi,
     stream::{self, RecvStream, SendStream},
     SessionId,
 };
 
-/// Accepts and manages WebTransport sessions
+enum Event {
+    Datagram(Bytes),
+    /// A new stream was opened for this session
+    Stream(Dir),
+}
+
+/// Manages multiple connected WebTransport sessions.
 pub struct WebTransportServer<C: quic::Connection> {
-    inner: Arc<Mutex<WConn<C>>>,
+    conn: Connection<C>,
+
+    sessions: HashMap<SessionId, mpsc::Sender<Event>>,
+
+    /// Bidirectional streams which have not yet read the first frame
+    /// This determines if it is a webtransport stream or a request stream
+    pending_bi: FuturesUnordered<AcceptBi<C>>,
+
+    accepted_requests: Vec<ResolveRequest<C>>,
 }
 
 impl<C: quic::Connection> WebTransportServer<C> {
     /// Creates a new WebTransport server from an HTTP/3 connection.
     pub fn new(conn: Connection<C>) -> Self {
-        // The peer is responsible for validating our side of the webtransport support.
-        //
-        // However, it is still advantageous to show a log on the server as (attempting) to
-        // establish a WebTransportSession without the proper h3 config is usually a mistake.
-        if !conn.inner.config.enable_webtransport {
-            tracing::warn!("Server does not support webtransport");
-        }
-
-        if !conn.inner.config.enable_datagram {
-            tracing::warn!("Server does not support datagrams");
-        }
-
-        if !conn.inner.config.enable_connect {
-            tracing::warn!("Server does not support CONNECT");
-        }
-
-        let opener = conn.inner.conn.lock().unwrap().opener();
-
-        let inner = WConn {
-            conn,
-            sessions: Default::default(),
-            pending_bi: Default::default(),
-            pending_requests: Default::default(),
-            bi_streams: Default::default(),
-            opener,
-        };
-
         Self {
-            inner: Arc::new(Mutex::new(inner)),
+            conn,
+            sessions: HashMap::new(),
+            pending_bi: Default::default(),
+            accepted_requests: todo!(),
         }
     }
 
-    /// Accepts the next WebTransport session.
-    pub async fn accept_session(&self) -> Result<Option<WebTransportSession<C>>, Error> {
-        loop {
-            let req = self.inner().pending_requests.pop();
-            if let Some(req) = req {
-                let (request, mut stream) = req.resolve().await?;
-
-                if request.method() != Method::CONNECT {
-                    // TODO buffer this request for someone else
-                }
-
-                {
-                    let mut inner = self.inner();
-
-                    let shared = inner.conn.shared_state().clone();
-                    {
-                        let config = shared.write("Read WebTransport support").config;
-
-                        tracing::debug!("Client settings: {:#?}", config);
-                        if !config.enable_webtransport {
-                            return Err(inner.conn.close(
-                                Code::H3_SETTINGS_ERROR,
-                                "webtransport is not supported by client",
-                            ));
-                        }
-
-                        if !config.enable_datagram {
-                            return Err(inner.conn.close(
-                                Code::H3_SETTINGS_ERROR,
-                                "datagrams are not supported by client",
-                            ));
-                        }
-                    }
-
-                    // Create a channel to communicate with the session
-
-                    let session_id = stream.send_id().into();
-
-                    // Ensure the session is inserted **before** sending and awaiting the response
-                    //
-                    // This is because streams can be opened by the client before the response it received
-                    inner.sessions.insert(session_id);
-                }
-                // Respond to the CONNECT request.
-
-                //= https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-3.3
-                let response = if validate_wt_connect(&request) {
-                    Response::builder()
-                        // This is the only header that chrome cares about.
-                        .header("sec-webtransport-http3-draft", "draft02")
-                        .status(StatusCode::OK)
-                        .body(())
-                        .unwrap()
-                } else {
-                    Response::builder()
-                        .status(StatusCode::BAD_REQUEST)
-                        .body(())
-                        .unwrap()
-                };
-
-                tracing::info!("Sending response: {response:?}");
-                stream.send_response(response).await?;
-
-                tracing::info!("Stream id: {}", stream.id());
-                let session_id = stream.send_id().into();
-                tracing::info!("Established new WebTransport session with id {session_id:?}");
-
-                let session = WebTransportSession {
-                    session_id,
-                    conn: self.inner.clone(),
-                    connect_stream: stream,
-                };
-
-                return Ok(Some(session));
-            } else {
-                match poll_fn(|cx| self.inner().poll_incoming_bidi(cx)).await {
-                    Ok(Some(())) => {}
-                    Ok(None) => return Ok(None),
-                    Err(err) => return Err(err),
-                }
-            }
-        }
-    }
-
-    fn inner(&self) -> MutexGuard<'_, WConn<C>> {
-        self.inner.lock().unwrap()
-    }
-}
-
-/// Manages multiple connected WebTransport sessions.
-struct WConn<C: quic::Connection> {
-    conn: Connection<C>,
-
-    sessions: HashSet<SessionId>,
-
-    /// Bidirectional streams which have not yet read the first frame
-    /// This determines if it is a webtransport stream or a request stream
-    pending_bi: FuturesUnordered<AcceptIncomingBi<C>>,
-
-    pending_requests: Vec<ResolveRequest<C>>,
-    bi_streams: Vec<(
-        SessionId,
-        SendStream<C::SendStream>,
-        RecvStream<C::RecvStream>,
-    )>,
-    opener: C::OpenStreams,
-}
-
-impl<C: quic::Connection> WConn<C> {
     /// Accepts the next request.
     ///
     /// *CONNECT* requests for the WebTransport protocol are intercepted. Use [`Self::accept_session`]
@@ -185,32 +66,29 @@ impl<C: quic::Connection> WConn<C> {
         todo!()
     }
 
-    /// Polls for the next incoming request or bidi stream
-    fn poll_incoming_bidi(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<()>, Error>> {
+    /// Accepts the next WebTransport session.
+    pub fn accept_session(
+        &self,
+        request: &Request<()>,
+        mut stream: RequestStream<C::BidiStream>,
+    ) -> Result<WebTransportSession<C>, Error> {
+        todo!()
+    }
+
+    /// Polls requests and incoming `CONNECT` requests
+    fn poll_requests(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<()>, Error>> {
         loop {
             let conn = &mut self.conn;
             // Handle any pending requests
-            if let Poll::Ready(Some((frame, stream))) = self.pending_bi.poll_next_unpin(cx) {
+            while let Poll::Ready(Some((frame, mut stream))) = self.pending_bi.poll_next_unpin(cx) {
                 match frame {
                     Ok(Some(Frame::WebTransportStream(session_id))) => {
                         tracing::debug!("Got webtransport stream for {session_id:?}");
-
-                        if let Some(session) = self.sessions.get(&session_id) {
-                            let (send, recv) = stream.into_inner().split();
-                            self.bi_streams.push((
-                                session_id,
-                                SendStream::new(send),
-                                RecvStream::new(recv),
-                            ));
-                        }
-
-                        return Poll::Ready(Ok(Some(())));
                     }
                     frame => {
                         match conn.accept_with_frame(stream, frame) {
                             Ok(Some(request)) => {
-                                self.pending_requests.push(request);
-                                return Poll::Ready(Ok(Some(())));
+                                self.accepted_requests.push(request);
                             }
                             Ok(None) => {
                                 // Connection is closed
@@ -232,7 +110,7 @@ impl<C: quic::Connection> WConn<C> {
 
             if let Some(stream) = stream {
                 let stream = FrameStream::new(BufRecvStream::new(stream));
-                self.pending_bi.push(AcceptIncomingBi::new(stream));
+                self.pending_bi.push(AcceptBi::new(stream));
                 // Go back around and poll the streams
             } else {
                 // Connection is closed
@@ -255,20 +133,101 @@ where
 {
     // See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-2-3
     session_id: SessionId,
-    conn: Arc<Mutex<WConn<C>>>,
+    conn: Mutex<Connection<C>>,
     connect_stream: RequestStream<C::BidiStream>,
+    opener: Mutex<C::OpenStreams>,
 }
 
 impl<C> WebTransportSession<C>
 where
     C: quic::Connection,
 {
+    /// Accepts a *CONNECT* request for establishing a WebTransport session.
+    ///
+    /// TODO: is the API or the user responsible for validating the CONNECT request?
+    pub async fn accept(
+        request: Request<()>,
+        mut stream: RequestStream<C::BidiStream>,
+        mut conn: Connection<C>,
+    ) -> Result<Self, Error> {
+        let shared = conn.shared_state().clone();
+        {
+            let config = shared.write("Read WebTransport support").config;
+
+            tracing::debug!("Client settings: {:#?}", config);
+            if !config.enable_webtransport {
+                return Err(conn.close(
+                    Code::H3_SETTINGS_ERROR,
+                    "webtransport is not supported by client",
+                ));
+            }
+
+            if !config.enable_datagram {
+                return Err(conn.close(
+                    Code::H3_SETTINGS_ERROR,
+                    "datagrams are not supported by client",
+                ));
+            }
+        }
+
+        tracing::debug!("Validated client webtransport support");
+
+        // The peer is responsible for validating our side of the webtransport support.
+        //
+        // However, it is still advantageous to show a log on the server as (attempting) to
+        // establish a WebTransportSession without the proper h3 config is usually a mistake.
+        if !conn.inner.config.enable_webtransport {
+            tracing::warn!("Server does not support webtransport");
+        }
+
+        if !conn.inner.config.enable_datagram {
+            tracing::warn!("Server does not support datagrams");
+        }
+
+        if !conn.inner.config.enable_connect {
+            tracing::warn!("Server does not support CONNECT");
+        }
+
+        // Respond to the CONNECT request.
+
+        //= https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-3.3
+        let response = if validate_wt_connect(&request) {
+            Response::builder()
+                // This is the only header that chrome cares about.
+                .header("sec-webtransport-http3-draft", "draft02")
+                .status(StatusCode::OK)
+                .body(())
+                .unwrap()
+        } else {
+            Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(())
+                .unwrap()
+        };
+
+        tracing::info!("Sending response: {response:?}");
+        stream.send_response(response).await?;
+
+        tracing::info!("Stream id: {}", stream.id());
+        let session_id = stream.send_id().into();
+        tracing::info!("Established new WebTransport session with id {session_id:?}");
+        let conn_inner = conn.inner.conn.lock().unwrap();
+        let opener = Mutex::new(conn_inner.opener());
+        drop(conn_inner);
+
+        Ok(Self {
+            session_id,
+            opener,
+            conn: Mutex::new(conn),
+            connect_stream: stream,
+        })
+    }
+
     /// Receive a datagram from the client
     pub fn accept_datagram(&self) -> ReadDatagram<C> {
-        todo!()
-        // ReadDatagram {
-        // conn: self.conn.lock().unwrap().inner.conn.clone(),
-        // }
+        ReadDatagram {
+            conn: self.conn.lock().unwrap().inner.conn.clone(),
+        }
     }
 
     /// Sends a datagram
@@ -278,7 +237,6 @@ where
         self.conn
             .lock()
             .unwrap()
-            .conn
             .send_datagram(self.connect_stream.id(), data)?;
 
         Ok(())
@@ -286,22 +244,85 @@ where
 
     /// Accept an incoming unidirectional stream from the client, it reads the stream until EOF.
     pub fn accept_uni(&self) -> AcceptUni<C> {
-        todo!()
-        // AcceptUni { conn: &self.conn }
+        AcceptUni { conn: &self.conn }
     }
 
     /// Accepts an incoming bidirectional stream or request
-    pub fn accept_bi(&self) -> AcceptBi<C> {
-        AcceptBi {
-            conn: &self.conn,
-            session_id: self.session_id,
+    pub async fn accept_bi(&self) -> Result<Option<AcceptedBi<C>>, Error> {
+        // Get the next stream
+        // Accept the incoming stream
+        let stream = poll_fn(|cx| {
+            let mut conn = self.conn.lock().unwrap();
+            conn.poll_accept_bi(cx)
+        })
+        .await;
+
+        tracing::debug!("Received biderectional stream");
+
+        let mut stream = match stream {
+            Ok(Some(s)) => FrameStream::new(BufRecvStream::new(s)),
+            Ok(None) => {
+                // We always send a last GoAway frame to the client, so it knows which was the last
+                // non-rejected request.
+                // self.shutdown(0).await?;
+                todo!("shutdown");
+                // return Ok(None);
+            }
+            Err(err) => {
+                match err.inner.kind {
+                    crate::error::Kind::Closed => return Ok(None),
+                    crate::error::Kind::Application {
+                        code,
+                        reason,
+                        level: ErrorLevel::ConnectionError,
+                    } => {
+                        return Err(self.conn.lock().unwrap().close(
+                            code,
+                            reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
+                        ))
+                    }
+                    _ => return Err(err),
+                };
+            }
+        };
+
+        tracing::debug!("Reading first frame");
+        // Read the first frame.
+        //
+        // This will determine if it is a webtransport bi-stream or a request stream
+        let frame = poll_fn(|cx| stream.poll_next(cx)).await;
+
+        match frame {
+            Ok(None) => Ok(None),
+            Ok(Some(Frame::WebTransportStream(session_id))) => {
+                tracing::info!("Got webtransport stream");
+                // Take the stream out of the framed reader and split it in half like Paul Allen
+                let (send, recv) = stream.into_inner().split();
+                let send = SendStream::new(send);
+                let recv = RecvStream::new(recv);
+
+                Ok(Some(AcceptedBi::BidiStream(session_id, send, recv)))
+            }
+            // Make the underlying HTTP/3 connection handle the rest
+            frame => {
+                let req = {
+                    let mut conn = self.conn.lock().unwrap();
+                    conn.accept_with_frame(stream, frame)?
+                };
+                if let Some(req) = req {
+                    let (req, resp) = req.resolve().await?;
+                    Ok(Some(AcceptedBi::Request(req, resp)))
+                } else {
+                    Ok(None)
+                }
+            }
         }
     }
 
     /// Open a new bidirectional stream
     pub fn open_bi(&self, session_id: SessionId) -> OpenBi<C> {
         OpenBi {
-            conn: &self.conn,
+            opener: &self.opener,
             stream: None,
             session_id,
         }
@@ -310,7 +331,7 @@ where
     /// Open a new unidirectional stream
     pub fn open_uni(&self, session_id: SessionId) -> OpenUni<C> {
         OpenUni {
-            conn: &self.conn,
+            opener: &self.opener,
             stream: None,
             session_id,
         }
@@ -338,7 +359,7 @@ type PendingUniStreams<C> = (
 #[pin_project::pin_project]
 /// Future for opening a bidi stream
 pub struct OpenBi<'a, C: quic::Connection> {
-    conn: &'a Mutex<WConn<C>>,
+    opener: &'a Mutex<C::OpenStreams>,
     stream: Option<PendingStreams<C>>,
     session_id: SessionId,
 }
@@ -362,8 +383,7 @@ impl<'a, C: quic::Connection> Future for OpenBi<'a, C> {
                     return Poll::Ready(Ok((send, recv)));
                 }
                 None => {
-                    let mut conn = (*p.conn).lock().unwrap();
-                    let opener = &mut conn.opener;
+                    let mut opener = (*p.opener).lock().unwrap();
                     // Open the stream first
                     let res = ready!(opener.poll_open_bidi(cx))?;
                     let (send, recv) = BufRecvStream::new(res).split();
@@ -382,7 +402,7 @@ impl<'a, C: quic::Connection> Future for OpenBi<'a, C> {
 #[pin_project::pin_project]
 /// Future for opening a uni stream
 pub struct OpenUni<'a, C: quic::Connection> {
-    conn: &'a Mutex<WConn<C>>,
+    opener: &'a Mutex<C::OpenStreams>,
     stream: Option<PendingUniStreams<C>>,
     session_id: SessionId,
 }
@@ -403,9 +423,7 @@ impl<'a, C: quic::Connection> Future for OpenUni<'a, C> {
                     return Poll::Ready(Ok(send));
                 }
                 None => {
-                    let mut conn = (*p.conn).lock().unwrap();
-                    let opener = &mut conn.opener;
-
+                    let mut opener = (*p.opener).lock().unwrap();
                     let send = ready!(opener.poll_open_uni(cx))?;
                     let send = BufRecvStream::new(send);
                     let send = SendStream::new(send);
@@ -462,52 +480,12 @@ where
     }
 }
 
-/// Accepts the next incoming bidirectional stream
-pub struct AcceptBi<'a, C>
-where
-    C: quic::Connection,
-{
-    conn: &'a Mutex<WConn<C>>,
-
-    session_id: SessionId,
-}
-
-impl<'a, C> Future for AcceptBi<'a, C>
-where
-    C: quic::Connection,
-{
-    type Output = Result<Option<(SendStream<C::SendStream>, RecvStream<C::RecvStream>)>, Error>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        loop {
-            let mut inner = self.conn.lock().unwrap();
-
-            if let Some(idx) = inner
-                .bi_streams
-                .iter()
-                .position(|(id, _, _)| *id == self.session_id)
-            {
-                let (_, send, recv) = inner.bi_streams.remove(idx);
-                return Poll::Ready(Ok(Some((send, recv))));
-            }
-
-            match ready!(inner.poll_incoming_bidi(cx)) {
-                Ok(Some(())) => {}
-                Ok(None) => return Poll::Ready(Ok(None)),
-                Err(err) => return Poll::Ready(Err(err)),
-            }
-        }
-    }
-}
-
 /// Future for [`WebTransportSession::accept_uni`]
 pub struct AcceptUni<'a, C>
 where
     C: quic::Connection,
 {
-    conn: &'a Mutex<WConn<C>>,
-
-    session_id: SessionId,
+    conn: &'a Mutex<server::Connection<C>>,
 }
 
 impl<'a, C> Future for AcceptUni<'a, C>
@@ -519,20 +497,19 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         tracing::trace!("poll: read_uni_stream");
 
-        todo!()
-        // let mut conn = self.conn.lock().unwrap();
-        // conn.poll_accept_recv(cx)?;
+        let mut conn = self.conn.lock().unwrap();
+        conn.inner.poll_accept_recv(cx)?;
 
-        // // Get the currently available streams
-        // let streams = conn.inner.accepted_streams_mut();
-        // if let Some(v) = streams.uni_streams.pop() {
-        //     tracing::info!("Got uni stream");
-        //     return Poll::Ready(Ok(Some(v)));
-        // }
+        // Get the currently available streams
+        let streams = conn.inner.accepted_streams_mut();
+        if let Some(v) = streams.uni_streams.pop() {
+            tracing::info!("Got uni stream");
+            return Poll::Ready(Ok(Some(v)));
+        }
 
-        // tracing::debug!("Waiting on incoming streams");
+        tracing::debug!("Waiting on incoming streams");
 
-        // Poll::Pending
+        Poll::Pending
     }
 }
 

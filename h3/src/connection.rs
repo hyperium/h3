@@ -169,6 +169,8 @@ where
             .insert(SettingId::H3_DATAGRAM, config.enable_datagram as u64)
             .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
 
+        tracing::debug!("Sending server settings: {settings:#x?}");
+
         if config.send_grease {
             tracing::debug!("Enabling send grease");
             //  Grease Settings (https://www.rfc-editor.org/rfc/rfc9114.html#name-defined-settings-parameters)
