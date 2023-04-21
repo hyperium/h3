@@ -171,7 +171,7 @@ where
         &mut self,
     ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream>)>, Error> {
         // Accept the incoming stream
-        let mut stream = match future::poll_fn(|cx| self.poll_accept_bi(cx)).await {
+        let mut stream = match future::poll_fn(|cx| self.poll_accept_request(cx)).await {
             Ok(Some(s)) => FrameStream::new(BufRecvStream::new(s)),
             Ok(None) => {
                 // We always send a last GoAway frame to the client, so it knows which was the last
@@ -377,13 +377,12 @@ where
     ///
     /// This could be either a *Request* or a *WebTransportBiStream*, the first frame's type
     /// decides.
-    pub(crate) fn poll_accept_bi(
+    pub(crate) fn poll_accept_request(
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<C::BidiStream>, Error>> {
         let _ = self.poll_control(cx)?;
         let _ = self.poll_requests_completion(cx);
-
         loop {
             match self.inner.poll_accept_request(cx) {
                 Poll::Ready(Err(x)) => break Poll::Ready(Err(x)),
@@ -471,7 +470,17 @@ where
         Poll::Ready(Ok(frame))
     }
 
-    /// Polls until all ongoing requests have completed
+    /// Accepts an incoming recv stream
+    fn poll_accept_uni(
+        &self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<<C as quic::Connection>::RecvStream>, Error>> {
+        todo!()
+        // let recv = ready!(self.inner.poll_accept_recv(cx))?;
+
+        // Poll::Ready(Ok(recv))
+    }
+
     fn poll_requests_completion(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         loop {
             match self.request_end_recv.poll_recv(cx) {
@@ -483,7 +492,7 @@ where
                 }
                 Poll::Pending => {
                     if self.ongoing_streams.is_empty() {
-                        // Tell the caller there are no more ongoing requests.
+                        // Tell the caller there is not more ongoing requests.
                         // Still, the completion of future requests will wake us.
                         return Poll::Ready(());
                     } else {

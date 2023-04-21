@@ -1,7 +1,6 @@
 //! Provides the server side WebTransport session
 
 use std::{
-    collections::HashMap,
     pin::Pin,
     sync::{Arc, Mutex},
     task::{Context, Poll},
@@ -11,116 +10,20 @@ use crate::{
     connection::ConnectionState,
     error::{Code, ErrorLevel},
     frame::FrameStream,
-    proto::{datagram::Datagram, frame::Frame, stream::Dir},
+    proto::{datagram::Datagram, frame::Frame},
     quic::{self, BidiStream as _, OpenStreams, SendStream as _, WriteBuf},
-    request::ResolveRequest,
     server::{self, Connection, RequestStream},
     stream::{BidiStreamHeader, BufRecvStream, UniStreamHeader},
     Error, Protocol,
 };
 use bytes::{Buf, Bytes};
-use futures_util::{future::poll_fn, ready, stream::FuturesUnordered, Future, StreamExt};
+use futures_util::{future::poll_fn, ready, Future};
 use http::{Method, Request, Response, StatusCode};
-use tokio::sync::mpsc;
 
 use super::{
-    accept::AcceptBi,
     stream::{self, RecvStream, SendStream},
     SessionId,
 };
-
-enum Event {
-    Datagram(Bytes),
-    /// A new stream was opened for this session
-    Stream(Dir),
-}
-
-/// Manages multiple connected WebTransport sessions.
-pub struct WebTransportServer<C: quic::Connection> {
-    conn: Connection<C>,
-
-    sessions: HashMap<SessionId, mpsc::Sender<Event>>,
-
-    /// Bidirectional streams which have not yet read the first frame
-    /// This determines if it is a webtransport stream or a request stream
-    pending_bi: FuturesUnordered<AcceptBi<C>>,
-
-    accepted_requests: Vec<ResolveRequest<C>>,
-}
-
-impl<C: quic::Connection> WebTransportServer<C> {
-    /// Creates a new WebTransport server from an HTTP/3 connection.
-    pub fn new(conn: Connection<C>) -> Self {
-        Self {
-            conn,
-            sessions: HashMap::new(),
-            pending_bi: Default::default(),
-            accepted_requests: todo!(),
-        }
-    }
-
-    /// Accepts the next request.
-    ///
-    /// *CONNECT* requests for the WebTransport protocol are intercepted. Use [`Self::accept_session`]
-    pub async fn accept_request(&self) -> (Request<()>, RequestStream<C::BidiStream>) {
-        todo!()
-    }
-
-    /// Accepts the next WebTransport session.
-    pub fn accept_session(
-        &self,
-        request: &Request<()>,
-        mut stream: RequestStream<C::BidiStream>,
-    ) -> Result<WebTransportSession<C>, Error> {
-        todo!()
-    }
-
-    /// Polls requests and incoming `CONNECT` requests
-    fn poll_requests(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<()>, Error>> {
-        loop {
-            let conn = &mut self.conn;
-            // Handle any pending requests
-            while let Poll::Ready(Some((frame, mut stream))) = self.pending_bi.poll_next_unpin(cx) {
-                match frame {
-                    Ok(Some(Frame::WebTransportStream(session_id))) => {
-                        tracing::debug!("Got webtransport stream for {session_id:?}");
-                    }
-                    frame => {
-                        match conn.accept_with_frame(stream, frame) {
-                            Ok(Some(request)) => {
-                                self.accepted_requests.push(request);
-                            }
-                            Ok(None) => {
-                                // Connection is closed
-                                return Poll::Ready(Ok(None));
-                            }
-                            Err(err) => {
-                                tracing::debug!("Error accepting request: {err}");
-                                return Poll::Ready(Err(err));
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Accept *new* incoming bidirectional stream
-            //
-            // This could be an HTTP/3 request, or a webtransport bidi stream.
-            let stream = ready!(self.conn.poll_accept_bi(cx)?);
-
-            if let Some(stream) = stream {
-                let stream = FrameStream::new(BufRecvStream::new(stream));
-                self.pending_bi.push(AcceptBi::new(stream));
-                // Go back around and poll the streams
-            } else {
-                // Connection is closed
-                return Poll::Ready(Ok(None));
-            }
-        }
-
-        // Peek the first varint to determine the type
-    }
-}
 
 /// WebTransport session driver.
 ///
@@ -253,7 +156,7 @@ where
         // Accept the incoming stream
         let stream = poll_fn(|cx| {
             let mut conn = self.conn.lock().unwrap();
-            conn.poll_accept_bi(cx)
+            conn.poll_accept_request(cx)
         })
         .await;
 
@@ -416,7 +319,7 @@ impl<'a, C: quic::Connection> Future for OpenUni<'a, C> {
             match &mut p.stream {
                 Some((send, buf)) => {
                     while buf.has_remaining() {
-                        ready!(send.poll_send(cx, buf))?;
+                        let n = ready!(send.poll_send(cx, buf))?;
                     }
                     let (send, buf) = p.stream.take().unwrap();
                     assert!(!buf.has_remaining());

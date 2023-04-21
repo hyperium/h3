@@ -11,7 +11,6 @@ use crate::proto::{
     stream::{InvalidStreamId, StreamId},
     varint::VarInt,
 };
-mod accept;
 pub mod server;
 /// Send and Receive streams
 pub mod stream;
