@@ -4,11 +4,12 @@ use bytes::{Buf, Bytes};
 use futures_util::{future, ready, AsyncRead, AsyncWrite};
 
 use crate::{
-    quic::{self, RecvStream as _, SendStream as _},
+    quic::{self, SendStream as _},
     stream::BufRecvStream,
 };
 
 /// WebTransport receive stream
+#[pin_project::pin_project]
 pub struct RecvStream<S> {
     stream: BufRecvStream<S>,
 }
@@ -48,7 +49,7 @@ where
 
 impl<S> AsyncRead for RecvStream<S>
 where
-    S: Unpin + quic::RecvStream,
+    S: quic::RecvStream,
     S::Error: Into<std::io::Error>,
 {
     fn poll_read(
@@ -80,6 +81,7 @@ where
 }
 
 /// WebTransport send stream
+#[pin_project::pin_project]
 pub struct SendStream<S> {
     stream: BufRecvStream<S>,
 }
@@ -108,15 +110,6 @@ where
     /// Returns the number of bytes written
     pub async fn write(&mut self, buf: &mut impl Buf) -> Result<usize, S::Error> {
         future::poll_fn(|cx| quic::SendStream::poll_send(self, cx, buf)).await
-    }
-
-    /// Writes the entire buffer to the stream
-    pub async fn write_all(&mut self, mut buf: impl Buf) -> Result<(), S::Error> {
-        while buf.has_remaining() {
-            self.write(&mut buf).await?;
-        }
-
-        Ok(())
     }
 }
 
@@ -149,7 +142,7 @@ where
 
 impl<S> AsyncWrite for SendStream<S>
 where
-    S: Unpin + quic::SendStream,
+    S: quic::SendStream,
     S::Error: Into<std::io::Error>,
 {
     fn poll_write(

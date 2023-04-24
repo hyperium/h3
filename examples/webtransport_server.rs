@@ -3,8 +3,13 @@ use anyhow::Result;
 use bytes::Bytes;
 use bytes::{BufMut, BytesMut};
 use futures::future::poll_fn;
+use futures::AsyncRead;
 use futures::AsyncReadExt;
+use futures::AsyncWrite;
 use futures::AsyncWriteExt;
+use h3::webtransport::session_id::SessionId;
+use h3::webtransport::stream::RecvStream;
+use h3::webtransport::stream::SendStream;
 use h3_webtransport::server;
 use http::Method;
 use rustls::{Certificate, PrivateKey};
@@ -15,7 +20,7 @@ use tracing_subscriber::prelude::*;
 
 use h3::{
     error::ErrorLevel,
-    quic::{self, RecvStream},
+    quic::{self, RecvStream as _},
     server::{Config, Connection},
     Protocol,
 };
@@ -231,6 +236,46 @@ where
     Ok(())
 }
 
+macro_rules! log_result {
+    ($expr:expr) => {
+        if let Err(err) = $expr {
+            tracing::error!("{err:?}");
+        }
+    };
+}
+
+async fn echo_stream<C>(
+    mut send: SendStream<C::SendStream>,
+    mut recv: RecvStream<C::RecvStream>,
+) -> anyhow::Result<()>
+where
+    C: quic::Connection,
+    SendStream<C::SendStream>: AsyncWrite,
+    RecvStream<C::RecvStream>: AsyncRead,
+{
+    tracing::info!("Got stream");
+    let mut buf = Vec::new();
+    recv.read_to_end(&mut buf).await?;
+
+    let message = Bytes::from(buf);
+
+    send_chunked(send, message).await?;
+
+    Ok(())
+}
+
+// Used to test that all chunks arrive properly as it is easy to write an impl which only reads and
+// writes the first chunk.
+async fn send_chunked(mut send: impl AsyncWrite + Unpin, data: Bytes) -> anyhow::Result<()> {
+    for chunk in data.chunks(4) {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        tracing::info!("Sending {chunk:?}");
+        send.write_all(chunk).await?;
+    }
+
+    Ok(())
+}
+
 /// This method will echo all inbound datagrams, unidirectional and bidirectional streams.
 #[tracing::instrument(level = "info", skip(session))]
 async fn handle_session_and_echo_all_inbound_messages<C>(
@@ -268,39 +313,19 @@ where
                     let mut resp = BytesMut::from(&b"Response: "[..]);
                     resp.put(datagram);
 
-                    session.send_datagram(resp).unwrap();
+                    session.send_datagram(resp)?;
                     tracing::info!("Finished sending datagram");
                 }
             }
             uni_stream = session.accept_uni() => {
-                let (id, mut stream) = uni_stream?.unwrap();
-                tracing::info!("Received uni stream {:?} for {id:?}", stream.recv_id());
+                let (id, stream) = uni_stream?.unwrap();
 
-                let mut message = Vec::new();
-
-                AsyncReadExt::read_to_end(&mut stream, &mut message).await.context("Failed to read message")?;
-                let message = Bytes::from(message);
-
-                tracing::info!("Got message: {message:?}");
-                let mut send = session.open_uni(session_id).await?;
-                tracing::info!("Opened unidirectional stream");
-
-                for byte in message {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                    tracing::info!("Sending {byte:?}");
-                    send.write_all(&[byte][..]).await?;
-                }
-                // futures::AsyncWriteExt::write_all(&mut send, &message).await.context("Failed to respond")?;
-                tracing::info!("Wrote response");
+                let send = session.open_uni(id).await?;
+                tokio::spawn( async move { log_result!(echo_stream::<C>(send, stream).await); });
             }
             stream = session.accept_bi() => {
-                if let Some(server::AcceptedBi::BidiStream(_, mut send, mut recv)) = stream? {
-                    tracing::info!("Got bi stream");
-                    while let Some(bytes) = poll_fn(|cx| recv.poll_data(cx)).await? {
-                        tracing::info!("Received data {:?}", &bytes);
-                        futures::AsyncWriteExt::write_all(&mut send, &bytes).await.context("Failed to respond")?;
-                    }
-                    send.close().await?;
+                if let Some(server::AcceptedBi::BidiStream(_, send, recv)) = stream? {
+                    tokio::spawn( async move { log_result!(echo_stream::<C>(send, recv).await); });
                 }
             }
             else => {
