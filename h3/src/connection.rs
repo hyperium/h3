@@ -29,7 +29,7 @@ use crate::{
 #[doc(hidden)]
 pub struct SharedState {
     // Peer settings
-    pub config: Config,
+    pub peer_config: Config,
     // connection-wide error, concerns all RequestStreams and drivers
     pub error: Option<Error>,
     // Has a GOAWAY frame been sent or received?
@@ -53,7 +53,7 @@ impl SharedStateRef {
 impl Default for SharedStateRef {
     fn default() -> Self {
         Self(Arc::new(RwLock::new(SharedState {
-            config: Config::default(),
+            peer_config: Config::default(),
             error: None,
             closing: false,
         })))
@@ -176,7 +176,6 @@ where
         tracing::debug!("Sending server settings: {settings:#x?}");
 
         if config.send_grease {
-            tracing::debug!("Enabling send grease");
             //  Grease Settings (https://www.rfc-editor.org/rfc/rfc9114.html#name-defined-settings-parameters)
             //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
             //# Setting identifiers of the format 0x1f * N + 0x21 for non-negative
@@ -363,7 +362,6 @@ where
                 //# receipt of a second stream claiming to be a control stream MUST be
                 //# treated as a connection error of type H3_STREAM_CREATION_ERROR.
                 AcceptedRecvStream::Control(s) => {
-                    tracing::debug!("Received control stream");
                     if self.control_recv.is_some() {
                         return Err(
                             self.close(Code::H3_STREAM_CREATION_ERROR, "got two control streams")
@@ -455,21 +453,21 @@ where
                         //# Endpoints MUST NOT consider such settings to have
                         //# any meaning upon receipt.
                         let mut shared = self.shared.write("connection settings write");
-                        shared.config.max_field_section_size = settings
+                        shared.peer_config.max_field_section_size = settings
                             .get(SettingId::MAX_HEADER_LIST_SIZE)
                             .unwrap_or(VarInt::MAX.0);
 
-                        shared.config.enable_webtransport =
+                        shared.peer_config.enable_webtransport =
                             settings.get(SettingId::ENABLE_WEBTRANSPORT).unwrap_or(0) != 0;
 
-                        shared.config.max_webtransport_sessions = settings
+                        shared.peer_config.max_webtransport_sessions = settings
                             .get(SettingId::WEBTRANSPORT_MAX_SESSIONS)
                             .unwrap_or(0);
 
-                        shared.config.enable_datagram =
+                        shared.peer_config.enable_datagram =
                             settings.get(SettingId::H3_DATAGRAM).unwrap_or(0) != 0;
 
-                        shared.config.enable_extended_connect = settings
+                        shared.peer_config.enable_extended_connect = settings
                             .get(SettingId::ENABLE_CONNECT_PROTOCOL)
                             .unwrap_or(0)
                             != 0;
@@ -825,7 +823,7 @@ where
         let max_mem_size = self
             .conn_state
             .read("send_trailers shared state read")
-            .config
+            .peer_config
             .max_field_section_size;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2

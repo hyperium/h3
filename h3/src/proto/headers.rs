@@ -233,7 +233,6 @@ impl TryFrom<Vec<HeaderField>> for Header {
                     fields.append(n, v);
                 }
                 Field::Protocol(p) => {
-                    tracing::info!("Got protocol");
                     pseudo.protocol = Some(p);
                     pseudo.len += 1;
                 }

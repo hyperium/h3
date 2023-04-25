@@ -381,7 +381,7 @@ async fn header_too_big_client_error() {
             client
                 .shared_state()
                 .write("client")
-                .config
+                .peer_config
                 .max_field_section_size = 12;
 
             let req = Request::get("http://localhost/salut").body(()).unwrap();
@@ -433,7 +433,7 @@ async fn header_too_big_client_error_trailer() {
             client
                 .shared_state()
                 .write("client")
-                .config
+                .peer_config
                 .max_field_section_size = 200;
 
             let mut request_stream = client
@@ -543,7 +543,7 @@ async fn header_too_big_discard_from_client() {
         incoming_req
             .shared_state()
             .write("client")
-            .config
+            .peer_config
             .max_field_section_size = u64::MAX;
         request_stream
             .send_response(
@@ -631,7 +631,7 @@ async fn header_too_big_discard_from_client_trailers() {
         incoming_req
             .shared_state()
             .write("server")
-            .config
+            .peer_config
             .max_field_section_size = u64::MAX;
 
         request_stream
@@ -703,7 +703,7 @@ async fn header_too_big_server_error() {
         incoming_req
             .shared_state()
             .write("server")
-            .config
+            .peer_config
             .max_field_section_size = 12;
 
         let err_kind = request_stream
@@ -784,7 +784,7 @@ async fn header_too_big_server_error_trailers() {
         incoming_req
             .shared_state()
             .write("write")
-            .config
+            .peer_config
             .max_field_section_size = 200;
 
         let mut trailers = HeaderMap::new();

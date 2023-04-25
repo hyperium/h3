@@ -55,9 +55,8 @@ where
     ) -> Result<Self, Error> {
         let shared = conn.shared_state().clone();
         {
-            let config = shared.write("Read WebTransport support").config;
+            let config = shared.write("Read WebTransport support").peer_config;
 
-            tracing::debug!("Client settings: {:#?}", config);
             if !config.enable_webtransport {
                 return Err(conn.close(
                     Code::H3_SETTINGS_ERROR,
@@ -72,8 +71,6 @@ where
                 ));
             }
         }
-
-        tracing::debug!("Validated client webtransport support");
 
         // The peer is responsible for validating our side of the webtransport support.
         //
@@ -108,12 +105,9 @@ where
                 .unwrap()
         };
 
-        tracing::info!("Sending response: {response:?}");
         stream.send_response(response).await?;
 
-        tracing::info!("Stream id: {}", stream.id());
         let session_id = stream.send_id().into();
-        tracing::info!("Established new WebTransport session with id {session_id:?}");
         let conn_inner = conn.inner.conn.lock().unwrap();
         let opener = Mutex::new(conn_inner.opener());
         drop(conn_inner);
@@ -160,8 +154,6 @@ where
         })
         .await;
 
-        tracing::debug!("Received biderectional stream");
-
         let mut stream = match stream {
             Ok(Some(s)) => FrameStream::new(BufRecvStream::new(s)),
             Ok(None) => {
@@ -172,7 +164,7 @@ where
                 // return Ok(None);
             }
             Err(err) => {
-                match err.inner.kind {
+                match err.inner.kind() {
                     h3::error::Kind::Closed => return Ok(None),
                     // h3::error::Kind::Application {
                     //     code,
@@ -189,7 +181,6 @@ where
             }
         };
 
-        tracing::debug!("Reading first frame");
         // Read the first frame.
         //
         // This will determine if it is a webtransport bi-stream or a request stream
@@ -198,7 +189,6 @@ where
         match frame {
             Ok(None) => Ok(None),
             Ok(Some(Frame::WebTransportStream(session_id))) => {
-                tracing::info!("Got webtransport stream");
                 // Take the stream out of the framed reader and split it in half like Paul Allen
                 let (send, recv) = stream.into_inner().split();
                 let send = SendStream::new(send);
@@ -277,11 +267,8 @@ impl<'a, C: quic::Connection> Future for OpenBi<'a, C> {
             match &mut p.stream {
                 Some((send, _, buf)) => {
                     while buf.has_remaining() {
-                        let n = ready!(send.poll_send(cx, buf))?;
-                        tracing::debug!("Wrote {n} bytes");
+                        ready!(send.poll_send(cx, buf))?;
                     }
-
-                    tracing::debug!("Finished sending header frame");
 
                     let (send, recv, _) = p.stream.take().unwrap();
                     return Poll::Ready(Ok((send, recv)));
@@ -373,8 +360,6 @@ where
     type Output = Result<Option<(SessionId, Bytes)>, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        tracing::trace!("poll: read_datagram");
-
         let mut conn = self.conn.lock().unwrap();
         match ready!(conn.poll_accept_datagram(cx))? {
             Some(v) => {
@@ -401,19 +386,14 @@ where
     type Output = Result<Option<(SessionId, RecvStream<C::RecvStream>)>, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        tracing::trace!("poll: read_uni_stream");
-
         let mut conn = self.conn.lock().unwrap();
         conn.inner.poll_accept_recv(cx)?;
 
         // Get the currently available streams
         let streams = conn.inner.accepted_streams_mut();
         if let Some((id, stream)) = streams.uni_streams.pop() {
-            tracing::info!("Got uni stream");
             return Poll::Ready(Ok(Some((id, RecvStream::new(stream)))));
         }
-
-        tracing::debug!("Waiting on incoming streams");
 
         Poll::Pending
     }

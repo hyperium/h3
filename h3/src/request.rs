@@ -71,7 +71,6 @@ impl<C: quic::Connection> ResolveRequest<C> {
             }
         };
 
-        tracing::info!("Protocol: {protocol:?}");
         //  request_stream.stop_stream(Code::H3_MESSAGE_ERROR).await;
         let mut req = http::Request::new(());
         *req.method_mut() = method;

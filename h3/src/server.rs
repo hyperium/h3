@@ -761,7 +761,7 @@ where
             .inner
             .conn_state
             .read("send_response")
-            .config
+            .peer_config
             .max_field_section_size;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2

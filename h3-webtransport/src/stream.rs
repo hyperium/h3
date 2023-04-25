@@ -30,12 +30,10 @@ where
 
     type Error = S::Error;
 
-    #[tracing::instrument(level = "info", skip_all)]
     fn poll_data(
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<Option<Self::Buf>, Self::Error>> {
-        tracing::info!("Polling RecvStream");
         self.stream.poll_data(cx)
     }
 
@@ -152,10 +150,7 @@ where
         cx: &mut std::task::Context<'_>,
         mut buf: &[u8],
     ) -> Poll<std::io::Result<usize>> {
-        let res = self.poll_send(cx, &mut buf).map_err(Into::into);
-
-        tracing::debug!("poll_write {res:?}");
-        res
+        self.poll_send(cx, &mut buf).map_err(Into::into)
     }
 
     fn poll_flush(
