@@ -11,7 +11,7 @@ use futures_util::{future::poll_fn, ready, Future};
 use h3::stream::{BidiStreamHeader, BufRecvStream, UniStreamHeader};
 use h3::{
     connection::ConnectionState,
-    error::{Code, ErrorLevel},
+    error::Code,
     frame::FrameStream,
     proto::{datagram::Datagram, frame::Frame},
     quic::{self, BidiStream as _, OpenStreams, SendStream as _, WriteBuf},
@@ -24,6 +24,7 @@ use h3::webtransport::{
     session_id::SessionId,
     stream::{self, RecvStream, SendStream},
 };
+use pin_project_lite::pin_project;
 
 /// WebTransport session driver.
 ///
@@ -259,12 +260,13 @@ type PendingUniStreams<C> = (
     WriteBuf<&'static [u8]>,
 );
 
-#[pin_project::pin_project]
-/// Future for opening a bidi stream
-pub struct OpenBi<'a, C: quic::Connection> {
-    opener: &'a Mutex<C::OpenStreams>,
-    stream: Option<PendingStreams<C>>,
-    session_id: SessionId,
+pin_project! {
+    /// Future for opening a bidi stream
+    pub struct OpenBi<'a, C: quic::Connection> {
+        opener: &'a Mutex<C::OpenStreams>,
+        stream: Option<PendingStreams<C>>,
+        session_id: SessionId,
+    }
 }
 
 impl<'a, C: quic::Connection> Future for OpenBi<'a, C> {
@@ -302,12 +304,14 @@ impl<'a, C: quic::Connection> Future for OpenBi<'a, C> {
     }
 }
 
-#[pin_project::pin_project]
-/// Future for opening a uni stream
-pub struct OpenUni<'a, C: quic::Connection> {
-    opener: &'a Mutex<C::OpenStreams>,
-    stream: Option<PendingUniStreams<C>>,
-    session_id: SessionId,
+pin_project! {
+    /// Opens a unidirectional stream
+    pub struct OpenUni<'a, C: quic::Connection> {
+        opener: &'a Mutex<C::OpenStreams>,
+        stream: Option<PendingUniStreams<C>>,
+        // Future for opening a uni stream
+        session_id: SessionId,
+    }
 }
 
 impl<'a, C: quic::Connection> Future for OpenUni<'a, C> {
@@ -319,7 +323,7 @@ impl<'a, C: quic::Connection> Future for OpenUni<'a, C> {
             match &mut p.stream {
                 Some((send, buf)) => {
                     while buf.has_remaining() {
-                        let n = ready!(send.poll_send(cx, buf))?;
+                        ready!(send.poll_send(cx, buf))?;
                     }
                     let (send, buf) = p.stream.take().unwrap();
                     assert!(!buf.has_remaining());

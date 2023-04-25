@@ -2,16 +2,18 @@ use std::task::Poll;
 
 use bytes::{Buf, Bytes};
 use futures_util::{future, ready, AsyncRead, AsyncWrite};
+use pin_project_lite::pin_project;
 
 use crate::{
     quic::{self, SendStream as _},
     stream::BufRecvStream,
 };
 
-/// WebTransport receive stream
-#[pin_project::pin_project]
-pub struct RecvStream<S> {
-    stream: BufRecvStream<S>,
+pin_project! {
+    /// WebTransport receive stream
+    pub struct RecvStream<S> {
+        stream: BufRecvStream<S>,
+    }
 }
 
 impl<S> RecvStream<S> {
@@ -80,10 +82,11 @@ where
     }
 }
 
-/// WebTransport send stream
-#[pin_project::pin_project]
-pub struct SendStream<S> {
-    stream: BufRecvStream<S>,
+pin_project! {
+    /// WebTransport send stream
+    pub struct SendStream<S> {
+        stream: BufRecvStream<S>,
+    }
 }
 
 impl<S> std::fmt::Debug for SendStream<S> {

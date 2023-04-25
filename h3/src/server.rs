@@ -67,7 +67,6 @@ use futures_util::{
     ready, FutureExt,
 };
 use http::{response, HeaderMap, Method, Request, Response, StatusCode};
-use pin_project::pin_project;
 use quic::RecvStream;
 use quic::StreamId;
 use tokio::sync::mpsc;

@@ -27,7 +27,7 @@ bytes = "1"
 futures-util = { version = "0.3", default-features = false }
 http = "0.2.9"
 tokio = { version = "1", features = ["sync"] }
-pin-project = { version = "1.0", default_features = false }
+pin-project-lite = { version = "0.2", default_features = false }
 tracing = "0.1.37"
 fastrand = "1.9.0"
 
