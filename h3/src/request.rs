@@ -1,27 +1,20 @@
 use std::convert::TryFrom;
 
-use bytes::Bytes;
 use http::{Request, StatusCode};
 
-use crate::{
-    error::Code,
-    proto::headers::Header,
-    qpack, quic,
-    server::{Connection, RequestStream},
-    Error,
-};
+use crate::{error::Code, proto::headers::Header, qpack, quic, server::RequestStream, Error};
 
 pub struct ResolveRequest<C: quic::Connection> {
     request_stream: RequestStream<C::BidiStream>,
     // Ok or `REQUEST_HEADER_FIELDS_TO_LARGE` which neeeds to be sent
-    decoded: Result<(qpack::Decoded), u64>,
+    decoded: Result<qpack::Decoded, u64>,
     max_field_section_size: u64,
 }
 
 impl<C: quic::Connection> ResolveRequest<C> {
     pub fn new(
         request_stream: RequestStream<C::BidiStream>,
-        decoded: Result<(qpack::Decoded), u64>,
+        decoded: Result<qpack::Decoded, u64>,
         max_field_section_size: u64,
     ) -> Self {
         Self {

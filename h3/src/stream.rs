@@ -14,7 +14,7 @@ use crate::{
         varint::VarInt,
     },
     quic::{self, BidiStream, RecvStream, SendStream},
-    webtransport::{self, SessionId},
+    webtransport::SessionId,
     Error,
 };
 
@@ -250,19 +250,6 @@ where
     Decoder(BufRecvStream<S>),
     WebTransportUni(SessionId, BufRecvStream<S>),
     Reserved,
-}
-
-impl<S> AcceptedRecvStream<S>
-where
-    S: quic::RecvStream,
-{
-    /// Returns `true` if the accepted recv stream is [`WebTransportUni`].
-    ///
-    /// [`WebTransportUni`]: AcceptedRecvStream::WebTransportUni
-    #[must_use]
-    pub fn is_web_transport_uni(&self) -> bool {
-        matches!(self, Self::WebTransportUni(..))
-    }
 }
 
 /// Resolves an incoming streams type as well as `PUSH_ID`s and `SESSION_ID`s
@@ -534,7 +521,6 @@ impl<S: BidiStream> BidiStream for BufRecvStream<S> {
 
 #[cfg(test)]
 mod tests {
-    use quic::StreamId;
     use quinn_proto::coding::BufExt;
 
     use super::*;

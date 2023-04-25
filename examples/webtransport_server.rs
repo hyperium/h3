@@ -2,7 +2,6 @@ use anyhow::Context;
 use anyhow::Result;
 use bytes::Bytes;
 use bytes::{BufMut, BytesMut};
-use futures::future::poll_fn;
 use futures::AsyncRead;
 use futures::AsyncReadExt;
 use futures::AsyncWrite;
@@ -15,11 +14,10 @@ use rustls::{Certificate, PrivateKey};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use structopt::StructOpt;
 use tracing::{error, info, trace_span};
-use tracing_subscriber::prelude::*;
 
 use h3::{
     error::ErrorLevel,
-    quic::{self, RecvStream as _},
+    quic,
     server::{Config, Connection},
     Protocol,
 };
@@ -29,15 +27,6 @@ use h3_webtransport::server::WebTransportSession;
 #[derive(StructOpt, Debug)]
 #[structopt(name = "server")]
 struct Opt {
-    #[structopt(
-        name = "dir",
-        short,
-        long,
-        help = "Root directory of the files to serve. \
-            If omitted, server will respond OK."
-    )]
-    pub root: Option<PathBuf>,
-
     #[structopt(
         short,
         long,
@@ -79,6 +68,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_writer(std::io::stderr)
         .init();
 
+    #[cfg(feature = "tree")]
+    use tracing_subscriber::prelude::*;
     #[cfg(feature = "tree")]
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::from_default_env())
@@ -244,7 +235,7 @@ macro_rules! log_result {
 }
 
 async fn echo_stream<C>(
-    mut send: SendStream<C::SendStream>,
+    send: SendStream<C::SendStream>,
     mut recv: RecvStream<C::RecvStream>,
 ) -> anyhow::Result<()>
 where
