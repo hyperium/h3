@@ -391,7 +391,7 @@ where
 
         // Get the currently available streams
         let streams = conn.inner.accepted_streams_mut();
-        if let Some((id, stream)) = streams.uni_streams.pop() {
+        if let Some((id, stream)) = streams.wt_uni_streams.pop() {
             return Poll::Ready(Ok(Some((id, RecvStream::new(stream)))));
         }
 

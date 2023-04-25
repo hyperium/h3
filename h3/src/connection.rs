@@ -79,7 +79,7 @@ where
     C: quic::Connection,
 {
     #[allow(missing_docs)]
-    pub uni_streams: Vec<(SessionId, BufRecvStream<C::RecvStream>)>,
+    pub wt_uni_streams: Vec<(SessionId, BufRecvStream<C::RecvStream>)>,
 }
 
 impl<C> Default for AcceptedStreams<C>
@@ -88,7 +88,7 @@ where
 {
     fn default() -> Self {
         Self {
-            uni_streams: Default::default(),
+            wt_uni_streams: Default::default(),
         }
     }
 }
@@ -383,10 +383,10 @@ where
                         );
                     }
                 }
-                AcceptedRecvStream::WebTransportUni(id, s) => {
+                AcceptedRecvStream::WebTransportUni(id, s) if self.config.enable_webtransport => {
                     // Store until someone else picks it up, like a webtransport session which is
                     // not yet established.
-                    self.accepted_streams.uni_streams.push((id, s))
+                    self.accepted_streams.wt_uni_streams.push((id, s))
                 }
 
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
