@@ -2,12 +2,11 @@ use std::task::Poll;
 
 use bytes::{Buf, Bytes};
 use futures_util::{future, ready, AsyncRead, AsyncWrite};
-use pin_project_lite::pin_project;
-
-use crate::{
+use h3::{
     quic::{self, SendStream as _},
     stream::BufRecvStream,
 };
+use pin_project_lite::pin_project;
 
 pin_project! {
     /// WebTransport receive stream

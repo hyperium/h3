@@ -23,7 +23,7 @@ use crate::{
     quic::{self, SendStream as _},
     server::Config,
     stream::{self, AcceptRecvStream, AcceptedRecvStream, BufRecvStream, UniStreamHeader},
-    webtransport::{self, session_id::SessionId},
+    webtransport::SessionId,
 };
 
 #[doc(hidden)]
@@ -79,7 +79,7 @@ where
     C: quic::Connection,
 {
     #[allow(missing_docs)]
-    pub uni_streams: Vec<(SessionId, webtransport::stream::RecvStream<C::RecvStream>)>,
+    pub uni_streams: Vec<(SessionId, BufRecvStream<C::RecvStream>)>,
 }
 
 impl<C> Default for AcceptedStreams<C>

@@ -20,11 +20,10 @@ use h3::{
 };
 use http::{Method, Request, Response, StatusCode};
 
-use h3::webtransport::{
-    session_id::SessionId,
-    stream::{self, RecvStream, SendStream},
-};
+use h3::webtransport::SessionId;
 use pin_project_lite::pin_project;
+
+use crate::stream::{RecvStream, SendStream};
 
 /// WebTransport session driver.
 ///
@@ -37,7 +36,7 @@ where
 {
     // See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-2-3
     session_id: SessionId,
-    pub conn: Mutex<Connection<C>>,
+    conn: Mutex<Connection<C>>,
     connect_stream: RequestStream<C::BidiStream>,
     opener: Mutex<C::OpenStreams>,
 }
@@ -399,7 +398,7 @@ impl<'a, C> Future for AcceptUni<'a, C>
 where
     C: quic::Connection,
 {
-    type Output = Result<Option<(SessionId, stream::RecvStream<C::RecvStream>)>, Error>;
+    type Output = Result<Option<(SessionId, RecvStream<C::RecvStream>)>, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         tracing::trace!("poll: read_uni_stream");
@@ -409,9 +408,9 @@ where
 
         // Get the currently available streams
         let streams = conn.inner.accepted_streams_mut();
-        if let Some(v) = streams.uni_streams.pop() {
+        if let Some((id, stream)) = streams.uni_streams.pop() {
             tracing::info!("Got uni stream");
-            return Poll::Ready(Ok(Some(v)));
+            return Poll::Ready(Ok(Some((id, RecvStream::new(stream)))));
         }
 
         tracing::debug!("Waiting on incoming streams");

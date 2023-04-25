@@ -5,7 +5,7 @@ use std::{
     ops::Add,
 };
 
-use crate::webtransport::session_id::SessionId;
+use crate::webtransport::SessionId;
 
 use super::{
     coding::{BufExt, BufMutExt, Decode, Encode, UnexpectedEnd},

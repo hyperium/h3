@@ -14,7 +14,7 @@ use crate::{
         varint::VarInt,
     },
     quic::{self, BidiStream, RecvStream, SendStream},
-    webtransport::{self, session_id::SessionId},
+    webtransport::{self, SessionId},
     Error,
 };
 
@@ -248,7 +248,7 @@ where
     Push(u64, FrameStream<S>),
     Encoder(BufRecvStream<S>),
     Decoder(BufRecvStream<S>),
-    WebTransportUni(SessionId, webtransport::stream::RecvStream<S>),
+    WebTransportUni(SessionId, BufRecvStream<S>),
     Reserved,
 }
 
@@ -298,7 +298,7 @@ where
             StreamType::DECODER => AcceptedRecvStream::Decoder(self.stream),
             StreamType::WEBTRANSPORT_UNI => AcceptedRecvStream::WebTransportUni(
                 SessionId::from_varint(self.id.expect("Session ID not resolved yet")),
-                webtransport::stream::RecvStream::new(self.stream),
+                self.stream,
             ),
             t if t.value() > 0x21 && (t.value() - 0x21) % 0x1f == 0 => AcceptedRecvStream::Reserved,
 
