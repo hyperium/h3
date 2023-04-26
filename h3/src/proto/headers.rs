@@ -10,7 +10,6 @@ use http::{
     uri::{self, Authority, Parts, PathAndQuery, Scheme, Uri},
     Extensions, HeaderMap, Method, StatusCode,
 };
-use tracing::trace;
 
 use crate::qpack::HeaderField;
 

@@ -7,12 +7,12 @@ use futures::AsyncReadExt;
 use futures::AsyncWrite;
 use futures::AsyncWriteExt;
 use h3_webtransport::server;
-use h3_webtransport::stream::RecvStream;
-use h3_webtransport::stream::SendStream;
+use h3_webtransport::stream;
 use http::Method;
 use rustls::{Certificate, PrivateKey};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use structopt::StructOpt;
+use tokio::pin;
 use tracing::{error, info, trace_span};
 
 use h3::{
@@ -169,17 +169,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn handle_connection<C>(mut conn: Connection<C>) -> Result<()>
-where
-    C: 'static + Send + quic::Connection,
-    <C::SendStream as h3::quic::SendStream>::Error:
-        'static + std::error::Error + Send + Sync + Into<std::io::Error>,
-    <C::RecvStream as h3::quic::RecvStream>::Error:
-        'static + std::error::Error + Send + Sync + Into<std::io::Error>,
-    C::SendStream: Send + Unpin,
-    C::RecvStream: Send + Unpin,
-    C::OpenStreams: Send,
-{
+async fn handle_connection(mut conn: Connection<h3_quinn::Connection>) -> Result<()> {
     // 3. TODO: Conditionally, if the client indicated that this is a webtransport session, we should accept it here, else use regular h3.
     // if this is a webtransport session, then h3 needs to stop handing the datagrams, bidirectional streams, and unidirectional streams and give them
     // to the webtransport session.
@@ -234,15 +224,14 @@ macro_rules! log_result {
     };
 }
 
-async fn echo_stream<C>(
-    send: SendStream<C::SendStream>,
-    mut recv: RecvStream<C::RecvStream>,
-) -> anyhow::Result<()>
+async fn echo_stream<T, R>(send: T, recv: R) -> anyhow::Result<()>
 where
-    C: quic::Connection,
-    SendStream<C::SendStream>: AsyncWrite,
-    RecvStream<C::RecvStream>: AsyncRead,
+    T: AsyncWrite,
+    R: AsyncRead,
 {
+    pin!(send);
+    pin!(recv);
+
     tracing::info!("Got stream");
     let mut buf = Vec::new();
     recv.read_to_end(&mut buf).await?;
@@ -266,6 +255,26 @@ async fn send_chunked(mut send: impl AsyncWrite + Unpin, data: Bytes) -> anyhow:
     Ok(())
 }
 
+async fn open_bidi_test<S>(mut stream: S) -> anyhow::Result<()>
+where
+    S: Unpin + AsyncRead + AsyncWrite,
+{
+    tracing::info!("Opening bidirectional stream");
+
+    stream
+        .write_all(b"Hello from a server initiated bidi stream")
+        .await
+        .context("Failed to respond")?;
+
+    let mut resp = Vec::new();
+    stream.close().await?;
+    stream.read_to_end(&mut resp).await?;
+
+    tracing::info!("Got response from client: {resp:?}");
+
+    Ok(())
+}
+
 /// This method will echo all inbound datagrams, unidirectional and bidirectional streams.
 #[tracing::instrument(level = "info", skip(session))]
 async fn handle_session_and_echo_all_inbound_messages<C>(
@@ -277,20 +286,21 @@ where
         'static + std::error::Error + Send + Sync + Into<std::io::Error>,
     <C::RecvStream as h3::quic::RecvStream>::Error:
         'static + std::error::Error + Send + Sync + Into<std::io::Error>,
+    stream::BidiStream<C::BidiStream>: quic::BidiStream + Unpin + AsyncWrite + AsyncRead,
+    <stream::BidiStream<C::BidiStream> as quic::BidiStream>::SendStream:
+        Unpin + AsyncWrite + Send + Sync,
+    <stream::BidiStream<C::BidiStream> as quic::BidiStream>::RecvStream:
+        Unpin + AsyncRead + Send + Sync,
     C::SendStream: Send + Unpin,
     C::RecvStream: Send + Unpin,
+    C::BidiStream: Send + Unpin,
 {
     let session_id = session.session_id();
 
     // This will open a bidirectional stream and send a message to the client right after connecting!
-    let (mut send, _read_bidi) = session.open_bi(session_id).await.unwrap();
-    tracing::info!("Opening bidirectional stream");
-    let bytes = Bytes::from("Hello from server");
-    futures::AsyncWriteExt::write_all(&mut send, &bytes)
-        .await
-        .context("Failed to respond")
-        .unwrap();
-    tokio::time::sleep(Duration::from_millis(1000)).await;
+    let stream = session.open_bi(session_id).await?;
+
+    tokio::spawn(async move { log_result!(open_bidi_test(stream).await) });
 
     loop {
         tokio::select! {
@@ -311,11 +321,12 @@ where
                 let (id, stream) = uni_stream?.unwrap();
 
                 let send = session.open_uni(id).await?;
-                tokio::spawn( async move { log_result!(echo_stream::<C>(send, stream).await); });
+                tokio::spawn( async move { log_result!(echo_stream(send, stream).await); });
             }
             stream = session.accept_bi() => {
-                if let Some(server::AcceptedBi::BidiStream(_, send, recv)) = stream? {
-                    tokio::spawn( async move { log_result!(echo_stream::<C>(send, recv).await); });
+                if let Some(server::AcceptedBi::BidiStream(_, stream)) = stream? {
+                    let (send, recv) = quic::BidiStream::split(stream);
+                    tokio::spawn( async move { log_result!(echo_stream(send, recv).await); });
                 }
             }
             else => {

@@ -14,7 +14,7 @@ use h3::{
     error::Code,
     frame::FrameStream,
     proto::{datagram::Datagram, frame::Frame},
-    quic::{self, BidiStream as _, OpenStreams, SendStream as _, WriteBuf},
+    quic::{self, OpenStreams, SendStream as _, WriteBuf},
     server::{self, Connection, RequestStream},
     Error, Protocol,
 };
@@ -23,7 +23,7 @@ use http::{Method, Request, Response, StatusCode};
 use h3::webtransport::SessionId;
 use pin_project_lite::pin_project;
 
-use crate::stream::{RecvStream, SendStream};
+use crate::stream::{BidiStream, RecvStream, SendStream};
 
 /// WebTransport session driver.
 ///
@@ -190,11 +190,12 @@ where
             Ok(None) => Ok(None),
             Ok(Some(Frame::WebTransportStream(session_id))) => {
                 // Take the stream out of the framed reader and split it in half like Paul Allen
-                let (send, recv) = stream.into_inner().split();
-                let send = SendStream::new(send);
-                let recv = RecvStream::new(recv);
+                let stream = stream.into_inner();
 
-                Ok(Some(AcceptedBi::BidiStream(session_id, send, recv)))
+                Ok(Some(AcceptedBi::BidiStream(
+                    session_id,
+                    BidiStream::new(stream),
+                )))
             }
             // Make the underlying HTTP/3 connection handle the rest
             frame => {
@@ -238,8 +239,7 @@ where
 
 /// Streams are opened, but the initial webtransport header has not been sent
 type PendingStreams<C> = (
-    SendStream<<C as quic::Connection>::SendStream>,
-    RecvStream<<C as quic::Connection>::RecvStream>,
+    BidiStream<<C as quic::Connection>::BidiStream>,
     WriteBuf<&'static [u8]>,
 );
 
@@ -259,31 +259,28 @@ pin_project! {
 }
 
 impl<'a, C: quic::Connection> Future for OpenBi<'a, C> {
-    type Output = Result<(SendStream<C::SendStream>, RecvStream<C::RecvStream>), Error>;
+    type Output = Result<BidiStream<C::BidiStream>, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut p = self.project();
         loop {
             match &mut p.stream {
-                Some((send, _, buf)) => {
+                Some((stream, buf)) => {
                     while buf.has_remaining() {
-                        ready!(send.poll_send(cx, buf))?;
+                        ready!(stream.poll_send(cx, buf))?;
                     }
 
-                    let (send, recv, _) = p.stream.take().unwrap();
-                    return Poll::Ready(Ok((send, recv)));
+                    let (stream, _) = p.stream.take().unwrap();
+                    return Poll::Ready(Ok(stream));
                 }
                 None => {
                     let mut opener = (*p.opener).lock().unwrap();
                     // Open the stream first
                     let res = ready!(opener.poll_open_bidi(cx))?;
-                    let (send, recv) = BufRecvStream::new(res).split();
-
-                    let send: SendStream<C::SendStream> = SendStream::new(send);
-                    let recv = RecvStream::new(recv);
+                    let stream = BidiStream::new(BufRecvStream::new(res));
 
                     let buf = WriteBuf::from(BidiStreamHeader::WebTransportBidi(*p.session_id));
-                    *p.stream = Some((send, recv, buf));
+                    *p.stream = Some((stream, buf));
                 }
             }
         }
@@ -334,11 +331,7 @@ impl<'a, C: quic::Connection> Future for OpenUni<'a, C> {
 /// Since
 pub enum AcceptedBi<C: quic::Connection> {
     /// An incoming bidirectional stream
-    BidiStream(
-        SessionId,
-        SendStream<C::SendStream>,
-        RecvStream<C::RecvStream>,
-    ),
+    BidiStream(SessionId, BidiStream<C::BidiStream>),
     /// An incoming HTTP/3 request, passed through a webtransport session.
     ///
     /// This makes it possible to respond to multiple CONNECT requests
