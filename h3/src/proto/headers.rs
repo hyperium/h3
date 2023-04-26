@@ -86,7 +86,6 @@ impl Header {
         //# If the scheme does not have a mandatory authority component and none
         //# is provided in the request target, the request MUST NOT contain the
         //# :authority pseudo-header or Host header fields.
-        trace!("got headers {:#?}", self.fields);
         match (self.pseudo.authority, self.fields.get("host")) {
             (None, None) => return Err(HeaderError::MissingAuthority),
             (Some(a), None) => uri = uri.authority(a.as_str().as_bytes()),
