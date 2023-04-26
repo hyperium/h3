@@ -441,9 +441,6 @@ setting_identifiers! {
     H3_SETTING_ENABLE_DATAGRAM_CHROME_SPECIFIC= 0xFFD277,
 
     WEBTRANSPORT_MAX_SESSIONS = 0x2b603743,
-    // Dummy setting to check it is correctly ignored by the peer.
-    // https://datatracker.ietf.org/doc/html/rfc9114#section-7.2.4.1
-    DUMMY = 0x21,
 }
 
 const SETTINGS_LEN: usize = 8;
