@@ -18,7 +18,6 @@ use std::{
     time::Duration,
 };
 
-use bytes::Bytes;
 use rustls::{Certificate, PrivateKey};
 
 use crate::quic;

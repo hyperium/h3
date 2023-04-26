@@ -2,20 +2,22 @@ use anyhow::Context;
 use anyhow::Result;
 use bytes::Bytes;
 use bytes::{BufMut, BytesMut};
-use futures::future::poll_fn;
+use futures::AsyncRead;
 use futures::AsyncReadExt;
+use futures::AsyncWrite;
 use futures::AsyncWriteExt;
 use h3_webtransport::server;
+use h3_webtransport::stream;
 use http::Method;
 use rustls::{Certificate, PrivateKey};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use structopt::StructOpt;
+use tokio::pin;
 use tracing::{error, info, trace_span};
-use tracing_subscriber::prelude::*;
 
 use h3::{
     error::ErrorLevel,
-    quic::{self, RecvStream},
+    quic,
     server::{Config, Connection},
     Protocol,
 };
@@ -25,15 +27,6 @@ use h3_webtransport::server::WebTransportSession;
 #[derive(StructOpt, Debug)]
 #[structopt(name = "server")]
 struct Opt {
-    #[structopt(
-        name = "dir",
-        short,
-        long,
-        help = "Root directory of the files to serve. \
-            If omitted, server will respond OK."
-    )]
-    pub root: Option<PathBuf>,
-
     #[structopt(
         short,
         long,
@@ -75,6 +68,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_writer(std::io::stderr)
         .init();
 
+    #[cfg(feature = "tree")]
+    use tracing_subscriber::prelude::*;
     #[cfg(feature = "tree")]
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::from_default_env())
@@ -174,17 +169,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn handle_connection<C>(mut conn: Connection<C>) -> Result<()>
-where
-    C: 'static + Send + quic::Connection,
-    <C::SendStream as h3::quic::SendStream>::Error:
-        'static + std::error::Error + Send + Sync + Into<std::io::Error>,
-    <C::RecvStream as h3::quic::RecvStream>::Error:
-        'static + std::error::Error + Send + Sync + Into<std::io::Error>,
-    C::SendStream: Send + Unpin,
-    C::RecvStream: Send + Unpin,
-    C::OpenStreams: Send,
-{
+async fn handle_connection(mut conn: Connection<h3_quinn::Connection>) -> Result<()> {
     // 3. TODO: Conditionally, if the client indicated that this is a webtransport session, we should accept it here, else use regular h3.
     // if this is a webtransport session, then h3 needs to stop handing the datagrams, bidirectional streams, and unidirectional streams and give them
     // to the webtransport session.
@@ -231,6 +216,65 @@ where
     Ok(())
 }
 
+macro_rules! log_result {
+    ($expr:expr) => {
+        if let Err(err) = $expr {
+            tracing::error!("{err:?}");
+        }
+    };
+}
+
+async fn echo_stream<T, R>(send: T, recv: R) -> anyhow::Result<()>
+where
+    T: AsyncWrite,
+    R: AsyncRead,
+{
+    pin!(send);
+    pin!(recv);
+
+    tracing::info!("Got stream");
+    let mut buf = Vec::new();
+    recv.read_to_end(&mut buf).await?;
+
+    let message = Bytes::from(buf);
+
+    send_chunked(send, message).await?;
+
+    Ok(())
+}
+
+// Used to test that all chunks arrive properly as it is easy to write an impl which only reads and
+// writes the first chunk.
+async fn send_chunked(mut send: impl AsyncWrite + Unpin, data: Bytes) -> anyhow::Result<()> {
+    for chunk in data.chunks(4) {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        tracing::info!("Sending {chunk:?}");
+        send.write_all(chunk).await?;
+    }
+
+    Ok(())
+}
+
+async fn open_bidi_test<S>(mut stream: S) -> anyhow::Result<()>
+where
+    S: Unpin + AsyncRead + AsyncWrite,
+{
+    tracing::info!("Opening bidirectional stream");
+
+    stream
+        .write_all(b"Hello from a server initiated bidi stream")
+        .await
+        .context("Failed to respond")?;
+
+    let mut resp = Vec::new();
+    stream.close().await?;
+    stream.read_to_end(&mut resp).await?;
+
+    tracing::info!("Got response from client: {resp:?}");
+
+    Ok(())
+}
+
 /// This method will echo all inbound datagrams, unidirectional and bidirectional streams.
 #[tracing::instrument(level = "info", skip(session))]
 async fn handle_session_and_echo_all_inbound_messages<C>(
@@ -242,20 +286,21 @@ where
         'static + std::error::Error + Send + Sync + Into<std::io::Error>,
     <C::RecvStream as h3::quic::RecvStream>::Error:
         'static + std::error::Error + Send + Sync + Into<std::io::Error>,
+    stream::BidiStream<C::BidiStream>: quic::BidiStream + Unpin + AsyncWrite + AsyncRead,
+    <stream::BidiStream<C::BidiStream> as quic::BidiStream>::SendStream:
+        Unpin + AsyncWrite + Send + Sync,
+    <stream::BidiStream<C::BidiStream> as quic::BidiStream>::RecvStream:
+        Unpin + AsyncRead + Send + Sync,
     C::SendStream: Send + Unpin,
     C::RecvStream: Send + Unpin,
+    C::BidiStream: Send + Unpin,
 {
     let session_id = session.session_id();
 
     // This will open a bidirectional stream and send a message to the client right after connecting!
-    let (mut send, _read_bidi) = session.open_bi(session_id).await.unwrap();
-    tracing::info!("Opening bidirectional stream");
-    let bytes = Bytes::from("Hello from server");
-    futures::AsyncWriteExt::write_all(&mut send, &bytes)
-        .await
-        .context("Failed to respond")
-        .unwrap();
-    tokio::time::sleep(Duration::from_millis(1000)).await;
+    let stream = session.open_bi(session_id).await?;
+
+    tokio::spawn(async move { log_result!(open_bidi_test(stream).await) });
 
     loop {
         tokio::select! {
@@ -268,39 +313,20 @@ where
                     let mut resp = BytesMut::from(&b"Response: "[..]);
                     resp.put(datagram);
 
-                    session.send_datagram(resp).unwrap();
+                    session.send_datagram(resp)?;
                     tracing::info!("Finished sending datagram");
                 }
             }
             uni_stream = session.accept_uni() => {
-                let (id, mut stream) = uni_stream?.unwrap();
-                tracing::info!("Received uni stream {:?} for {id:?}", stream.recv_id());
+                let (id, stream) = uni_stream?.unwrap();
 
-                let mut message = Vec::new();
-
-                AsyncReadExt::read_to_end(&mut stream, &mut message).await.context("Failed to read message")?;
-                let message = Bytes::from(message);
-
-                tracing::info!("Got message: {message:?}");
-                let mut send = session.open_uni(session_id).await?;
-                tracing::info!("Opened unidirectional stream");
-
-                for byte in message {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                    tracing::info!("Sending {byte:?}");
-                    send.write_all(&[byte][..]).await?;
-                }
-                // futures::AsyncWriteExt::write_all(&mut send, &message).await.context("Failed to respond")?;
-                tracing::info!("Wrote response");
+                let send = session.open_uni(id).await?;
+                tokio::spawn( async move { log_result!(echo_stream(send, stream).await); });
             }
             stream = session.accept_bi() => {
-                if let Some(server::AcceptedBi::BidiStream(_, mut send, mut recv)) = stream? {
-                    tracing::info!("Got bi stream");
-                    while let Some(bytes) = poll_fn(|cx| recv.poll_data(cx)).await? {
-                        tracing::info!("Received data {:?}", &bytes);
-                        futures::AsyncWriteExt::write_all(&mut send, &bytes).await.context("Failed to respond")?;
-                    }
-                    send.close().await?;
+                if let Some(server::AcceptedBi::BidiStream(_, stream)) = stream? {
+                    let (send, recv) = quic::BidiStream::split(stream);
+                    tokio::spawn( async move { log_result!(echo_stream(send, recv).await); });
                 }
             }
             else => {

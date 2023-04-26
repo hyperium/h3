@@ -1,7 +1,6 @@
-use std::marker::PhantomData;
 use std::task::{Context, Poll};
 
-use bytes::{Buf, Bytes};
+use bytes::Buf;
 
 use futures_util::ready;
 use tracing::trace;
@@ -15,7 +14,6 @@ use crate::{
         stream::StreamId,
     },
     quic::{BidiStream, RecvStream, SendStream},
-    stream::WriteBuf,
 };
 
 /// Decodes Frames from the underlying QUIC stream
@@ -263,7 +261,7 @@ mod tests {
     use super::*;
 
     use assert_matches::assert_matches;
-    use bytes::{BufMut, BytesMut};
+    use bytes::{BufMut, Bytes, BytesMut};
     use futures_util::future::poll_fn;
     use std::{collections::VecDeque, fmt, sync::Arc};
 

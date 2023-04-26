@@ -14,7 +14,7 @@ use crate::{
         varint::VarInt,
     },
     quic::{self, BidiStream, RecvStream, SendStream},
-    webtransport::{self, session_id::SessionId},
+    webtransport::SessionId,
     Error,
 };
 
@@ -248,21 +248,8 @@ where
     Push(u64, FrameStream<S>),
     Encoder(BufRecvStream<S>),
     Decoder(BufRecvStream<S>),
-    WebTransportUni(SessionId, webtransport::stream::RecvStream<S>),
+    WebTransportUni(SessionId, BufRecvStream<S>),
     Reserved,
-}
-
-impl<S> AcceptedRecvStream<S>
-where
-    S: quic::RecvStream,
-{
-    /// Returns `true` if the accepted recv stream is [`WebTransportUni`].
-    ///
-    /// [`WebTransportUni`]: AcceptedRecvStream::WebTransportUni
-    #[must_use]
-    pub fn is_web_transport_uni(&self) -> bool {
-        matches!(self, Self::WebTransportUni(..))
-    }
 }
 
 /// Resolves an incoming streams type as well as `PUSH_ID`s and `SESSION_ID`s
@@ -298,7 +285,7 @@ where
             StreamType::DECODER => AcceptedRecvStream::Decoder(self.stream),
             StreamType::WEBTRANSPORT_UNI => AcceptedRecvStream::WebTransportUni(
                 SessionId::from_varint(self.id.expect("Session ID not resolved yet")),
-                webtransport::stream::RecvStream::new(self.stream),
+                self.stream,
             ),
             t if t.value() > 0x21 && (t.value() - 0x21) % 0x1f == 0 => AcceptedRecvStream::Reserved,
 
@@ -534,7 +521,6 @@ impl<S: BidiStream> BidiStream for BufRecvStream<S> {
 
 #[cfg(test)]
 mod tests {
-    use quic::StreamId;
     use quinn_proto::coding::BufExt;
 
     use super::*;

@@ -72,7 +72,7 @@ impl Error for SendDatagramError {
 /// Trait representing a QUIC connection.
 pub trait Connection {
     /// The type produced by `poll_accept_bidi()`
-    type BidiStream: BidiStream<RecvStream = Self::RecvStream, SendStream = Self::SendStream>;
+    type BidiStream: SendStream + RecvStream;
     /// The type of the sending part of `BidiStream`
     type SendStream: SendStream;
     /// The type produced by `poll_accept_recv()`

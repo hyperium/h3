@@ -13,19 +13,19 @@ pub use proto::headers::Protocol;
 
 mod buf;
 
-#[cfg(feature="allow_access_to_core")]
+#[cfg(feature = "allow_access_to_core")]
 #[allow(missing_docs)]
 pub mod connection;
-#[cfg(feature="allow_access_to_core")]
+#[cfg(feature = "allow_access_to_core")]
 #[allow(missing_docs)]
 pub mod frame;
-#[cfg(feature="allow_access_to_core")]
+#[cfg(feature = "allow_access_to_core")]
 #[allow(missing_docs)]
 pub mod proto;
-#[cfg(feature="allow_access_to_core")]
+#[cfg(feature = "allow_access_to_core")]
 #[allow(missing_docs)]
 pub mod stream;
-#[cfg(feature="allow_access_to_core")]
+#[cfg(feature = "allow_access_to_core")]
 #[allow(missing_docs)]
 pub mod webtransport;
 

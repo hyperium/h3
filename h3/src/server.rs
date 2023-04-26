@@ -52,8 +52,6 @@
 
 use std::{
     collections::HashSet,
-    convert::TryFrom,
-    marker::PhantomData,
     option::Option,
     result::Result,
     sync::Arc,
@@ -62,12 +60,10 @@ use std::{
 
 use bytes::{Buf, Bytes, BytesMut};
 use futures_util::{
-    future::ready,
     future::{self, Future},
-    ready, FutureExt,
+    ready,
 };
-use http::{response, HeaderMap, Method, Request, Response, StatusCode};
-use pin_project::pin_project;
+use http::{response, HeaderMap, Request, Response};
 use quic::RecvStream;
 use quic::StreamId;
 use tokio::sync::mpsc;
@@ -79,7 +75,7 @@ use crate::{
     proto::{
         datagram::Datagram,
         frame::{Frame, PayloadLen},
-        headers::{Header, Protocol},
+        headers::Header,
         push::PushId,
         varint::VarInt,
     },
@@ -88,7 +84,7 @@ use crate::{
     request::ResolveRequest,
     stream::{self, BufRecvStream},
 };
-use tracing::{error, info, trace, warn};
+use tracing::{error, trace, warn};
 
 /// Create a builder of HTTP/3 server connections
 ///
@@ -470,17 +466,6 @@ where
         Poll::Ready(Ok(frame))
     }
 
-    /// Accepts an incoming recv stream
-    fn poll_accept_uni(
-        &self,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<<C as quic::Connection>::RecvStream>, Error>> {
-        todo!()
-        // let recv = ready!(self.inner.poll_accept_recv(cx))?;
-
-        // Poll::Ready(Ok(recv))
-    }
-
     fn poll_requests_completion(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         loop {
             match self.request_end_recv.poll_recv(cx) {
@@ -776,7 +761,7 @@ where
             .inner
             .conn_state
             .read("send_response")
-            .config
+            .peer_config
             .max_field_section_size;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2

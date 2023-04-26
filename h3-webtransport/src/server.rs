@@ -11,19 +11,19 @@ use futures_util::{future::poll_fn, ready, Future};
 use h3::stream::{BidiStreamHeader, BufRecvStream, UniStreamHeader};
 use h3::{
     connection::ConnectionState,
-    error::{Code, ErrorLevel},
+    error::Code,
     frame::FrameStream,
     proto::{datagram::Datagram, frame::Frame},
-    quic::{self, BidiStream as _, OpenStreams, SendStream as _, WriteBuf},
+    quic::{self, OpenStreams, SendStream as _, WriteBuf},
     server::{self, Connection, RequestStream},
     Error, Protocol,
 };
 use http::{Method, Request, Response, StatusCode};
 
-use h3::webtransport::{
-    session_id::SessionId,
-    stream::{self, RecvStream, SendStream},
-};
+use h3::webtransport::SessionId;
+use pin_project_lite::pin_project;
+
+use crate::stream::{BidiStream, RecvStream, SendStream};
 
 /// WebTransport session driver.
 ///
@@ -36,7 +36,7 @@ where
 {
     // See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-2-3
     session_id: SessionId,
-    pub conn: Mutex<Connection<C>>,
+    conn: Mutex<Connection<C>>,
     connect_stream: RequestStream<C::BidiStream>,
     opener: Mutex<C::OpenStreams>,
 }
@@ -55,9 +55,8 @@ where
     ) -> Result<Self, Error> {
         let shared = conn.shared_state().clone();
         {
-            let config = shared.write("Read WebTransport support").config;
+            let config = shared.write("Read WebTransport support").peer_config;
 
-            tracing::debug!("Client settings: {:#?}", config);
             if !config.enable_webtransport {
                 return Err(conn.close(
                     Code::H3_SETTINGS_ERROR,
@@ -72,8 +71,6 @@ where
                 ));
             }
         }
-
-        tracing::debug!("Validated client webtransport support");
 
         // The peer is responsible for validating our side of the webtransport support.
         //
@@ -108,12 +105,9 @@ where
                 .unwrap()
         };
 
-        tracing::info!("Sending response: {response:?}");
         stream.send_response(response).await?;
 
-        tracing::info!("Stream id: {}", stream.id());
         let session_id = stream.send_id().into();
-        tracing::info!("Established new WebTransport session with id {session_id:?}");
         let conn_inner = conn.inner.conn.lock().unwrap();
         let opener = Mutex::new(conn_inner.opener());
         drop(conn_inner);
@@ -160,8 +154,6 @@ where
         })
         .await;
 
-        tracing::debug!("Received biderectional stream");
-
         let mut stream = match stream {
             Ok(Some(s)) => FrameStream::new(BufRecvStream::new(s)),
             Ok(None) => {
@@ -172,7 +164,7 @@ where
                 // return Ok(None);
             }
             Err(err) => {
-                match err.inner.kind {
+                match err.inner.kind() {
                     h3::error::Kind::Closed => return Ok(None),
                     // h3::error::Kind::Application {
                     //     code,
@@ -189,7 +181,6 @@ where
             }
         };
 
-        tracing::debug!("Reading first frame");
         // Read the first frame.
         //
         // This will determine if it is a webtransport bi-stream or a request stream
@@ -198,13 +189,13 @@ where
         match frame {
             Ok(None) => Ok(None),
             Ok(Some(Frame::WebTransportStream(session_id))) => {
-                tracing::info!("Got webtransport stream");
                 // Take the stream out of the framed reader and split it in half like Paul Allen
-                let (send, recv) = stream.into_inner().split();
-                let send = SendStream::new(send);
-                let recv = RecvStream::new(recv);
+                let stream = stream.into_inner();
 
-                Ok(Some(AcceptedBi::BidiStream(session_id, send, recv)))
+                Ok(Some(AcceptedBi::BidiStream(
+                    session_id,
+                    BidiStream::new(stream),
+                )))
             }
             // Make the underlying HTTP/3 connection handle the rest
             frame => {
@@ -248,8 +239,7 @@ where
 
 /// Streams are opened, but the initial webtransport header has not been sent
 type PendingStreams<C> = (
-    SendStream<<C as quic::Connection>::SendStream>,
-    RecvStream<<C as quic::Connection>::RecvStream>,
+    BidiStream<<C as quic::Connection>::BidiStream>,
     WriteBuf<&'static [u8]>,
 );
 
@@ -259,55 +249,52 @@ type PendingUniStreams<C> = (
     WriteBuf<&'static [u8]>,
 );
 
-#[pin_project::pin_project]
-/// Future for opening a bidi stream
-pub struct OpenBi<'a, C: quic::Connection> {
-    opener: &'a Mutex<C::OpenStreams>,
-    stream: Option<PendingStreams<C>>,
-    session_id: SessionId,
+pin_project! {
+    /// Future for opening a bidi stream
+    pub struct OpenBi<'a, C: quic::Connection> {
+        opener: &'a Mutex<C::OpenStreams>,
+        stream: Option<PendingStreams<C>>,
+        session_id: SessionId,
+    }
 }
 
 impl<'a, C: quic::Connection> Future for OpenBi<'a, C> {
-    type Output = Result<(SendStream<C::SendStream>, RecvStream<C::RecvStream>), Error>;
+    type Output = Result<BidiStream<C::BidiStream>, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut p = self.project();
         loop {
             match &mut p.stream {
-                Some((send, _, buf)) => {
+                Some((stream, buf)) => {
                     while buf.has_remaining() {
-                        let n = ready!(send.poll_send(cx, buf))?;
-                        tracing::debug!("Wrote {n} bytes");
+                        ready!(stream.poll_send(cx, buf))?;
                     }
 
-                    tracing::debug!("Finished sending header frame");
-
-                    let (send, recv, _) = p.stream.take().unwrap();
-                    return Poll::Ready(Ok((send, recv)));
+                    let (stream, _) = p.stream.take().unwrap();
+                    return Poll::Ready(Ok(stream));
                 }
                 None => {
                     let mut opener = (*p.opener).lock().unwrap();
                     // Open the stream first
                     let res = ready!(opener.poll_open_bidi(cx))?;
-                    let (send, recv) = BufRecvStream::new(res).split();
-
-                    let send: SendStream<C::SendStream> = SendStream::new(send);
-                    let recv = RecvStream::new(recv);
+                    let stream = BidiStream::new(BufRecvStream::new(res));
 
                     let buf = WriteBuf::from(BidiStreamHeader::WebTransportBidi(*p.session_id));
-                    *p.stream = Some((send, recv, buf));
+                    *p.stream = Some((stream, buf));
                 }
             }
         }
     }
 }
 
-#[pin_project::pin_project]
-/// Future for opening a uni stream
-pub struct OpenUni<'a, C: quic::Connection> {
-    opener: &'a Mutex<C::OpenStreams>,
-    stream: Option<PendingUniStreams<C>>,
-    session_id: SessionId,
+pin_project! {
+    /// Opens a unidirectional stream
+    pub struct OpenUni<'a, C: quic::Connection> {
+        opener: &'a Mutex<C::OpenStreams>,
+        stream: Option<PendingUniStreams<C>>,
+        // Future for opening a uni stream
+        session_id: SessionId,
+    }
 }
 
 impl<'a, C: quic::Connection> Future for OpenUni<'a, C> {
@@ -319,7 +306,7 @@ impl<'a, C: quic::Connection> Future for OpenUni<'a, C> {
             match &mut p.stream {
                 Some((send, buf)) => {
                     while buf.has_remaining() {
-                        let n = ready!(send.poll_send(cx, buf))?;
+                        ready!(send.poll_send(cx, buf))?;
                     }
                     let (send, buf) = p.stream.take().unwrap();
                     assert!(!buf.has_remaining());
@@ -344,11 +331,7 @@ impl<'a, C: quic::Connection> Future for OpenUni<'a, C> {
 /// Since
 pub enum AcceptedBi<C: quic::Connection> {
     /// An incoming bidirectional stream
-    BidiStream(
-        SessionId,
-        SendStream<C::SendStream>,
-        RecvStream<C::RecvStream>,
-    ),
+    BidiStream(SessionId, BidiStream<C::BidiStream>),
     /// An incoming HTTP/3 request, passed through a webtransport session.
     ///
     /// This makes it possible to respond to multiple CONNECT requests
@@ -370,8 +353,6 @@ where
     type Output = Result<Option<(SessionId, Bytes)>, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        tracing::trace!("poll: read_datagram");
-
         let mut conn = self.conn.lock().unwrap();
         match ready!(conn.poll_accept_datagram(cx))? {
             Some(v) => {
@@ -395,22 +376,17 @@ impl<'a, C> Future for AcceptUni<'a, C>
 where
     C: quic::Connection,
 {
-    type Output = Result<Option<(SessionId, stream::RecvStream<C::RecvStream>)>, Error>;
+    type Output = Result<Option<(SessionId, RecvStream<C::RecvStream>)>, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        tracing::trace!("poll: read_uni_stream");
-
         let mut conn = self.conn.lock().unwrap();
         conn.inner.poll_accept_recv(cx)?;
 
         // Get the currently available streams
         let streams = conn.inner.accepted_streams_mut();
-        if let Some(v) = streams.uni_streams.pop() {
-            tracing::info!("Got uni stream");
-            return Poll::Ready(Ok(Some(v)));
+        if let Some((id, stream)) = streams.wt_uni_streams.pop() {
+            return Poll::Ready(Ok(Some((id, RecvStream::new(stream)))));
         }
-
-        tracing::debug!("Waiting on incoming streams");
 
         Poll::Pending
     }
