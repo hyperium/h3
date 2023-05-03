@@ -133,7 +133,7 @@ pub trait Connection {
 /// Trait for opening outgoing streams
 pub trait OpenStreams {
     /// The type produced by `poll_open_bidi()`
-    type BidiStream: BidiStream;
+    type BidiStream: SendStream + RecvStream;
     /// The type produced by `poll_open_send()`
     type SendStream: SendStream;
     /// The type of the receiving part of `BidiStream`
