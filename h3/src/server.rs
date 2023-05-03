@@ -1,4 +1,4 @@
-//! This mofield1ule provides methods to create a http/3 Server.
+//! This module provides methods to create a http/3 Server.
 //!
 //! It allows to accept incoming requests, and send responses.
 //!
