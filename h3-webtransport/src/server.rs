@@ -1,6 +1,7 @@
 //! Provides the server side WebTransport session
 
 use std::{
+    marker::PhantomData,
     pin::Pin,
     sync::{Arc, Mutex},
     task::{Context, Poll},
@@ -30,28 +31,30 @@ use crate::stream::{BidiStream, RecvStream, SendStream};
 /// Maintains the session using the underlying HTTP/3 connection.
 ///
 /// Similar to [`crate::Connection`] it is generic over the QUIC implementation and Buffer.
-pub struct WebTransportSession<C>
+pub struct WebTransportSession<C, B>
 where
-    C: quic::Connection,
+    C: quic::Connection<B>,
+    B: Buf,
 {
     // See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-2-3
     session_id: SessionId,
-    conn: Mutex<Connection<C>>,
-    connect_stream: RequestStream<C::BidiStream>,
+    conn: Mutex<Connection<C, B>>,
+    connect_stream: RequestStream<C::BidiStream, B>,
     opener: Mutex<C::OpenStreams>,
 }
 
-impl<C> WebTransportSession<C>
+impl<C, B> WebTransportSession<C, B>
 where
-    C: quic::Connection,
+    C: quic::Connection<B>,
+    B: Buf,
 {
     /// Accepts a *CONNECT* request for establishing a WebTransport session.
     ///
     /// TODO: is the API or the user responsible for validating the CONNECT request?
     pub async fn accept(
         request: Request<()>,
-        mut stream: RequestStream<C::BidiStream>,
-        mut conn: Connection<C>,
+        mut stream: RequestStream<C::BidiStream, B>,
+        mut conn: Connection<C, B>,
     ) -> Result<Self, Error> {
         let shared = conn.shared_state().clone();
         {
@@ -121,9 +124,10 @@ where
     }
 
     /// Receive a datagram from the client
-    pub fn accept_datagram(&self) -> ReadDatagram<C> {
+    pub fn accept_datagram(&self) -> ReadDatagram<C, B> {
         ReadDatagram {
             conn: self.conn.lock().unwrap().inner.conn.clone(),
+            _marker: PhantomData,
         }
     }
 
@@ -140,12 +144,12 @@ where
     }
 
     /// Accept an incoming unidirectional stream from the client, it reads the stream until EOF.
-    pub fn accept_uni(&self) -> AcceptUni<C> {
+    pub fn accept_uni(&self) -> AcceptUni<C, B> {
         AcceptUni { conn: &self.conn }
     }
 
     /// Accepts an incoming bidirectional stream or request
-    pub async fn accept_bi(&self) -> Result<Option<AcceptedBi<C>>, Error> {
+    pub async fn accept_bi(&self) -> Result<Option<AcceptedBi<C, B>>, Error> {
         // Get the next stream
         // Accept the incoming stream
         let stream = poll_fn(|cx| {
@@ -214,7 +218,7 @@ where
     }
 
     /// Open a new bidirectional stream
-    pub fn open_bi(&self, session_id: SessionId) -> OpenBi<C> {
+    pub fn open_bi(&self, session_id: SessionId) -> OpenBi<C, B> {
         OpenBi {
             opener: &self.opener,
             stream: None,
@@ -223,7 +227,7 @@ where
     }
 
     /// Open a new unidirectional stream
-    pub fn open_uni(&self, session_id: SessionId) -> OpenUni<C> {
+    pub fn open_uni(&self, session_id: SessionId) -> OpenUni<C, B> {
         OpenUni {
             opener: &self.opener,
             stream: None,
@@ -238,28 +242,28 @@ where
 }
 
 /// Streams are opened, but the initial webtransport header has not been sent
-type PendingStreams<C> = (
-    BidiStream<<C as quic::Connection>::BidiStream>,
+type PendingStreams<C, B> = (
+    BidiStream<<C as quic::Connection<B>>::BidiStream, B>,
     WriteBuf<&'static [u8]>,
 );
 
 /// Streams are opened, but the initial webtransport header has not been sent
-type PendingUniStreams<C> = (
-    SendStream<<C as quic::Connection>::SendStream>,
+type PendingUniStreams<C, B> = (
+    SendStream<<C as quic::Connection<B>>::SendStream, B>,
     WriteBuf<&'static [u8]>,
 );
 
 pin_project! {
     /// Future for opening a bidi stream
-    pub struct OpenBi<'a, C: quic::Connection> {
+    pub struct OpenBi<'a, C:quic::Connection<B>, B:Buf> {
         opener: &'a Mutex<C::OpenStreams>,
-        stream: Option<PendingStreams<C>>,
+        stream: Option<PendingStreams<C,B>>,
         session_id: SessionId,
     }
 }
 
-impl<'a, C: quic::Connection> Future for OpenBi<'a, C> {
-    type Output = Result<BidiStream<C::BidiStream>, Error>;
+impl<'a, B: Buf, C: quic::Connection<B>> Future for OpenBi<'a, C, B> {
+    type Output = Result<BidiStream<C::BidiStream, B>, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut p = self.project();
@@ -267,7 +271,8 @@ impl<'a, C: quic::Connection> Future for OpenBi<'a, C> {
             match &mut p.stream {
                 Some((stream, buf)) => {
                     while buf.has_remaining() {
-                        ready!(stream.poll_send(cx, buf))?;
+                        todo!()
+                        // ready!(stream.poll_send(cx, buf))?;
                     }
 
                     let (stream, _) = p.stream.take().unwrap();
@@ -289,16 +294,16 @@ impl<'a, C: quic::Connection> Future for OpenBi<'a, C> {
 
 pin_project! {
     /// Opens a unidirectional stream
-    pub struct OpenUni<'a, C: quic::Connection> {
+    pub struct OpenUni<'a, C: quic::Connection<B>, B:Buf> {
         opener: &'a Mutex<C::OpenStreams>,
-        stream: Option<PendingUniStreams<C>>,
+        stream: Option<PendingUniStreams<C, B>>,
         // Future for opening a uni stream
         session_id: SessionId,
     }
 }
 
-impl<'a, C: quic::Connection> Future for OpenUni<'a, C> {
-    type Output = Result<SendStream<C::SendStream>, Error>;
+impl<'a, C: quic::Connection<B>, B: Buf> Future for OpenUni<'a, C, B> {
+    type Output = Result<SendStream<C::SendStream, B>, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut p = self.project();
@@ -306,7 +311,8 @@ impl<'a, C: quic::Connection> Future for OpenUni<'a, C> {
             match &mut p.stream {
                 Some((send, buf)) => {
                     while buf.has_remaining() {
-                        ready!(send.poll_send(cx, buf))?;
+                        todo!()
+                        // ready!(send.poll_send(cx, buf))?;
                     }
                     let (send, buf) = p.stream.take().unwrap();
                     assert!(!buf.has_remaining());
@@ -314,7 +320,7 @@ impl<'a, C: quic::Connection> Future for OpenUni<'a, C> {
                 }
                 None => {
                     let mut opener = (*p.opener).lock().unwrap();
-                    let send = ready!(opener.poll_open_uni(cx))?;
+                    let send = ready!(opener.poll_open_send(cx))?;
                     let send = BufRecvStream::new(send);
                     let send = SendStream::new(send);
 
@@ -329,26 +335,25 @@ impl<'a, C: quic::Connection> Future for OpenUni<'a, C> {
 /// An accepted incoming bidirectional stream.
 ///
 /// Since
-pub enum AcceptedBi<C: quic::Connection> {
+pub enum AcceptedBi<C: quic::Connection<B>, B: Buf> {
     /// An incoming bidirectional stream
-    BidiStream(SessionId, BidiStream<C::BidiStream>),
+    BidiStream(SessionId, BidiStream<C::BidiStream, B>),
     /// An incoming HTTP/3 request, passed through a webtransport session.
     ///
     /// This makes it possible to respond to multiple CONNECT requests
-    Request(Request<()>, RequestStream<C::BidiStream>),
+    Request(Request<()>, RequestStream<C::BidiStream, B>),
 }
 
 /// Future for [`Connection::read_datagram`]
-pub struct ReadDatagram<C>
-where
-    C: quic::Connection,
-{
+pub struct ReadDatagram<C, B> {
     conn: Arc<Mutex<C>>,
+    _marker: PhantomData<B>,
 }
 
-impl<C> Future for ReadDatagram<C>
+impl<C, B> Future for ReadDatagram<C, B>
 where
-    C: quic::Connection,
+    C: quic::Connection<B>,
+    B: Buf,
 {
     type Output = Result<Option<(SessionId, Bytes)>, Error>;
 
@@ -365,18 +370,20 @@ where
 }
 
 /// Future for [`WebTransportSession::accept_uni`]
-pub struct AcceptUni<'a, C>
+pub struct AcceptUni<'a, C, B>
 where
-    C: quic::Connection,
+    C: quic::Connection<B>,
+    B: Buf,
 {
-    conn: &'a Mutex<server::Connection<C>>,
+    conn: &'a Mutex<server::Connection<C, B>>,
 }
 
-impl<'a, C> Future for AcceptUni<'a, C>
+impl<'a, C, B> Future for AcceptUni<'a, C, B>
 where
-    C: quic::Connection,
+    C: quic::Connection<B>,
+    B: Buf,
 {
-    type Output = Result<Option<(SessionId, RecvStream<C::RecvStream>)>, Error>;
+    type Output = Result<Option<(SessionId, RecvStream<C::RecvStream, B>)>, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut conn = self.conn.lock().unwrap();

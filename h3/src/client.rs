@@ -2,6 +2,7 @@
 
 use std::{
     convert::TryFrom,
+    marker::PhantomData,
     sync::{atomic::AtomicUsize, Arc},
     task::{Context, Poll, Waker},
 };
@@ -28,10 +29,10 @@ pub fn builder() -> Builder {
 }
 
 /// Create a new HTTP/3 client with default settings
-pub async fn new<C, O>(conn: C) -> Result<(Connection<C>, SendRequest<O>), Error>
+pub async fn new<C, O>(conn: C) -> Result<(Connection<C, Bytes>, SendRequest<O, Bytes>), Error>
 where
-    C: quic::Connection<OpenStreams = O>,
-    O: quic::OpenStreams,
+    C: quic::Connection<Bytes, OpenStreams = O>,
+    O: quic::OpenStreams<Bytes>,
 {
     //= https://www.rfc-editor.org/rfc/rfc9114#section-3.3
     //= type=implication
@@ -118,9 +119,10 @@ where
 /// [`send_request()`]: struct.SendRequest.html#method.send_request
 /// [`RequestStream`]: struct.RequestStream.html
 /// [`RequestStream::finish()`]: struct.RequestStream.html#method.finish
-pub struct SendRequest<T>
+pub struct SendRequest<T, B>
 where
-    T: quic::OpenStreams,
+    T: quic::OpenStreams<B>,
+    B: Buf,
 {
     open: T,
     conn_state: SharedStateRef,
@@ -128,18 +130,20 @@ where
     // counts instances of SendRequest to close the connection when the last is dropped.
     sender_count: Arc<AtomicUsize>,
     conn_waker: Option<Waker>,
+    _buf: PhantomData<fn(B)>,
     send_grease_frame: bool,
 }
 
-impl<T> SendRequest<T>
+impl<T, B> SendRequest<T, B>
 where
-    T: quic::OpenStreams,
+    T: quic::OpenStreams<B>,
+    B: Buf,
 {
     /// Send a HTTP/3 request to the server
     pub async fn send_request(
         &mut self,
         req: http::Request<()>,
-    ) -> Result<RequestStream<T::BidiStream>, Error> {
+    ) -> Result<RequestStream<T::BidiStream, B>, Error> {
         let (peer_max_field_section_size, closing) = {
             let state = self.conn_state.read("send request lock state");
             (state.peer_config.max_field_section_size, state.closing)
@@ -189,7 +193,7 @@ where
             return Err(Error::header_too_big(mem_size, peer_max_field_section_size));
         }
 
-        stream::write::<_, _, Bytes>(&mut stream, Frame::Headers(block.freeze()))
+        stream::write(&mut stream, Frame::Headers(block.freeze()))
             .await
             .map_err(|e| self.maybe_conn_err(e))?;
 
@@ -207,18 +211,20 @@ where
     }
 }
 
-impl<T> ConnectionState for SendRequest<T>
+impl<T, B> ConnectionState for SendRequest<T, B>
 where
-    T: quic::OpenStreams,
+    T: quic::OpenStreams<B>,
+    B: Buf,
 {
     fn shared_state(&self) -> &SharedStateRef {
         &self.conn_state
     }
 }
 
-impl<T> Clone for SendRequest<T>
+impl<T, B> Clone for SendRequest<T, B>
 where
-    T: quic::OpenStreams + Clone,
+    T: quic::OpenStreams<B> + Clone,
+    B: Buf,
 {
     fn clone(&self) -> Self {
         self.sender_count
@@ -230,14 +236,16 @@ where
             max_field_section_size: self.max_field_section_size,
             sender_count: self.sender_count.clone(),
             conn_waker: self.conn_waker.clone(),
+            _buf: PhantomData,
             send_grease_frame: self.send_grease_frame,
         }
     }
 }
 
-impl<T> Drop for SendRequest<T>
+impl<T, B> Drop for SendRequest<T, B>
 where
-    T: quic::OpenStreams,
+    T: quic::OpenStreams<B>,
+    B: Buf,
 {
     fn drop(&mut self) {
         if self
@@ -334,20 +342,22 @@ where
 /// ```
 /// [`poll_close()`]: struct.Connection.html#method.poll_close
 /// [`shutdown()`]: struct.Connection.html#method.shutdown
-pub struct Connection<C>
+pub struct Connection<C, B>
 where
-    C: quic::Connection,
+    C: quic::Connection<B>,
+    B: Buf,
 {
-    inner: ConnectionInner<C>,
+    inner: ConnectionInner<C, B>,
     // Has a GOAWAY frame been sent? If so, this PushId is the last we are willing to accept.
     sent_closing: Option<PushId>,
     // Has a GOAWAY frame been received? If so, this is StreamId the last the remote will accept.
     recv_closing: Option<StreamId>,
 }
 
-impl<C> Connection<C>
+impl<C, B> Connection<C, B>
 where
-    C: quic::Connection,
+    C: quic::Connection<B>,
+    B: Buf,
 {
     /// Initiate a graceful shutdown, accepting `max_push` potentially in-flight server pushes
     pub async fn shutdown(&mut self, _max_push: usize) -> Result<(), Error> {
@@ -490,10 +500,14 @@ impl Builder {
     }
 
     /// Create a new HTTP/3 client from a `quic` connection
-    pub async fn build<C, O>(&mut self, quic: C) -> Result<(Connection<C>, SendRequest<O>), Error>
+    pub async fn build<C, O, B>(
+        &mut self,
+        quic: C,
+    ) -> Result<(Connection<C, B>, SendRequest<O, B>), Error>
     where
-        C: quic::Connection<OpenStreams = O>,
-        O: quic::OpenStreams,
+        C: quic::Connection<B, OpenStreams = O>,
+        O: quic::OpenStreams<B>,
+        B: Buf,
     {
         let open = quic.opener();
         let conn_state = SharedStateRef::default();
@@ -513,6 +527,7 @@ impl Builder {
                 max_field_section_size: self.config.max_field_section_size,
                 sender_count: Arc::new(AtomicUsize::new(1)),
                 send_grease_frame: self.config.send_grease,
+                _buf: PhantomData,
             },
         ))
     }
@@ -570,19 +585,20 @@ impl Builder {
 /// [`recv_trailers()`]: #method.recv_trailers
 /// [`finish()`]: #method.finish
 /// [`stop_sending()`]: #method.stop_sending
-pub struct RequestStream<S> {
-    inner: connection::RequestStream<S>,
+pub struct RequestStream<S, B> {
+    inner: connection::RequestStream<S, B>,
 }
 
-impl<S> ConnectionState for RequestStream<S> {
+impl<S, B> ConnectionState for RequestStream<S, B> {
     fn shared_state(&self) -> &SharedStateRef {
         &self.inner.conn_state
     }
 }
 
-impl<S> RequestStream<S>
+impl<S, B> RequestStream<S, B>
 where
     S: quic::RecvStream,
+    B: Buf,
 {
     /// Receive the HTTP/3 response
     ///
@@ -671,12 +687,13 @@ where
     }
 }
 
-impl<S> RequestStream<S>
+impl<S, B> RequestStream<S, B>
 where
-    S: quic::SendStream,
+    S: quic::SendStream<B>,
+    B: Buf,
 {
     /// Send some data on the request body.
-    pub async fn send_data(&mut self, buf: impl Buf) -> Result<(), Error> {
+    pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
         self.inner.send_data(buf).await
     }
 
@@ -707,12 +724,18 @@ where
     //# [QUIC-TRANSPORT].
 }
 
-impl<S> RequestStream<S>
+impl<S, B> RequestStream<S, B>
 where
-    S: quic::BidiStream,
+    S: quic::BidiStream<B>,
+    B: Buf,
 {
     /// Split this stream into two halves that can be driven independently.
-    pub fn split(self) -> (RequestStream<S::SendStream>, RequestStream<S::RecvStream>) {
+    pub fn split(
+        self,
+    ) -> (
+        RequestStream<S::SendStream, B>,
+        RequestStream<S::RecvStream, B>,
+    ) {
         let (send, recv) = self.inner.split();
         (RequestStream { inner: send }, RequestStream { inner: recv })
     }

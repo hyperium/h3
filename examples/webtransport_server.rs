@@ -169,7 +169,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn handle_connection(mut conn: Connection<h3_quinn::Connection>) -> Result<()> {
+async fn handle_connection(mut conn: Connection<h3_quinn::Connection, Bytes>) -> Result<()> {
     // 3. TODO: Conditionally, if the client indicated that this is a webtransport session, we should accept it here, else use regular h3.
     // if this is a webtransport session, then h3 needs to stop handing the datagrams, bidirectional streams, and unidirectional streams and give them
     // to the webtransport session.
@@ -278,18 +278,19 @@ where
 /// This method will echo all inbound datagrams, unidirectional and bidirectional streams.
 #[tracing::instrument(level = "info", skip(session))]
 async fn handle_session_and_echo_all_inbound_messages<C>(
-    session: WebTransportSession<C>,
+    session: WebTransportSession<C, Bytes>,
 ) -> anyhow::Result<()>
 where
-    C: 'static + Send + h3::quic::Connection,
-    <C::SendStream as h3::quic::SendStream>::Error:
+    C: 'static + Send + h3::quic::Connection<Bytes>,
+    <C::SendStream as h3::quic::SendStream<Bytes>>::Error:
         'static + std::error::Error + Send + Sync + Into<std::io::Error>,
     <C::RecvStream as h3::quic::RecvStream>::Error:
         'static + std::error::Error + Send + Sync + Into<std::io::Error>,
-    stream::BidiStream<C::BidiStream>: quic::BidiStream + Unpin + AsyncWrite + AsyncRead,
-    <stream::BidiStream<C::BidiStream> as quic::BidiStream>::SendStream:
+    stream::BidiStream<C::BidiStream, Bytes>:
+        quic::BidiStream<Bytes> + Unpin + AsyncWrite + AsyncRead,
+    <stream::BidiStream<C::BidiStream, Bytes> as quic::BidiStream<Bytes>>::SendStream:
         Unpin + AsyncWrite + Send + Sync,
-    <stream::BidiStream<C::BidiStream> as quic::BidiStream>::RecvStream:
+    <stream::BidiStream<C::BidiStream, Bytes> as quic::BidiStream<Bytes>>::RecvStream:
         Unpin + AsyncRead + Send + Sync,
     C::SendStream: Send + Unpin,
     C::RecvStream: Send + Unpin,

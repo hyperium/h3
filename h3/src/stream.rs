@@ -1,4 +1,7 @@
-use std::task::{Context, Poll};
+use std::{
+    marker::PhantomData,
+    task::{Context, Poll},
+};
 
 use bytes::{Buf, BufMut, Bytes};
 use futures_util::{future, ready};
@@ -22,14 +25,12 @@ use crate::{
 /// Transmits data by encoding in wire format.
 pub(crate) async fn write<S, D, B>(stream: &mut S, data: D) -> Result<(), Error>
 where
-    S: SendStream,
+    S: SendStream<B>,
     D: Into<WriteBuf<B>>,
     B: Buf,
 {
-    let mut write_buf = data.into();
-    while write_buf.has_remaining() {
-        future::poll_fn(|cx| stream.poll_send(cx, &mut write_buf)).await?;
-    }
+    stream.send_data(data)?;
+    future::poll_fn(|cx| stream.poll_ready(cx)).await?;
 
     Ok(())
 }
@@ -240,30 +241,32 @@ where
     }
 }
 
-pub(super) enum AcceptedRecvStream<S>
+pub(super) enum AcceptedRecvStream<S, B>
 where
     S: quic::RecvStream,
+    B: Buf,
 {
-    Control(FrameStream<S>),
-    Push(u64, FrameStream<S>),
-    Encoder(BufRecvStream<S>),
-    Decoder(BufRecvStream<S>),
-    WebTransportUni(SessionId, BufRecvStream<S>),
+    Control(FrameStream<S, B>),
+    Push(u64, FrameStream<S, B>),
+    Encoder(BufRecvStream<S, B>),
+    Decoder(BufRecvStream<S, B>),
+    WebTransportUni(SessionId, BufRecvStream<S, B>),
     Reserved,
 }
 
 /// Resolves an incoming streams type as well as `PUSH_ID`s and `SESSION_ID`s
-pub(super) struct AcceptRecvStream<S> {
-    stream: BufRecvStream<S>,
+pub(super) struct AcceptRecvStream<S, B> {
+    stream: BufRecvStream<S, B>,
     ty: Option<StreamType>,
     /// push_id or session_id
     id: Option<VarInt>,
     expected: Option<usize>,
 }
 
-impl<S> AcceptRecvStream<S>
+impl<S, B> AcceptRecvStream<S, B>
 where
     S: RecvStream,
+    B: Buf,
 {
     pub fn new(stream: S) -> Self {
         Self {
@@ -274,7 +277,7 @@ where
         }
     }
 
-    pub fn into_stream(self) -> Result<AcceptedRecvStream<S>, Error> {
+    pub fn into_stream(self) -> Result<AcceptedRecvStream<S, B>, Error> {
         Ok(match self.ty.expect("Stream type not resolved yet") {
             StreamType::CONTROL => AcceptedRecvStream::Control(FrameStream::new(self.stream)),
             StreamType::PUSH => AcceptedRecvStream::Push(
@@ -379,16 +382,17 @@ where
 ///
 /// Implements `quic::RecvStream` which will first return buffered data, and then read from the
 /// stream
-pub struct BufRecvStream<S> {
+pub struct BufRecvStream<S, B> {
     buf: BufList<Bytes>,
     /// Indicates that the end of the stream has been reached
     ///
     /// Data may still be available as buffered
     eos: bool,
     stream: S,
+    _marker: PhantomData<B>,
 }
 
-impl<S> std::fmt::Debug for BufRecvStream<S> {
+impl<S, B> std::fmt::Debug for BufRecvStream<S, B> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BufRecvStream")
             .field("buf", &self.buf)
@@ -398,17 +402,18 @@ impl<S> std::fmt::Debug for BufRecvStream<S> {
     }
 }
 
-impl<S> BufRecvStream<S> {
+impl<S, B> BufRecvStream<S, B> {
     pub fn new(stream: S) -> Self {
         Self {
             buf: BufList::new(),
             eos: false,
             stream,
+            _marker: PhantomData,
         }
     }
 }
 
-impl<S: RecvStream> BufRecvStream<S> {
+impl<B, S: RecvStream> BufRecvStream<S, B> {
     /// Reads more data into the buffer, returning the number of bytes read.
     ///
     /// Returns `true` if the end of the stream is reached.
@@ -440,7 +445,7 @@ impl<S: RecvStream> BufRecvStream<S> {
     }
 }
 
-impl<S: RecvStream> RecvStream for BufRecvStream<S> {
+impl<S: RecvStream, B> RecvStream for BufRecvStream<S, B> {
     type Buf = Bytes;
 
     type Error = S::Error;
@@ -471,17 +476,12 @@ impl<S: RecvStream> RecvStream for BufRecvStream<S> {
     }
 }
 
-impl<S: SendStream> SendStream for BufRecvStream<S> {
+impl<S, B> SendStream<B> for BufRecvStream<S, B>
+where
+    B: Buf,
+    S: SendStream<B>,
+{
     type Error = S::Error;
-
-    #[inline]
-    fn poll_send<D: Buf>(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut D,
-    ) -> Poll<Result<usize, Self::Error>> {
-        self.stream.poll_send(cx, buf)
-    }
 
     fn poll_finish(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.stream.poll_finish(cx)
@@ -494,12 +494,24 @@ impl<S: SendStream> SendStream for BufRecvStream<S> {
     fn send_id(&self) -> quic::StreamId {
         self.stream.send_id()
     }
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.stream.poll_ready(cx)
+    }
+
+    fn send_data<T: Into<WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error> {
+        self.stream.send_data(data)
+    }
 }
 
-impl<S: BidiStream> BidiStream for BufRecvStream<S> {
-    type SendStream = BufRecvStream<S::SendStream>;
+impl<S, B> BidiStream<B> for BufRecvStream<S, B>
+where
+    B: Buf,
+    S: BidiStream<B>,
+{
+    type SendStream = BufRecvStream<S::SendStream, B>;
 
-    type RecvStream = BufRecvStream<S::RecvStream>;
+    type RecvStream = BufRecvStream<S::RecvStream, B>;
 
     fn split(self) -> (Self::SendStream, Self::RecvStream) {
         let (send, recv) = self.stream.split();
@@ -509,11 +521,13 @@ impl<S: BidiStream> BidiStream for BufRecvStream<S> {
                 buf: BufList::new(),
                 eos: self.eos,
                 stream: send,
+                _marker: PhantomData,
             },
             BufRecvStream {
                 buf: self.buf,
                 eos: self.eos,
                 stream: recv,
+                _marker: PhantomData,
             },
         )
     }

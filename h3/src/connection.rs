@@ -74,17 +74,19 @@ pub trait ConnectionState {
 }
 
 #[allow(missing_docs)]
-pub struct AcceptedStreams<C>
+pub struct AcceptedStreams<C, B>
 where
-    C: quic::Connection,
+    C: quic::Connection<B>,
+    B: Buf,
 {
     #[allow(missing_docs)]
-    pub wt_uni_streams: Vec<(SessionId, BufRecvStream<C::RecvStream>)>,
+    pub wt_uni_streams: Vec<(SessionId, BufRecvStream<C::RecvStream, B>)>,
 }
 
-impl<C> Default for AcceptedStreams<C>
+impl<B, C> Default for AcceptedStreams<C, B>
 where
-    C: quic::Connection,
+    C: quic::Connection<B>,
+    B: Buf,
 {
     fn default() -> Self {
         Self {
@@ -94,17 +96,18 @@ where
 }
 
 #[allow(missing_docs)]
-pub struct ConnectionInner<C>
+pub struct ConnectionInner<C, B>
 where
-    C: quic::Connection,
+    C: quic::Connection<B>,
+    B: Buf,
 {
     pub(super) shared: SharedStateRef,
     /// TODO: breaking encapsulation just to see if we can get this to work, will fix before merging
     pub conn: Arc<Mutex<C>>,
     control_send: C::SendStream,
-    control_recv: Option<FrameStream<C::RecvStream>>,
-    decoder_recv: Option<AcceptedRecvStream<C::RecvStream>>,
-    encoder_recv: Option<AcceptedRecvStream<C::RecvStream>>,
+    control_recv: Option<FrameStream<C::RecvStream, B>>,
+    decoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
+    encoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
     /// Buffers incoming uni/recv streams which have yet to be claimed.
     ///
     /// This is opposed to discarding them by returning in `poll_accept_recv`, which may cause them to be missed by something else polling.
@@ -124,18 +127,19 @@ where
     /// STOP_SENDING with the H3_WEBTRANSPORT_BUFFERED_STREAM_REJECTED error code. When the
     /// number of buffered datagrams is exceeded, a datagram SHALL be dropped. It is up to an
     /// implementation to choose what stream or datagram to discard.
-    accepted_streams: AcceptedStreams<C>,
+    accepted_streams: AcceptedStreams<C, B>,
 
-    pending_recv_streams: Vec<AcceptRecvStream<C::RecvStream>>,
+    pending_recv_streams: Vec<AcceptRecvStream<C::RecvStream, B>>,
 
     got_peer_settings: bool,
     pub send_grease_frame: bool,
     pub config: Config,
 }
 
-impl<C> ConnectionInner<C>
+impl<B, C> ConnectionInner<C, B>
 where
-    C: quic::Connection,
+    C: quic::Connection<B>,
+    B: Buf,
 {
     /// Initiates the connection and opens a control stream
     pub async fn new(mut conn: C, shared: SharedStateRef, config: Config) -> Result<Self, Error> {
@@ -222,7 +226,7 @@ where
         //# the peer prior to sending the SETTINGS frame; settings MUST be sent
         //# as soon as the transport is ready to send data.
         trace!("Sending Settings frame: {settings:#x?}");
-        stream::write::<_, _, Bytes>(
+        stream::write(
             &mut control_send,
             WriteBuf::from(UniStreamHeader::Control(settings)),
         )
@@ -287,7 +291,7 @@ where
         //# (Section 5.2) so that both endpoints can reliably determine whether
         //# previously sent frames have been processed and gracefully complete or
         //# terminate any necessary remaining tasks.
-        stream::write::<_, _, Bytes>(&mut self.control_send, Frame::Goaway(max_id.into())).await
+        stream::write(&mut self.control_send, Frame::Goaway(max_id.into())).await
     }
 
     #[allow(missing_docs)]
@@ -604,12 +608,7 @@ where
         //# types be ignored.  These streams have no semantics, and they can be
         //# sent when application-layer padding is desired.  They MAY also be
         //# sent on connections where no data is currently being transferred.
-        match stream::write::<_, _, Bytes>(
-            &mut grease_stream,
-            (StreamType::grease(), Frame::Grease),
-        )
-        .await
-        {
+        match stream::write(&mut grease_stream, (StreamType::grease(), Frame::Grease)).await {
             Ok(()) => (),
             Err(err) => {
                 warn!("write data on grease stream failed with {}", err);
@@ -635,24 +634,24 @@ where
     }
 
     #[allow(missing_docs)]
-    pub fn accepted_streams_mut(&mut self) -> &mut AcceptedStreams<C> {
+    pub fn accepted_streams_mut(&mut self) -> &mut AcceptedStreams<C, B> {
         &mut self.accepted_streams
     }
 }
 
 #[allow(missing_docs)]
-pub struct RequestStream<S> {
-    pub(super) stream: FrameStream<S>,
+pub struct RequestStream<S, B> {
+    pub(super) stream: FrameStream<S, B>,
     pub(super) trailers: Option<Bytes>,
     pub(super) conn_state: SharedStateRef,
     pub(super) max_field_section_size: u64,
     send_grease_frame: bool,
 }
 
-impl<S> RequestStream<S> {
+impl<S, B> RequestStream<S, B> {
     #[allow(missing_docs)]
     pub fn new(
-        stream: FrameStream<S>,
+        stream: FrameStream<S, B>,
         max_field_section_size: u64,
         conn_state: SharedStateRef,
         grease: bool,
@@ -667,15 +666,16 @@ impl<S> RequestStream<S> {
     }
 }
 
-impl<S> ConnectionState for RequestStream<S> {
+impl<S, B> ConnectionState for RequestStream<S, B> {
     fn shared_state(&self) -> &SharedStateRef {
         &self.conn_state
     }
 }
 
-impl<S> RequestStream<S>
+impl<S, B> RequestStream<S, B>
 where
     S: quic::RecvStream,
+    B: Buf,
 {
     /// Receive some of the request body.
     pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
@@ -797,12 +797,13 @@ where
     }
 }
 
-impl<S> RequestStream<S>
+impl<S, B> RequestStream<S, B>
 where
-    S: quic::SendStream,
+    S: quic::SendStream<B>,
+    B: Buf,
 {
     /// Send some data on the response body.
-    pub async fn send_data(&mut self, buf: impl Buf) -> Result<(), Error> {
+    pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
         let frame = Frame::Data(buf);
 
         stream::write(&mut self.stream, frame)
@@ -834,7 +835,7 @@ where
         if mem_size > max_mem_size {
             return Err(Error::header_too_big(mem_size, max_mem_size));
         }
-        stream::write::<_, _, Bytes>(&mut self.stream, Frame::Headers(block.freeze()))
+        stream::write(&mut self.stream, Frame::Headers(block.freeze()))
             .await
             .map_err(|e| self.maybe_conn_err(e))?;
 
@@ -850,7 +851,7 @@ where
     pub async fn finish(&mut self) -> Result<(), Error> {
         if self.send_grease_frame {
             // send a grease frame once per Connection
-            stream::write::<_, _, Bytes>(&mut self.stream, Frame::Grease)
+            stream::write(&mut self.stream, Frame::Grease)
                 .await
                 .map_err(|e| self.maybe_conn_err(e))?;
             self.send_grease_frame = false;
@@ -862,11 +863,17 @@ where
     }
 }
 
-impl<S> RequestStream<S>
+impl<S, B> RequestStream<S, B>
 where
-    S: quic::BidiStream,
+    S: quic::BidiStream<B>,
+    B: Buf,
 {
-    pub(crate) fn split(self) -> (RequestStream<S::SendStream>, RequestStream<S::RecvStream>) {
+    pub(crate) fn split(
+        self,
+    ) -> (
+        RequestStream<S::SendStream, B>,
+        RequestStream<S::RecvStream, B>,
+    ) {
         let (send, recv) = self.stream.split();
 
         (

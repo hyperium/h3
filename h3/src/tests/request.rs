@@ -214,7 +214,7 @@ async fn post() {
                 .expect("request");
 
             request_stream
-                .send_data("wonderful json".as_bytes())
+                .send_data("wonderful json".into())
                 .await
                 .expect("send_data");
             request_stream.finish().await.expect("client finish");
@@ -319,7 +319,7 @@ async fn header_too_big_response_from_server_trailers() {
                 .await
                 .expect("request");
             request_stream
-                .send_data("wonderful json".as_bytes())
+                .send_data("wonderful json".into())
                 .await
                 .expect("send_data");
 
@@ -441,7 +441,7 @@ async fn header_too_big_client_error_trailer() {
                 .await
                 .expect("request");
             request_stream
-                .send_data("wonderful json".as_bytes())
+                .send_data("wonderful json".into())
                 .await
                 .expect("send_data");
 
@@ -508,7 +508,7 @@ async fn header_too_big_discard_from_client() {
         // Do not poll driver so client doesn't know about server's max_field section size setting
         let (_conn, mut client) = client::builder()
             .max_field_section_size(12)
-            .build(pair.client().await)
+            .build::<_, _, Bytes>(pair.client().await)
             .await
             .expect("client init");
         let mut request_stream = client
@@ -594,7 +594,7 @@ async fn header_too_big_discard_from_client_trailers() {
         // Do not poll driver so client doesn't know about server's max_field section size setting
         let (mut driver, mut client) = client::builder()
             .max_field_section_size(200)
-            .build(pair.client().await)
+            .build::<_, _, Bytes>(pair.client().await)
             .await
             .expect("client init");
 

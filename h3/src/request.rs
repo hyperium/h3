@@ -1,19 +1,20 @@
 use std::convert::TryFrom;
 
+use bytes::Buf;
 use http::{Request, StatusCode};
 
 use crate::{error::Code, proto::headers::Header, qpack, quic, server::RequestStream, Error};
 
-pub struct ResolveRequest<C: quic::Connection> {
-    request_stream: RequestStream<C::BidiStream>,
+pub struct ResolveRequest<C: quic::Connection<B>, B: Buf> {
+    request_stream: RequestStream<C::BidiStream, B>,
     // Ok or `REQUEST_HEADER_FIELDS_TO_LARGE` which neeeds to be sent
     decoded: Result<qpack::Decoded, u64>,
     max_field_section_size: u64,
 }
 
-impl<C: quic::Connection> ResolveRequest<C> {
+impl<B: Buf, C: quic::Connection<B>> ResolveRequest<C, B> {
     pub fn new(
-        request_stream: RequestStream<C::BidiStream>,
+        request_stream: RequestStream<C::BidiStream, B>,
         decoded: Result<qpack::Decoded, u64>,
         max_field_section_size: u64,
     ) -> Self {
@@ -25,7 +26,9 @@ impl<C: quic::Connection> ResolveRequest<C> {
     }
 
     /// Finishes the resolution of the request
-    pub async fn resolve(mut self) -> Result<(Request<()>, RequestStream<C::BidiStream>), Error> {
+    pub async fn resolve(
+        mut self,
+    ) -> Result<(Request<()>, RequestStream<C::BidiStream, B>), Error> {
         let fields = match self.decoded {
             Ok(v) => v.fields,
             Err(cancel_size) => {

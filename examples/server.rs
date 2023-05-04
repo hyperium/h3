@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use http::{Request, StatusCode};
 use rustls::{Certificate, PrivateKey};
 use structopt::StructOpt;
@@ -164,11 +164,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn handle_request<T>(
     req: Request<()>,
-    mut stream: RequestStream<T>,
+    mut stream: RequestStream<T, Bytes>,
     serve_root: Arc<Option<PathBuf>>,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
-    T: BidiStream,
+    T: BidiStream<Bytes>,
 {
     let (status, to_serve) = match serve_root.as_deref() {
         None => (StatusCode::OK, None),

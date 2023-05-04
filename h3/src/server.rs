@@ -52,13 +52,14 @@
 
 use std::{
     collections::HashSet,
+    marker::PhantomData,
     option::Option,
     result::Result,
     sync::Arc,
     task::{Context, Poll},
 };
 
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Buf, BytesMut};
 use futures_util::{
     future::{self, Future},
     ready,
@@ -101,12 +102,13 @@ pub fn builder() -> Builder {
 /// Create a new Instance with [`Connection::new()`].
 /// Accept incoming requests with [`Connection::accept()`].
 /// And shutdown a connection with [`Connection::shutdown()`].
-pub struct Connection<C>
+pub struct Connection<C, B>
 where
-    C: quic::Connection,
+    C: quic::Connection<B>,
+    B: Buf,
 {
     /// TODO: temporarily break encapsulation for `WebTransportSession`
-    pub inner: ConnectionInner<C>,
+    pub inner: ConnectionInner<C, B>,
     max_field_section_size: u64,
     // List of all incoming streams that are currently running.
     ongoing_streams: HashSet<StreamId>,
@@ -121,18 +123,20 @@ where
     last_accepted_stream: Option<StreamId>,
 }
 
-impl<C> ConnectionState for Connection<C>
+impl<C, B> ConnectionState for Connection<C, B>
 where
-    C: quic::Connection,
+    C: quic::Connection<B>,
+    B: Buf,
 {
     fn shared_state(&self) -> &SharedStateRef {
         &self.inner.shared
     }
 }
 
-impl<C> Connection<C>
+impl<C, B> Connection<C, B>
 where
-    C: quic::Connection,
+    C: quic::Connection<B>,
+    B: Buf,
 {
     /// Create a new HTTP/3 server connection with default settings
     ///
@@ -154,9 +158,10 @@ where
     }
 }
 
-impl<C> Connection<C>
+impl<C, B> Connection<C, B>
 where
-    C: quic::Connection,
+    C: quic::Connection<B>,
+    B: Buf,
 {
     /// Accept an incoming request.
     ///
@@ -165,7 +170,7 @@ where
     /// The [`RequestStream`] can be used to send the response.
     pub async fn accept(
         &mut self,
-    ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream>)>, Error> {
+    ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
         // Accept the incoming stream
         let mut stream = match future::poll_fn(|cx| self.poll_accept_request(cx)).await {
             Ok(Some(s)) => FrameStream::new(BufRecvStream::new(s)),
@@ -210,9 +215,9 @@ where
     /// may still want to be handled and passed to the user.
     pub fn accept_with_frame(
         &mut self,
-        mut stream: FrameStream<C::BidiStream>,
+        mut stream: FrameStream<C::BidiStream, B>,
         frame: Result<Option<Frame<PayloadLen>>, FrameStreamError>,
-    ) -> Result<Option<ResolveRequest<C>>, Error> {
+    ) -> Result<Option<ResolveRequest<C, B>>, Error> {
         let mut encoded = match frame {
             Ok(Some(Frame::Headers(h))) => h,
 
@@ -337,9 +342,10 @@ where
     }
 
     /// Reads an incoming datagram
-    pub fn read_datagram(&self) -> ReadDatagram<C> {
+    pub fn read_datagram(&self) -> ReadDatagram<C, B> {
         ReadDatagram {
             conn: &self.inner.conn,
+            _marker: PhantomData,
         }
     }
 
@@ -489,9 +495,10 @@ where
     }
 }
 
-impl<C> Drop for Connection<C>
+impl<C, B> Drop for Connection<C, B>
 where
-    C: quic::Connection,
+    C: quic::Connection<B>,
+    B: Buf,
 {
     fn drop(&mut self) {
         self.inner.close(Code::H3_NO_ERROR, "");
@@ -615,9 +622,10 @@ impl Default for Config {
 /// # Example
 ///
 /// ```rust
-/// fn doc<C>(conn: C)
+/// fn doc<C,B>(conn: C)
 /// where
-/// C: h3::quic::Connection,
+/// C: h3::quic::Connection<B>,
+/// B: bytes::Buf,
 /// {
 ///     let mut server_builder = h3::server::builder();
 ///     // Set the maximum header size
@@ -670,9 +678,10 @@ impl Builder {
     /// Build an HTTP/3 connection from a QUIC connection
     ///
     /// This method creates a [`Connection`] instance with the settings in the [`Builder`].
-    pub async fn build<C>(&self, conn: C) -> Result<Connection<C>, Error>
+    pub async fn build<C, B>(&self, conn: C) -> Result<Connection<C, B>, Error>
     where
-        C: quic::Connection,
+        C: quic::Connection<B>,
+        B: Buf,
     {
         let (sender, receiver) = mpsc::unbounded_channel();
         Ok(Connection {
@@ -697,26 +706,27 @@ struct RequestEnd {
 ///
 /// The [`RequestStream`] struct is used to send and/or receive
 /// information from the client.
-pub struct RequestStream<S> {
-    inner: connection::RequestStream<S>,
+pub struct RequestStream<S, B> {
+    inner: connection::RequestStream<S, B>,
     request_end: Arc<RequestEnd>,
 }
 
-impl<S> AsMut<connection::RequestStream<S>> for RequestStream<S> {
-    fn as_mut(&mut self) -> &mut connection::RequestStream<S> {
+impl<S, B> AsMut<connection::RequestStream<S, B>> for RequestStream<S, B> {
+    fn as_mut(&mut self) -> &mut connection::RequestStream<S, B> {
         &mut self.inner
     }
 }
 
-impl<S> ConnectionState for RequestStream<S> {
+impl<S, B> ConnectionState for RequestStream<S, B> {
     fn shared_state(&self) -> &SharedStateRef {
         &self.inner.conn_state
     }
 }
 
-impl<S> RequestStream<S>
+impl<S, B> RequestStream<S, B>
 where
     S: quic::RecvStream,
+    B: Buf,
 {
     /// Receive data sent from the client
     pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
@@ -739,9 +749,10 @@ where
     }
 }
 
-impl<S> RequestStream<S>
+impl<S, B> RequestStream<S, B>
 where
-    S: quic::SendStream,
+    S: quic::SendStream<B>,
+    B: Buf,
 {
     /// Send the HTTP/3 response
     ///
@@ -773,7 +784,7 @@ where
             return Err(Error::header_too_big(mem_size, max_mem_size));
         }
 
-        stream::write::<_, _, Bytes>(&mut self.inner.stream, Frame::Headers(block.freeze()))
+        stream::write(&mut self.inner.stream, Frame::Headers(block.freeze()))
             .await
             .map_err(|e| self.maybe_conn_err(e))?;
 
@@ -781,7 +792,7 @@ where
     }
 
     /// Send some data on the response body.
-    pub async fn send_data(&mut self, buf: Bytes) -> Result<(), Error> {
+    pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
         self.inner.send_data(buf).await
     }
 
@@ -824,13 +835,19 @@ where
     }
 }
 
-impl<S> RequestStream<S>
+impl<S, B> RequestStream<S, B>
 where
-    S: quic::BidiStream,
+    S: quic::BidiStream<B>,
+    B: Buf,
 {
     /// Splits the Request-Stream into send and receive.
     /// This can be used the send and receive data on different tasks.
-    pub fn split(self) -> (RequestStream<S::SendStream>, RequestStream<S::RecvStream>) {
+    pub fn split(
+        self,
+    ) -> (
+        RequestStream<S::SendStream, B>,
+        RequestStream<S::RecvStream, B>,
+    ) {
         let (send, recv) = self.inner.split();
         (
             RequestStream {
@@ -857,16 +874,15 @@ impl Drop for RequestEnd {
 }
 
 /// Future for [`Connection::read_datagram`]
-pub struct ReadDatagram<'a, C>
-where
-    C: quic::Connection,
-{
+pub struct ReadDatagram<'a, C, B> {
     conn: &'a std::sync::Mutex<C>,
+    _marker: PhantomData<B>,
 }
 
-impl<'a, C> Future for ReadDatagram<'a, C>
+impl<'a, C, B> Future for ReadDatagram<'a, C, B>
 where
-    C: quic::Connection,
+    C: quic::Connection<B>,
+    B: Buf,
 {
     type Output = Result<Option<Datagram>, Error>;
 

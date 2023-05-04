@@ -10,21 +10,22 @@ use pin_project_lite::pin_project;
 
 pin_project! {
     /// WebTransport receive stream
-    pub struct RecvStream<S> {
-        stream: BufRecvStream<S>,
+    pub struct RecvStream<S,B> {
+        stream: BufRecvStream<S, B>,
     }
 }
 
-impl<S> RecvStream<S> {
+impl<S, B> RecvStream<S, B> {
     #[allow(missing_docs)]
-    pub fn new(stream: BufRecvStream<S>) -> Self {
+    pub fn new(stream: BufRecvStream<S, B>) -> Self {
         Self { stream }
     }
 }
 
-impl<S> quic::RecvStream for RecvStream<S>
+impl<S, B> quic::RecvStream for RecvStream<S, B>
 where
     S: quic::RecvStream,
+    B: Buf,
 {
     type Buf = Bytes;
 
@@ -84,7 +85,12 @@ macro_rules! async_write {
             cx: &mut std::task::Context<'_>,
             mut buf: $buf,
         ) -> Poll<std::io::Result<usize>> {
-            self.poll_send(cx, &mut buf).map_err(Into::into)
+            // self.send_data(buf.into())?;
+
+            // ready!(self.poll_ready(cx)?);
+
+            let len = buf.len();
+            Poll::Ready(Ok(len))
         }
 
         fn poll_flush(
@@ -103,22 +109,23 @@ macro_rules! async_write {
     };
 }
 
-impl<S> AsyncRead for RecvStream<S>
+impl<S, B> AsyncRead for RecvStream<S, B>
 where
     S: quic::RecvStream,
     S::Error: Into<std::io::Error>,
+    B: Buf,
 {
     async_read!(&mut [u8]);
 }
 
 pin_project! {
     /// WebTransport send stream
-    pub struct SendStream<S> {
-        stream: BufRecvStream<S>,
+    pub struct SendStream<S,B> {
+        stream: BufRecvStream<S ,B>,
     }
 }
 
-impl<S> std::fmt::Debug for SendStream<S> {
+impl<S, B> std::fmt::Debug for SendStream<S, B> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SendStream")
             .field("stream", &self.stream)
@@ -126,38 +133,35 @@ impl<S> std::fmt::Debug for SendStream<S> {
     }
 }
 
-impl<S> SendStream<S> {
+impl<S, B> SendStream<S, B> {
     #[allow(missing_docs)]
-    pub fn new(stream: BufRecvStream<S>) -> Self {
+    pub(crate) fn new(stream: BufRecvStream<S, B>) -> Self {
         Self { stream }
     }
 }
 
-impl<S> SendStream<S>
+impl<S, B> SendStream<S, B>
 where
-    S: quic::SendStream,
+    S: quic::SendStream<B>,
+    B: Buf,
 {
     /// Write bytes to the stream.
     ///
     /// Returns the number of bytes written
-    pub async fn write(&mut self, buf: &mut impl Buf) -> Result<usize, S::Error> {
-        future::poll_fn(|cx| quic::SendStream::poll_send(self, cx, buf)).await
+    pub async fn write(&mut self, buf: impl Buf) -> Result<(), S::Error> {
+        todo!();
+        // self.send_data(buf.into())?;
+        future::poll_fn(|cx| quic::SendStream::poll_ready(self, cx)).await?;
+        Ok(())
     }
 }
 
-impl<S> quic::SendStream for SendStream<S>
+impl<S, B> quic::SendStream<B> for SendStream<S, B>
 where
-    S: quic::SendStream,
+    S: quic::SendStream<B>,
+    B: Buf,
 {
     type Error = S::Error;
-
-    fn poll_send<D: Buf>(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut D,
-    ) -> Poll<Result<usize, Self::Error>> {
-        self.stream.poll_send(cx, buf)
-    }
 
     fn poll_finish(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.stream.poll_finish(cx)
@@ -170,11 +174,20 @@ where
     fn send_id(&self) -> quic::StreamId {
         self.stream.send_id()
     }
+
+    fn send_data<T: Into<h3::stream::WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error> {
+        todo!()
+    }
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        todo!()
+    }
 }
 
-impl<S> AsyncWrite for SendStream<S>
+impl<S, B> AsyncWrite for SendStream<S, B>
 where
-    S: quic::SendStream,
+    S: quic::SendStream<B>,
+    B: Buf,
     S::Error: Into<std::io::Error>,
 {
     async_write!(&[u8]);
@@ -185,27 +198,23 @@ pin_project! {
     ///
     /// Can be split into a [`RecvStream`] and [`SendStream`] if the underlying QUIC implementation
     /// supports it.
-    pub struct BidiStream<S> {
-        stream: BufRecvStream<S>,
+    pub struct BidiStream<S, B> {
+        stream: BufRecvStream<S, B>,
     }
 }
 
-impl<S> BidiStream<S> {
-    pub(crate) fn new(stream: BufRecvStream<S>) -> Self {
+impl<S, B> BidiStream<S, B> {
+    pub(crate) fn new(stream: BufRecvStream<S, B>) -> Self {
         Self { stream }
     }
 }
 
-impl<S: quic::SendStream> quic::SendStream for BidiStream<S> {
+impl<S, B> quic::SendStream<B> for BidiStream<S, B>
+where
+    S: quic::SendStream<B>,
+    B: Buf,
+{
     type Error = S::Error;
-
-    fn poll_send<D: Buf>(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut D,
-    ) -> Poll<Result<usize, Self::Error>> {
-        self.stream.poll_send(cx, buf)
-    }
 
     fn poll_finish(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.stream.poll_finish(cx)
@@ -218,9 +227,17 @@ impl<S: quic::SendStream> quic::SendStream for BidiStream<S> {
     fn send_id(&self) -> quic::StreamId {
         self.stream.send_id()
     }
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        todo!()
+    }
+
+    fn send_data<T: Into<h3::stream::WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error> {
+        todo!()
+    }
 }
 
-impl<S: quic::RecvStream> quic::RecvStream for BidiStream<S> {
+impl<S: quic::RecvStream, B> quic::RecvStream for BidiStream<S, B> {
     type Buf = Bytes;
 
     type Error = S::Error;
@@ -241,10 +258,14 @@ impl<S: quic::RecvStream> quic::RecvStream for BidiStream<S> {
     }
 }
 
-impl<S: quic::BidiStream> quic::BidiStream for BidiStream<S> {
-    type SendStream = SendStream<S::SendStream>;
+impl<S, B> quic::BidiStream<B> for BidiStream<S, B>
+where
+    S: quic::BidiStream<B>,
+    B: Buf,
+{
+    type SendStream = SendStream<S::SendStream, B>;
 
-    type RecvStream = RecvStream<S::RecvStream>;
+    type RecvStream = RecvStream<S::RecvStream, B>;
 
     fn split(self) -> (Self::SendStream, Self::RecvStream) {
         let (send, recv) = self.stream.split();
@@ -252,18 +273,20 @@ impl<S: quic::BidiStream> quic::BidiStream for BidiStream<S> {
     }
 }
 
-impl<S> AsyncRead for BidiStream<S>
+impl<S, B> AsyncRead for BidiStream<S, B>
 where
     S: quic::RecvStream,
     S::Error: Into<std::io::Error>,
+    B: Buf,
 {
     async_read!(&mut [u8]);
 }
 
-impl<S> AsyncWrite for BidiStream<S>
+impl<S, B> AsyncWrite for BidiStream<S, B>
 where
-    S: quic::SendStream,
+    S: quic::SendStream<B>,
     S::Error: Into<std::io::Error>,
+    B: Buf,
 {
     async_write!(&[u8]);
 }

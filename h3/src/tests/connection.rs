@@ -4,7 +4,7 @@
 use std::{borrow::BorrowMut, time::Duration};
 
 use assert_matches::assert_matches;
-use bytes::{Bytes, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 use futures_util::future;
 use http::{Request, Response, StatusCode};
 
@@ -184,7 +184,7 @@ async fn settings_exchange_server() {
     let client_fut = async {
         let (mut conn, _client) = client::builder()
             .max_field_section_size(12)
-            .build(pair.client().await)
+            .build::<_, _, Bytes>(pair.client().await)
             .await
             .expect("client init");
         let drive = async move {
@@ -687,10 +687,11 @@ async fn graceful_shutdown_client() {
     tokio::join!(server_fut, client_fut);
 }
 
-async fn request<T, O>(mut send_request: T) -> Result<Response<()>, Error>
+async fn request<T, O, B>(mut send_request: T) -> Result<Response<()>, Error>
 where
-    T: BorrowMut<SendRequest<O>>,
-    O: quic::OpenStreams,
+    T: BorrowMut<SendRequest<O, B>>,
+    O: quic::OpenStreams<B>,
+    B: Buf,
 {
     let mut request_stream = send_request
         .borrow_mut()
@@ -699,9 +700,10 @@ where
     request_stream.recv_response().await
 }
 
-async fn response<S>(mut stream: server::RequestStream<S>)
+async fn response<S, B>(mut stream: server::RequestStream<S, B>)
 where
-    S: quic::RecvStream + SendStream,
+    S: quic::RecvStream + SendStream<B>,
+    B: Buf,
 {
     stream
         .send_response(

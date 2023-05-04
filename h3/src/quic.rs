@@ -70,15 +70,16 @@ impl Error for SendDatagramError {
 }
 
 /// Trait representing a QUIC connection.
-pub trait Connection {
+pub trait Connection<B: Buf> {
     /// The type produced by `poll_accept_bidi()`
-    type BidiStream: SendStream + RecvStream;
+    type BidiStream: SendStream<B> + RecvStream;
     /// The type of the sending part of `BidiStream`
-    type SendStream: SendStream;
+    type SendStream: SendStream<B>;
     /// The type produced by `poll_accept_recv()`
     type RecvStream: RecvStream;
     /// A producer of outgoing Unidirectional and Bidirectional streams.
     type OpenStreams: OpenStreams<
+        B,
         SendStream = Self::SendStream,
         RecvStream = Self::RecvStream,
         BidiStream = Self::BidiStream,
@@ -131,11 +132,11 @@ pub trait Connection {
 }
 
 /// Trait for opening outgoing streams
-pub trait OpenStreams {
+pub trait OpenStreams<B: Buf> {
     /// The type produced by `poll_open_bidi()`
-    type BidiStream: SendStream + RecvStream;
+    type BidiStream: SendStream<B> + RecvStream;
     /// The type produced by `poll_open_send()`
-    type SendStream: SendStream;
+    type SendStream: SendStream<B>;
     /// The type of the receiving part of `BidiStream`
     type RecvStream: RecvStream;
     /// Error type yielded by these trait methods
@@ -148,7 +149,7 @@ pub trait OpenStreams {
     ) -> Poll<Result<Self::BidiStream, Self::Error>>;
 
     /// Poll the connection to create a new unidirectional stream.
-    fn poll_open_uni(
+    fn poll_open_send(
         &mut self,
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Self::SendStream, Self::Error>>;
@@ -158,22 +159,15 @@ pub trait OpenStreams {
 }
 
 /// A trait describing the "send" actions of a QUIC stream.
-pub trait SendStream {
+pub trait SendStream<B: Buf> {
     /// The error type returned by fallible send methods.
     type Error: Into<Box<dyn Error>>;
 
-    /// Attempts write data into the stream.
-    ///
-    /// Returns the number of bytes written.
-    ///
-    /// `buf` is advanced by the number of bytes written.
-    ///
-    /// This allows writing arbitrary data to the stream as well as complete encoded frames.
-    fn poll_send<D: Buf>(
-        &mut self,
-        cx: &mut task::Context<'_>,
-        buf: &mut D,
-    ) -> Poll<Result<usize, Self::Error>>;
+    /// Polls if the stream can send more data.
+    fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>>;
+
+    /// Send more data on the stream.
+    fn send_data<T: Into<WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error>;
 
     /// Poll to finish the sending side of the stream.
     fn poll_finish(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>>;
@@ -183,6 +177,23 @@ pub trait SendStream {
 
     /// Get QUIC send stream id
     fn send_id(&self) -> StreamId;
+}
+
+/// Allows sending unframed bytes to a stream
+pub trait SendStreamUnframed {
+    /// The error type returned by fallible send methods.
+    type Error: Into<Box<dyn Error>>;
+
+    /// Attempts write data into the stream.
+    ///
+    /// Returns the number of bytes written.
+    ///
+    /// `buf` is advanced by the number of bytes written.
+    fn poll_send<B: Buf>(
+        &mut self,
+        cx: &mut task::Context<'_>,
+        buf: &mut B,
+    ) -> Poll<Result<usize, Self::Error>>;
 }
 
 /// A trait describing the "receive" actions of a QUIC stream.
@@ -209,9 +220,9 @@ pub trait RecvStream {
 }
 
 /// Optional trait to allow "splitting" a bidirectional stream into two sides.
-pub trait BidiStream: SendStream + RecvStream {
+pub trait BidiStream<B: Buf>: SendStream<B> + RecvStream {
     /// The type for the send half.
-    type SendStream: SendStream;
+    type SendStream: SendStream<B>;
     /// The type for the receive half.
     type RecvStream: RecvStream;
 

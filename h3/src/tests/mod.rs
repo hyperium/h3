@@ -18,6 +18,7 @@ use std::{
     time::Duration,
 };
 
+use bytes::Bytes;
 use rustls::{Certificate, PrivateKey};
 
 use crate::quic;
@@ -129,7 +130,7 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn next(&mut self) -> impl quic::Connection {
+    pub async fn next(&mut self) -> impl quic::Connection<Bytes> {
         Connection::new(self.endpoint.accept().await.unwrap().await.unwrap())
     }
 }
