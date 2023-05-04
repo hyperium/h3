@@ -9,15 +9,18 @@ use std::{
 
 use bytes::{Buf, Bytes};
 use futures_util::{future::poll_fn, ready, Future};
-use h3::stream::{BidiStreamHeader, BufRecvStream, UniStreamHeader};
 use h3::{
     connection::ConnectionState,
     error::Code,
     frame::FrameStream,
     proto::{datagram::Datagram, frame::Frame},
-    quic::{self, OpenStreams, SendStream as _, WriteBuf},
+    quic::{self, OpenStreams, WriteBuf},
     server::{self, Connection, RequestStream},
     Error, Protocol,
+};
+use h3::{
+    quic::SendStreamUnframed,
+    stream::{BidiStreamHeader, BufRecvStream, UniStreamHeader},
 };
 use http::{Method, Request, Response, StatusCode};
 
@@ -262,7 +265,12 @@ pin_project! {
     }
 }
 
-impl<'a, B: Buf, C: quic::Connection<B>> Future for OpenBi<'a, C, B> {
+impl<'a, B, C> Future for OpenBi<'a, C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+    C::BidiStream: SendStreamUnframed<B>,
+{
     type Output = Result<BidiStream<C::BidiStream, B>, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -271,8 +279,7 @@ impl<'a, B: Buf, C: quic::Connection<B>> Future for OpenBi<'a, C, B> {
             match &mut p.stream {
                 Some((stream, buf)) => {
                     while buf.has_remaining() {
-                        todo!()
-                        // ready!(stream.poll_send(cx, buf))?;
+                        ready!(stream.poll_send(cx, buf))?;
                     }
 
                     let (stream, _) = p.stream.take().unwrap();
@@ -302,7 +309,12 @@ pin_project! {
     }
 }
 
-impl<'a, C: quic::Connection<B>, B: Buf> Future for OpenUni<'a, C, B> {
+impl<'a, C, B> Future for OpenUni<'a, C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+    C::SendStream: SendStreamUnframed<B>,
+{
     type Output = Result<SendStream<C::SendStream, B>, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -311,8 +323,7 @@ impl<'a, C: quic::Connection<B>, B: Buf> Future for OpenUni<'a, C, B> {
             match &mut p.stream {
                 Some((send, buf)) => {
                     while buf.has_remaining() {
-                        todo!()
-                        // ready!(send.poll_send(cx, buf))?;
+                        ready!(send.poll_send(cx, buf))?;
                     }
                     let (send, buf) = p.stream.take().unwrap();
                     assert!(!buf.has_remaining());

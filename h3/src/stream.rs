@@ -16,7 +16,7 @@ use crate::{
         stream::StreamType,
         varint::VarInt,
     },
-    quic::{self, BidiStream, RecvStream, SendStream},
+    quic::{self, BidiStream, RecvStream, SendStream, SendStreamUnframed},
     webtransport::SessionId,
     Error,
 };
@@ -501,6 +501,20 @@ where
 
     fn send_data<T: Into<WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error> {
         self.stream.send_data(data)
+    }
+}
+
+impl<S, B> SendStreamUnframed<B> for BufRecvStream<S, B>
+where
+    B: Buf,
+    S: SendStreamUnframed<B>,
+{
+    fn poll_send<D: Buf>(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut D,
+    ) -> Poll<Result<usize, Self::Error>> {
+        self.stream.poll_send(cx, buf)
     }
 }
 

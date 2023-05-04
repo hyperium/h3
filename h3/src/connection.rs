@@ -675,7 +675,6 @@ impl<S, B> ConnectionState for RequestStream<S, B> {
 impl<S, B> RequestStream<S, B>
 where
     S: quic::RecvStream,
-    B: Buf,
 {
     /// Receive some of the request body.
     pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {

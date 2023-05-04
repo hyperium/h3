@@ -8,8 +8,8 @@
 //! ```rust
 //! async fn doc<C>(conn: C)
 //! where
-//! C: h3::quic::Connection,
-//! <C as h3::quic::Connection>::BidiStream: Send + 'static
+//! C: h3::quic::Connection<bytes::Bytes>,
+//! <C as h3::quic::Connection<bytes::Bytes>>::BidiStream: Send + 'static
 //! {
 //!     let mut server_builder = h3::server::builder();
 //!     // Build the Connection

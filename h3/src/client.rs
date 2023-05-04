@@ -65,15 +65,16 @@ where
 /// # use h3::{quic, client::*};
 /// # use http::{Request, Response};
 /// # use bytes::Buf;
-/// # async fn doc<T>(mut send_request: SendRequest<T>) -> Result<(), Box<dyn std::error::Error>>
+/// # async fn doc<T,B>(mut send_request: SendRequest<T, B>) -> Result<(), Box<dyn std::error::Error>>
 /// # where
-/// #     T: quic::OpenStreams,
+/// #     T: quic::OpenStreams<B>,
+/// #     B: Buf,
 /// # {
 /// // Prepare the HTTP request to send to the server
 /// let request = Request::get("https://www.example.com/").body(())?;
 ///
 /// // Send the request to the server
-/// let mut req_stream: RequestStream<_> = send_request.send_request(request).await?;
+/// let mut req_stream: RequestStream<_, _> = send_request.send_request(request).await?;
 /// // Don't forget to end up the request by finishing the send stream.
 /// req_stream.finish().await?;
 /// // Receive the response
@@ -90,9 +91,9 @@ where
 /// # use h3::{quic, client::*};
 /// # use http::{Request, Response, HeaderMap};
 /// # use bytes::{Buf, Bytes};
-/// # async fn doc<T>(mut send_request: SendRequest<T>) -> Result<(), Box<dyn std::error::Error>>
+/// # async fn doc<T,B>(mut send_request: SendRequest<T, Bytes>) -> Result<(), Box<dyn std::error::Error>>
 /// # where
-/// #     T: quic::OpenStreams,
+/// #     T: quic::OpenStreams<Bytes>,
 /// # {
 /// // Prepare the HTTP request to send to the server
 /// let request = Request::get("https://www.example.com/").body(())?;
@@ -100,7 +101,7 @@ where
 /// // Send the request to the server
 /// let mut req_stream = send_request.send_request(request).await?;
 /// // Send some data
-/// req_stream.send_data("body".as_bytes()).await?;
+/// req_stream.send_data("body".into()).await?;
 /// // Prepare the trailers
 /// let mut trailers = HeaderMap::new();
 /// trailers.insert("trailer", "value".parse()?);
@@ -283,12 +284,13 @@ where
 /// # use futures_util::future;
 /// # use h3::{client::*, quic};
 /// # use tokio::task::JoinHandle;
-/// # async fn doc<C>(mut connection: Connection<C>)
+/// # async fn doc<C, B>(mut connection: Connection<C, B>)
 /// #    -> JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>
 /// # where
-/// #    C: quic::Connection + Send + 'static,
+/// #    C: quic::Connection<B> + Send + 'static,
 /// #    C::SendStream: Send + 'static,
 /// #    C::RecvStream: Send + 'static,
+/// #    B: Buf + Send + 'static,
 /// # {
 /// // Run the driver on a different task
 /// tokio::spawn(async move {
@@ -305,12 +307,13 @@ where
 /// # use futures_util::future;
 /// # use h3::{client::*, quic};
 /// # use tokio::{self, sync::oneshot, task::JoinHandle};
-/// # async fn doc<C>(mut connection: Connection<C>)
+/// # async fn doc<C, B>(mut connection: Connection<C, B>)
 /// #    -> Result<(), Box<dyn std::error::Error + Send + Sync>>
 /// # where
-/// #    C: quic::Connection + Send + 'static,
+/// #    C: quic::Connection<B> + Send + 'static,
 /// #    C::SendStream: Send + 'static,
 /// #    C::RecvStream: Send + 'static,
+/// #    B: Buf + Send + 'static,
 /// # {
 /// // Prepare a channel to stop the driver thread
 /// let (shutdown_tx, shutdown_rx) = oneshot::channel();
@@ -466,10 +469,11 @@ where
 /// # Examples
 /// ```rust
 /// # use h3::quic;
-/// # async fn doc<C, O>(quic: C)
+/// # async fn doc<C, O, B>(quic: C)
 /// # where
-/// #   C: quic::Connection<OpenStreams = O>,
-/// #   O: quic::OpenStreams,
+/// #   C: quic::Connection<B, OpenStreams = O>,
+/// #   O: quic::OpenStreams<B>,
+/// #   B: bytes::Buf,
 /// # {
 /// let h3_conn = h3::client::builder()
 ///     .max_field_section_size(8192)
@@ -557,7 +561,7 @@ impl Builder {
 /// # use http::{Request, Response};
 /// # use bytes::Buf;
 /// # use tokio::io::AsyncWriteExt;
-/// # async fn doc<T>(mut req_stream: RequestStream<T>) -> Result<(), Box<dyn std::error::Error>>
+/// # async fn doc<T,B>(mut req_stream: RequestStream<T, B>) -> Result<(), Box<dyn std::error::Error>>
 /// # where
 /// #     T: quic::RecvStream,
 /// # {
@@ -598,7 +602,6 @@ impl<S, B> ConnectionState for RequestStream<S, B> {
 impl<S, B> RequestStream<S, B>
 where
     S: quic::RecvStream,
-    B: Buf,
 {
     /// Receive the HTTP/3 response
     ///

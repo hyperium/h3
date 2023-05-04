@@ -179,20 +179,17 @@ pub trait SendStream<B: Buf> {
     fn send_id(&self) -> StreamId;
 }
 
-/// Allows sending unframed bytes to a stream
-pub trait SendStreamUnframed {
-    /// The error type returned by fallible send methods.
-    type Error: Into<Box<dyn Error>>;
-
+/// Allows sending unframed pure bytes to a stream. Similar to [`AsyncWrite`](https://docs.rs/tokio/latest/tokio/io/trait.AsyncWrite.html)
+pub trait SendStreamUnframed<B: Buf>: SendStream<B> {
     /// Attempts write data into the stream.
     ///
     /// Returns the number of bytes written.
     ///
     /// `buf` is advanced by the number of bytes written.
-    fn poll_send<B: Buf>(
+    fn poll_send<D: Buf>(
         &mut self,
         cx: &mut task::Context<'_>,
-        buf: &mut B,
+        buf: &mut D,
     ) -> Poll<Result<usize, Self::Error>>;
 }
 

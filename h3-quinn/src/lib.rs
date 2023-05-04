@@ -7,6 +7,7 @@ use std::{
     convert::TryInto,
     fmt::{self, Display},
     future::Future,
+    pin::Pin,
     sync::Arc,
     task::{self, Poll},
 };
@@ -345,6 +346,18 @@ where
         self.send.send_id()
     }
 }
+impl<B> quic::SendStreamUnframed<B> for BidiStream<B>
+where
+    B: Buf,
+{
+    fn poll_send<D: Buf>(
+        &mut self,
+        cx: &mut task::Context<'_>,
+        buf: &mut D,
+    ) -> Poll<Result<usize, Self::Error>> {
+        self.send.poll_send(cx, buf)
+    }
+}
 
 /// Quinn-backed receive stream
 ///
@@ -554,6 +567,48 @@ where
             .0
             .try_into()
             .expect("invalid stream id")
+    }
+}
+
+impl<B> quic::SendStreamUnframed<B> for SendStream<B>
+where
+    B: Buf,
+{
+    fn poll_send<D: Buf>(
+        &mut self,
+        cx: &mut task::Context<'_>,
+        buf: &mut D,
+    ) -> Poll<Result<usize, Self::Error>> {
+        if self.writing.is_some() {
+            // This signifies a bug in implementation
+            panic!("poll_send called while send stream is not ready")
+        }
+
+        let s = Pin::new(self.stream.as_mut().unwrap());
+
+        let res = ready!(tokio::io::AsyncWrite::poll_write(s, cx, buf.chunk()));
+        match res {
+            Ok(written) => {
+                buf.advance(written);
+                Poll::Ready(Ok(written))
+            }
+            Err(err) => {
+                // We are forced to use AsyncWrite for now because we cannot store
+                // the result of a call to:
+                // quinn::send_stream::write<'a>(&'a mut self, buf: &'a [u8]) -> Result<usize, WriteError>.
+                //
+                // This is why we have to unpack the error from io::Error instead of having it
+                // returned directly. This should not panic as long as quinn's AsyncWrite impl
+                // doesn't change.
+                let err = err
+                    .into_inner()
+                    .expect("write stream returned an empty error")
+                    .downcast::<WriteError>()
+                    .expect("write stream returned an error which type is not WriteError");
+
+                Poll::Ready(Err(SendStreamError::Write(*err)))
+            }
+        }
     }
 }
 

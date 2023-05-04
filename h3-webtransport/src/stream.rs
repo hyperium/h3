@@ -1,9 +1,9 @@
 use std::task::Poll;
 
 use bytes::{Buf, Bytes};
-use futures_util::{future, ready, AsyncRead, AsyncWrite};
+use futures_util::{ready, AsyncRead, AsyncWrite};
 use h3::{
-    quic::{self, SendStream as _},
+    quic::{self, SendStream as _, SendStreamUnframed},
     stream::BufRecvStream,
 };
 use pin_project_lite::pin_project;
@@ -85,12 +85,7 @@ macro_rules! async_write {
             cx: &mut std::task::Context<'_>,
             mut buf: $buf,
         ) -> Poll<std::io::Result<usize>> {
-            // self.send_data(buf.into())?;
-
-            // ready!(self.poll_ready(cx)?);
-
-            let len = buf.len();
-            Poll::Ready(Ok(len))
+            self.poll_send(cx, &mut buf).map_err(Into::into)
         }
 
         fn poll_flush(
@@ -140,19 +135,17 @@ impl<S, B> SendStream<S, B> {
     }
 }
 
-impl<S, B> SendStream<S, B>
+impl<S, B> quic::SendStreamUnframed<B> for SendStream<S, B>
 where
-    S: quic::SendStream<B>,
+    S: quic::SendStreamUnframed<B>,
     B: Buf,
 {
-    /// Write bytes to the stream.
-    ///
-    /// Returns the number of bytes written
-    pub async fn write(&mut self, buf: impl Buf) -> Result<(), S::Error> {
-        todo!();
-        // self.send_data(buf.into())?;
-        future::poll_fn(|cx| quic::SendStream::poll_ready(self, cx)).await?;
-        Ok(())
+    fn poll_send<D: Buf>(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut D,
+    ) -> Poll<Result<usize, Self::Error>> {
+        self.stream.poll_send(cx, buf)
     }
 }
 
@@ -176,17 +169,17 @@ where
     }
 
     fn send_data<T: Into<h3::stream::WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error> {
-        todo!()
+        self.stream.send_data(data)
     }
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        todo!()
+        self.stream.poll_ready(cx)
     }
 }
 
 impl<S, B> AsyncWrite for SendStream<S, B>
 where
-    S: quic::SendStream<B>,
+    S: quic::SendStream<B> + SendStreamUnframed<B>,
     B: Buf,
     S::Error: Into<std::io::Error>,
 {
@@ -229,11 +222,25 @@ where
     }
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        todo!()
+        self.stream.poll_ready(cx)
     }
 
     fn send_data<T: Into<h3::stream::WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error> {
-        todo!()
+        self.stream.send_data(data)
+    }
+}
+
+impl<S, B> quic::SendStreamUnframed<B> for BidiStream<S, B>
+where
+    S: quic::SendStreamUnframed<B>,
+    B: Buf,
+{
+    fn poll_send<D: Buf>(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut D,
+    ) -> Poll<Result<usize, Self::Error>> {
+        self.stream.poll_send(cx, buf)
     }
 }
 
@@ -284,7 +291,7 @@ where
 
 impl<S, B> AsyncWrite for BidiStream<S, B>
 where
-    S: quic::SendStream<B>,
+    S: SendStreamUnframed<B>,
     S::Error: Into<std::io::Error>,
     B: Buf,
 {

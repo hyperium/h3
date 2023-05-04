@@ -6,6 +6,7 @@ use futures::AsyncRead;
 use futures::AsyncReadExt;
 use futures::AsyncWrite;
 use futures::AsyncWriteExt;
+use h3::quic::SendStreamUnframed;
 use h3_webtransport::server;
 use h3_webtransport::stream;
 use http::Method;
@@ -281,6 +282,8 @@ async fn handle_session_and_echo_all_inbound_messages<C>(
     session: WebTransportSession<C, Bytes>,
 ) -> anyhow::Result<()>
 where
+    // Use trait bounds to ensure we only happen to use implementation that are only for the quinn
+    // backend.
     C: 'static + Send + h3::quic::Connection<Bytes>,
     <C::SendStream as h3::quic::SendStream<Bytes>>::Error:
         'static + std::error::Error + Send + Sync + Into<std::io::Error>,
@@ -295,6 +298,9 @@ where
     C::SendStream: Send + Unpin,
     C::RecvStream: Send + Unpin,
     C::BidiStream: Send + Unpin,
+    stream::SendStream<C::SendStream, Bytes>: AsyncWrite,
+    C::BidiStream: SendStreamUnframed<Bytes>,
+    C::SendStream: SendStreamUnframed<Bytes>,
 {
     let session_id = session.session_id();
 
