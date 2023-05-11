@@ -13,7 +13,7 @@ pub(crate) type TransportError = Box<dyn quic::Error>;
 #[derive(Clone)]
 pub struct Error {
     /// The error kind.
-    pub inner: Box<ErrorImpl>,
+    pub(crate) inner: Box<ErrorImpl>,
 }
 
 /// An HTTP/3 "application error code".
@@ -284,7 +284,6 @@ impl Error {
         matches!(&self.inner.kind, Kind::HeaderTooBig { .. })
     }
 
-    #[cfg(test)]
     #[doc(hidden)]
     pub fn kind(&self) -> Kind {
         self.inner.kind.clone()

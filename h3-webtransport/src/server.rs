@@ -11,7 +11,7 @@ use bytes::{Buf, Bytes};
 use futures_util::{future::poll_fn, ready, Future};
 use h3::{
     connection::ConnectionState,
-    error::Code,
+    error::{Code, ErrorLevel},
     ext::Protocol,
     frame::FrameStream,
     proto::{datagram::Datagram, frame::Frame},
@@ -172,18 +172,19 @@ where
                 // return Ok(None);
             }
             Err(err) => {
-                match err.inner.kind() {
+                match err.kind() {
                     h3::error::Kind::Closed => return Ok(None),
-                    // h3::error::Kind::Application {
-                    //     code,
-                    //     reason,
-                    //     level: ErrorLevel::ConnectionError,
-                    // } => {
-                    //     return Err(self.conn.lock().unwrap().close(
-                    //         code,
-                    //         reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
-                    //     ))
-                    // },
+                    h3::error::Kind::Application {
+                        code,
+                        reason,
+                        level: ErrorLevel::ConnectionError,
+                        ..
+                    } => {
+                        return Err(self.conn.lock().unwrap().close(
+                            code,
+                            reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
+                        ))
+                    }
                     _ => return Err(err),
                 };
             }
