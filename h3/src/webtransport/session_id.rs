@@ -10,7 +10,7 @@ use crate::proto::{
 ///
 /// The session id is the same as the stream id of the CONNECT request.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct SessionId(pub u64);
+pub struct SessionId(u64);
 impl SessionId {
     pub(crate) fn from_varint(id: VarInt) -> SessionId {
         Self(id.0)
