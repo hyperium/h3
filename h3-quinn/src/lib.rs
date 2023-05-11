@@ -24,10 +24,7 @@ pub use quinn::{
 };
 use quinn::{ReadDatagram, SendDatagramError};
 
-use h3::{
-    quic::{self, Error, StreamId},
-    stream::WriteBuf,
-};
+use h3::quic::{self, Error, StreamId, WriteBuf};
 use tokio_util::sync::ReusableBoxFuture;
 
 /// A QUIC connection backed by Quinn
