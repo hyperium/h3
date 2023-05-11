@@ -55,17 +55,17 @@ macro_rules! async_read {
             buf: $buf,
         ) -> Poll<std::io::Result<usize>> {
             // If the buffer i empty, poll for more data
-            if !self.stream.buf_mut().has_remaining() {
+            if !self.stream.has_remaining() {
                 let res = ready!(self.stream.poll_read(cx).map_err(Into::into))?;
                 if res {
                     return Poll::Ready(Ok(0));
                 };
             }
 
-            let bytes = self.stream.buf_mut();
+            let chunk = self.stream.take_chunk(buf.len());
 
             // Do not overfill
-            if let Some(chunk) = bytes.take_chunk(buf.len()) {
+            if let Some(chunk) = chunk {
                 assert!(chunk.len() <= buf.len());
                 let len = chunk.len().min(buf.len());
                 buf[..len].copy_from_slice(&chunk);

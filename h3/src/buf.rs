@@ -4,7 +4,7 @@ use std::io::IoSlice;
 use bytes::{Buf, Bytes};
 
 #[derive(Debug)]
-pub struct BufList<T> {
+pub(crate) struct BufList<T> {
     bufs: VecDeque<T>,
 }
 

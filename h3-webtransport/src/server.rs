@@ -7,7 +7,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use bytes::{Buf, Bytes};
+use bytes::Buf;
 use futures_util::{future::poll_fn, ready, Future};
 use h3::{
     connection::ConnectionState,

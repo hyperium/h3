@@ -431,8 +431,20 @@ impl<B, S: RecvStream> BufRecvStream<S, B> {
 
     /// Returns the currently buffered data, allowing it to be partially read
     #[inline]
-    pub fn buf_mut(&mut self) -> &mut BufList<Bytes> {
+    pub(crate) fn buf_mut(&mut self) -> &mut BufList<Bytes> {
         &mut self.buf
+    }
+
+    /// Returns the next chunk of data from the stream
+    ///
+    /// Return `None` when there is no more buffered data; use [`Self::poll_read`].
+    pub fn take_chunk(&mut self, limit: usize) -> Option<Bytes> {
+        self.buf.take_chunk(limit)
+    }
+
+    /// Returns true if there is remaining buffered data
+    pub fn has_remaining(&mut self) -> bool {
+        self.buf.has_remaining()
     }
 
     #[inline]
