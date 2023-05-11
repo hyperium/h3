@@ -12,19 +12,22 @@ use std::{
     task::{self, Poll},
 };
 
-use bytes::{Buf, Bytes};
+use bytes::{Buf, Bytes, BytesMut};
 
 use futures::{
     ready,
     stream::{self, BoxStream},
     StreamExt,
 };
+use quinn::ReadDatagram;
 pub use quinn::{
     self, crypto::Session, AcceptBi, AcceptUni, Endpoint, OpenBi, OpenUni, VarInt, WriteError,
 };
-use quinn::{ReadDatagram, SendDatagramError};
 
-use h3::quic::{self, Error, StreamId, WriteBuf};
+use h3::{
+    proto::datagram::Datagram,
+    quic::{self, Error, StreamId, WriteBuf},
+};
 use tokio_util::sync::ReusableBoxFuture;
 
 /// A QUIC connection backed by Quinn
@@ -95,6 +98,58 @@ impl From<quinn::ConnectionError> for ConnectionError {
     }
 }
 
+/// Types of errors when sending a datagram.
+#[derive(Debug)]
+pub enum SendDatagramError {
+    /// Datagrams are not supported by the peer
+    UnsupportedByPeer,
+    /// Datagrams are locally disabled
+    Disabled,
+    /// The datagram was too large to be sent.
+    TooLarge,
+    /// Network error
+    ConnectionLost(Box<dyn Error>),
+}
+
+impl fmt::Display for SendDatagramError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SendDatagramError::UnsupportedByPeer => write!(f, "datagrams not supported by peer"),
+            SendDatagramError::Disabled => write!(f, "datagram support disabled"),
+            SendDatagramError::TooLarge => write!(f, "datagram too large"),
+            SendDatagramError::ConnectionLost(_) => write!(f, "connection lost"),
+        }
+    }
+}
+
+impl std::error::Error for SendDatagramError {}
+
+impl Error for SendDatagramError {
+    fn is_timeout(&self) -> bool {
+        false
+    }
+
+    fn err_code(&self) -> Option<u64> {
+        match self {
+            Self::ConnectionLost(err) => err.err_code(),
+            _ => None,
+        }
+    }
+}
+
+impl From<quinn::SendDatagramError> for SendDatagramError {
+    fn from(value: quinn::SendDatagramError) -> Self {
+        match value {
+            quinn::SendDatagramError::UnsupportedByPeer => Self::UnsupportedByPeer,
+            quinn::SendDatagramError::Disabled => Self::Disabled,
+            quinn::SendDatagramError::TooLarge => Self::TooLarge,
+            quinn::SendDatagramError::ConnectionLost(err) => {
+                Self::ConnectionLost(ConnectionError::from(err).into())
+            }
+        }
+    }
+}
+
 impl<B> quic::Connection<B> for Connection
 where
     B: Buf,
@@ -104,18 +159,6 @@ where
     type BidiStream = BidiStream<B>;
     type OpenStreams = OpenStreams;
     type Error = ConnectionError;
-
-    #[inline]
-    fn poll_accept_datagram(
-        &mut self,
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Bytes>, Self::Error>> {
-        match ready!(self.datagrams.poll_next_unpin(cx)) {
-            Some(Ok(x)) => Poll::Ready(Ok(Some(x))),
-            Some(Err(e)) => Poll::Ready(Err(e.into())),
-            None => Poll::Ready(Ok(None)),
-        }
-    }
 
     fn poll_accept_bidi(
         &mut self,
@@ -174,20 +217,6 @@ where
         Poll::Ready(Ok(Self::SendStream::new(send)))
     }
 
-    fn send_datagram(&mut self, data: Bytes) -> Result<(), quic::SendDatagramError> {
-        match self.conn.send_datagram(data) {
-            Ok(v) => Ok(v),
-            Err(SendDatagramError::Disabled) => Err(quic::SendDatagramError::Disabled),
-            Err(SendDatagramError::TooLarge) => Err(quic::SendDatagramError::TooLarge),
-            Err(SendDatagramError::UnsupportedByPeer) => {
-                Err(quic::SendDatagramError::UnsupportedByPeer)
-            }
-            Err(SendDatagramError::ConnectionLost(err)) => Err(
-                quic::SendDatagramError::ConnectionLost(ConnectionError::from(err).into()),
-            ),
-        }
-    }
-
     fn opener(&self) -> Self::OpenStreams {
         OpenStreams {
             conn: self.conn.clone(),
@@ -201,6 +230,40 @@ where
             VarInt::from_u64(code.value()).expect("error code VarInt"),
             reason,
         );
+    }
+}
+
+impl<B> quic::SendDatagramExt<B> for Connection
+where
+    B: Buf,
+{
+    type Error = SendDatagramError;
+
+    fn send_datagram(&mut self, data: Datagram<B>) -> Result<(), SendDatagramError> {
+        // TODO investigate static buffer from known max datagram size
+        let mut buf = BytesMut::new();
+        data.encode(&mut buf);
+        self.conn.send_datagram(buf.freeze())?;
+
+        Ok(())
+    }
+}
+
+impl quic::RecvDatagramExt for Connection {
+    type Buf = Bytes;
+
+    type Error = ConnectionError;
+
+    #[inline]
+    fn poll_accept_datagram(
+        &mut self,
+        cx: &mut task::Context<'_>,
+    ) -> Poll<Result<Option<Self::Buf>, Self::Error>> {
+        match ready!(self.datagrams.poll_next_unpin(cx)) {
+            Some(Ok(x)) => Poll::Ready(Ok(Some(x))),
+            Some(Err(e)) => Poll::Ready(Err(e.into())),
+            None => Poll::Ready(Ok(None)),
+        }
     }
 }
 

@@ -15,7 +15,7 @@ use h3::{
     ext::Protocol,
     frame::FrameStream,
     proto::{datagram::Datagram, frame::Frame},
-    quic::{self, OpenStreams, WriteBuf},
+    quic::{self, OpenStreams, RecvDatagramExt, SendDatagramExt, WriteBuf},
     server::{self, Connection, RequestStream},
     Error,
 };
@@ -138,7 +138,10 @@ where
     /// Sends a datagram
     ///
     /// TODO: maybe make async. `quinn` does not require an async send
-    pub fn send_datagram(&self, data: impl Buf) -> Result<(), Error> {
+    pub fn send_datagram(&self, data: B) -> Result<(), Error>
+    where
+        C: SendDatagramExt<B>,
+    {
         self.conn
             .lock()
             .unwrap()
@@ -365,10 +368,10 @@ pub struct ReadDatagram<C, B> {
 
 impl<C, B> Future for ReadDatagram<C, B>
 where
-    C: quic::Connection<B>,
+    C: quic::Connection<B> + RecvDatagramExt,
     B: Buf,
 {
-    type Output = Result<Option<(SessionId, Bytes)>, Error>;
+    type Output = Result<Option<(SessionId, C::Buf)>, Error>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut conn = self.conn.lock().unwrap();

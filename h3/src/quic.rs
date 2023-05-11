@@ -3,11 +3,11 @@
 //! This module includes traits and types meant to allow being generic over any
 //! QUIC implementation.
 
-use core::fmt;
 use std::task::{self, Poll};
 
-use bytes::{Buf, Bytes};
+use bytes::Buf;
 
+use crate::proto::datagram::Datagram;
 pub use crate::proto::stream::{InvalidStreamId, StreamId};
 pub use crate::stream::WriteBuf;
 
@@ -27,45 +27,6 @@ pub trait Error: std::error::Error + Send + Sync {
 impl<'a, E: Error + 'a> From<E> for Box<dyn Error + 'a> {
     fn from(err: E) -> Box<dyn Error + 'a> {
         Box::new(err)
-    }
-}
-
-/// Types of erros that *specifically* arises when sending a datagram.
-#[derive(Debug)]
-pub enum SendDatagramError {
-    /// Datagrams are not supported by the peer
-    UnsupportedByPeer,
-    /// Datagrams are locally disabled
-    Disabled,
-    /// The datagram was too large to be sent.
-    TooLarge,
-    /// Network error
-    ConnectionLost(Box<dyn Error>),
-}
-
-impl fmt::Display for SendDatagramError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SendDatagramError::UnsupportedByPeer => write!(f, "datagrams not supported by peer"),
-            SendDatagramError::Disabled => write!(f, "datagram support disabled"),
-            SendDatagramError::TooLarge => write!(f, "datagram too large"),
-            SendDatagramError::ConnectionLost(_) => write!(f, "connection lost"),
-        }
-    }
-}
-
-impl std::error::Error for SendDatagramError {}
-
-impl Error for SendDatagramError {
-    fn is_timeout(&self) -> bool {
-        false
-    }
-
-    fn err_code(&self) -> Option<u64> {
-        match self {
-            Self::ConnectionLost(err) => err.err_code(),
-            _ => None,
-        }
     }
 }
 
@@ -120,15 +81,33 @@ pub trait Connection<B: Buf> {
 
     /// Close the connection immediately
     fn close(&mut self, code: crate::error::Code, reason: &[u8]);
+}
+
+/// Extends the `Connection` trait for sending datagrams
+///
+/// See: https://www.rfc-editor.org/rfc/rfc9297
+pub trait SendDatagramExt<B: Buf> {
+    /// The error type that can occur when sending a datagram
+    type Error: Into<Box<dyn Error>>;
+
+    /// Send a datagram
+    fn send_datagram(&mut self, data: Datagram<B>) -> Result<(), Self::Error>;
+}
+
+/// Extends the `Connection` trait for receiving datagrams
+///
+/// See: https://www.rfc-editor.org/rfc/rfc9297
+pub trait RecvDatagramExt {
+    /// The type of `Buf` for *raw* datagrams (without the stream_id decoded)
+    type Buf: Buf;
+    /// The error type that can occur when receiving a datagram
+    type Error: Into<Box<dyn Error>>;
 
     /// Poll the connection for incoming datagrams.
     fn poll_accept_datagram(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Bytes>, Self::Error>>;
-
-    /// Send a datagram
-    fn send_datagram(&mut self, data: Bytes) -> Result<(), SendDatagramError>;
+    ) -> Poll<Result<Option<Self::Buf>, Self::Error>>;
 }
 
 /// Trait for opening outgoing streams

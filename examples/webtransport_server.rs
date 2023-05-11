@@ -6,6 +6,8 @@ use futures::AsyncRead;
 use futures::AsyncReadExt;
 use futures::AsyncWrite;
 use futures::AsyncWriteExt;
+use h3::quic::RecvDatagramExt;
+use h3::quic::SendDatagramExt;
 use h3::quic::SendStreamUnframed;
 use h3_webtransport::server;
 use h3_webtransport::stream;
@@ -284,7 +286,11 @@ async fn handle_session_and_echo_all_inbound_messages<C>(
 where
     // Use trait bounds to ensure we only happen to use implementation that are only for the quinn
     // backend.
-    C: 'static + Send + h3::quic::Connection<Bytes>,
+    C: 'static
+        + Send
+        + h3::quic::Connection<Bytes>
+        + RecvDatagramExt<Buf = Bytes>
+        + SendDatagramExt<Bytes>,
     <C::SendStream as h3::quic::SendStream<Bytes>>::Error:
         'static + std::error::Error + Send + Sync + Into<std::io::Error>,
     <C::RecvStream as h3::quic::RecvStream>::Error:
@@ -320,7 +326,7 @@ where
                     let mut resp = BytesMut::from(&b"Response: "[..]);
                     resp.put(datagram);
 
-                    session.send_datagram(resp)?;
+                    session.send_datagram(resp.freeze())?;
                     tracing::info!("Finished sending datagram");
                 }
             }

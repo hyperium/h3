@@ -81,7 +81,7 @@ use crate::{
         varint::VarInt,
     },
     qpack,
-    quic::{self, SendStream as _},
+    quic::{self, RecvDatagramExt, SendDatagramExt, SendStream as _},
     request::ResolveRequest,
     stream::{self, BufRecvStream},
 };
@@ -341,28 +341,6 @@ where
         )))
     }
 
-    /// Reads an incoming datagram
-    pub fn read_datagram(&self) -> ReadDatagram<C, B> {
-        ReadDatagram {
-            conn: &self.inner.conn,
-            _marker: PhantomData,
-        }
-    }
-
-    /// Sends a datagram
-    pub fn send_datagram(&self, stream_id: StreamId, data: impl Buf) -> Result<(), Error> {
-        let mut buf = BytesMut::with_capacity(8 + data.remaining());
-
-        // Encode::encode(&Datagram::new(stream_id, data), &mut buf);
-        Datagram::new(stream_id, data).encode(&mut buf);
-
-        let buf = buf.freeze();
-        self.inner.conn.lock().unwrap().send_datagram(buf)?;
-        tracing::info!("Sent datagram");
-
-        Ok(())
-    }
-
     /// Initiate a graceful shutdown, accepting `max_request` potentially still in-flight
     ///
     /// See [connection shutdown](https://www.rfc-editor.org/rfc/rfc9114.html#connection-shutdown) for more information.
@@ -491,6 +469,38 @@ where
                     }
                 }
             }
+        }
+    }
+}
+
+impl<C, B> Connection<C, B>
+where
+    C: quic::Connection<B> + SendDatagramExt<B>,
+    B: Buf,
+{
+    /// Sends a datagram
+    pub fn send_datagram(&self, stream_id: StreamId, data: B) -> Result<(), Error> {
+        self.inner
+            .conn
+            .lock()
+            .unwrap()
+            .send_datagram(Datagram::new(stream_id, data))?;
+        tracing::info!("Sent datagram");
+
+        Ok(())
+    }
+}
+
+impl<C, B> Connection<C, B>
+where
+    C: quic::Connection<B> + RecvDatagramExt,
+    B: Buf,
+{
+    /// Reads an incoming datagram
+    pub fn read_datagram(&self) -> ReadDatagram<C, B> {
+        ReadDatagram {
+            conn: &self.inner.conn,
+            _marker: PhantomData,
         }
     }
 }
@@ -881,10 +891,10 @@ pub struct ReadDatagram<'a, C, B> {
 
 impl<'a, C, B> Future for ReadDatagram<'a, C, B>
 where
-    C: quic::Connection<B>,
+    C: quic::Connection<B> + RecvDatagramExt,
     B: Buf,
 {
-    type Output = Result<Option<Datagram>, Error>;
+    type Output = Result<Option<Datagram<C::Buf>>, Error>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         tracing::trace!("poll: read_datagram");
