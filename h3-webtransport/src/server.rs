@@ -12,11 +12,12 @@ use futures_util::{future::poll_fn, ready, Future};
 use h3::{
     connection::ConnectionState,
     error::Code,
+    ext::Protocol,
     frame::FrameStream,
     proto::{datagram::Datagram, frame::Frame},
     quic::{self, OpenStreams, WriteBuf},
     server::{self, Connection, RequestStream},
-    Error, Protocol,
+    Error,
 };
 use h3::{
     quic::SendStreamUnframed,

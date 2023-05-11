@@ -18,9 +18,9 @@ use tracing::{error, info, trace_span};
 
 use h3::{
     error::ErrorLevel,
+    ext::Protocol,
     quic,
     server::{Config, Connection},
-    Protocol,
 };
 use h3_quinn::quinn;
 use h3_webtransport::server::WebTransportSession;

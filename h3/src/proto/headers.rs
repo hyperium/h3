@@ -11,7 +11,7 @@ use http::{
     Extensions, HeaderMap, Method, StatusCode,
 };
 
-use crate::qpack::HeaderField;
+use crate::{ext::Protocol, qpack::HeaderField};
 
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq, Clone))]
@@ -308,22 +308,6 @@ where
     R::from_str(s).map_err(|_| HeaderError::invalid_value(name, value))
 }
 
-#[derive(Copy, PartialEq, Debug, Clone)]
-/// Describes the `:protocol` pseudo-header for extended connect
-///
-/// See: [https://www.rfc-editor.org/rfc/rfc8441#section-4]
-pub struct Protocol(ProtocolInner);
-
-impl Protocol {
-    /// WebTransport protocol
-    pub const WEB_TRANSPORT: Protocol = Protocol(ProtocolInner::WebTransport);
-}
-
-#[derive(Copy, PartialEq, Debug, Clone)]
-enum ProtocolInner {
-    WebTransport,
-}
-
 /// Pseudo-header fields have the same purpose as data from the first line of HTTP/1.X,
 /// but are conveyed along with other headers. For example ':method' and ':path' in a
 /// request, and ':status' in a response. They must be placed before all other fields,
@@ -350,19 +334,6 @@ struct Pseudo {
     protocol: Option<Protocol>,
 
     len: usize,
-}
-
-pub struct InvalidProtocol;
-
-impl FromStr for Protocol {
-    type Err = InvalidProtocol;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "webtransport" => Ok(Self(ProtocolInner::WebTransport)),
-            _ => Err(InvalidProtocol),
-        }
-    }
 }
 
 #[allow(clippy::len_without_is_empty)]
