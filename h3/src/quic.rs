@@ -198,7 +198,7 @@ pub trait RecvStream {
     /// The type of `Buf` for data received on this stream.
     type Buf: Buf;
     /// The error type that can occur when receiving data.
-    type Error: 'static + Error;
+    type Error: Into<Box<dyn Error>>;
 
     /// Poll the stream for more data.
     ///
