@@ -55,7 +55,7 @@ use std::{
     marker::PhantomData,
     option::Option,
     result::Result,
-    sync::{Arc, Mutex},
+    sync::Arc,
     task::{Context, Poll},
 };
 
