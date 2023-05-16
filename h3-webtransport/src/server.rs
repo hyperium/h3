@@ -42,7 +42,8 @@ where
 {
     // See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-2-3
     session_id: SessionId,
-    conn: Mutex<Connection<C, B>>,
+    /// The underlying HTTP/3 connection
+    server_conn: Mutex<Connection<C, B>>,
     connect_stream: RequestStream<C::BidiStream, B>,
     opener: Mutex<C::OpenStreams>,
 }
@@ -122,7 +123,7 @@ where
         Ok(Self {
             session_id,
             opener,
-            conn: Mutex::new(conn),
+            server_conn: Mutex::new(conn),
             connect_stream: stream,
         })
     }
@@ -130,7 +131,7 @@ where
     /// Receive a datagram from the client
     pub fn accept_datagram(&self) -> ReadDatagram<C, B> {
         ReadDatagram {
-            conn: self.conn.lock().unwrap().inner.conn.clone(),
+            conn: self.server_conn.lock().unwrap().inner.conn.clone(),
             _marker: PhantomData,
         }
     }
@@ -142,7 +143,7 @@ where
     where
         C: SendDatagramExt<B>,
     {
-        self.conn
+        self.server_conn
             .lock()
             .unwrap()
             .send_datagram(self.connect_stream.id(), data)?;
@@ -152,7 +153,9 @@ where
 
     /// Accept an incoming unidirectional stream from the client, it reads the stream until EOF.
     pub fn accept_uni(&self) -> AcceptUni<C, B> {
-        AcceptUni { conn: &self.conn }
+        AcceptUni {
+            conn: &self.server_conn,
+        }
     }
 
     /// Accepts an incoming bidirectional stream or request
@@ -160,7 +163,7 @@ where
         // Get the next stream
         // Accept the incoming stream
         let stream = poll_fn(|cx| {
-            let mut conn = self.conn.lock().unwrap();
+            let mut conn = self.server_conn.lock().unwrap();
             conn.poll_accept_request(cx)
         })
         .await;
@@ -183,7 +186,7 @@ where
                         level: ErrorLevel::ConnectionError,
                         ..
                     } => {
-                        return Err(self.conn.lock().unwrap().close(
+                        return Err(self.server_conn.lock().unwrap().close(
                             code,
                             reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
                         ))
@@ -212,7 +215,7 @@ where
             // Make the underlying HTTP/3 connection handle the rest
             frame => {
                 let req = {
-                    let mut conn = self.conn.lock().unwrap();
+                    let mut conn = self.server_conn.lock().unwrap();
                     conn.accept_with_frame(stream, frame)?
                 };
                 if let Some(req) = req {
