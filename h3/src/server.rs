@@ -147,11 +147,6 @@ where
         builder().build(conn).await
     }
 
-    /// Create a new HTTP/3 server connection using the provided settings.
-    pub async fn with_config(conn: C, config: Config) -> Result<Self, Error> {
-        Builder { config }.build(conn).await
-    }
-
     /// Closes the connection with a code and a reason.
     pub fn close<T: AsRef<str>>(&mut self, code: Code, reason: T) -> Error {
         self.inner.close(code, reason)
@@ -544,60 +539,6 @@ pub struct Config {
     pub max_webtransport_sessions: u64,
 }
 
-impl Config {
-    /// Creates a new HTTP/3 config with default settings
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Set the maximum header size this client is willing to accept
-    ///
-    /// See [header size constraints] section of the specification for details.
-    ///
-    /// [header size constraints]: https://www.rfc-editor.org/rfc/rfc9114.html#name-header-size-constraints
-    #[inline]
-    pub fn max_field_section_size(&mut self, value: u64) {
-        self.max_field_section_size = value;
-    }
-
-    /// Send grease values to the Client.
-    /// See [setting](https://www.rfc-editor.org/rfc/rfc9114.html#settings-parameters), [frame](https://www.rfc-editor.org/rfc/rfc9114.html#frame-reserved) and [stream](https://www.rfc-editor.org/rfc/rfc9114.html#stream-grease) for more information.
-    #[inline]
-    pub fn send_grease(&mut self, value: bool) {
-        self.send_grease = value;
-    }
-
-    /// Indicates to the peer that WebTransport is supported.
-    ///
-    /// See: [establishing a webtransport session](https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-3.1)
-    ///
-    ///
-    /// **Server**:
-    /// Supporting for webtransport also requires setting `enable_connect` `enable_datagram`
-    /// and `max_webtransport_sessions`.
-    #[inline]
-    pub fn enable_webtransport(&mut self, value: bool) {
-        self.enable_webtransport = value;
-    }
-
-    /// Enables the CONNECT protocol
-    pub fn enable_connect(&mut self, value: bool) {
-        self.enable_extended_connect = value;
-    }
-
-    /// Limits the maximum number of WebTransport sessions
-    pub fn max_webtransport_sessions(&mut self, value: u64) {
-        self.max_webtransport_sessions = value;
-    }
-
-    /// Indicates that the client or server supports HTTP/3 datagrams
-    ///
-    /// See: https://www.rfc-editor.org/rfc/rfc9297#section-2.1.1
-    pub fn enable_datagram(&mut self, value: bool) {
-        self.enable_datagram = value;
-    }
-}
-
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -664,22 +605,49 @@ impl Builder {
     ///
     /// [header size constraints]: https://www.rfc-editor.org/rfc/rfc9114.html#name-header-size-constraints
     pub fn max_field_section_size(&mut self, value: u64) -> &mut Self {
-        self.config.max_field_section_size(value);
+        self.config.max_field_section_size = value;
         self
     }
 
     /// Send grease values to the Client.
     /// See [setting](https://www.rfc-editor.org/rfc/rfc9114.html#settings-parameters), [frame](https://www.rfc-editor.org/rfc/rfc9114.html#frame-reserved) and [stream](https://www.rfc-editor.org/rfc/rfc9114.html#stream-grease) for more information.
+    #[inline]
     pub fn send_grease(&mut self, value: bool) -> &mut Self {
-        self.config.send_grease(value);
+        self.config.send_grease = value;
         self
     }
 
     /// Indicates to the peer that WebTransport is supported.
     ///
-    /// See [establishing a webtransport session](https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-3.1)
+    /// See: [establishing a webtransport session](https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-3.1)
+    ///
+    ///
+    /// **Server**:
+    /// Supporting for webtransport also requires setting `enable_connect` `enable_datagram`
+    /// and `max_webtransport_sessions`.
+    #[inline]
     pub fn enable_webtransport(&mut self, value: bool) -> &mut Self {
-        self.config.enable_webtransport(value);
+        self.config.enable_webtransport = value;
+        self
+    }
+
+    /// Enables the CONNECT protocol
+    pub fn enable_connect(&mut self, value: bool) -> &mut Self {
+        self.config.enable_extended_connect = value;
+        self
+    }
+
+    /// Limits the maximum number of WebTransport sessions
+    pub fn max_webtransport_sessions(&mut self, value: u64) -> &mut Self {
+        self.config.max_webtransport_sessions = value;
+        self
+    }
+
+    /// Indicates that the client or server supports HTTP/3 datagrams
+    ///
+    /// See: https://www.rfc-editor.org/rfc/rfc9297#section-2.1.1
+    pub fn enable_datagram(&mut self, value: bool) -> &mut Self {
+        self.config.enable_datagram = value;
         self
     }
 }

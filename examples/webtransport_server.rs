@@ -1,31 +1,23 @@
-use anyhow::Context;
-use anyhow::Result;
-use bytes::Bytes;
-use bytes::{BufMut, BytesMut};
-use futures::AsyncRead;
-use futures::AsyncReadExt;
-use futures::AsyncWrite;
-use futures::AsyncWriteExt;
-use h3::quic::RecvDatagramExt;
-use h3::quic::SendDatagramExt;
-use h3::quic::SendStreamUnframed;
-use h3_webtransport::server;
-use h3_webtransport::stream;
+use anyhow::{Context, Result};
+use bytes::{BufMut, Bytes, BytesMut};
+use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use h3::{
+    error::ErrorLevel,
+    ext::Protocol,
+    quic::{self, RecvDatagramExt, SendDatagramExt, SendStreamUnframed},
+    server::Connection,
+};
+use h3_quinn::quinn;
+use h3_webtransport::{
+    server::{self, WebTransportSession},
+    stream,
+};
 use http::Method;
 use rustls::{Certificate, PrivateKey};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use structopt::StructOpt;
 use tokio::pin;
 use tracing::{error, info, trace_span};
-
-use h3::{
-    error::ErrorLevel,
-    ext::Protocol,
-    quic,
-    server::{Config, Connection},
-};
-use h3_quinn::quinn;
-use h3_webtransport::server::WebTransportSession;
 
 #[derive(StructOpt, Debug)]
 #[structopt(name = "server")]
@@ -118,14 +110,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("listening on {}", opt.listen);
 
-    // 1. Configure h3 server, since this is a webtransport server, we need to enable webtransport, connect, and datagram
-    let mut h3_config = Config::new();
-    h3_config.enable_webtransport(true);
-    h3_config.enable_connect(true);
-    h3_config.enable_datagram(true);
-    h3_config.max_webtransport_sessions(16);
-    h3_config.send_grease(true);
-
     // 2. Accept new quic connections and spawn a new task to handle them
     while let Some(new_conn) = endpoint.accept().await {
         trace_span!("New connection being attempted");
@@ -134,12 +118,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match new_conn.await {
                 Ok(conn) => {
                     info!("new http3 established");
-                    let h3_conn = h3::server::Connection::with_config(
-                        h3_quinn::Connection::new(conn),
-                        h3_config,
-                    )
-                    .await
-                    .unwrap();
+                    let h3_conn = h3::server::builder()
+                        .enable_webtransport(true)
+                        .enable_connect(true)
+                        .enable_datagram(true)
+                        .max_webtransport_sessions(1)
+                        .send_grease(true)
+                        .build(h3_quinn::Connection::new(conn))
+                        .await
+                        .unwrap();
 
                     // tracing::info!("Establishing WebTransport session");
                     // // 3. TODO: Conditionally, if the client indicated that this is a webtransport session, we should accept it here, else use regular h3.
