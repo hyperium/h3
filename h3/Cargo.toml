@@ -20,7 +20,7 @@ categories = [
 ]
 
 [features]
-allow_access_to_core = []
+i-implement-a-third-party-backend-and-opt-into-breaking-changes = []
 
 [dependencies]
 bytes = "1"

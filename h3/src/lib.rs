@@ -13,31 +13,31 @@ pub use error::Error;
 
 mod buf;
 
-#[cfg(feature = "allow_access_to_core")]
+#[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
 #[allow(missing_docs)]
 pub mod connection;
-#[cfg(feature = "allow_access_to_core")]
+#[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
 #[allow(missing_docs)]
 pub mod frame;
-#[cfg(feature = "allow_access_to_core")]
+#[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
 #[allow(missing_docs)]
 pub mod proto;
-#[cfg(feature = "allow_access_to_core")]
+#[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
 #[allow(missing_docs)]
 pub mod stream;
-#[cfg(feature = "allow_access_to_core")]
+#[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
 #[allow(missing_docs)]
 pub mod webtransport;
 
-#[cfg(not(feature = "allow_access_to_core"))]
+#[cfg(not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"))]
 mod connection;
-#[cfg(not(feature = "allow_access_to_core"))]
+#[cfg(not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"))]
 mod frame;
-#[cfg(not(feature = "allow_access_to_core"))]
+#[cfg(not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"))]
 mod proto;
-#[cfg(not(feature = "allow_access_to_core"))]
+#[cfg(not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"))]
 mod stream;
-#[cfg(not(feature = "allow_access_to_core"))]
+#[cfg(not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"))]
 mod webtransport;
 
 #[allow(dead_code)]
