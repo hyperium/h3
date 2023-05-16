@@ -55,7 +55,7 @@ use std::{
     marker::PhantomData,
     option::Option,
     result::Result,
-    sync::Arc,
+    sync::{Arc, Mutex},
     task::{Context, Poll},
 };
 
@@ -65,6 +65,7 @@ use futures_util::{
     ready,
 };
 use http::{response, HeaderMap, Request, Response};
+use pin_project_lite::pin_project;
 use quic::RecvStream;
 use quic::StreamId;
 use tokio::sync::mpsc;
@@ -474,11 +475,9 @@ where
     B: Buf,
 {
     /// Sends a datagram
-    pub fn send_datagram(&self, stream_id: StreamId, data: B) -> Result<(), Error> {
+    pub fn send_datagram(&mut self, stream_id: StreamId, data: B) -> Result<(), Error> {
         self.inner
             .conn
-            .lock()
-            .unwrap()
             .send_datagram(Datagram::new(stream_id, data))?;
         tracing::info!("Sent datagram");
 
@@ -492,9 +491,9 @@ where
     B: Buf,
 {
     /// Reads an incoming datagram
-    pub fn read_datagram(&self) -> ReadDatagram<C, B> {
+    pub fn read_datagram(&mut self) -> ReadDatagram<C, B> {
         ReadDatagram {
-            conn: &self.inner.conn,
+            conn: self,
             _marker: PhantomData,
         }
     }
@@ -851,10 +850,16 @@ impl Drop for RequestEnd {
     }
 }
 
-/// Future for [`Connection::read_datagram`]
-pub struct ReadDatagram<'a, C, B> {
-    conn: &'a std::sync::Mutex<C>,
-    _marker: PhantomData<B>,
+pin_project! {
+    /// Future for [`Connection::read_datagram`]
+    pub struct ReadDatagram<'a, C, B>
+    where
+            C: quic::Connection<B>,
+            B: Buf,
+        {
+            conn: &'a mut Connection<C, B>,
+            _marker: PhantomData<B>,
+        }
 }
 
 impl<'a, C, B> Future for ReadDatagram<'a, C, B>
@@ -864,9 +869,9 @@ where
 {
     type Output = Result<Option<Datagram<C::Buf>>, Error>;
 
-    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         tracing::trace!("poll: read_datagram");
-        match ready!(self.conn.lock().unwrap().poll_accept_datagram(cx))? {
+        match ready!(self.conn.inner.conn.poll_accept_datagram(cx))? {
             Some(v) => Poll::Ready(Ok(Some(Datagram::decode(v)?))),
             None => Poll::Ready(Ok(None)),
         }

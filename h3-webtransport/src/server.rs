@@ -3,7 +3,7 @@
 use std::{
     marker::PhantomData,
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::Mutex,
     task::{Context, Poll},
 };
 
@@ -116,9 +116,8 @@ where
         stream.send_response(response).await?;
 
         let session_id = stream.send_id().into();
-        let conn_inner = conn.inner.conn.lock().unwrap();
+        let conn_inner = &mut conn.inner.conn;
         let opener = Mutex::new(conn_inner.opener());
-        drop(conn_inner);
 
         Ok(Self {
             session_id,
@@ -131,7 +130,7 @@ where
     /// Receive a datagram from the client
     pub fn accept_datagram(&self) -> ReadDatagram<C, B> {
         ReadDatagram {
-            conn: self.server_conn.lock().unwrap().inner.conn.clone(),
+            conn: &self.server_conn,
             _marker: PhantomData,
         }
     }
@@ -364,12 +363,16 @@ pub enum AcceptedBi<C: quic::Connection<B>, B: Buf> {
 }
 
 /// Future for [`Connection::read_datagram`]
-pub struct ReadDatagram<C, B> {
-    conn: Arc<Mutex<C>>,
+pub struct ReadDatagram<'a, C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    conn: &'a Mutex<Connection<C, B>>,
     _marker: PhantomData<B>,
 }
 
-impl<C, B> Future for ReadDatagram<C, B>
+impl<'a, C, B> Future for ReadDatagram<'a, C, B>
 where
     C: quic::Connection<B> + RecvDatagramExt,
     B: Buf,
@@ -378,7 +381,7 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut conn = self.conn.lock().unwrap();
-        match ready!(conn.poll_accept_datagram(cx))? {
+        match ready!(conn.inner.conn.poll_accept_datagram(cx))? {
             Some(v) => {
                 let datagram = Datagram::decode(v)?;
                 Poll::Ready(Ok(Some((datagram.stream_id().into(), datagram.payload))))

@@ -1,6 +1,6 @@
 use std::{
     convert::TryFrom,
-    sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard},
+    sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
     task::{Context, Poll},
 };
 
@@ -103,7 +103,7 @@ where
 {
     pub(super) shared: SharedStateRef,
     /// TODO: breaking encapsulation just to see if we can get this to work, will fix before merging
-    pub conn: Arc<Mutex<C>>,
+    pub conn: C,
     control_send: C::SendStream,
     control_recv: Option<FrameStream<C::RecvStream, B>>,
     decoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
@@ -237,7 +237,6 @@ where
         //# The
         //# sender MUST NOT close the control stream, and the receiver MUST NOT
         //# request that the sender close the control stream.
-        let conn = Arc::new(Mutex::new(conn));
         let mut conn_inner = Self {
             shared,
             conn,
@@ -309,11 +308,7 @@ where
         // Accept the request by accepting the next bidirectional stream
         // .into().into() converts the impl QuicError into crate::error::Error.
         // The `?` operator doesn't work here for some reason.
-        self.conn
-            .lock()
-            .unwrap()
-            .poll_accept_bidi(cx)
-            .map_err(|e| e.into().into())
+        self.conn.poll_accept_bidi(cx).map_err(|e| e.into().into())
     }
 
     /// Polls incoming streams
@@ -326,7 +321,7 @@ where
 
         // Get all currently pending streams
         loop {
-            match self.conn.lock().unwrap().poll_accept_recv(cx)? {
+            match self.conn.poll_accept_recv(cx)? {
                 Poll::Ready(Some(stream)) => self
                     .pending_recv_streams
                     .push(AcceptRecvStream::new(stream)),
@@ -579,10 +574,7 @@ where
     pub fn close<T: AsRef<str>>(&mut self, code: Code, reason: T) -> Error {
         self.shared.write("connection close err").error =
             Some(code.with_reason(reason.as_ref(), crate::error::ErrorLevel::ConnectionError));
-        self.conn
-            .lock()
-            .unwrap()
-            .close(code, reason.as_ref().as_bytes());
+        self.conn.close(code, reason.as_ref().as_bytes());
         code.with_reason(reason.as_ref(), crate::error::ErrorLevel::ConnectionError)
     }
 
@@ -590,17 +582,16 @@ where
     /// https://www.rfc-editor.org/rfc/rfc9114.html#stream-grease
     async fn start_grease_stream(&mut self) {
         // start the stream
-        let mut grease_stream =
-            match future::poll_fn(|cx| self.conn.lock().unwrap().poll_open_send(cx))
-                .await
-                .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))
-            {
-                Err(err) => {
-                    warn!("grease stream creation failed with {}", err);
-                    return;
-                }
-                Ok(grease) => grease,
-            };
+        let mut grease_stream = match future::poll_fn(|cx| self.conn.poll_open_send(cx))
+            .await
+            .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))
+        {
+            Err(err) => {
+                warn!("grease stream creation failed with {}", err);
+                return;
+            }
+            Ok(grease) => grease,
+        };
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
         //# Stream types of the format 0x1f * N + 0x21 for non-negative integer
