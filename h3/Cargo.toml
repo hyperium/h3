@@ -35,15 +35,14 @@ fastrand = "1.9.0"
 assert_matches = "1.5.0"
 futures-util = { version = "0.3", default-features = false, features = ["io"] }
 proptest = "1"
-quinn = { version = "0.9.3", default-features = false, features = [
-    "futures-io",
+quinn = { version = "0.10", default-features = false, features = [
     "runtime-tokio",
     "tls-rustls",
     "ring",
 ] }
-quinn-proto = { version = "0.9.2", default-features = false }
+quinn-proto = { version = "0.10", default-features = false }
 rcgen = "0.10"
-rustls = "0.20"
+rustls = "0.21"
 tokio = { version = "1", features = ["rt", "macros", "io-util", "io-std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = [
     "fmt",
