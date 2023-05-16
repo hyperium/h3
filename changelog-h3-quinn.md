@@ -1,3 +1,7 @@
+### v0.0.3 (2023-05-16)
+
+* Update dependencies (quinn 0.10 and rustls 0.21) ([fabf614](https://github.com/hyperium/h3/commit/fabf6149c9ee57d7803ea5fb4426f895cbb5d244))
+
 ### v0.0.2 (2023-04-11)
 
 #### Bug Fixes
