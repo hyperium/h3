@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use bytes::{BufMut, Bytes, BytesMut};
-use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use h3::{
     error::ErrorLevel,
     ext::Protocol,
@@ -16,6 +15,7 @@ use http::Method;
 use rustls::{Certificate, PrivateKey};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use structopt::StructOpt;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::pin;
 use tracing::{error, info, trace_span};
 
@@ -257,7 +257,7 @@ where
         .context("Failed to respond")?;
 
     let mut resp = Vec::new();
-    stream.close().await?;
+    stream.shutdown().await?;
     stream.read_to_end(&mut resp).await?;
 
     tracing::info!("Got response from client: {resp:?}");

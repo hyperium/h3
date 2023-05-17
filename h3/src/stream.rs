@@ -1,10 +1,13 @@
 use std::{
     marker::PhantomData,
+    pin::Pin,
     task::{Context, Poll},
 };
 
 use bytes::{Buf, BufMut, Bytes};
 use futures_util::{future, ready};
+use pin_project_lite::pin_project;
+use tokio::io::ReadBuf;
 
 use crate::{
     buf::BufList,
@@ -373,23 +376,25 @@ where
     }
 }
 
-/// A stream which allows partial reading of the data without data loss.
-///
-/// This fixes the problem where `poll_data` returns more than the needed amount of bytes,
-/// requiring correct implementations to hold on to that extra data and return it later.
-///
-/// # Usage
-///
-/// Implements `quic::RecvStream` which will first return buffered data, and then read from the
-/// stream
-pub struct BufRecvStream<S, B> {
-    buf: BufList<Bytes>,
-    /// Indicates that the end of the stream has been reached
+pin_project! {
+    /// A stream which allows partial reading of the data without data loss.
     ///
-    /// Data may still be available as buffered
-    eos: bool,
-    stream: S,
-    _marker: PhantomData<B>,
+    /// This fixes the problem where `poll_data` returns more than the needed amount of bytes,
+    /// requiring correct implementations to hold on to that extra data and return it later.
+    ///
+    /// # Usage
+    ///
+    /// Implements `quic::RecvStream` which will first return buffered data, and then read from the
+    /// stream
+    pub struct BufRecvStream<S, B> {
+        buf: BufList<Bytes>,
+        // Indicates that the end of the stream has been reached
+        //
+        // Data may still be available as buffered
+        eos: bool,
+        stream: S,
+        _marker: PhantomData<B>,
+    }
 }
 
 impl<S, B> std::fmt::Debug for BufRecvStream<S, B> {
@@ -521,6 +526,7 @@ where
     B: Buf,
     S: SendStreamUnframed<B>,
 {
+    #[inline]
     fn poll_send<D: Buf>(
         &mut self,
         cx: &mut std::task::Context<'_>,
@@ -556,6 +562,127 @@ where
                 _marker: PhantomData,
             },
         )
+    }
+}
+
+impl<S, B> futures_util::io::AsyncRead for BufRecvStream<S, B>
+where
+    B: Buf,
+    S: RecvStream,
+    S::Error: Into<std::io::Error>,
+{
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut [u8],
+    ) -> Poll<futures_util::io::Result<usize>> {
+        let p = &mut *self;
+        // Poll for data if the buffer is empty
+        //
+        // If there is data available *do not* poll for more data, as that may suspend indefinitely
+        // if no more data is sent, causing data loss.
+        if !p.has_remaining() {
+            let eos = ready!(p.poll_read(cx).map_err(Into::into))?;
+            if eos {
+                return Poll::Ready(Ok(0));
+            }
+        }
+
+        let chunk = p.buf_mut().take_chunk(buf.len());
+        if let Some(chunk) = chunk {
+            assert!(chunk.len() <= buf.len());
+            let len = chunk.len().min(buf.len());
+            // Write the subset into the destination
+            buf[..len].copy_from_slice(&chunk);
+            Poll::Ready(Ok(len))
+        } else {
+            Poll::Ready(Ok(0))
+        }
+    }
+}
+
+impl<S, B> tokio::io::AsyncRead for BufRecvStream<S, B>
+where
+    B: Buf,
+    S: RecvStream,
+    S::Error: Into<std::io::Error>,
+{
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<futures_util::io::Result<()>> {
+        let p = &mut *self;
+        // Poll for data if the buffer is empty
+        //
+        // If there is data available *do not* poll for more data, as that may suspend indefinitely
+        // if no more data is sent, causing data loss.
+        if !p.has_remaining() {
+            let eos = ready!(p.poll_read(cx).map_err(Into::into))?;
+            if eos {
+                return Poll::Ready(Ok(()));
+            }
+        }
+
+        let chunk = p.buf_mut().take_chunk(buf.remaining());
+        if let Some(chunk) = chunk {
+            assert!(chunk.len() <= buf.remaining());
+            // Write the subset into the destination
+            buf.put_slice(&chunk);
+            Poll::Ready(Ok(()))
+        } else {
+            Poll::Ready(Ok(()))
+        }
+    }
+}
+
+impl<S, B> futures_util::io::AsyncWrite for BufRecvStream<S, B>
+where
+    B: Buf,
+    S: SendStreamUnframed<B>,
+    S::Error: Into<std::io::Error>,
+{
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        mut buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        let p = &mut *self;
+        p.poll_send(cx, &mut buf).map_err(Into::into)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        let p = &mut *self;
+        p.poll_finish(cx).map_err(Into::into)
+    }
+}
+
+impl<S, B> tokio::io::AsyncWrite for BufRecvStream<S, B>
+where
+    B: Buf,
+    S: SendStreamUnframed<B>,
+    S::Error: Into<std::io::Error>,
+{
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        mut buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        let p = &mut *self;
+        p.poll_send(cx, &mut buf).map_err(Into::into)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        let p = &mut *self;
+        p.poll_finish(cx).map_err(Into::into)
     }
 }
 

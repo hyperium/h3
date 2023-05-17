@@ -1,16 +1,14 @@
 use std::task::Poll;
 
 use bytes::{Buf, Bytes};
-use futures_util::{ready, AsyncRead, AsyncWrite};
-use h3::{
-    quic::{self, SendStream as _, SendStreamUnframed},
-    stream::BufRecvStream,
-};
+use h3::{quic, stream::BufRecvStream};
 use pin_project_lite::pin_project;
+use tokio::io::ReadBuf;
 
 pin_project! {
     /// WebTransport receive stream
     pub struct RecvStream<S,B> {
+        #[pin]
         stream: BufRecvStream<S, B>,
     }
 }
@@ -47,75 +45,38 @@ where
     }
 }
 
-macro_rules! async_read {
-    ($buf: ty) => {
-        fn poll_read(
-            mut self: std::pin::Pin<&mut Self>,
-            cx: &mut std::task::Context<'_>,
-            buf: $buf,
-        ) -> Poll<std::io::Result<usize>> {
-            // If the buffer i empty, poll for more data
-            if !self.stream.has_remaining() {
-                let res = ready!(self.stream.poll_read(cx).map_err(Into::into))?;
-                if res {
-                    return Poll::Ready(Ok(0));
-                };
-            }
-
-            let chunk = self.stream.take_chunk(buf.len());
-
-            // Do not overfill
-            if let Some(chunk) = chunk {
-                assert!(chunk.len() <= buf.len());
-                let len = chunk.len().min(buf.len());
-                buf[..len].copy_from_slice(&chunk);
-
-                Poll::Ready(Ok(len))
-            } else {
-                Poll::Ready(Ok(0))
-            }
-        }
-    };
-}
-
-macro_rules! async_write {
-    ($buf: ty) => {
-        fn poll_write(
-            mut self: std::pin::Pin<&mut Self>,
-            cx: &mut std::task::Context<'_>,
-            mut buf: $buf,
-        ) -> Poll<std::io::Result<usize>> {
-            self.poll_send(cx, &mut buf).map_err(Into::into)
-        }
-
-        fn poll_flush(
-            self: std::pin::Pin<&mut Self>,
-            _: &mut std::task::Context<'_>,
-        ) -> Poll<std::io::Result<()>> {
-            Poll::Ready(Ok(()))
-        }
-
-        fn poll_close(
-            mut self: std::pin::Pin<&mut Self>,
-            cx: &mut std::task::Context<'_>,
-        ) -> Poll<std::io::Result<()>> {
-            self.poll_finish(cx).map_err(Into::into)
-        }
-    };
-}
-
-impl<S, B> AsyncRead for RecvStream<S, B>
+impl<S, B> futures_util::io::AsyncRead for RecvStream<S, B>
 where
-    S: quic::RecvStream,
-    S::Error: Into<std::io::Error>,
-    B: Buf,
+    BufRecvStream<S, B>: futures_util::io::AsyncRead,
 {
-    async_read!(&mut [u8]);
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut [u8],
+    ) -> Poll<std::io::Result<usize>> {
+        let p = self.project();
+        p.stream.poll_read(cx, buf)
+    }
+}
+
+impl<S, B> tokio::io::AsyncRead for RecvStream<S, B>
+where
+    BufRecvStream<S, B>: tokio::io::AsyncRead,
+{
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let p = self.project();
+        p.stream.poll_read(cx, buf)
+    }
 }
 
 pin_project! {
     /// WebTransport send stream
     pub struct SendStream<S,B> {
+        #[pin]
         stream: BufRecvStream<S ,B>,
     }
 }
@@ -177,13 +138,64 @@ where
     }
 }
 
-impl<S, B> AsyncWrite for SendStream<S, B>
+impl<S, B> futures_util::io::AsyncWrite for SendStream<S, B>
 where
-    S: quic::SendStream<B> + SendStreamUnframed<B>,
-    B: Buf,
-    S::Error: Into<std::io::Error>,
+    BufRecvStream<S, B>: futures_util::io::AsyncWrite,
 {
-    async_write!(&[u8]);
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        let p = self.project();
+        p.stream.poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let p = self.project();
+        p.stream.poll_flush(cx)
+    }
+
+    fn poll_close(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let p = self.project();
+        p.stream.poll_close(cx)
+    }
+}
+
+impl<S, B> tokio::io::AsyncWrite for SendStream<S, B>
+where
+    BufRecvStream<S, B>: tokio::io::AsyncWrite,
+{
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        let p = self.project();
+        p.stream.poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let p = self.project();
+        p.stream.poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let p = self.project();
+        p.stream.poll_shutdown(cx)
+    }
 }
 
 pin_project! {
@@ -192,6 +204,7 @@ pin_project! {
     /// Can be split into a [`RecvStream`] and [`SendStream`] if the underlying QUIC implementation
     /// supports it.
     pub struct BidiStream<S, B> {
+        #[pin]
         stream: BufRecvStream<S, B>,
     }
 }
@@ -280,20 +293,90 @@ where
     }
 }
 
-impl<S, B> AsyncRead for BidiStream<S, B>
+impl<S, B> futures_util::io::AsyncRead for BidiStream<S, B>
 where
-    S: quic::RecvStream,
-    S::Error: Into<std::io::Error>,
-    B: Buf,
+    BufRecvStream<S, B>: futures_util::io::AsyncRead,
 {
-    async_read!(&mut [u8]);
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut [u8],
+    ) -> Poll<std::io::Result<usize>> {
+        let p = self.project();
+        p.stream.poll_read(cx, buf)
+    }
 }
 
-impl<S, B> AsyncWrite for BidiStream<S, B>
+impl<S, B> futures_util::io::AsyncWrite for BidiStream<S, B>
 where
-    S: SendStreamUnframed<B>,
-    S::Error: Into<std::io::Error>,
-    B: Buf,
+    BufRecvStream<S, B>: futures_util::io::AsyncWrite,
 {
-    async_write!(&[u8]);
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        let p = self.project();
+        p.stream.poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let p = self.project();
+        p.stream.poll_flush(cx)
+    }
+
+    fn poll_close(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let p = self.project();
+        p.stream.poll_close(cx)
+    }
+}
+
+impl<S, B> tokio::io::AsyncRead for BidiStream<S, B>
+where
+    BufRecvStream<S, B>: tokio::io::AsyncRead,
+{
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let p = self.project();
+        p.stream.poll_read(cx, buf)
+    }
+}
+
+impl<S, B> tokio::io::AsyncWrite for BidiStream<S, B>
+where
+    BufRecvStream<S, B>: tokio::io::AsyncWrite,
+{
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        let p = self.project();
+        p.stream.poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let p = self.project();
+        p.stream.poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let p = self.project();
+        p.stream.poll_shutdown(cx)
+    }
 }
