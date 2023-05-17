@@ -170,11 +170,9 @@ where
         let mut stream = match stream {
             Ok(Some(s)) => FrameStream::new(BufRecvStream::new(s)),
             Ok(None) => {
-                // We always send a last GoAway frame to the client, so it knows which was the last
-                // non-rejected request.
-                // self.shutdown(0).await?;
-                todo!("shutdown");
-                // return Ok(None);
+                // FIXME: is proper HTTP GoAway shutdown required?
+                panic!("");
+                return Ok(None);
             }
             Err(err) => {
                 match err.kind() {
