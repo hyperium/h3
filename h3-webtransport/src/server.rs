@@ -171,7 +171,6 @@ where
             Ok(Some(s)) => FrameStream::new(BufRecvStream::new(s)),
             Ok(None) => {
                 // FIXME: is proper HTTP GoAway shutdown required?
-                panic!("");
                 return Ok(None);
             }
             Err(err) => {
