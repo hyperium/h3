@@ -141,7 +141,7 @@ where
 {
     /// Create a new HTTP/3 server connection with default settings
     ///
-    /// Use [`Self::with_config`] or a custom [`Builder`] with [`builder()`] to create a connection
+    /// Use a custom [`Builder`] with [`builder()`] to create a connection
     /// with different settings.
     /// Provide a Connection which implements [`quic::Connection`].
     pub async fn new(conn: C) -> Result<Self, Error> {
