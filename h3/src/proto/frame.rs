@@ -220,7 +220,7 @@ impl fmt::Debug for Frame<PayloadLen> {
             Frame::Goaway(id) => write!(f, "GoAway({})", id),
             Frame::MaxPushId(id) => write!(f, "MaxPushId({})", id),
             Frame::Grease => write!(f, "Grease()"),
-            Frame::WebTransportStream(session) => write!(f, "WebTransportStream({session:?})"),
+            Frame::WebTransportStream(session) => write!(f, "WebTransportStream({:?})", session),
         }
     }
 }
@@ -536,7 +536,7 @@ impl Settings {
                 //# H3_SETTINGS_ERROR.
                 settings.insert(identifier, value)?;
             } else {
-                tracing::warn!("Unsupported setting: {identifier:#x?}");
+                tracing::warn!("Unsupported setting: {:#x?}", identifier);
             }
         }
         Ok(settings)

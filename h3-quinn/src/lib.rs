@@ -25,7 +25,7 @@ pub use quinn::{
 };
 
 use h3::{
-    proto::datagram::Datagram,
+    ext::Datagram,
     quic::{self, Error, StreamId, WriteBuf},
 };
 use tokio_util::sync::ReusableBoxFuture;
@@ -646,7 +646,7 @@ where
 
         let s = Pin::new(self.stream.as_mut().unwrap());
 
-        let res = ready!(tokio::io::AsyncWrite::poll_write(s, cx, buf.chunk()));
+        let res = ready!(futures::io::AsyncWrite::poll_write(s, cx, buf.chunk()));
         match res {
             Ok(written) => {
                 buf.advance(written);

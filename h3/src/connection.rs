@@ -177,7 +177,7 @@ where
             .insert(SettingId::H3_DATAGRAM, config.enable_datagram as u64)
             .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
 
-        tracing::debug!("Sending server settings: {settings:#x?}");
+        tracing::debug!("Sending server settings: {:#x?}", settings);
 
         if config.send_grease {
             //  Grease Settings (https://www.rfc-editor.org/rfc/rfc9114.html#name-defined-settings-parameters)
@@ -225,7 +225,7 @@ where
         //# Endpoints MUST NOT require any data to be received from
         //# the peer prior to sending the SETTINGS frame; settings MUST be sent
         //# as soon as the transport is ready to send data.
-        trace!("Sending Settings frame: {settings:#x?}");
+        trace!("Sending Settings frame: {:#x?}", settings);
         stream::write(
             &mut control_send,
             WriteBuf::from(UniStreamHeader::Control(settings)),

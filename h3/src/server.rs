@@ -74,9 +74,9 @@ use crate::{
     config::Config,
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
     error::{Code, Error, ErrorLevel},
+    ext::Datagram,
     frame::{FrameStream, FrameStreamError},
     proto::{
-        datagram::Datagram,
         frame::{Frame, PayloadLen},
         headers::Header,
         push::PushId,

@@ -12,9 +12,9 @@ use futures_util::{future::poll_fn, ready, Future};
 use h3::{
     connection::ConnectionState,
     error::{Code, ErrorLevel},
-    ext::Protocol,
+    ext::{Datagram, Protocol},
     frame::FrameStream,
-    proto::{datagram::Datagram, frame::Frame},
+    proto::frame::Frame,
     quic::{self, OpenStreams, RecvDatagramExt, SendDatagramExt, WriteBuf},
     server::{self, Connection, RequestStream},
     Error,
