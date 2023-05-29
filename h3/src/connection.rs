@@ -11,6 +11,7 @@ use stream::WriteBuf;
 use tracing::{trace, warn};
 
 use crate::{
+    config::Config,
     error::{Code, Error},
     frame::FrameStream,
     proto::{
@@ -21,7 +22,6 @@ use crate::{
     },
     qpack,
     quic::{self, SendStream as _},
-    server::Config,
     stream::{self, AcceptRecvStream, AcceptedRecvStream, BufRecvStream, UniStreamHeader},
     webtransport::SessionId,
 };

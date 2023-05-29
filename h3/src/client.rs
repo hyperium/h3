@@ -13,13 +13,13 @@ use http::{request, HeaderMap, Response};
 use tracing::{info, trace};
 
 use crate::{
+    config::Config,
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
     error::{Code, Error, ErrorLevel},
     frame::FrameStream,
     proto::{frame::Frame, headers::Header, push::PushId},
     qpack,
     quic::{self, StreamId},
-    server::Config,
     stream::{self, BufRecvStream},
 };
 
