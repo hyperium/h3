@@ -15,7 +15,7 @@ pub struct Config {
     /// This means that the dynamic table used for HPACK compression can have a maximum size of 2^12 bytes, which is 4KB.
     pub max_field_section_size: u64,
 
-    //=https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-3.1
+    /// https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-3.1
     /// Sets `SETTINGS_ENABLE_WEBTRANSPORT` if enabled
     pub enable_webtransport: bool,
     /// https://www.rfc-editor.org/info/rfc8441 defines an extended CONNECT method in Section 4,
