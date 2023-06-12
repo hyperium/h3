@@ -19,11 +19,15 @@ categories = [
     "web-programming::http-server",
 ]
 
+[features]
+i-implement-a-third-party-backend-and-opt-into-breaking-changes = []
+
 [dependencies]
 bytes = "1"
 futures-util = { version = "0.3", default-features = false }
 http = "0.2.9"
 tokio = { version = "1", features = ["sync"] }
+pin-project-lite = { version = "0.2", default_features = false }
 tracing = "0.1.37"
 fastrand = "1.9.0"
 

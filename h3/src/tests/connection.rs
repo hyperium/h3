@@ -144,7 +144,8 @@ async fn settings_exchange_client() {
                 if client
                     .shared_state()
                     .read("client")
-                    .peer_max_field_section_size
+                    .peer_config
+                    .max_field_section_size
                     == 12
                 {
                     return;
@@ -202,7 +203,12 @@ async fn settings_exchange_server() {
 
         let settings_change = async {
             for _ in 0..10 {
-                if state.read("setting_change").peer_max_field_section_size == 12 {
+                if state
+                    .read("setting_change")
+                    .peer_config
+                    .max_field_section_size
+                    == 12
+                {
                     return;
                 }
                 tokio::time::sleep(Duration::from_millis(2)).await;
