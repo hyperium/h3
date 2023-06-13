@@ -95,7 +95,7 @@ where
 
         // Respond to the CONNECT request.
 
-        //= https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-3.3
+        // See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-3.3
         let response = if validate_wt_connect(&request) {
             Response::builder()
                 // This is the only header that chrome cares about.

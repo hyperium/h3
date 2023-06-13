@@ -2,6 +2,9 @@
 
 An async HTTP/3 implementation that supports WebTransport.
 
+[![crates.io](https://img.shields.io/crates/v/sec-http3.svg)](https://crates.io/crates/sec-http3)
+[![docs.rs](https://docs.rs/sec-http3/badge.svg)](https://docs.rs/sec-http3)
+
 ### WebTransport Server
 
 You can find a full server example in [`examples/webtransport_server.rs`](./examples/webtransport_server.rs)
