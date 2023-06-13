@@ -27,6 +27,7 @@ use crate::{
 };
 
 #[doc(hidden)]
+#[non_exhaustive]
 pub struct SharedState {
     // Peer settings
     pub peer_config: Config,

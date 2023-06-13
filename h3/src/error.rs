@@ -40,16 +40,9 @@ impl PartialEq<u64> for Code {
 
 /// The error kind.
 #[derive(Clone)]
-pub struct ErrorImpl {
+pub(crate) struct ErrorImpl {
     pub(crate) kind: Kind,
     cause: Option<Arc<Cause>>,
-}
-
-impl ErrorImpl {
-    /// Returns the error kind
-    pub fn kind(&self) -> &Kind {
-        &self.kind
-    }
 }
 
 /// Some errors affect the whole connection, others only one Request or Stream.

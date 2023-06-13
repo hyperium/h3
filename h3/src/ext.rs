@@ -47,7 +47,7 @@ pub struct Datagram<B = Bytes> {
     /// Stream id divided by 4
     stream_id: StreamId,
     /// The data contained in the datagram
-    pub payload: B,
+    payload: B,
 }
 
 impl<B> Datagram<B>
@@ -100,5 +100,10 @@ where
     pub fn encode<D: bytes::BufMut>(self, buf: &mut D) {
         (VarInt::from(self.stream_id) / 4).encode(buf);
         buf.put(self.payload);
+    }
+
+    /// Returns the datagram payload
+    pub fn into_payload(self) -> B {
+        self.payload
     }
 }

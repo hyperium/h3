@@ -65,14 +65,14 @@ where
         {
             let config = shared.write("Read WebTransport support").peer_config;
 
-            if !config.enable_webtransport {
+            if !config.enable_webtransport() {
                 return Err(conn.close(
                     Code::H3_SETTINGS_ERROR,
                     "webtransport is not supported by client",
                 ));
             }
 
-            if !config.enable_datagram {
+            if !config.enable_datagram() {
                 return Err(conn.close(
                     Code::H3_SETTINGS_ERROR,
                     "datagrams are not supported by client",
@@ -84,15 +84,15 @@ where
         //
         // However, it is still advantageous to show a log on the server as (attempting) to
         // establish a WebTransportSession without the proper h3 config is usually a mistake.
-        if !conn.inner.config.enable_webtransport {
+        if !conn.inner.config.enable_webtransport() {
             tracing::warn!("Server does not support webtransport");
         }
 
-        if !conn.inner.config.enable_datagram {
+        if !conn.inner.config.enable_datagram() {
             tracing::warn!("Server does not support datagrams");
         }
 
-        if !conn.inner.config.enable_extended_connect {
+        if !conn.inner.config.enable_extended_connect() {
             tracing::warn!("Server does not support CONNECT");
         }
 
@@ -381,7 +381,10 @@ where
         match ready!(conn.inner.conn.poll_accept_datagram(cx))? {
             Some(v) => {
                 let datagram = Datagram::decode(v)?;
-                Poll::Ready(Ok(Some((datagram.stream_id().into(), datagram.payload))))
+                Poll::Ready(Ok(Some((
+                    datagram.stream_id().into(),
+                    datagram.into_payload(),
+                ))))
             }
             None => Poll::Ready(Ok(None)),
         }
