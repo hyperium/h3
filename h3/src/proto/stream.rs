@@ -5,6 +5,8 @@ use std::{
     ops::Add,
 };
 
+use crate::webtransport::SessionId;
+
 use super::{
     coding::{BufExt, BufMutExt, Decode, Encode, UnexpectedEnd},
     varint::VarInt,
@@ -26,6 +28,8 @@ stream_types! {
     PUSH = 0x01,
     ENCODER = 0x02,
     DECODER = 0x03,
+    WEBTRANSPORT_BIDI = 0x41,
+    WEBTRANSPORT_UNI = 0x54,
 }
 
 impl StreamType {
@@ -59,6 +63,7 @@ impl fmt::Display for StreamType {
             &StreamType::CONTROL => write!(f, "Control"),
             &StreamType::ENCODER => write!(f, "Encoder"),
             &StreamType::DECODER => write!(f, "Decoder"),
+            &StreamType::WEBTRANSPORT_UNI => write!(f, "WebTransportUni"),
             x => write!(f, "StreamType({})", x.0),
         }
     }
@@ -116,7 +121,7 @@ impl StreamId {
     }
 
     /// Distinguishes streams of the same initiator and directionality
-    fn index(self) -> u64 {
+    pub fn index(self) -> u64 {
         self.0 >> 2
     }
 
@@ -127,6 +132,10 @@ impl StreamId {
         } else {
             Dir::Uni
         }
+    }
+
+    pub(crate) fn into_inner(self) -> u64 {
+        self.0
     }
 }
 
@@ -154,7 +163,7 @@ impl From<StreamId> for VarInt {
 
 /// Invalid StreamId, for example because it's too large
 #[derive(Debug, PartialEq)]
-pub struct InvalidStreamId(u64);
+pub struct InvalidStreamId(pub(crate) u64);
 
 impl Display for InvalidStreamId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -178,6 +187,12 @@ impl Add<usize> for StreamId {
             VarInt::MAX.0 >> 2,
         );
         Self::new(index, self.dir(), self.initiator())
+    }
+}
+
+impl From<SessionId> for StreamId {
+    fn from(value: SessionId) -> Self {
+        Self(value.into_inner())
     }
 }
 

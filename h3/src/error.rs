@@ -12,6 +12,7 @@ pub(crate) type TransportError = Box<dyn quic::Error>;
 /// A general error that can occur when handling the HTTP/3 protocol.
 #[derive(Clone)]
 pub struct Error {
+    /// The error kind.
     pub(crate) inner: Box<ErrorImpl>,
 }
 
@@ -37,6 +38,7 @@ impl PartialEq<u64> for Code {
     }
 }
 
+/// The error kind.
 #[derive(Clone)]
 pub(crate) struct ErrorImpl {
     pub(crate) kind: Kind,
@@ -110,6 +112,9 @@ macro_rules! codes {
 }
 
 codes! {
+    /// Datagram or capsule parse error
+    /// See: https://www.rfc-editor.org/rfc/rfc9297#section-5.2
+    (0x33, H3_DATAGRAM_ERROR);
     /// No error. This is used when the connection or stream needs to be
     /// closed, but there is no error to signal.
     (0x100, H3_NO_ERROR);
@@ -272,7 +277,6 @@ impl Error {
         matches!(&self.inner.kind, Kind::HeaderTooBig { .. })
     }
 
-    #[cfg(test)]
     #[doc(hidden)]
     pub fn kind(&self) -> Kind {
         self.inner.kind.clone()

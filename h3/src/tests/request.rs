@@ -381,7 +381,8 @@ async fn header_too_big_client_error() {
             client
                 .shared_state()
                 .write("client")
-                .peer_max_field_section_size = 12;
+                .peer_config
+                .max_field_section_size = 12;
 
             let req = Request::get("http://localhost/salut").body(()).unwrap();
             let err_kind = client
@@ -432,7 +433,8 @@ async fn header_too_big_client_error_trailer() {
             client
                 .shared_state()
                 .write("client")
-                .peer_max_field_section_size = 200;
+                .peer_config
+                .max_field_section_size = 200;
 
             let mut request_stream = client
                 .send_request(Request::get("http://localhost/salut").body(()).unwrap())
@@ -541,7 +543,8 @@ async fn header_too_big_discard_from_client() {
         incoming_req
             .shared_state()
             .write("client")
-            .peer_max_field_section_size = u64::MAX;
+            .peer_config
+            .max_field_section_size = u64::MAX;
         request_stream
             .send_response(
                 Response::builder()
@@ -594,6 +597,7 @@ async fn header_too_big_discard_from_client_trailers() {
             .build::<_, _, Bytes>(pair.client().await)
             .await
             .expect("client init");
+
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
         let req_fut = async {
             let mut request_stream = client
@@ -627,7 +631,8 @@ async fn header_too_big_discard_from_client_trailers() {
         incoming_req
             .shared_state()
             .write("server")
-            .peer_max_field_section_size = u64::MAX;
+            .peer_config
+            .max_field_section_size = u64::MAX;
 
         request_stream
             .send_response(
@@ -698,7 +703,8 @@ async fn header_too_big_server_error() {
         incoming_req
             .shared_state()
             .write("server")
-            .peer_max_field_section_size = 12;
+            .peer_config
+            .max_field_section_size = 12;
 
         let err_kind = request_stream
             .send_response(
@@ -778,7 +784,8 @@ async fn header_too_big_server_error_trailers() {
         incoming_req
             .shared_state()
             .write("write")
-            .peer_max_field_section_size = 200;
+            .peer_config
+            .max_field_section_size = 200;
 
         let mut trailers = HeaderMap::new();
         trailers.insert("trailer", "value".repeat(100).parse().unwrap());
@@ -1332,7 +1339,7 @@ fn request_encode<B: BufMut>(buf: &mut B, req: http::Request<()>) {
         headers,
         ..
     } = parts;
-    let headers = Header::request(method, uri, headers).unwrap();
+    let headers = Header::request(method, uri, headers, Default::default()).unwrap();
     let mut block = BytesMut::new();
     qpack::encode_stateless(&mut block, headers).unwrap();
     Frame::headers(block).encode_with_payload(buf);
