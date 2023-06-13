@@ -13,3 +13,9 @@ target/
 # macOS
 .DS_Store
 ._*
+
+# Example Certificates
+localhost-key.pem
+localhost.crt
+localhost.key
+localhost.pem

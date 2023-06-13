@@ -1,42 +1,46 @@
 [package]
-name = "h3"
-version = "0.0.2"
-rust-version = "1.57"
+name = "sec-http3"
+version = "0.1.0"
+rust-version = "1.63"
 authors = [
-    "Sean McArthur <sean@seanmonstar.com>",
-    "Jean-Christophe BEGUE <jc.begue@pm.me>",
+    "Dario Lencina <dario@securityunion.dev>",
+    "Tei Leelo Roberts <ten3roberts@gmail.com>",
 ]
 license = "MIT"
 edition = "2018"
-documentation = "https://docs.rs/h3"
-repository = "https://github.com/hyperium/h3"
+documentation = "https://docs.rs/sec-http3"
+repository = "https://github.com/security-union/sec-http3"
 readme = "../README.md"
-description = "An async HTTP/3 implementation."
-keywords = ["http3", "quic", "h3"]
+description = "An async HTTP/3 implementation that supports web transport."
+keywords = ["http3", "quic", "sec-http3"]
 categories = [
     "network-programming",
     "web-programming::http-client",
     "web-programming::http-server",
+    "webtransport",
 ]
 
 [dependencies]
 bytes = "1"
-futures-util = { version = "0.3", default-features = false }
+futures-util = { version = "0.3", default-features = false, features = ["io"] }
 http = "0.2.9"
 tokio = { version = "1", features = ["sync"] }
+pin-project-lite = { version = "0.2", default_features = false }
 tracing = "0.1.37"
 fastrand = "1.9.0"
-
-[dev-dependencies]
-assert_matches = "1.5.0"
-futures-util = { version = "0.3", default-features = false, features = ["io"] }
-proptest = "1"
 quinn = { version = "0.10", default-features = false, features = [
     "runtime-tokio",
     "tls-rustls",
     "ring",
+    "futures-io",
 ] }
 quinn-proto = { version = "0.10", default-features = false }
+futures = { version = "0.3.27" }
+tokio-util = { version = "0.7.7" }
+
+[dev-dependencies]
+assert_matches = "1.5.0"
+proptest = "1"
 rcgen = "0.10"
 rustls = "0.21"
 tokio = { version = "1", features = ["rt", "macros", "io-util", "io-std"] }
@@ -47,5 +51,6 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
     "time",
     "tracing-log",
 ] }
-futures = { version = "0.3.27" }
-tokio-util = { version = "0.7.7" }
+
+
+bytes = "1"

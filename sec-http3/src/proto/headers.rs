@@ -8,10 +8,10 @@ use std::{
 use http::{
     header::{self, HeaderName, HeaderValue},
     uri::{self, Authority, Parts, PathAndQuery, Scheme, Uri},
-    HeaderMap, Method, StatusCode,
+    Extensions, HeaderMap, Method, StatusCode,
 };
 
-use crate::qpack::HeaderField;
+use crate::{ext::Protocol, qpack::HeaderField};
 
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq, Clone))]
@@ -22,12 +22,18 @@ pub struct Header {
 
 #[allow(clippy::len_without_is_empty)]
 impl Header {
-    pub fn request(method: Method, uri: Uri, fields: HeaderMap) -> Result<Self, HeaderError> {
+    /// Creates a new `Header` frame data suitable for sending a request
+    pub fn request(
+        method: Method,
+        uri: Uri,
+        fields: HeaderMap,
+        ext: Extensions,
+    ) -> Result<Self, HeaderError> {
         match (uri.authority(), fields.get("host")) {
             (None, None) => Err(HeaderError::MissingAuthority),
             (Some(a), Some(h)) if a.as_str() != h => Err(HeaderError::ContradictedAuthority),
             _ => Ok(Self {
-                pseudo: Pseudo::request(method, uri),
+                pseudo: Pseudo::request(method, uri, ext),
                 fields,
             }),
         }
@@ -50,7 +56,9 @@ impl Header {
         }
     }
 
-    pub fn into_request_parts(self) -> Result<(Method, Uri, HeaderMap), HeaderError> {
+    pub fn into_request_parts(
+        self,
+    ) -> Result<(Method, Uri, Option<Protocol>, HeaderMap), HeaderError> {
         let mut uri = Uri::builder();
 
         if let Some(path) = self.pseudo.path {
@@ -92,6 +100,7 @@ impl Header {
         Ok((
             self.pseudo.method.ok_or(HeaderError::MissingMethod)?,
             uri.build().map_err(HeaderError::InvalidRequest)?,
+            self.pseudo.protocol,
             self.fields,
         ))
     }
@@ -221,6 +230,10 @@ impl TryFrom<Vec<HeaderField>> for Header {
                 Field::Header((n, v)) => {
                     fields.append(n, v);
                 }
+                Field::Protocol(p) => {
+                    pseudo.protocol = Some(p);
+                    pseudo.len += 1;
+                }
             }
         }
 
@@ -234,6 +247,7 @@ enum Field {
     Authority(Authority),
     Path(PathAndQuery),
     Status(StatusCode),
+    Protocol(Protocol),
     Header((HeaderName, HeaderValue)),
 }
 
@@ -277,6 +291,7 @@ impl Field {
                 StatusCode::from_bytes(value.as_ref())
                     .map_err(|_| HeaderError::invalid_value(name, value))?,
             ),
+            b":protocol" => Field::Protocol(try_value(name, value)?),
             _ => return Err(HeaderError::invalid_name(name)),
         })
     }
@@ -316,12 +331,14 @@ struct Pseudo {
     // Response
     status: Option<StatusCode>,
 
+    protocol: Option<Protocol>,
+
     len: usize,
 }
 
 #[allow(clippy::len_without_is_empty)]
 impl Pseudo {
-    fn request(method: Method, uri: Uri) -> Self {
+    fn request(method: Method, uri: Uri, ext: Extensions) -> Self {
         let Parts {
             scheme,
             authority,
@@ -345,7 +362,16 @@ impl Pseudo {
             },
         );
 
-        let len = 3 + if authority.is_some() { 1 } else { 0 };
+        // If the method is connect, the `:protocol` pseudo-header MAY be defined
+        //
+        // See: [https://www.rfc-editor.org/rfc/rfc8441#section-4]
+        let protocol = if method == Method::CONNECT {
+            ext.get::<Protocol>().copied()
+        } else {
+            None
+        };
+
+        let len = 3 + authority.is_some() as usize + protocol.is_some() as usize;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3
         //= type=implication
@@ -364,6 +390,7 @@ impl Pseudo {
             authority,
             path: Some(path),
             status: None,
+            protocol,
             len,
         }
     }
@@ -381,6 +408,7 @@ impl Pseudo {
             path: None,
             status: Some(status),
             len: 1,
+            protocol: None,
         }
     }
 

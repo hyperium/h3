@@ -5,6 +5,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use futures_util::future;
 use http::{request, HeaderMap, Request, Response, StatusCode};
 
+use super::{init_tracing, Pair};
 use crate::{
     client,
     connection::ConnectionState,
@@ -18,9 +19,6 @@ use crate::{
     },
     qpack, server,
 };
-
-use super::h3_quinn;
-use super::{init_tracing, Pair};
 
 #[tokio::test]
 async fn get() {
@@ -381,7 +379,8 @@ async fn header_too_big_client_error() {
             client
                 .shared_state()
                 .write("client")
-                .peer_max_field_section_size = 12;
+                .peer_config
+                .max_field_section_size = 12;
 
             let req = Request::get("http://localhost/salut").body(()).unwrap();
             let err_kind = client
@@ -432,7 +431,8 @@ async fn header_too_big_client_error_trailer() {
             client
                 .shared_state()
                 .write("client")
-                .peer_max_field_section_size = 200;
+                .peer_config
+                .max_field_section_size = 200;
 
             let mut request_stream = client
                 .send_request(Request::get("http://localhost/salut").body(()).unwrap())
@@ -541,7 +541,8 @@ async fn header_too_big_discard_from_client() {
         incoming_req
             .shared_state()
             .write("client")
-            .peer_max_field_section_size = u64::MAX;
+            .peer_config
+            .max_field_section_size = u64::MAX;
         request_stream
             .send_response(
                 Response::builder()
@@ -594,6 +595,7 @@ async fn header_too_big_discard_from_client_trailers() {
             .build::<_, _, Bytes>(pair.client().await)
             .await
             .expect("client init");
+
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
         let req_fut = async {
             let mut request_stream = client
@@ -627,7 +629,8 @@ async fn header_too_big_discard_from_client_trailers() {
         incoming_req
             .shared_state()
             .write("server")
-            .peer_max_field_section_size = u64::MAX;
+            .peer_config
+            .max_field_section_size = u64::MAX;
 
         request_stream
             .send_response(
@@ -698,7 +701,8 @@ async fn header_too_big_server_error() {
         incoming_req
             .shared_state()
             .write("server")
-            .peer_max_field_section_size = 12;
+            .peer_config
+            .max_field_section_size = 12;
 
         let err_kind = request_stream
             .send_response(
@@ -778,7 +782,8 @@ async fn header_too_big_server_error_trailers() {
         incoming_req
             .shared_state()
             .write("write")
-            .peer_max_field_section_size = 200;
+            .peer_config
+            .max_field_section_size = 200;
 
         let mut trailers = HeaderMap::new();
         trailers.insert("trailer", "value".repeat(100).parse().unwrap());
@@ -1332,7 +1337,7 @@ fn request_encode<B: BufMut>(buf: &mut B, req: http::Request<()>) {
         headers,
         ..
     } = parts;
-    let headers = Header::request(method, uri, headers).unwrap();
+    let headers = Header::request(method, uri, headers, Default::default()).unwrap();
     let mut block = BytesMut::new();
     qpack::encode_stateless(&mut block, headers).unwrap();
     Frame::headers(block).encode_with_payload(buf);
@@ -1413,12 +1418,12 @@ where
         let res = req_recv
             .read(&mut buf)
             .await
-            .map_err(Into::<h3_quinn::ReadError>::into)
+            .map_err(Into::<crate::sec_http3_quinn::ReadError>::into)
             .map_err(Into::<Error>::into)
             .map(|_| ());
         check(res);
 
-        let (mut driver, _send) = client::new(h3_quinn::Connection::new(connection))
+        let (mut driver, _send) = client::new(crate::sec_http3_quinn::Connection::new(connection))
             .await
             .unwrap();
 

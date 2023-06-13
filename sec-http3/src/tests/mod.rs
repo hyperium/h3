@@ -1,13 +1,3 @@
-// This is to avoid an import loop:
-// h3 tests depend on having private access to the crate.
-// They must be part of the crate so as not to break privacy.
-// They also depend on h3_quinn which depends on the crate.
-// Having a dev-dependency on h3_quinn would work as far as cargo is
-// concerned, but quic traits wouldn't match between the "h3" crate that
-// comes before h3_quinn and the one that comes after and runs the tests
-#[path = "../../../h3-quinn/src/lib.rs"]
-mod h3_quinn;
-
 mod connection;
 mod request;
 
@@ -21,8 +11,8 @@ use std::{
 use bytes::Bytes;
 use rustls::{Certificate, PrivateKey};
 
-use crate::quic;
-use h3_quinn::{quinn::TransportConfig, Connection};
+use crate::sec_http3_quinn::{quinn::TransportConfig, Connection};
+use crate::{quic, sec_http3_quinn};
 
 pub fn init_tracing() {
     let _ = tracing_subscriber::fmt()
@@ -62,7 +52,7 @@ impl Pair {
             .initial_rtt(Duration::from_millis(10));
     }
 
-    pub fn server_inner(&mut self) -> h3_quinn::Endpoint {
+    pub fn server_inner(&mut self) -> sec_http3_quinn::Endpoint {
         let mut crypto = rustls::ServerConfig::builder()
             .with_safe_default_cipher_suites()
             .with_safe_default_kx_groups()
@@ -74,10 +64,11 @@ impl Pair {
         crypto.max_early_data_size = u32::MAX;
         crypto.alpn_protocols = vec![b"h3".to_vec()];
 
-        let mut server_config = h3_quinn::quinn::ServerConfig::with_crypto(Arc::new(crypto));
+        let mut server_config = sec_http3_quinn::quinn::ServerConfig::with_crypto(Arc::new(crypto));
         server_config.transport = self.config.clone();
         let endpoint =
-            h3_quinn::quinn::Endpoint::server(server_config, "[::]:0".parse().unwrap()).unwrap();
+            sec_http3_quinn::quinn::Endpoint::server(server_config, "[::]:0".parse().unwrap())
+                .unwrap();
 
         self.port = endpoint.local_addr().unwrap().port();
 
@@ -108,10 +99,10 @@ impl Pair {
         crypto.enable_early_data = true;
         crypto.alpn_protocols = vec![b"h3".to_vec()];
 
-        let client_config = h3_quinn::quinn::ClientConfig::new(Arc::new(crypto));
+        let client_config = sec_http3_quinn::quinn::ClientConfig::new(Arc::new(crypto));
 
         let mut client_endpoint =
-            h3_quinn::quinn::Endpoint::client("[::]:0".parse().unwrap()).unwrap();
+            sec_http3_quinn::quinn::Endpoint::client("[::]:0".parse().unwrap()).unwrap();
         client_endpoint.set_default_client_config(client_config);
         client_endpoint
             .connect(addr, "localhost")
@@ -120,13 +111,13 @@ impl Pair {
             .unwrap()
     }
 
-    pub async fn client(&self) -> h3_quinn::Connection {
+    pub async fn client(&self) -> sec_http3_quinn::Connection {
         Connection::new(self.client_inner().await)
     }
 }
 
 pub struct Server {
-    pub endpoint: h3_quinn::Endpoint,
+    pub endpoint: sec_http3_quinn::Endpoint,
 }
 
 impl Server {

@@ -9,8 +9,8 @@ duvet report \
     --workspace \
     --exclude duvet \
     --require-tests false \
-    --blob-link "https://github.com/hyperium/h3/blob/master" \
-    --issue-link 'https://github.com/hyperium/h3/issues' \
+    --blob-link "https://github.com/security-union/sec-http3/blob/master" \
+    --issue-link 'https://github.com/security-union/sec-http3/issues' \
     --no-cargo \
     --html ci/compliance/report.html
 

@@ -7,19 +7,35 @@ edition = "2018"
 # If you copy one of the examples into a new project, you should be using
 # [dependencies] instead.
 [dev-dependencies]
+anyhow = "1.0"
 bytes = "1"
 futures = "0.3"
-h3 = { path = "../h3" }
-h3-quinn = { path = "../h3-quinn" }
+sec-http3 = { path = "../sec-http3" }
 http = "0.2"
-quinn = { version = "0.10", default-features = false, features = ["runtime-tokio", "tls-rustls", "ring"] }
+quinn = { version = "0.10", default-features = false, features = [
+    "runtime-tokio",
+    "tls-rustls",
+    "ring",
+] }
 rcgen = { version = "0.10" }
 rustls = { version = "0.21", features = ["dangerous_configuration"] }
 rustls-native-certs = "0.6"
 structopt = "0.3"
 tokio = { version = "1.27", features = ["full"] }
 tracing = "0.1.37"
-tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "ansi", "env-filter", "time", "tracing-log"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = [
+    "fmt",
+    "ansi",
+    "env-filter",
+    "time",
+    "tracing-log",
+] }
+octets = "0.2.0"
+
+tracing-tree = { version = "0.2" }
+
+[features]
+tree = []
 
 [[example]]
 name = "client"
@@ -28,3 +44,7 @@ path = "client.rs"
 [[example]]
 name = "server"
 path = "server.rs"
+
+[[example]]
+name = "webtransport_server"
+path = "webtransport_server.rs"

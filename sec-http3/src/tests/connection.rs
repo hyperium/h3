@@ -23,8 +23,8 @@ use crate::{
     server,
 };
 
-use super::h3_quinn;
 use super::{init_tracing, Pair};
+use crate::sec_http3_quinn;
 
 #[tokio::test]
 async fn connect() {
@@ -144,7 +144,8 @@ async fn settings_exchange_client() {
                 if client
                     .shared_state()
                     .read("client")
-                    .peer_max_field_section_size
+                    .peer_config
+                    .max_field_section_size
                     == 12
                 {
                     return;
@@ -202,7 +203,12 @@ async fn settings_exchange_server() {
 
         let settings_change = async {
             for _ in 0..10 {
-                if state.read("setting_change").peer_max_field_section_size == 12 {
+                if state
+                    .read("setting_change")
+                    .peer_config
+                    .max_field_section_size
+                    == 12
+                {
                     return;
                 }
                 tokio::time::sleep(Duration::from_millis(2)).await;
@@ -326,7 +332,7 @@ async fn control_close_send_error() {
         //# error of type H3_CLOSED_CRITICAL_STREAM.
         control_stream.finish().await.unwrap(); // close the client control stream immediately
 
-        let (mut driver, _send) = client::new(h3_quinn::Connection::new(connection))
+        let (mut driver, _send) = client::new(sec_http3_quinn::Connection::new(connection))
             .await
             .unwrap();
 
@@ -468,7 +474,7 @@ async fn goaway_from_server_not_request_id() {
         control_stream.write_all(&buf[..]).await.unwrap();
         control_stream.finish().await.unwrap(); // close the client control stream immediately
 
-        let (mut driver, _send) = client::new(h3_quinn::Connection::new(connection))
+        let (mut driver, _send) = client::new(sec_http3_quinn::Connection::new(connection))
             .await
             .unwrap();
 

@@ -8,8 +8,8 @@ inputs:
   report-script:
     description: 'Path to script that generates a compliance report'
     required: true
-  h3-dir:
-    description: 'Path to the directory where h3 is cloned'
+  sec-http3-dir:
+    description: 'Path to the directory where sec-http3 is cloned'
     required: false
     default: ${{ github.workspace }}
 
@@ -43,16 +43,16 @@ runs:
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
 
         if git ls-remote --exit-code --heads origin gh-pages; then
-          cp -r .github ci h3 target
+          cp -r .github ci sec-http3 target
           git switch gh-pages
-          cp -r target/.github target/ci target/h3 .
+          cp -r target/.github target/ci target/sec-http3 .
         else
           git checkout --orphan gh-pages
           git reset
         fi
 
     - name: Generate report
-      working-directory: ${{ inputs.h3-dir }}
+      working-directory: ${{ inputs.sec-http3-dir }}
       shell: bash
       run: |
         ${{ inputs.extract-script }}
@@ -60,7 +60,7 @@ runs:
 
     # commit only when there are changes
     - name: Commit report changes
-      working-directory: ${{ inputs.h3-dir }}
+      working-directory: ${{ inputs.sec-http3-dir }}
       shell: bash
       run: |
         git add ci/compliance/*.html

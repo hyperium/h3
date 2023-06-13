@@ -3,6 +3,7 @@ use std::io::IoSlice;
 
 use bytes::{Buf, Bytes};
 
+#[derive(Debug)]
 pub(crate) struct BufList<T> {
     bufs: VecDeque<T>,
 }
@@ -32,11 +33,16 @@ impl<T: Buf> BufList<T> {
 }
 
 impl BufList<Bytes> {
+    pub fn take_first_chunk(&mut self) -> Option<Bytes> {
+        self.bufs.pop_front()
+    }
+
     pub fn take_chunk(&mut self, max_len: usize) -> Option<Bytes> {
         let chunk = self
             .bufs
             .front_mut()
             .map(|chunk| chunk.split_to(usize::min(max_len, chunk.remaining())));
+
         if let Some(front) = self.bufs.front() {
             if front.remaining() == 0 {
                 let _ = self.bufs.pop_front();

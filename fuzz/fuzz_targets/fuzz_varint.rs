@@ -1,8 +1,8 @@
 #![no_main]
 
-#[path = "../../h3/src/proto/varint.rs"]
+#[path = "../../sec-http3/src/proto/varint.rs"]
 mod varint;
-#[path = "../../h3/src/proto/coding.rs"]
+#[path = "../../sec-http3/src/proto/coding.rs"]
 mod coding;
 
 use libfuzzer_sys::fuzz_target;

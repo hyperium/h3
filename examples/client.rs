@@ -5,8 +5,6 @@ use structopt::StructOpt;
 use tokio::io::AsyncWriteExt;
 use tracing::{error, info};
 
-use h3_quinn::quinn;
-
 static ALPN: &[u8] = b"h3";
 
 #[derive(StructOpt, Debug)]
@@ -97,7 +95,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tls_config.key_log = Arc::new(rustls::KeyLogFile::new());
     }
 
-    let mut client_endpoint = h3_quinn::quinn::Endpoint::client("[::]:0".parse().unwrap())?;
+    let mut client_endpoint =
+        sec_http3::sec_http3_quinn::quinn::Endpoint::client("[::]:0".parse().unwrap())?;
 
     let client_config = quinn::ClientConfig::new(Arc::new(tls_config));
     client_endpoint.set_default_client_config(client_config);
@@ -111,9 +110,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // h3 is designed to work with different QUIC implementations via
     // a generic interface, that is, the [`quic::Connection`] trait.
     // h3_quinn implements the trait w/ quinn to make it work with h3.
-    let quinn_conn = h3_quinn::Connection::new(conn);
+    let quinn_conn = sec_http3::sec_http3_quinn::Connection::new(conn);
 
-    let (mut driver, mut send_request) = h3::client::new(quinn_conn).await?;
+    let (mut driver, mut send_request) = sec_http3::client::new(quinn_conn).await?;
 
     let drive = async move {
         future::poll_fn(|cx| driver.poll_close(cx)).await?;
