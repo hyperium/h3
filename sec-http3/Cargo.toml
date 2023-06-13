@@ -1,6 +1,6 @@
 [package]
 name = "sec-http3"
-version = "0.1.0"
+version = "0.1.1"
 rust-version = "1.63"
 authors = [
     "Dario Lencina <dario@securityunion.dev>",
@@ -12,7 +12,7 @@ documentation = "https://docs.rs/sec-http3"
 repository = "https://github.com/security-union/sec-http3"
 readme = "../README.md"
 description = "An async HTTP/3 implementation that supports web transport."
-keywords = ["http3", "quic", "sec-http3"]
+keywords = ["http3", "quic", "sec-http3", "webtransport"]
 categories = [
     "network-programming",
     "web-programming::http-client",
