@@ -77,7 +77,7 @@ impl From<usize> for PayloadLen {
 impl Frame<PayloadLen> {
     pub const MAX_ENCODED_SIZE: usize = VarInt::MAX_SIZE * 7;
 
-    /// Decodes a Frame from the stream according to https://www.rfc-editor.org/rfc/rfc9114#section-7.1
+    /// Decodes a Frame from the stream according to <https://www.rfc-editor.org/rfc/rfc9114#section-7.1>
     pub fn decode<T: Buf>(buf: &mut T) -> Result<Self, FrameError> {
         let remaining = buf.remaining();
         let ty = FrameType::decode(buf).map_err(|_| FrameError::Incomplete(remaining + 1))?;

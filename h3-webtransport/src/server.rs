@@ -34,7 +34,7 @@ use crate::stream::{BidiStream, RecvStream, SendStream};
 ///
 /// Maintains the session using the underlying HTTP/3 connection.
 ///
-/// Similar to [`crate::Connection`] it is generic over the QUIC implementation and Buffer.
+/// Similar to [`h3_quinn::Connection`](https://docs.rs/h3-quinn/latest/h3_quinn/struct.Connection.html) it is generic over the QUIC implementation and Buffer.
 pub struct WebTransportSession<C, B>
 where
     C: quic::Connection<B>,
