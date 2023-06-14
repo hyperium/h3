@@ -602,7 +602,7 @@ impl Builder {
 
     /// Indicates that the client or server supports HTTP/3 datagrams
     ///
-    /// See: https://www.rfc-editor.org/rfc/rfc9297#section-2.1.1
+    /// See: <https://www.rfc-editor.org/rfc/rfc9297#section-2.1.1>
     pub fn enable_datagram(&mut self, value: bool) -> &mut Self {
         self.config.enable_datagram = value;
         self

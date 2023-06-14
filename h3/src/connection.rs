@@ -113,7 +113,7 @@ where
     ///
     /// This is opposed to discarding them by returning in `poll_accept_recv`, which may cause them to be missed by something else polling.
     ///
-    /// See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-4.5
+    /// See: <https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-4.5>
     ///
     /// In WebTransport over HTTP/3, the client MAY send its SETTINGS frame, as well as
     /// multiple WebTransport CONNECT requests, WebTransport data streams and WebTransport
