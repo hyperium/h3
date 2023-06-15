@@ -269,6 +269,22 @@ pin_project! {
     }
 }
 
+impl<'a, C: quic::Connection<B>, B: Buf> OpenBi<'a, C, B> {
+    #[allow(missing_docs)]
+    pub fn new(opener: &'a Mutex<C::OpenStreams>, session_id: SessionId) -> Self {
+        Self {
+            opener,
+            stream: None,
+            session_id,
+        }
+    }
+    #[allow(missing_docs)]
+    pub fn set_stream(mut self, stream: impl Into<Option<PendingStreams<C,B>>>) -> Self {
+        self.stream = stream.into();
+        self
+    }
+}
+
 impl<'a, B, C> Future for OpenBi<'a, C, B>
 where
     C: quic::Connection<B>,
@@ -310,6 +326,21 @@ pin_project! {
         stream: Option<PendingUniStreams<C, B>>,
         // Future for opening a uni stream
         session_id: SessionId,
+    }
+}
+impl<'a, C: quic::Connection<B>, B: Buf> OpenUni<'a, C, B> {
+    #[allow(missing_docs)]
+    pub fn new(opener: &'a Mutex<C::OpenStreams>, session_id: SessionId) -> Self {
+        Self {
+            opener,
+            stream: None,
+            session_id,
+        }
+    }
+    #[allow(missing_docs)]
+    pub fn set_stream(mut self, stream: impl Into<Option<PendingUniStreams<C,B>>>) -> Self {
+        self.stream = stream.into();
+        self
     }
 }
 
@@ -368,6 +399,19 @@ where
     conn: &'a Mutex<Connection<C, B>>,
     _marker: PhantomData<B>,
 }
+impl<'a, C, B> ReadDatagram<'a, C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    #[allow(missing_docs)]
+    pub fn new(conn: &'a Mutex<Connection<C, B>>) -> Self {
+        Self {
+            conn,
+            _marker: PhantomData,
+        }
+    }
+}
 
 impl<'a, C, B> Future for ReadDatagram<'a, C, B>
 where
@@ -400,6 +444,16 @@ where
     conn: &'a Mutex<server::Connection<C, B>>,
 }
 
+impl<'a, C, B> AcceptUni<'a, C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    #[allow(missing_docs)]
+    pub fn new(conn: &'a Mutex<server::Connection<C, B>>) -> Self {
+        Self { conn }
+    }
+}
 impl<'a, C, B> Future for AcceptUni<'a, C, B>
 where
     C: quic::Connection<B>,

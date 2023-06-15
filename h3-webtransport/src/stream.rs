@@ -91,7 +91,7 @@ impl<S, B> std::fmt::Debug for SendStream<S, B> {
 
 impl<S, B> SendStream<S, B> {
     #[allow(missing_docs)]
-    pub(crate) fn new(stream: BufRecvStream<S, B>) -> Self {
+    pub fn new(stream: BufRecvStream<S, B>) -> Self {
         Self { stream }
     }
 }
@@ -210,7 +210,8 @@ pin_project! {
 }
 
 impl<S, B> BidiStream<S, B> {
-    pub(crate) fn new(stream: BufRecvStream<S, B>) -> Self {
+    #[allow(missing_docs)]
+    pub fn new(stream: BufRecvStream<S, B>) -> Self {
         Self { stream }
     }
 }
