@@ -279,7 +279,7 @@ impl<'a, C: quic::Connection<B>, B: Buf> OpenBi<'a, C, B> {
         }
     }
     #[allow(missing_docs)]
-    pub fn set_stream(mut self, stream: impl Into<Option<PendingStreams<C,B>>>) -> Self {
+    pub fn with_stream(mut self, stream: impl Into<Option<PendingStreams<C,B>>>) -> Self {
         self.stream = stream.into();
         self
     }
@@ -338,7 +338,7 @@ impl<'a, C: quic::Connection<B>, B: Buf> OpenUni<'a, C, B> {
         }
     }
     #[allow(missing_docs)]
-    pub fn set_stream(mut self, stream: impl Into<Option<PendingUniStreams<C,B>>>) -> Self {
+    pub fn with_stream(mut self, stream: impl Into<Option<PendingUniStreams<C,B>>>) -> Self {
         self.stream = stream.into();
         self
     }
