@@ -3,9 +3,10 @@ use bytes::{BufMut, Bytes, BytesMut};
 use h3::{
     error::ErrorLevel,
     ext::Protocol,
-    quic::{self, RecvDatagramExt, SendDatagramExt, SendStreamUnframed},
+    quic::{self, SendStreamUnframed},
     server::Connection,
 };
+use h3_datagram::quic_traits::{RecvDatagramExt, SendDatagramExt};
 use h3_quinn::quinn;
 use h3_webtransport::{
     server::{self, WebTransportSession},
@@ -294,6 +295,8 @@ where
     stream::SendStream<C::SendStream, Bytes>: AsyncWrite,
     C::BidiStream: SendStreamUnframed<Bytes>,
     C::SendStream: SendStreamUnframed<Bytes>,
+    <C as RecvDatagramExt>::Error: h3::quic::Error,
+    <C as SendDatagramExt<Bytes>>::Error: h3::quic::Error,
 {
     let session_id = session.session_id();
 

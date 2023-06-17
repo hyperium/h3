@@ -52,7 +52,6 @@
 
 use std::{
     collections::HashSet,
-    marker::PhantomData,
     option::Option,
     result::Result,
     sync::Arc,
@@ -61,11 +60,10 @@ use std::{
 
 use bytes::{Buf, BytesMut};
 use futures_util::{
-    future::{self, Future},
+    future::{self},
     ready,
 };
 use http::{response, HeaderMap, Request, Response};
-use pin_project_lite::pin_project;
 use quic::RecvStream;
 use quic::StreamId;
 use tokio::sync::mpsc;
@@ -74,7 +72,6 @@ use crate::{
     config::Config,
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
     error::{Code, Error, ErrorLevel},
-    ext::Datagram,
     frame::{FrameStream, FrameStreamError},
     proto::{
         frame::{Frame, PayloadLen},
@@ -82,7 +79,7 @@ use crate::{
         push::PushId,
     },
     qpack,
-    quic::{self, RecvDatagramExt, SendDatagramExt, SendStream as _},
+    quic::{self, SendStream as _},
     request::ResolveRequest,
     stream::{self, BufRecvStream},
 };
@@ -469,36 +466,6 @@ where
     }
 }
 
-impl<C, B> Connection<C, B>
-where
-    C: quic::Connection<B> + SendDatagramExt<B>,
-    B: Buf,
-{
-    /// Sends a datagram
-    pub fn send_datagram(&mut self, stream_id: StreamId, data: B) -> Result<(), Error> {
-        self.inner
-            .conn
-            .send_datagram(Datagram::new(stream_id, data))?;
-        tracing::info!("Sent datagram");
-
-        Ok(())
-    }
-}
-
-impl<C, B> Connection<C, B>
-where
-    C: quic::Connection<B> + RecvDatagramExt,
-    B: Buf,
-{
-    /// Reads an incoming datagram
-    pub fn read_datagram(&mut self) -> ReadDatagram<C, B> {
-        ReadDatagram {
-            conn: self,
-            _marker: PhantomData,
-        }
-    }
-}
-
 impl<C, B> Drop for Connection<C, B>
 where
     C: quic::Connection<B>,
@@ -804,34 +771,6 @@ impl Drop for RequestEnd {
                 "failed to notify connection of request end: {} {}",
                 self.stream_id, e
             );
-        }
-    }
-}
-
-pin_project! {
-    /// Future for [`Connection::read_datagram`]
-    pub struct ReadDatagram<'a, C, B>
-    where
-            C: quic::Connection<B>,
-            B: Buf,
-        {
-            conn: &'a mut Connection<C, B>,
-            _marker: PhantomData<B>,
-        }
-}
-
-impl<'a, C, B> Future for ReadDatagram<'a, C, B>
-where
-    C: quic::Connection<B> + RecvDatagramExt,
-    B: Buf,
-{
-    type Output = Result<Option<Datagram<C::Buf>>, Error>;
-
-    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        tracing::trace!("poll: read_datagram");
-        match ready!(self.conn.inner.conn.poll_accept_datagram(cx))? {
-            Some(v) => Poll::Ready(Ok(Some(Datagram::decode(v)?))),
-            None => Poll::Ready(Ok(None)),
         }
     }
 }
