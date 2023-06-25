@@ -357,20 +357,10 @@ where
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<C::BidiStream>, Error>> {
-        let _ = self.poll_control(cx)?;
         let _ = self.poll_requests_completion(cx);
-        loop {
-            match self.inner.poll_accept_request(cx) {
+        let result = loop {
+            match self.inner.poll_handle_incoming(cx) {
                 Poll::Ready(Err(x)) => break Poll::Ready(Err(x)),
-                Poll::Ready(Ok(None)) => {
-                    if self.poll_requests_completion(cx).is_ready() {
-                        break Poll::Ready(Ok(None));
-                    } else {
-                        // Wait for all the requests to be finished, request_end_recv will wake
-                        // us on each request completion.
-                        break Poll::Pending;
-                    }
-                }
                 Poll::Pending => {
                     if self.recv_closing.is_some() && self.poll_requests_completion(cx).is_ready() {
                         // The connection is now idle.
@@ -379,7 +369,7 @@ where
                         return Poll::Pending;
                     }
                 }
-                Poll::Ready(Ok(Some(mut s))) => {
+                Poll::Ready(Ok(mut s)) => {
                     // When the connection is in a graceful shutdown procedure, reject all
                     // incoming requests not belonging to the grace interval. It's possible that
                     // some acceptable request streams arrive after rejected requests.
@@ -398,7 +388,11 @@ where
                     break Poll::Ready(Ok(Some(s)));
                 }
             };
-        }
+        };
+
+        let _ = self.poll_control(cx)?;
+
+        result
     }
 
     pub(crate) fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {

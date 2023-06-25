@@ -16,7 +16,7 @@ use bytes::{Buf, Bytes, BytesMut};
 
 use futures::{
     ready,
-    stream::{self, BoxStream},
+    stream::{self, select, BoxStream, Select},
     StreamExt,
 };
 use quinn::ReadDatagram;
@@ -26,34 +26,67 @@ pub use quinn::{
 
 use h3::{
     ext::Datagram,
-    quic::{self, Error, StreamId, WriteBuf},
+    quic::{self, Error, IncomingStreamType, StreamId, WriteBuf},
 };
 use tokio_util::sync::ReusableBoxFuture;
 
 /// A QUIC connection backed by Quinn
 ///
 /// Implements a [`quic::Connection`] backed by a [`quinn::Connection`].
-pub struct Connection {
+pub struct Connection<B>
+where
+    B: Buf,
+{
     conn: quinn::Connection,
-    incoming_bi: BoxStream<'static, <AcceptBi<'static> as Future>::Output>,
     opening_bi: Option<BoxStream<'static, <OpenBi<'static> as Future>::Output>>,
-    incoming_uni: BoxStream<'static, <AcceptUni<'static> as Future>::Output>,
+    incoming: Select<
+        BoxStream<
+            'static,
+            Result<IncomingStreamType<BidiStream<B>, RecvStream, B>, quinn::ConnectionError>,
+        >,
+        BoxStream<
+            'static,
+            Result<IncomingStreamType<BidiStream<B>, RecvStream, B>, quinn::ConnectionError>,
+        >,
+    >,
     opening_uni: Option<BoxStream<'static, <OpenUni<'static> as Future>::Output>>,
     datagrams: BoxStream<'static, <ReadDatagram<'static> as Future>::Output>,
 }
 
-impl Connection {
+impl<B> Connection<B>
+where
+    B: Buf,
+{
     /// Create a [`Connection`] from a [`quinn::Connection`]
     pub fn new(conn: quinn::Connection) -> Self {
+        let incoming_uni = Box::pin(stream::unfold(conn.clone(), |conn| async {
+            Some((
+                conn.accept_uni().await.map(|recv_stream| {
+                    IncomingStreamType::<BidiStream<B>, RecvStream, B>::Unidirectional(
+                        RecvStream::new(recv_stream),
+                    )
+                }),
+                conn,
+            ))
+        }));
+        let incoming_bi = Box::pin(stream::unfold(conn.clone(), |conn| async {
+            Some((
+                conn.accept_bi().await.map(|bidi_stream| {
+                    IncomingStreamType::<BidiStream<B>, RecvStream, B>::Bidirectional(
+                        BidiStream {
+                            send: SendStream::new(bidi_stream.0),
+                            recv: RecvStream::new(bidi_stream.1),
+                        },
+                        std::marker::PhantomData,
+                    )
+                }),
+                conn,
+            ))
+        }));
         Self {
             conn: conn.clone(),
-            incoming_bi: Box::pin(stream::unfold(conn.clone(), |conn| async {
-                Some((conn.accept_bi().await, conn))
-            })),
             opening_bi: None,
-            incoming_uni: Box::pin(stream::unfold(conn.clone(), |conn| async {
-                Some((conn.accept_uni().await, conn))
-            })),
+            incoming: select(incoming_uni, incoming_bi),
             opening_uni: None,
             datagrams: Box::pin(stream::unfold(conn, |conn| async {
                 Some((conn.read_datagram().await, conn))
@@ -150,7 +183,7 @@ impl From<quinn::SendDatagramError> for SendDatagramError {
     }
 }
 
-impl<B> quic::Connection<B> for Connection
+impl<B> quic::Connection<B> for Connection<B>
 where
     B: Buf,
 {
@@ -160,29 +193,18 @@ where
     type OpenStreams = OpenStreams;
     type Error = ConnectionError;
 
-    fn poll_accept_bidi(
+    fn poll_incoming(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::BidiStream>, Self::Error>> {
-        let (send, recv) = match ready!(self.incoming_bi.poll_next_unpin(cx)) {
-            Some(x) => x?,
-            None => return Poll::Ready(Ok(None)),
-        };
-        Poll::Ready(Ok(Some(Self::BidiStream {
-            send: Self::SendStream::new(send),
-            recv: Self::RecvStream::new(recv),
-        })))
-    }
-
-    fn poll_accept_recv(
-        &mut self,
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::RecvStream>, Self::Error>> {
-        let recv = match ready!(self.incoming_uni.poll_next_unpin(cx)) {
-            Some(x) => x?,
-            None => return Poll::Ready(Ok(None)),
-        };
-        Poll::Ready(Ok(Some(Self::RecvStream::new(recv))))
+    ) -> Poll<Result<IncomingStreamType<Self::BidiStream, Self::RecvStream, B>, Self::Error>> {
+        // put the two streams together
+        Poll::Ready(
+            ready!(self
+                .incoming
+                .poll_next_unpin(cx)
+                .map_err(|e| ConnectionError(e)))
+            .unwrap(),
+        )
     }
 
     fn poll_open_bidi(
@@ -233,7 +255,7 @@ where
     }
 }
 
-impl<B> quic::SendDatagramExt<B> for Connection
+impl<B> quic::SendDatagramExt<B> for Connection<B>
 where
     B: Buf,
 {
@@ -249,7 +271,10 @@ where
     }
 }
 
-impl quic::RecvDatagramExt for Connection {
+impl<B> quic::RecvDatagramExt for Connection<B>
+where
+    B: Buf,
+{
     type Buf = Bytes;
 
     type Error = ConnectionError;

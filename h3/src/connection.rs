@@ -21,7 +21,7 @@ use crate::{
         varint::VarInt,
     },
     qpack,
-    quic::{self, SendStream as _},
+    quic::{self, Connection, SendStream as _},
     stream::{self, AcceptRecvStream, AcceptedRecvStream, BufRecvStream, UniStreamHeader},
     webtransport::SessionId,
 };
@@ -294,47 +294,43 @@ where
         stream::write(&mut self.control_send, Frame::Goaway(max_id.into())).await
     }
 
-    #[allow(missing_docs)]
-    pub fn poll_accept_request(
+    /// Polls incoming streams
+    ///
+    /// Accepts all streams and dispatches them to the appropriate handler
+    pub fn poll_handle_incoming(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<C::BidiStream>, Error>> {
-        {
-            let state = self.shared.read("poll_accept_request");
-            if let Some(ref e) = state.error {
-                return Poll::Ready(Err(e.clone()));
-            }
-        }
+    ) -> Poll<Result<C::BidiStream, Error>> {
+        if let Some(ref e) = self.shared.read("poll_handle_incoming").error {
+            return Poll::Ready(Err(e.clone()));
+        };
 
-        // Accept the request by accepting the next bidirectional stream
-        // .into().into() converts the impl QuicError into crate::error::Error.
-        // The `?` operator doesn't work here for some reason.
-        self.conn.poll_accept_bidi(cx).map_err(|e| e.into().into())
+        let incoming_bidirectional_stream = loop {
+            match ready!(self.conn.poll_incoming(cx))? {
+                quic::IncomingStreamType::Bidirectional(bi_di_stream, _) => break bi_di_stream,
+                quic::IncomingStreamType::Unidirectional(recv_steam) => {
+                    self.poll_handle_receive_stream(cx, recv_steam)?;
+                }
+            };
+        };
+
+        Poll::Ready(Ok(incoming_bidirectional_stream))
     }
 
     /// Polls incoming streams
     ///
     /// Accepted streams which are not control, decoder, or encoder streams are buffer in `accepted_recv_streams`
-    pub fn poll_accept_recv(&mut self, cx: &mut Context<'_>) -> Result<(), Error> {
+    pub fn poll_handle_receive_stream(
+        &mut self,
+        cx: &mut Context<'_>,
+        recv_stream: <C as Connection<B>>::RecvStream,
+    ) -> Result<(), Error> {
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
             return Err(e.clone());
         }
 
-        // Get all currently pending streams
-        loop {
-            match self.conn.poll_accept_recv(cx)? {
-                Poll::Ready(Some(stream)) => self
-                    .pending_recv_streams
-                    .push(AcceptRecvStream::new(stream)),
-                Poll::Ready(None) => {
-                    return Err(Code::H3_GENERAL_PROTOCOL_ERROR.with_reason(
-                        "Connection closed unexpected",
-                        crate::error::ErrorLevel::ConnectionError,
-                    ))
-                }
-                Poll::Pending => break,
-            }
-        }
+        self.pending_recv_streams
+            .push(AcceptRecvStream::new(recv_stream));
 
         let mut resolved = vec![];
 
@@ -406,15 +402,11 @@ where
             return Poll::Ready(Err(e.clone()));
         }
 
-        let recv = {
-            // TODO
-            self.poll_accept_recv(cx)?;
-            if let Some(v) = &mut self.control_recv {
-                v
-            } else {
-                // Try later
-                return Poll::Pending;
-            }
+        let recv = if let Some(v) = &mut self.control_recv {
+            v
+        } else {
+            // Try later
+            return Poll::Pending;
         };
 
         let recvd = ready!(recv.poll_next(cx))?;
