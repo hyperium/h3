@@ -120,7 +120,7 @@ macro_rules! codes {
 
 codes! {
     /// Datagram or capsule parse error
-    /// See: https://www.rfc-editor.org/rfc/rfc9297#section-5.2
+    /// See: <https://www.rfc-editor.org/rfc/rfc9297#section-5.2>
     (0x33, H3_DATAGRAM_ERROR);
     /// No error. This is used when the connection or stream needs to be
     /// closed, but there is no error to signal.

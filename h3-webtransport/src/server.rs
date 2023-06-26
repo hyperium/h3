@@ -7,8 +7,9 @@ use std::{
     task::{Context, Poll},
 };
 
-use self::quic::SendStreamUnframed;
-use crate::{
+use bytes::Buf;
+use futures_util::{future::poll_fn, ready, Future};
+use h3::{
     connection::ConnectionState,
     error::{Code, ErrorLevel},
     ext::{Datagram, Protocol},
@@ -16,22 +17,24 @@ use crate::{
     proto::frame::Frame,
     quic::{self, OpenStreams, RecvDatagramExt, SendDatagramExt, WriteBuf},
     server::{self, Connection, RequestStream},
-    stream::{BidiStreamHeader, BufRecvStream, UniStreamHeader},
-    webtransport::stream::{BidiStream, RecvStream, SendStream},
     Error,
 };
-use bytes::Buf;
-use futures_util::{future::poll_fn, ready, Future};
+use h3::{
+    quic::SendStreamUnframed,
+    stream::{BidiStreamHeader, BufRecvStream, UniStreamHeader},
+};
 use http::{Method, Request, Response, StatusCode};
 
-use crate::webtransport::SessionId;
+use h3::webtransport::SessionId;
 use pin_project_lite::pin_project;
+
+use crate::stream::{BidiStream, RecvStream, SendStream};
 
 /// WebTransport session driver.
 ///
 /// Maintains the session using the underlying HTTP/3 connection.
 ///
-/// Similar to [`crate::server::Connection`] it is generic over the QUIC implementation and Buffer.
+/// Similar to [`h3::server::Connection`](https://docs.rs/h3/latest/h3/server/struct.Connection.html) it is generic over the QUIC implementation and Buffer.
 pub struct WebTransportSession<C, B>
 where
     C: quic::Connection<B>,
@@ -62,14 +65,14 @@ where
         {
             let config = shared.write("Read WebTransport support").peer_config;
 
-            if !config.enable_webtransport {
+            if !config.enable_webtransport() {
                 return Err(conn.close(
                     Code::H3_SETTINGS_ERROR,
                     "webtransport is not supported by client",
                 ));
             }
 
-            if !config.enable_datagram {
+            if !config.enable_datagram() {
                 return Err(conn.close(
                     Code::H3_SETTINGS_ERROR,
                     "datagrams are not supported by client",
@@ -81,21 +84,21 @@ where
         //
         // However, it is still advantageous to show a log on the server as (attempting) to
         // establish a WebTransportSession without the proper h3 config is usually a mistake.
-        if !conn.inner.config.enable_webtransport {
+        if !conn.inner.config.enable_webtransport() {
             tracing::warn!("Server does not support webtransport");
         }
 
-        if !conn.inner.config.enable_datagram {
+        if !conn.inner.config.enable_datagram() {
             tracing::warn!("Server does not support datagrams");
         }
 
-        if !conn.inner.config.enable_extended_connect {
+        if !conn.inner.config.enable_extended_connect() {
             tracing::warn!("Server does not support CONNECT");
         }
 
         // Respond to the CONNECT request.
 
-        // See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-3.3
+        //= https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-3.3
         let response = if validate_wt_connect(&request) {
             Response::builder()
                 // This is the only header that chrome cares about.
@@ -172,8 +175,8 @@ where
             }
             Err(err) => {
                 match err.kind() {
-                    crate::error::Kind::Closed => return Ok(None),
-                    crate::error::Kind::Application {
+                    h3::error::Kind::Closed => return Ok(None),
+                    h3::error::Kind::Application {
                         code,
                         reason,
                         level: ErrorLevel::ConnectionError,

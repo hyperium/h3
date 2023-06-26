@@ -20,6 +20,9 @@ categories = [
     "webtransport",
 ]
 
+[features]
+i-implement-a-third-party-backend-and-opt-into-breaking-changes = []
+
 [dependencies]
 bytes = "1"
 futures-util = { version = "0.3", default-features = false, features = ["io"] }

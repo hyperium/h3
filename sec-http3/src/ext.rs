@@ -13,7 +13,7 @@ use crate::{
 
 /// Describes the `:protocol` pseudo-header for extended connect
 ///
-/// See: [https://www.rfc-editor.org/rfc/rfc8441#section-4]
+/// See: <https://www.rfc-editor.org/rfc/rfc8441#section-4>
 #[derive(Copy, PartialEq, Debug, Clone)]
 pub struct Protocol(ProtocolInner);
 
@@ -42,12 +42,12 @@ impl FromStr for Protocol {
 }
 
 /// HTTP datagram frames
-/// See: https://www.rfc-editor.org/rfc/rfc9297#section-2.1
+/// See: <https://www.rfc-editor.org/rfc/rfc9297#section-2.1>
 pub struct Datagram<B = Bytes> {
     /// Stream id divided by 4
     stream_id: StreamId,
     /// The data contained in the datagram
-    pub payload: B,
+    payload: B,
 }
 
 impl<B> Datagram<B>
@@ -100,5 +100,10 @@ where
     pub fn encode<D: bytes::BufMut>(self, buf: &mut D) {
         (VarInt::from(self.stream_id) / 4).encode(buf);
         buf.put(self.payload);
+    }
+
+    /// Returns the datagram payload
+    pub fn into_payload(self) -> B {
+        self.payload
     }
 }

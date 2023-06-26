@@ -85,7 +85,7 @@ pub trait Connection<B: Buf> {
 
 /// Extends the `Connection` trait for sending datagrams
 ///
-/// See: https://www.rfc-editor.org/rfc/rfc9297
+/// See: <https://www.rfc-editor.org/rfc/rfc9297>
 pub trait SendDatagramExt<B: Buf> {
     /// The error type that can occur when sending a datagram
     type Error: Into<Box<dyn Error>>;
@@ -96,7 +96,7 @@ pub trait SendDatagramExt<B: Buf> {
 
 /// Extends the `Connection` trait for receiving datagrams
 ///
-/// See: https://www.rfc-editor.org/rfc/rfc9297
+/// See: <https://www.rfc-editor.org/rfc/rfc9297>
 pub trait RecvDatagramExt {
     /// The type of `Buf` for *raw* datagrams (without the stream_id decoded)
     type Buf: Buf;
