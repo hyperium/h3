@@ -34,8 +34,6 @@ fn server_and_client_should_connect_successfully() {
         .spawn()
         .expect("Failed to run server example");
 
-
-
     let mut server = ChildGuard(server);
 
     assert!(server.0.stderr.is_none(), "Failed to listen on localhost");
