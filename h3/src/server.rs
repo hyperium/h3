@@ -359,7 +359,11 @@ where
     ) -> Poll<Result<Option<C::BidiStream>, Error>> {
         let _ = self.poll_requests_completion(cx);
         let result = loop {
-            match self.inner.poll_handle_incoming(cx) {
+            let incoming = self.inner.poll_handle_incoming(cx);
+
+            let _ = self.poll_control(cx)?;
+
+            match incoming {
                 Poll::Ready(Err(x)) => break Poll::Ready(Err(x)),
                 Poll::Pending => {
                     if self.recv_closing.is_some() && self.poll_requests_completion(cx).is_ready() {
@@ -389,9 +393,6 @@ where
                 }
             };
         };
-
-        let _ = self.poll_control(cx)?;
-
         result
     }
 
