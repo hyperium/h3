@@ -27,7 +27,7 @@ fn server_and_client_should_connect_successfully() {
         .arg("--cert=../examples/server.cert")
         .arg("--key=../examples/server.key")
         .spawn()
-        .expect("Failed to run server example");
+        .expect(("Failed to run server example  ".to_string()+std::env!("CARGO_MANIFEST_DIR")).as_str());
 
     let mut server = ChildGuard(server);
 
