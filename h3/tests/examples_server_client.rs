@@ -22,15 +22,19 @@ fn server_and_client_should_connect_successfully() {
     let mut command = PathBuf::from(std::env!("CARGO_MANIFEST_DIR"));
     command.push("../target/debug/examples/server");
 
+    if !command.exists() {
+        // somehow CARGO_MANIFEST_DIR is different in gh CI
+        command = PathBuf::from("/home/runner/work/h3/target/debug/examples/server")
+    }
+
     let server = Command::new(command.as_path())
         .arg("--listen=[::]:4433")
         .arg("--cert=../examples/server.cert")
         .arg("--key=../examples/server.key")
         .spawn()
-        .expect(
-            ("Failed to run server example  ".to_string() + std::env!("CARGO_MANIFEST_DIR"))
-                .as_str(),
-        );
+        .expect("Failed to run server example");
+
+
 
     let mut server = ChildGuard(server);
 
