@@ -22,6 +22,15 @@ impl Protocol {
     pub const WEB_TRANSPORT: Protocol = Protocol(ProtocolInner::WebTransport);
     /// RFC 9298 protocol
     pub const CONNECT_UDP: Protocol = Protocol(ProtocolInner::ConnectUdp);
+
+    /// Return a &str representation of the `:protocol` pseudo-header value
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        match self.0 {
+            ProtocolInner::WebTransport => "webtransport",
+            ProtocolInner::ConnectUdp => "connect-udp",
+        }
+    }
 }
 
 #[derive(Copy, PartialEq, Debug, Clone)]
