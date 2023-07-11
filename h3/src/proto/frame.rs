@@ -433,8 +433,8 @@ setting_identifiers! {
     MAX_HEADER_LIST_SIZE = 0x6,
     // https://datatracker.ietf.org/doc/html/rfc9220#section-5
     ENABLE_CONNECT_PROTOCOL = 0x8,
-    // https://datatracker.ietf.org/doc/html/draft-ietf-masque-h3-datagram-05#section-9.1
-    H3_DATAGRAM = 0xFFD277,
+    // https://datatracker.ietf.org/doc/html/rfc9297#name-http-3-setting
+    H3_DATAGRAM = 0x33,
     // https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-8.2
     ENABLE_WEBTRANSPORT = 0x2B603742,
     // https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-8.2
