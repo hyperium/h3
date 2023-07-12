@@ -159,9 +159,10 @@ where
             method,
             uri,
             headers,
+            extensions,
             ..
         } = parts;
-        let headers = Header::request(method, uri, headers, Default::default())?;
+        let headers = Header::request(method, uri, headers, extensions)?;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
         //= type=implication
