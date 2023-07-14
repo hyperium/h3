@@ -504,6 +504,8 @@ async fn header_too_big_discard_from_client() {
 
         let (mut driver, mut client) = client::builder()
             .max_field_section_size(12)
+            // Don't send settings, so server doesn't know about the low max_field_section_size
+            .send_settings(false)
             .build::<_, _, Bytes>(pair.client().await)
             .await
             .expect("client init");
@@ -539,12 +541,6 @@ async fn header_too_big_discard_from_client() {
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
         let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
-        // pretend server didn't receive settings
-        incoming_req
-            .shared_state()
-            .write("client")
-            .peer_config
-            .max_field_section_size = u64::MAX;
         request_stream
             .send_response(
                 Response::builder()
@@ -593,6 +589,8 @@ async fn header_too_big_discard_from_client_trailers() {
 
         let (mut driver, mut client) = client::builder()
             .max_field_section_size(200)
+            // Don't send settings, so server doesn't know about the low max_field_section_size
+            .send_settings(false)
             .build::<_, _, Bytes>(pair.client().await)
             .await
             .expect("client init");
@@ -625,13 +623,6 @@ async fn header_too_big_discard_from_client_trailers() {
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
         let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
-
-        // pretend server didn't receive settings
-        incoming_req
-            .shared_state()
-            .write("server")
-            .peer_config
-            .max_field_section_size = u64::MAX;
 
         request_stream
             .send_response(

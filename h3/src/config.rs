@@ -9,6 +9,10 @@ pub struct Config {
     /// In HTTP/3, the concept of grease is used to ensure that the protocol can evolve
     /// and accommodate future changes without breaking existing implementations.
     pub(crate) send_grease: bool,
+
+    #[cfg(test)]
+    pub(crate) send_settings: bool,
+
     /// The MAX_FIELD_SECTION_SIZE in HTTP/3 refers to the maximum size of the dynamic table used in HPACK compression.
     /// HPACK is the compression algorithm used in HTTP/3 to reduce the size of the header fields in HTTP requests and responses.
 
@@ -56,6 +60,8 @@ impl Default for Config {
         Self {
             max_field_section_size: VarInt::MAX.0,
             send_grease: true,
+            #[cfg(test)]
+            send_settings: true,
             enable_webtransport: false,
             enable_extended_connect: false,
             enable_datagram: false,
