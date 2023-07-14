@@ -504,6 +504,15 @@ impl Builder {
         self
     }
 
+    /// Just like in HTTP/2, HTTP/3 also uses the concept of "grease"
+    /// to prevent potential interoperability issues in the future.
+    /// In HTTP/3, the concept of grease is used to ensure that the protocol can evolve
+    /// and accommodate future changes without breaking existing implementations.
+    pub fn send_grease(&mut self, enabled: bool) -> &mut Self {
+        self.config.send_grease = enabled;
+        self
+    }
+
     /// Create a new HTTP/3 client from a `quic` connection
     pub async fn build<C, O, B>(
         &mut self,
