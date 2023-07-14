@@ -11,11 +11,11 @@ use stream::WriteBuf;
 use tracing::{trace, warn};
 
 use crate::{
-    config::Config,
+    config::{Config, Settings},
     error::{Code, Error},
     frame::FrameStream,
     proto::{
-        frame::{Frame, PayloadLen, SettingId, Settings},
+        frame::{self, Frame, PayloadLen},
         headers::Header,
         stream::StreamType,
         varint::VarInt,
@@ -30,7 +30,7 @@ use crate::{
 #[non_exhaustive]
 pub struct SharedState {
     // Peer settings
-    pub peer_config: Config,
+    pub peer_config: Settings,
     // connection-wide error, concerns all RequestStreams and drivers
     pub error: Option<Error>,
     // Has a GOAWAY frame been sent or received?
@@ -54,7 +54,7 @@ impl SharedStateRef {
 impl Default for SharedStateRef {
     fn default() -> Self {
         Self(Arc::new(RwLock::new(SharedState {
-            peer_config: Config::default(),
+            peer_config: Default::default(),
             error: None,
             closing: false,
         })))
@@ -148,53 +148,10 @@ where
             return Ok(());
         }
 
-        let mut settings = Settings::default();
-
-        settings
-            .insert(
-                SettingId::MAX_HEADER_LIST_SIZE,
-                self.config.max_field_section_size,
-            )
-            .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
-
-        settings
-            .insert(
-                SettingId::ENABLE_CONNECT_PROTOCOL,
-                self.config.enable_extended_connect as u64,
-            )
-            .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
-        settings
-            .insert(
-                SettingId::ENABLE_WEBTRANSPORT,
-                self.config.enable_webtransport as u64,
-            )
-            .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
-        settings
-            .insert(SettingId::H3_DATAGRAM, self.config.enable_datagram as u64)
+        let settings = frame::Settings::try_from(self.config)
             .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
 
         tracing::debug!("Sending server settings: {:#x?}", settings);
-
-        if self.config.send_grease {
-            //  Grease Settings (https://www.rfc-editor.org/rfc/rfc9114.html#name-defined-settings-parameters)
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
-            //# Setting identifiers of the format 0x1f * N + 0x21 for non-negative
-            //# integer values of N are reserved to exercise the requirement that
-            //# unknown identifiers be ignored.  Such settings have no defined
-            //# meaning.  Endpoints SHOULD include at least one such setting in their
-            //# SETTINGS frame.
-
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
-            //# Setting identifiers that were defined in [HTTP/2] where there is no
-            //# corresponding HTTP/3 setting have also been reserved
-            //# (Section 11.2.2).  These reserved settings MUST NOT be sent, and
-            //# their receipt MUST be treated as a connection error of type
-            //# H3_SETTINGS_ERROR.
-            match settings.insert(SettingId::grease(), 0) {
-                Ok(_) => (),
-                Err(err) => warn!("Error when adding the grease Setting. Reason {}", err),
-            }
-        }
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-3.2
         //# After the QUIC connection is
@@ -465,24 +422,7 @@ where
                         //# Endpoints MUST NOT consider such settings to have
                         //# any meaning upon receipt.
                         let mut shared = self.shared.write("connection settings write");
-                        shared.peer_config.max_field_section_size = settings
-                            .get(SettingId::MAX_HEADER_LIST_SIZE)
-                            .unwrap_or(VarInt::MAX.0);
-
-                        shared.peer_config.enable_webtransport =
-                            settings.get(SettingId::ENABLE_WEBTRANSPORT).unwrap_or(0) != 0;
-
-                        shared.peer_config.max_webtransport_sessions = settings
-                            .get(SettingId::WEBTRANSPORT_MAX_SESSIONS)
-                            .unwrap_or(0);
-
-                        shared.peer_config.enable_datagram =
-                            settings.get(SettingId::H3_DATAGRAM).unwrap_or(0) != 0;
-
-                        shared.peer_config.enable_extended_connect = settings
-                            .get(SettingId::ENABLE_CONNECT_PROTOCOL)
-                            .unwrap_or(0)
-                            != 0;
+                        shared.peer_config = (&settings).into();
 
                         Ok(Frame::Settings(settings))
                     }
