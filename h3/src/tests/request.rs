@@ -258,7 +258,6 @@ async fn header_too_big_response_from_server() {
     let mut server = pair.server();
 
     let client_fut = async {
-        // Do not poll driver so client doesn't know about server's max_field section size setting
         let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
         let req_fut = async {
@@ -310,7 +309,6 @@ async fn header_too_big_response_from_server_trailers() {
     let mut server = pair.server();
 
     let client_fut = async {
-        // Do not poll driver so client doesn't know about server's max_field_section_size setting
         let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
         let req_fut = async {
@@ -426,7 +424,6 @@ async fn header_too_big_client_error_trailer() {
     let mut server = pair.server();
 
     let client_fut = async {
-        // Do not poll driver so client doesn't know about server's max_field_section_size setting
         let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
         let req_fut = async {
@@ -591,7 +588,6 @@ async fn header_too_big_discard_from_client_trailers() {
         //# that exceeds the indicated size, as the peer will likely refuse to
         //# process it.
 
-        // Do not poll driver so client doesn't know about server's max_field section size setting
         let (mut driver, mut client) = client::builder()
             .max_field_section_size(200)
             .build::<_, _, Bytes>(pair.client().await)
