@@ -494,6 +494,12 @@ impl Builder {
         }
     }
 
+    #[cfg(test)]
+    pub fn send_settings(&mut self, value: bool) -> &mut Self {
+        self.config.send_settings = value;
+        self
+    }
+
     /// Set the maximum header size this client is willing to accept
     ///
     /// See [header size constraints] section of the specification for details.
