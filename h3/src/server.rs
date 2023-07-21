@@ -568,7 +568,7 @@ impl Builder {
     ///
     /// [header size constraints]: https://www.rfc-editor.org/rfc/rfc9114.html#name-header-size-constraints
     pub fn max_field_section_size(&mut self, value: u64) -> &mut Self {
-        self.config.max_field_section_size = value;
+        self.config.settings.max_field_section_size = value;
         self
     }
 
@@ -590,19 +590,19 @@ impl Builder {
     /// and `max_webtransport_sessions`.
     #[inline]
     pub fn enable_webtransport(&mut self, value: bool) -> &mut Self {
-        self.config.enable_webtransport = value;
+        self.config.settings.enable_webtransport = value;
         self
     }
 
     /// Enables the CONNECT protocol
     pub fn enable_connect(&mut self, value: bool) -> &mut Self {
-        self.config.enable_extended_connect = value;
+        self.config.settings.enable_extended_connect = value;
         self
     }
 
     /// Limits the maximum number of WebTransport sessions
     pub fn max_webtransport_sessions(&mut self, value: u64) -> &mut Self {
-        self.config.max_webtransport_sessions = value;
+        self.config.settings.max_webtransport_sessions = value;
         self
     }
 
@@ -610,7 +610,7 @@ impl Builder {
     ///
     /// See: <https://www.rfc-editor.org/rfc/rfc9297#section-2.1.1>
     pub fn enable_datagram(&mut self, value: bool) -> &mut Self {
-        self.config.enable_datagram = value;
+        self.config.settings.enable_datagram = value;
         self
     }
 }
@@ -627,7 +627,7 @@ impl Builder {
         let (sender, receiver) = mpsc::unbounded_channel();
         Ok(Connection {
             inner: ConnectionInner::new(conn, SharedStateRef::default(), self.config).await?,
-            max_field_section_size: self.config.max_field_section_size,
+            max_field_section_size: self.config.settings.max_field_section_size,
             request_end_send: sender,
             request_end_recv: receiver,
             ongoing_streams: HashSet::new(),

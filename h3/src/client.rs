@@ -506,7 +506,7 @@ impl Builder {
     ///
     /// [header size constraints]: https://www.rfc-editor.org/rfc/rfc9114.html#name-header-size-constraints
     pub fn max_field_section_size(&mut self, value: u64) -> &mut Self {
-        self.config.max_field_section_size = value;
+        self.config.settings.max_field_section_size = value;
         self
     }
 
@@ -544,7 +544,7 @@ impl Builder {
                 open,
                 conn_state,
                 conn_waker,
-                max_field_section_size: self.config.max_field_section_size,
+                max_field_section_size: self.config.settings.max_field_section_size,
                 sender_count: Arc::new(AtomicUsize::new(1)),
                 send_grease_frame: self.config.send_grease,
                 _buf: PhantomData,

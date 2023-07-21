@@ -84,15 +84,15 @@ where
         //
         // However, it is still advantageous to show a log on the server as (attempting) to
         // establish a WebTransportSession without the proper h3 config is usually a mistake.
-        if !conn.inner.config.enable_webtransport() {
+        if !conn.inner.config.settings.enable_webtransport() {
             tracing::warn!("Server does not support webtransport");
         }
 
-        if !conn.inner.config.enable_datagram() {
+        if !conn.inner.config.settings.enable_datagram() {
             tracing::warn!("Server does not support datagrams");
         }
 
-        if !conn.inner.config.enable_extended_connect() {
+        if !conn.inner.config.settings.enable_extended_connect() {
             tracing::warn!("Server does not support CONNECT");
         }
 
