@@ -352,7 +352,9 @@ where
                         );
                     }
                 }
-                AcceptedRecvStream::WebTransportUni(id, s) if self.config.enable_webtransport => {
+                AcceptedRecvStream::WebTransportUni(id, s)
+                    if self.config.settings.enable_webtransport =>
+                {
                     // Store until someone else picks it up, like a webtransport session which is
                     // not yet established.
                     self.accepted_streams.wt_uni_streams.push((id, s))

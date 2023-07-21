@@ -1,7 +1,4 @@
-use std::{
-    convert::TryFrom,
-    ops::{Deref, DerefMut},
-};
+use std::convert::TryFrom;
 
 use crate::proto::{frame, varint::VarInt};
 
@@ -19,7 +16,7 @@ pub struct Config {
     pub(crate) send_settings: bool,
 
     /// HTTP/3 Settings
-    pub(crate) settings: Settings,
+    pub settings: Settings,
 }
 
 /// HTTP/3 Settings
@@ -175,20 +172,5 @@ impl Default for Config {
             send_settings: true,
             settings: Default::default(),
         }
-    }
-}
-
-impl Deref for Config {
-    type Target = Settings;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.settings
-    }
-}
-
-impl DerefMut for Config {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.settings
     }
 }
