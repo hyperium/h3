@@ -19,15 +19,13 @@ use futures::{
     stream::{self, BoxStream},
     StreamExt,
 };
+use h3_datagram::{datagram::Datagram, quic_traits};
 use quinn::ReadDatagram;
 pub use quinn::{
     self, crypto::Session, AcceptBi, AcceptUni, Endpoint, OpenBi, OpenUni, VarInt, WriteError,
 };
 
-use h3::{
-    ext::Datagram,
-    quic::{self, Error, StreamId, WriteBuf},
-};
+use h3::quic::{self, Error, StreamId, WriteBuf};
 use tokio_util::sync::ReusableBoxFuture;
 
 /// A QUIC connection backed by Quinn
@@ -233,7 +231,7 @@ where
     }
 }
 
-impl<B> quic::SendDatagramExt<B> for Connection
+impl<B> quic_traits::SendDatagramExt<B> for Connection
 where
     B: Buf,
 {
@@ -249,7 +247,7 @@ where
     }
 }
 
-impl quic::RecvDatagramExt for Connection {
+impl quic_traits::RecvDatagramExt for Connection {
     type Buf = Bytes;
 
     type Error = ConnectionError;

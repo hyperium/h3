@@ -3,6 +3,7 @@ members = [
     "h3",
     "h3-quinn",
     "h3-webtransport",
+    "h3-datagram",
 
     # Internal
     "examples",

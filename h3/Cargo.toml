@@ -53,3 +53,4 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
 ] }
 futures = { version = "0.3.27" }
 tokio-util = { version = "0.7.7" }
+h3-datagram = {path = "../h3-datagram" }

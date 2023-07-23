@@ -35,6 +35,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
 octets = "0.2.0"
 
 tracing-tree = { version = "0.2" }
+h3-datagram = { path = "../h3-datagram" }
 
 [features]
 tree = []
