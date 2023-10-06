@@ -31,7 +31,7 @@ impl Header {
     ) -> Result<Self, HeaderError> {
         match (uri.authority(), fields.get("host")) {
             (None, None) => Err(HeaderError::MissingAuthority),
-            (Some(a), Some(h)) if a.as_str() != h => Err(HeaderError::ContradictedAuthority),
+            (Some(a), Some(h)) if a.host() != h => Err(HeaderError::ContradictedAuthority),
             _ => Ok(Self {
                 pseudo: Pseudo::request(method, uri, ext),
                 fields,
