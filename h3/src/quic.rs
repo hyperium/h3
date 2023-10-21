@@ -31,6 +31,22 @@ impl<'a, E: Error + 'a> From<E> for Box<dyn Error + 'a> {
     }
 }
 
+/// TODO:
+pub enum ErrorIncoming {
+    /// Todo
+    ApplicationClose {
+        /// TODO
+        error_code: u64,
+    },
+    /// TODO
+    Timeout,
+    /// TODO
+    ConnectionClosed {
+        /// TODO
+        error_code: u64,
+    },
+}
+
 /// Trait representing a incoming QUIC stream.
 pub enum IncomingStreamType<BiDi, UniDi, B>
 where
