@@ -28,8 +28,8 @@ futures-util = { version = "0.3", default-features = false, features = ["io"] }
 http = "0.2.9"
 tokio = { version = "1", features = ["sync"] }
 pin-project-lite = { version = "0.2", default_features = false }
-tracing = "0.1.37"
-fastrand = "1.9.0"
+tracing = "0.1.40"
+fastrand = "2.0.1"
 
 [dev-dependencies]
 assert_matches = "1.5.0"
@@ -41,7 +41,7 @@ quinn = { version = "0.10", default-features = false, features = [
     "ring",
 ] }
 quinn-proto = { version = "0.10", default-features = false }
-rcgen = "0.10"
+rcgen = "0.11.3"
 rustls = "0.21"
 tokio = { version = "1", features = ["rt", "macros", "io-util", "io-std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = [
@@ -51,5 +51,5 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
     "time",
     "tracing-log",
 ] }
-futures = { version = "0.3.27" }
-tokio-util = { version = "0.7.7" }
+futures = { version = "0.3.28" }
+tokio-util = { version = "0.7.9" }
