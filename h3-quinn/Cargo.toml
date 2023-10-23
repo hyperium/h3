@@ -1,6 +1,6 @@
 [package]
 name = "h3-quinn"
-version = "0.0.3"
+version = "0.0.4"
 rust-version = "1.63"
 authors = ["Jean-Christophe BEGUE <jc.begue@pm.me>"]
 edition = "2018"
