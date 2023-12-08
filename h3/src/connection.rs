@@ -622,47 +622,57 @@ impl<S, B> RequestStream<S, B>
 where
     S: quic::RecvStream,
 {
-    /// Receive some of the request body.
-    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
+    pub fn poll_read(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<impl Buf>, Error>> {
         if !self.stream.has_data() {
-            let frame = future::poll_fn(|cx| self.stream.poll_next(cx))
-                .await
-                .map_err(|e| self.maybe_conn_err(e))?;
-            match frame {
-                Some(Frame::Data { .. }) => (),
-                Some(Frame::Headers(encoded)) => {
-                    self.trailers = Some(encoded);
-                    return Ok(None);
+            match self.stream.poll_next(cx) {
+                Poll::Ready(Ok(frame)) => {
+                    match frame {
+                        Some(Frame::Data { .. }) => (),
+                        Some(Frame::Headers(encoded)) => {
+                            self.trailers = Some(encoded);
+                            return Poll::Ready(Ok(None));
+                        }
+
+                        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+                        //# Receipt of an invalid sequence of frames MUST be treated as a
+                        //# connection error of type H3_FRAME_UNEXPECTED.
+
+                        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
+                        //# Receiving a
+                        //# CANCEL_PUSH frame on a stream other than the control stream MUST be
+                        //# treated as a connection error of type H3_FRAME_UNEXPECTED.
+
+                        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
+                        //# If an endpoint receives a SETTINGS frame on a different
+                        //# stream, the endpoint MUST respond with a connection error of type
+                        //# H3_FRAME_UNEXPECTED.
+
+                        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.6
+                        //# A client MUST treat a GOAWAY frame on a stream other than
+                        //# the control stream as a connection error of type H3_FRAME_UNEXPECTED.
+
+                        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.7
+                        //# The MAX_PUSH_ID frame is always sent on the control stream.  Receipt
+                        //# of a MAX_PUSH_ID frame on any other stream MUST be treated as a
+                        //# connection error of type H3_FRAME_UNEXPECTED.
+                        Some(_) => return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED.into())),
+                        None => return Poll::Ready(Ok(None)),
+                    }
                 }
-
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
-                //# Receipt of an invalid sequence of frames MUST be treated as a
-                //# connection error of type H3_FRAME_UNEXPECTED.
-
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
-                //# Receiving a
-                //# CANCEL_PUSH frame on a stream other than the control stream MUST be
-                //# treated as a connection error of type H3_FRAME_UNEXPECTED.
-
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
-                //# If an endpoint receives a SETTINGS frame on a different
-                //# stream, the endpoint MUST respond with a connection error of type
-                //# H3_FRAME_UNEXPECTED.
-
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.6
-                //# A client MUST treat a GOAWAY frame on a stream other than
-                //# the control stream as a connection error of type H3_FRAME_UNEXPECTED.
-
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.7
-                //# The MAX_PUSH_ID frame is always sent on the control stream.  Receipt
-                //# of a MAX_PUSH_ID frame on any other stream MUST be treated as a
-                //# connection error of type H3_FRAME_UNEXPECTED.
-                Some(_) => return Err(Code::H3_FRAME_UNEXPECTED.into()),
-                None => return Ok(None),
+                Poll::Ready(Err(e)) => return Poll::Ready(Err(self.maybe_conn_err(e))),
+                Poll::Pending => return Poll::Pending,
             }
         }
+        match self.stream.poll_data(cx) {
+            Poll::Ready(Ok(data)) => Poll::Ready(Ok(data)),
+            Poll::Ready(Err(e)) => Poll::Ready(Err(self.maybe_conn_err(e))),
+            Poll::Pending => Poll::Pending,
+        }
+    }
 
-        let data = future::poll_fn(|cx| self.stream.poll_data(cx))
+    /// Receive some of the request body.
+    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
+        let data = future::poll_fn(|cx| self.poll_read(cx))
             .await
             .map_err(|e| self.maybe_conn_err(e))?;
         Ok(data)
@@ -749,12 +759,25 @@ where
 {
     /// Send some data on the response body.
     pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
-        let frame = Frame::Data(buf);
+        self.push_data(buf)?;
+        future::poll_fn(|cx| self.poll_ready(cx)).await
+    }
 
-        stream::write(&mut self.stream, frame)
-            .await
-            .map_err(|e| self.maybe_conn_err(e))?;
-        Ok(())
+    /// push_data() will queue up data to be sent, it has to be followed by
+    /// polling for poll_ready() to actually transmit it. push_data() will
+    /// return error if there is already data queued up to be sent
+    pub fn push_data(&mut self, buf: B) -> Result<(), Error> {
+        let frame = Frame::Data(buf);
+        self.stream
+            .send_data(frame)
+            .map_err(|e| self.maybe_conn_err(e))
+    }
+
+    /// Ensures that the queued up data is transmitted
+    pub fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+        self.stream
+            .poll_ready(cx)
+            .map_err(|e| self.maybe_conn_err(e))
     }
 
     /// Send a set of trailers to end the request.
@@ -794,17 +817,30 @@ where
 
     #[allow(missing_docs)]
     pub async fn finish(&mut self) -> Result<(), Error> {
+        future::poll_fn(|cx| self.poll_shutdown(cx)).await
+    }
+
+    /// Poll to finish the sending side of the stream
+    pub fn poll_shutdown(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         if self.send_grease_frame {
             // send a grease frame once per Connection
-            stream::write(&mut self.stream, Frame::Grease)
-                .await
-                .map_err(|e| self.maybe_conn_err(e))?;
+            match self.stream.send_data(Frame::Grease) {
+                Ok(_) => (),
+                Err(e) => return Poll::Ready(Err(self.maybe_conn_err(e))),
+            }
+            match self.stream.poll_ready(cx) {
+                Poll::Ready(Ok(())) => (),
+                Poll::Ready(Err(e)) => return Poll::Ready(Err(self.maybe_conn_err(e))),
+                Poll::Pending => return Poll::Pending,
+            }
             self.send_grease_frame = false;
         }
 
-        future::poll_fn(|cx| self.stream.poll_finish(cx))
-            .await
-            .map_err(|e| self.maybe_conn_err(e))
+        match self.stream.poll_finish(cx) {
+            Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
+            Poll::Ready(Err(e)) => Poll::Ready(Err(self.maybe_conn_err(e))),
+            Poll::Pending => Poll::Pending,
+        }
     }
 }
 

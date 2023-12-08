@@ -687,6 +687,11 @@ where
         self.inner.recv_data().await
     }
 
+    /// Poll some of the request body.
+    pub fn poll_read(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<impl Buf>, Error>> {
+        self.inner.poll_read(cx)
+    }
+
     /// Receive an optional set of trailers for the response.
     pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
         let res = self.inner.recv_trailers().await;
@@ -716,6 +721,18 @@ where
         self.inner.send_data(buf).await
     }
 
+    /// push_data() will queue up data to be sent, it has to be followed by
+    /// polling for poll_ready() to actually transmit it. push_data() will
+    /// return error if there is already data queued up to be sent
+    pub fn push_data(&mut self, buf: B) -> Result<(), Error> {
+        self.inner.push_data(buf)
+    }
+
+    /// Ensures that the queued up data is transmitted
+    pub fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+        self.inner.poll_ready(cx)
+    }
+
     /// Send a set of trailers to end the request.
     ///
     /// Either [`RequestStream::finish`] or
@@ -732,6 +749,11 @@ where
     /// request.
     pub async fn finish(&mut self) -> Result<(), Error> {
         self.inner.finish().await
+    }
+
+    /// Poll to finish the sending side of the stream
+    pub fn poll_shutdown(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+        self.inner.poll_shutdown(cx)
     }
 
     //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1.1
