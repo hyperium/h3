@@ -331,7 +331,7 @@ where
                 None => (),
             };
 
-            if ready!(self.stream.poll_read(cx))? {
+            if ready!(self.stream.poll_read(cx)) {
                 return Poll::Ready(Err(Code::H3_STREAM_CREATION_ERROR.with_reason(
                     "Stream closed before type received",
                     ErrorLevel::ConnectionError,
@@ -422,15 +422,15 @@ impl<B, S: RecvStream> BufRecvStream<S, B> {
     /// Reads more data into the buffer, returning the number of bytes read.
     ///
     /// Returns `true` if the end of the stream is reached.
-    pub fn poll_read(&mut self, cx: &mut Context<'_>) -> Poll<Result<bool, S::Error>> {
-        let data = ready!(self.stream.poll_data(cx))?;
+    pub fn poll_read(&mut self, cx: &mut Context<'_>) -> Poll<bool> {
+        let data = ready!(self.stream.poll_data(cx));
 
         if let Some(mut data) = data {
             self.buf.push_bytes(&mut data);
-            Poll::Ready(Ok(false))
+            Poll::Ready(false)
         } else {
             self.eos = true;
-            Poll::Ready(Ok(true))
+            Poll::Ready(true)
         }
     }
 
@@ -465,22 +465,17 @@ impl<B, S: RecvStream> BufRecvStream<S, B> {
 impl<S: RecvStream, B> RecvStream for BufRecvStream<S, B> {
     type Buf = Bytes;
 
-    type Error = S::Error;
-
-    fn poll_data(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Result<Option<Self::Buf>, Self::Error>> {
+    fn poll_data(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Option<Self::Buf>> {
         // There is data buffered, return that immediately
         if let Some(chunk) = self.buf.take_first_chunk() {
-            return Poll::Ready(Ok(Some(chunk)));
+            return Poll::Ready(Some(chunk));
         }
 
-        if let Some(mut data) = ready!(self.stream.poll_data(cx))? {
-            Poll::Ready(Ok(Some(data.copy_to_bytes(data.remaining()))))
+        if let Some(mut data) = ready!(self.stream.poll_data(cx)) {
+            Poll::Ready(Some(data.copy_to_bytes(data.remaining())))
         } else {
             self.eos = true;
-            Poll::Ready(Ok(None))
+            Poll::Ready(None)
         }
     }
 
@@ -527,11 +522,7 @@ where
     S: SendStreamUnframed<B>,
 {
     #[inline]
-    fn poll_send<D: Buf>(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut D,
-    ) -> Poll<Result<usize, Self::Error>> {
+    fn poll_send<D: Buf>(&mut self, cx: &mut std::task::Context<'_>, buf: &mut D) -> Poll<usize> {
         self.stream.poll_send(cx, buf)
     }
 }
@@ -569,7 +560,6 @@ impl<S, B> futures_util::io::AsyncRead for BufRecvStream<S, B>
 where
     B: Buf,
     S: RecvStream,
-    S::Error: Into<std::io::Error>,
 {
     fn poll_read(
         mut self: Pin<&mut Self>,
@@ -582,7 +572,7 @@ where
         // If there is data available *do not* poll for more data, as that may suspend indefinitely
         // if no more data is sent, causing data loss.
         if !p.has_remaining() {
-            let eos = ready!(p.poll_read(cx).map_err(Into::into))?;
+            let eos = ready!(p.poll_read(cx));
             if eos {
                 return Poll::Ready(Ok(0));
             }
@@ -605,7 +595,6 @@ impl<S, B> tokio::io::AsyncRead for BufRecvStream<S, B>
 where
     B: Buf,
     S: RecvStream,
-    S::Error: Into<std::io::Error>,
 {
     fn poll_read(
         mut self: Pin<&mut Self>,
@@ -618,7 +607,7 @@ where
         // If there is data available *do not* poll for more data, as that may suspend indefinitely
         // if no more data is sent, causing data loss.
         if !p.has_remaining() {
-            let eos = ready!(p.poll_read(cx).map_err(Into::into))?;
+            let eos = ready!(p.poll_read(cx));
             if eos {
                 return Poll::Ready(Ok(()));
             }
@@ -648,7 +637,7 @@ where
         mut buf: &[u8],
     ) -> Poll<std::io::Result<usize>> {
         let p = &mut *self;
-        p.poll_send(cx, &mut buf).map_err(Into::into)
+        p.poll_send(cx, &mut buf).map(|x| Ok(x))
     }
 
     fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> {
@@ -673,7 +662,7 @@ where
         mut buf: &[u8],
     ) -> Poll<std::io::Result<usize>> {
         let p = &mut *self;
-        p.poll_send(cx, &mut buf).map_err(Into::into)
+        p.poll_send(cx, &mut buf).map(|x| Ok(x))
     }
 
     fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> {

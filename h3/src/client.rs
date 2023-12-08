@@ -168,9 +168,7 @@ where
         //# A
         //# client MUST send only a single request on a given stream.
         let mut stream = future::poll_fn(|cx| self.open.poll_open_bidi(cx))
-            .await
-            .map_err(|e| self.maybe_conn_err(e))?;
-
+            .await;
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
         //= type=TODO
         //# Characters in field names MUST be
