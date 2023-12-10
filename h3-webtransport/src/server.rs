@@ -292,7 +292,7 @@ where
                 None => {
                     let mut opener = (*p.opener).lock().unwrap();
                     // Open the stream first
-                    let res = ready!(opener.poll_open_bidi(cx))?;
+                    let res = ready!(opener.poll_open_bidi(cx));
                     let stream = BidiStream::new(BufRecvStream::new(res));
 
                     let buf = WriteBuf::from(BidiStreamHeader::WebTransportBidi(*p.session_id));
@@ -335,7 +335,7 @@ where
                 }
                 None => {
                     let mut opener = (*p.opener).lock().unwrap();
-                    let send = ready!(opener.poll_open_send(cx))?;
+                    let send = ready!(opener.poll_open_send(cx));
                     let send = BufRecvStream::new(send);
                     let send = SendStream::new(send);
 

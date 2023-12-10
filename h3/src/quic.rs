@@ -3,6 +3,7 @@
 //! This module includes traits and types meant to allow being generic over any
 //! QUIC implementation.
 
+use std::fmt::Display;
 use std::marker::PhantomData;
 use std::task::{self, Poll};
 
@@ -31,7 +32,37 @@ impl<'a, E: Error + 'a> From<E> for Box<dyn Error + 'a> {
     }
 }
 
+impl Display for ErrorIncoming {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // display enum with fields
+        match self {
+            ErrorIncoming::ApplicationClose { error_code } => {
+                write!(f, "ApplicationClose: {}", error_code)
+            }
+            ErrorIncoming::Timeout => write!(f, "Timeout"),
+            ErrorIncoming::ConnectionClosed { error_code } => {
+                write!(f, "ConnectionClosed: {}", error_code)
+            }
+        }
+    }
+}
+
+impl std::error::Error for ErrorIncoming {
+
+}
+
+impl Error for ErrorIncoming{
+    fn is_timeout(&self) -> bool {
+        todo!()
+    }
+
+    fn err_code(&self) -> Option<u64> {
+        todo!()
+    }
+}
+
 /// TODO:
+#[derive(Debug)]
 pub enum ErrorIncoming {
     /// Todo
     ApplicationClose {
@@ -186,13 +217,15 @@ pub trait SendStreamUnframed<B: Buf>: SendStream<B> {
         &mut self,
         cx: &mut task::Context<'_>,
         buf: &mut D,
-    ) -> Poll<usize>;
+    ) -> Poll<Result<usize, Self::Error>>;
 }
 
 /// A trait describing the "receive" actions of a QUIC stream.
 pub trait RecvStream {
     /// The type of `Buf` for data received on this stream.
     type Buf: Buf;
+    /// The error type that can occur when receiving data.
+    type Error: Into<Box<dyn Error>>;
 
     /// Poll the stream for more data.
     ///
@@ -201,7 +234,7 @@ pub trait RecvStream {
     fn poll_data(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Option<Self::Buf>>;
+    ) -> Poll<Result<Option<Self::Buf>, Self::Error>>;
 
     /// Send a `STOP_SENDING` QUIC code.
     fn stop_sending(&mut self, error_code: u64);

@@ -133,8 +133,9 @@ where
             return Poll::Ready(Ok(true));
         }
         match self.stream.poll_read(cx) {
+            Poll::Ready(Err(e)) => Poll::Ready(Err(FrameStreamError::Quic(e.into()))),
             Poll::Pending => Poll::Pending,
-            Poll::Ready(eos) => Poll::Ready(Ok(eos)),
+            Poll::Ready(Ok(eos)) => Poll::Ready(Ok(eos)),
         }
     }
 
@@ -553,11 +554,12 @@ mod tests {
 
     impl RecvStream for FakeRecv {
         type Buf = Bytes;
+        type Error = FakeError;
 
         fn poll_data(
             &mut self,
             _: &mut Context<'_>,
-        ) -> Poll<Option<Self::Buf>> {
+        ) -> Poll<Result<Option<Self::Buf>, Self::Error>> {
             Poll::Ready(Ok(self.chunks.pop_front()))
         }
 
@@ -570,7 +572,31 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct FakeError;
 
+    impl quic::Error for FakeError {
+        fn is_timeout(&self) -> bool {
+            unimplemented!()
+        }
+
+        fn err_code(&self) -> Option<u64> {
+            unimplemented!()
+        }
+    }
+
+    impl std::error::Error for FakeError {}
+    impl fmt::Display for FakeError {
+        fn fmt(&self, _: &mut fmt::Formatter<'_>) -> fmt::Result {
+            unimplemented!()
+        }
+    }
+
+    impl From<FakeError> for Arc<dyn quic::Error> {
+        fn from(_: FakeError) -> Self {
+            unimplemented!()
+        }
+    }
 
     fn to_bytes(
         x: Poll<Result<Option<impl Buf>, FrameStreamError>>,
