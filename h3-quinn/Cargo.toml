@@ -22,3 +22,4 @@ quinn-proto = { version = "0.10", default-features = false }
 tokio-util = { version = "0.7.9" }
 futures = { version = "0.3.28" }
 tokio = { version = "1", features = ["io-util"], default-features = false }
+sync_wrapper = "0.1.2"
