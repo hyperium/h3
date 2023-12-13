@@ -53,3 +53,26 @@ Now you can navigate to files in the `root` folder for example `https://localhos
 The example [example client](client.rs) can generate a `SSLKEYLOGFILE` to see the traffic unencrypted in tools like Wireshark.  
 To set this up just set the `SSLKEYLOGFILE` environment variable to a file path and follow this [tutorial](https://wiki.wireshark.org/TLS#using-the-pre-master-secret).
 Then use the example client with the `--keylogfile=true` option to enable this.
+
+
+## Streaming client/serer - Start the client
+
+This example sends an HTTP request to the server, server responds with 
+a response and after that the client body and server body can be used
+as tokio AsyncRead/AsyncWrite streams to continue doing bidirectional
+data transfer on each end. In this example, the client sends a message
+every one second and server just echoes it back
+
+To start the streaming example client you can run following command:
+
+```bash
+> cargo run --example client_streaming -- https://localhost:4433
+```
+
+
+## Streaming client/server- start the server
+So that the server responds something you can provide a directory with content files.
+
+```bash
+> cargo run --example server_streaming -- --listen=127.0.0.1:4433 
+```

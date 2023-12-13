@@ -48,5 +48,13 @@ name = "server"
 path = "server.rs"
 
 [[example]]
+name = "client_streaming"
+path = "client_streaming.rs"
+
+[[example]]
+name = "server_streaming"
+path = "server_streaming.rs"
+
+[[example]]
 name = "webtransport_server"
 path = "webtransport_server.rs"
