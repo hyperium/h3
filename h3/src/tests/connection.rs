@@ -93,6 +93,43 @@ async fn server_drop_close() {
     tokio::join!(server_fut, client_fut);
 }
 
+// In this test the client calls send_data() without doing a finish(),
+// i.e client keeps the body stream open. And cient expects server to
+// read_data() and send a response
+#[tokio::test]
+async fn server_send_data_without_finish() {
+    let mut pair = Pair::default();
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let (_driver, mut send_request) = client::new(pair.client().await).await.unwrap();
+
+        let mut req = send_request
+            .send_request(Request::get("http://no.way").body(()).unwrap())
+            .await
+            .unwrap();
+        let data = vec![0; 100];
+        let _ = req
+            .send_data(bytes::Bytes::copy_from_slice(&data))
+            .await
+            .unwrap();
+        let _ = req.recv_response().await.unwrap();
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming = server::Connection::new(conn).await.unwrap();
+        let (_, mut stream) = incoming.accept().await.unwrap().unwrap();
+        let mut data = stream.recv_data().await.unwrap().unwrap();
+        let data = data.copy_to_bytes(data.remaining());
+        assert_eq!(data.len(), 100);
+        response(stream).await;
+        server.endpoint.wait_idle().await;
+    };
+
+    tokio::join!(server_fut, client_fut);
+}
+
 #[tokio::test]
 async fn client_close_only_on_last_sender_drop() {
     let mut pair = Pair::default();
