@@ -2,7 +2,6 @@ use std::task::{Context, Poll};
 
 use bytes::Buf;
 
-use futures_util::ready;
 use tracing::trace;
 
 use crate::stream::{BufRecvStream, WriteBuf};
@@ -96,7 +95,11 @@ where
             return Poll::Ready(Ok(None));
         };
 
-        let end = ready!(self.try_recv(cx))?;
+        let end = match self.try_recv(cx) {
+            Poll::Ready(Ok(end)) => end,
+            Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+            Poll::Pending => false,
+        };
         let data = self.stream.buf_mut().take_chunk(self.remaining_data);
 
         match (data, end) {
