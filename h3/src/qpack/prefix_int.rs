@@ -107,11 +107,19 @@ mod test {
         check_codec(5, 0b101, 0, &[0b1010_0000]);
         check_codec(5, 0b010, 1337, &[0b0101_1111, 154, 10]);
         check_codec(5, 0b010, 31, &[0b0101_1111, 0]);
+        #[cfg(target_pointer_width = "64")]
         check_codec(
             5,
             0b010,
             usize::max_value(),
             &[95, 224, 255, 255, 255, 255, 255, 255, 255, 255, 1],
+        );
+        #[cfg(target_pointer_width = "32")]
+        check_codec(
+            5,
+            0b010,
+            usize::max_value(),
+            &[95, 224, 255, 255, 255, 15],
         );
     }
 
@@ -119,11 +127,19 @@ mod test {
     fn codec_8_bits() {
         check_codec(8, 0, 42, &[0b0010_1010]);
         check_codec(8, 0, 424_242, &[255, 179, 240, 25]);
+        #[cfg(target_pointer_width = "64")]
         check_codec(
             8,
             0,
             usize::max_value(),
             &[255, 128, 254, 255, 255, 255, 255, 255, 255, 255, 1],
+        );
+        #[cfg(target_pointer_width = "32")]
+        check_codec(
+            8,
+            0,
+            usize::max_value(),
+            &[255, 128, 254, 255, 255, 15],
         );
     }
 
