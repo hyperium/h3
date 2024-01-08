@@ -240,7 +240,7 @@ impl Action {
         let instruction = match DecoderInstruction::decode(first) {
             DecoderInstruction::Unknown => return Err(Error::UnknownDecoderInstruction(first)),
             DecoderInstruction::InsertCountIncrement => {
-                InsertCountIncrement::decode(&mut buf)?.map(|x| Action::ReceivedRefIncrement(x.0))
+                InsertCountIncrement::decode(&mut buf)?.map(|x| Action::ReceivedRefIncrement(x.0 as usize))
             }
             DecoderInstruction::HeaderAck => {
                 HeaderAck::decode(&mut buf)?.map(|x| Action::Untrack(x.0))
