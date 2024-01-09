@@ -1,4 +1,5 @@
 use bytes::{Buf, BufMut};
+use std::convert::TryInto;
 
 use super::{
     parse_error::ParseError,
@@ -96,6 +97,9 @@ impl InsertWithNameRef {
             Err(IntError::UnexpectedEnd) => return Ok(None),
             Err(e) => return Err(e.into()),
         };
+        let index: usize = index
+            .try_into()
+            .map_err(|e| ParseError::Integer(crate::qpack::prefix_int::Error::Overflow))?;
 
         let value = match prefix_string::decode(8, buf) {
             Ok(x) => x,
@@ -113,11 +117,11 @@ impl InsertWithNameRef {
     pub fn encode<W: BufMut>(&self, buf: &mut W) -> Result<(), prefix_string::Error> {
         match self {
             InsertWithNameRef::Static { index, value } => {
-                prefix_int::encode(6, 0b11, *index, buf);
+                prefix_int::encode(6, 0b11, *index as u64, buf);
                 prefix_string::encode(8, 0, value, buf)?;
             }
             InsertWithNameRef::Dynamic { index, value } => {
-                prefix_int::encode(6, 0b10, *index, buf);
+                prefix_int::encode(6, 0b10, *index as u64, buf);
                 prefix_string::encode(8, 0, value, buf)?;
             }
         }
@@ -166,7 +170,14 @@ pub struct Duplicate(pub usize);
 impl Duplicate {
     pub fn decode<R: Buf>(buf: &mut R) -> Result<Option<Self>, ParseError> {
         let index = match prefix_int::decode(5, buf) {
-            Ok((0, x)) => x,
+            Ok((0, x)) => {
+                if x > (usize::MAX as u64) {
+                    return Err(ParseError::Integer(
+                        crate::qpack::prefix_int::Error::Overflow,
+                    ));
+                }
+                x as usize
+            }
             Ok((f, _)) => return Err(ParseError::InvalidPrefix(f)),
             Err(IntError::UnexpectedEnd) => return Ok(None),
             Err(e) => return Err(e.into()),
@@ -175,7 +186,7 @@ impl Duplicate {
     }
 
     pub fn encode<W: BufMut>(&self, buf: &mut W) {
-        prefix_int::encode(5, 0, self.0, buf);
+        prefix_int::encode(5, 0, self.0 as u64, buf);
     }
 }
 
@@ -185,7 +196,14 @@ pub struct DynamicTableSizeUpdate(pub usize);
 impl DynamicTableSizeUpdate {
     pub fn decode<R: Buf>(buf: &mut R) -> Result<Option<Self>, ParseError> {
         let size = match prefix_int::decode(5, buf) {
-            Ok((0b001, x)) => x,
+            Ok((0b001, x)) => {
+                if x > (usize::MAX as u64) {
+                    return Err(ParseError::Integer(
+                        crate::qpack::prefix_int::Error::Overflow,
+                    ));
+                }
+                x as usize
+            }
             Ok((f, _)) => return Err(ParseError::InvalidPrefix(f)),
             Err(IntError::UnexpectedEnd) => return Ok(None),
             Err(e) => return Err(e.into()),
@@ -194,7 +212,7 @@ impl DynamicTableSizeUpdate {
     }
 
     pub fn encode<W: BufMut>(&self, buf: &mut W) {
-        prefix_int::encode(5, 0b001, self.0, buf);
+        prefix_int::encode(5, 0b001, self.0 as u64, buf);
     }
 }
 
@@ -245,12 +263,19 @@ impl DecoderInstruction {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct InsertCountIncrement(pub usize);
+pub struct InsertCountIncrement(pub u8);
 
 impl InsertCountIncrement {
     pub fn decode<R: Buf>(buf: &mut R) -> Result<Option<Self>, ParseError> {
         let insert_count = match prefix_int::decode(6, buf) {
-            Ok((0b00, x)) => x,
+            Ok((0b00, x)) => {
+                if x > 64 {
+                    return Err(ParseError::Integer(
+                        crate::qpack::prefix_int::Error::Overflow,
+                    ));
+                }
+                x as u8
+            }
             Ok((f, _)) => return Err(ParseError::InvalidPrefix(f)),
             Err(IntError::UnexpectedEnd) => return Ok(None),
             Err(e) => return Err(e.into()),
@@ -259,7 +284,7 @@ impl InsertCountIncrement {
     }
 
     pub fn encode<W: BufMut>(&self, buf: &mut W) {
-        prefix_int::encode(6, 0b00, self.0, buf);
+        prefix_int::encode(6, 0b00, self.0 as u64, buf);
     }
 }
 
@@ -278,7 +303,7 @@ impl HeaderAck {
     }
 
     pub fn encode<W: BufMut>(&self, buf: &mut W) {
-        prefix_int::encode(7, 0b1, self.0 as usize, buf);
+        prefix_int::encode(7, 0b1, self.0, buf);
     }
 }
 
@@ -297,7 +322,7 @@ impl StreamCancel {
     }
 
     pub fn encode<W: BufMut>(&self, buf: &mut W) {
-        prefix_int::encode(6, 0b01, self.0 as usize, buf);
+        prefix_int::encode(6, 0b01, self.0, buf);
     }
 }
 
