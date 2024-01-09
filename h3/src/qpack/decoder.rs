@@ -128,7 +128,8 @@ impl Decoder {
         }
 
         if self.table.total_inserted() != inserted_on_start {
-            InsertCountIncrement((self.table.total_inserted() - inserted_on_start).try_into()?).encode(write);
+            InsertCountIncrement((self.table.total_inserted() - inserted_on_start).try_into()?)
+                .encode(write);
         }
 
         Ok(self.table.total_inserted())

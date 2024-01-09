@@ -179,11 +179,15 @@ impl HeaderPrefix {
         let (sign_negative, delta_base) = prefix_int::decode(7, buf)?;
 
         if encoded_insert_count > (usize::MAX as u64) {
-            return Err(ParseError::Integer(crate::qpack::prefix_int::Error::Overflow))
+            return Err(ParseError::Integer(
+                crate::qpack::prefix_int::Error::Overflow,
+            ));
         }
 
         if delta_base > (usize::MAX as u64) {
-            return Err(ParseError::Integer(crate::qpack::prefix_int::Error::Overflow))
+            return Err(ParseError::Integer(
+                crate::qpack::prefix_int::Error::Overflow,
+            ));
         }
 
         Ok(Self {
@@ -211,18 +215,22 @@ impl Indexed {
         match prefix_int::decode(6, buf)? {
             (0b11, i) => {
                 if i > (usize::MAX as u64) {
-                    return Err(ParseError::Integer(crate::qpack::prefix_int::Error::Overflow))
+                    return Err(ParseError::Integer(
+                        crate::qpack::prefix_int::Error::Overflow,
+                    ));
                 }
 
                 Ok(Indexed::Static(i as usize))
-            },
+            }
             (0b10, i) => {
                 if i > (usize::MAX as u64) {
-                    return Err(ParseError::Integer(crate::qpack::prefix_int::Error::Overflow))
+                    return Err(ParseError::Integer(
+                        crate::qpack::prefix_int::Error::Overflow,
+                    ));
                 }
 
                 Ok(Indexed::Dynamic(i as usize))
-            },
+            }
             (f, _) => Err(ParseError::InvalidPrefix(f)),
         }
     }
@@ -243,11 +251,13 @@ impl IndexedWithPostBase {
         match prefix_int::decode(4, buf)? {
             (0b0001, i) => {
                 if i > (usize::MAX as u64) {
-                    return Err(ParseError::Integer(crate::qpack::prefix_int::Error::Overflow))
+                    return Err(ParseError::Integer(
+                        crate::qpack::prefix_int::Error::Overflow,
+                    ));
                 }
 
                 Ok(IndexedWithPostBase(i as usize))
-            },
+            }
             (f, _) => Err(ParseError::InvalidPrefix(f)),
         }
     }
@@ -282,22 +292,28 @@ impl LiteralWithNameRef {
         match prefix_int::decode(4, buf)? {
             (f, i) if f & 0b0101 == 0b0101 => {
                 if i > (usize::MAX as u64) {
-                    return Err(ParseError::Integer(crate::qpack::prefix_int::Error::Overflow))
+                    return Err(ParseError::Integer(
+                        crate::qpack::prefix_int::Error::Overflow,
+                    ));
                 }
 
                 Ok(LiteralWithNameRef::new_static(
-                i as usize,
-                prefix_string::decode(8, buf)?))
-            },
+                    i as usize,
+                    prefix_string::decode(8, buf)?,
+                ))
+            }
             (f, i) if f & 0b0101 == 0b0100 => {
                 if i > (usize::MAX as u64) {
-                    return Err(ParseError::Integer(crate::qpack::prefix_int::Error::Overflow))
+                    return Err(ParseError::Integer(
+                        crate::qpack::prefix_int::Error::Overflow,
+                    ));
                 }
 
                 Ok(LiteralWithNameRef::new_dynamic(
-                i as usize,
-                prefix_string::decode(8, buf)?))
-            },
+                    i as usize,
+                    prefix_string::decode(8, buf)?,
+                ))
+            }
             (f, _) => Err(ParseError::InvalidPrefix(f)),
         }
     }
@@ -335,13 +351,16 @@ impl LiteralWithPostBaseNameRef {
         match prefix_int::decode(3, buf)? {
             (f, i) if f & 0b1111_0000 == 0 => {
                 if i > (usize::MAX as u64) {
-                    return Err(ParseError::Integer(crate::qpack::prefix_int::Error::Overflow))
+                    return Err(ParseError::Integer(
+                        crate::qpack::prefix_int::Error::Overflow,
+                    ));
                 }
 
                 Ok(LiteralWithPostBaseNameRef::new(
-                i as usize,
-                prefix_string::decode(8, buf)?))
-            },
+                    i as usize,
+                    prefix_string::decode(8, buf)?,
+                ))
+            }
             (f, _) => Err(ParseError::InvalidPrefix(f)),
         }
     }

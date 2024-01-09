@@ -97,7 +97,9 @@ impl InsertWithNameRef {
             Err(IntError::UnexpectedEnd) => return Ok(None),
             Err(e) => return Err(e.into()),
         };
-        let index: usize = index.try_into().map_err(|e| ParseError::Integer(crate::qpack::prefix_int::Error::Overflow))?;
+        let index: usize = index
+            .try_into()
+            .map_err(|e| ParseError::Integer(crate::qpack::prefix_int::Error::Overflow))?;
 
         let value = match prefix_string::decode(8, buf) {
             Ok(x) => x,
@@ -170,10 +172,12 @@ impl Duplicate {
         let index = match prefix_int::decode(5, buf) {
             Ok((0, x)) => {
                 if x > (usize::MAX as u64) {
-                    return Err(ParseError::Integer(crate::qpack::prefix_int::Error::Overflow))
+                    return Err(ParseError::Integer(
+                        crate::qpack::prefix_int::Error::Overflow,
+                    ));
                 }
                 x as usize
-            },
+            }
             Ok((f, _)) => return Err(ParseError::InvalidPrefix(f)),
             Err(IntError::UnexpectedEnd) => return Ok(None),
             Err(e) => return Err(e.into()),
@@ -194,10 +198,12 @@ impl DynamicTableSizeUpdate {
         let size = match prefix_int::decode(5, buf) {
             Ok((0b001, x)) => {
                 if x > (usize::MAX as u64) {
-                    return Err(ParseError::Integer(crate::qpack::prefix_int::Error::Overflow))
+                    return Err(ParseError::Integer(
+                        crate::qpack::prefix_int::Error::Overflow,
+                    ));
                 }
                 x as usize
-            },
+            }
             Ok((f, _)) => return Err(ParseError::InvalidPrefix(f)),
             Err(IntError::UnexpectedEnd) => return Ok(None),
             Err(e) => return Err(e.into()),
@@ -264,10 +270,12 @@ impl InsertCountIncrement {
         let insert_count = match prefix_int::decode(6, buf) {
             Ok((0b00, x)) => {
                 if x > 64 {
-                    return Err(ParseError::Integer(crate::qpack::prefix_int::Error::Overflow))
+                    return Err(ParseError::Integer(
+                        crate::qpack::prefix_int::Error::Overflow,
+                    ));
                 }
                 x as u8
-            },
+            }
             Ok((f, _)) => return Err(ParseError::InvalidPrefix(f)),
             Err(IntError::UnexpectedEnd) => return Ok(None),
             Err(e) => return Err(e.into()),
