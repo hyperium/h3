@@ -1,3 +1,9 @@
+### v0.0.4 (2024-01-24)
+
+* Update to `http` v1.0
+* Fix `try_recv` potentially hanging
+* Fix prefixed integers on 32bit targets
+
 ### v0.0.3 (2023-10-23)
 
 * Split out a `Settings` struct from `Config` ([a57ed22](https://github.com/hyperium/h3/commit/a57ed224ac5d17a635eb71eb6f83c1196f581a51))
