@@ -1,3 +1,7 @@
+### v0.0.5 (2024-01-24)
+
+* Update to `http` v1.
+
 ### v0.0.4 (2023-10-23)
 
 * Fix `cargo doc` warning ([3ef7c1a](https://github.com/hyperium/h3/commit/3ef7c1a37b635e8446322d8f8d3a68580a208ad8))
