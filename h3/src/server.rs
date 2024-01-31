@@ -826,6 +826,20 @@ pin_project! {
         }
 }
 
+impl<'a, C, B> ReadDatagram<'a, C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    #[allow(missing_docs)]
+    pub fn new(conn: &'a mut Connection<C, B>) -> Self {
+        Self {
+            conn,
+            _marker: PhantomData,
+        }
+    }
+}
+
 impl<'a, C, B> Future for ReadDatagram<'a, C, B>
 where
     C: quic::Connection<B> + RecvDatagramExt,
