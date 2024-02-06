@@ -149,10 +149,10 @@ where
         //# unidirectional streams required by mandatory extensions (such as the
         //# QPACK encoder and decoder streams) first, and then create additional
         //# streams as allowed by their peer.
-        let mut control_send = future::poll_fn(|cx| conn.poll_open_send(cx))
-            .await;
 
-            //.map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))?;
+        let mut control_send = future::poll_fn(|cx| conn.poll_open_send(cx))
+            .await
+            .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))?;
 
         let mut settings = Settings::default();
 
@@ -576,8 +576,16 @@ where
     /// https://www.rfc-editor.org/rfc/rfc9114.html#stream-grease
     async fn start_grease_stream(&mut self) {
         // start the stream
-        let mut grease_stream = future::poll_fn(|cx| self.conn.poll_open_send(cx))
-            .await;
+        let mut grease_stream = match future::poll_fn(|cx| self.conn.poll_open_send(cx))
+            .await
+            .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))
+        {
+            Err(err) => {
+                warn!("grease stream creation failed with {}", err);
+                return;
+            }
+            Ok(grease) => grease,
+        };
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
         //# Stream types of the format 0x1f * N + 0x21 for non-negative integer

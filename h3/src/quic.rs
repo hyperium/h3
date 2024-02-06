@@ -47,11 +47,9 @@ impl Display for ErrorIncoming {
     }
 }
 
-impl std::error::Error for ErrorIncoming {
+impl std::error::Error for ErrorIncoming {}
 
-}
-
-impl Error for ErrorIncoming{
+impl Error for ErrorIncoming {
     fn is_timeout(&self) -> bool {
         todo!()
     }
@@ -107,6 +105,11 @@ pub trait Connection<B: Buf> {
         BidiStream = Self::BidiStream,
     >;
 
+    /// The error type that can occur when accepting a new stream
+    ///
+    /// TODO: this should be a trait
+    ///
+
     /// Poll the connection for incoming streams.
     fn poll_incoming(
         &mut self,
@@ -117,13 +120,13 @@ pub trait Connection<B: Buf> {
     fn poll_open_bidi(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Self::BidiStream>;
+    ) -> Poll<Result<Self::BidiStream, ErrorIncoming>>;
 
     /// Poll the connection to create a new unidirectional stream.
     fn poll_open_send(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Self::SendStream>;
+    ) -> Poll<Result<Self::SendStream, ErrorIncoming>>;
 
     /// Get an object to open outgoing streams.
     fn opener(&self) -> Self::OpenStreams;
@@ -173,13 +176,13 @@ pub trait OpenStreams<B: Buf> {
     fn poll_open_bidi(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Self::BidiStream>;
+    ) -> Poll<Result<Self::BidiStream, ErrorIncoming>>;
 
     /// Poll the connection to create a new unidirectional stream.
     fn poll_open_send(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Self::SendStream>;
+    ) -> Poll<Result<Self::SendStream, ErrorIncoming>>;
 
     /// Close the connection immediately
     fn close(&mut self, code: crate::error::Code, reason: &[u8]);
