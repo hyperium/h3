@@ -674,6 +674,11 @@ where
         self.inner.recv_data().await
     }
 
+    /// Poll for data sent from the client
+    pub fn poll_data(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<impl Buf>, Error>> {
+        self.inner.poll_data(cx)
+    }
+
     /// Receive an optional set of trailers for the request
     pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
         self.inner.recv_trailers().await
