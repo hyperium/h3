@@ -177,17 +177,30 @@ impl HeaderPrefix {
     pub fn decode<R: Buf>(buf: &mut R) -> Result<Self, ParseError> {
         let (_, encoded_insert_count) = prefix_int::decode(8, buf)?;
         let (sign_negative, delta_base) = prefix_int::decode(7, buf)?;
+
+        if encoded_insert_count > (usize::MAX as u64) {
+            return Err(ParseError::Integer(
+                crate::qpack::prefix_int::Error::Overflow,
+            ));
+        }
+
+        if delta_base > (usize::MAX as u64) {
+            return Err(ParseError::Integer(
+                crate::qpack::prefix_int::Error::Overflow,
+            ));
+        }
+
         Ok(Self {
-            encoded_insert_count,
-            delta_base,
+            encoded_insert_count: encoded_insert_count as usize,
+            delta_base: delta_base as usize,
             sign_negative: sign_negative == 1,
         })
     }
 
     pub fn encode<W: BufMut>(&self, buf: &mut W) {
         let sign_bit = if self.sign_negative { 1 } else { 0 };
-        prefix_int::encode(8, 0, self.encoded_insert_count, buf);
-        prefix_int::encode(7, sign_bit, self.delta_base, buf);
+        prefix_int::encode(8, 0, self.encoded_insert_count as u64, buf);
+        prefix_int::encode(7, sign_bit, self.delta_base as u64, buf);
     }
 }
 
@@ -200,16 +213,32 @@ pub enum Indexed {
 impl Indexed {
     pub fn decode<R: Buf>(buf: &mut R) -> Result<Self, ParseError> {
         match prefix_int::decode(6, buf)? {
-            (0b11, i) => Ok(Indexed::Static(i)),
-            (0b10, i) => Ok(Indexed::Dynamic(i)),
+            (0b11, i) => {
+                if i > (usize::MAX as u64) {
+                    return Err(ParseError::Integer(
+                        crate::qpack::prefix_int::Error::Overflow,
+                    ));
+                }
+
+                Ok(Indexed::Static(i as usize))
+            }
+            (0b10, i) => {
+                if i > (usize::MAX as u64) {
+                    return Err(ParseError::Integer(
+                        crate::qpack::prefix_int::Error::Overflow,
+                    ));
+                }
+
+                Ok(Indexed::Dynamic(i as usize))
+            }
             (f, _) => Err(ParseError::InvalidPrefix(f)),
         }
     }
 
     pub fn encode<W: BufMut>(&self, buf: &mut W) {
         match self {
-            Indexed::Static(i) => prefix_int::encode(6, 0b11, *i, buf),
-            Indexed::Dynamic(i) => prefix_int::encode(6, 0b10, *i, buf),
+            Indexed::Static(i) => prefix_int::encode(6, 0b11, *i as u64, buf),
+            Indexed::Dynamic(i) => prefix_int::encode(6, 0b10, *i as u64, buf),
         }
     }
 }
@@ -220,13 +249,21 @@ pub struct IndexedWithPostBase(pub usize);
 impl IndexedWithPostBase {
     pub fn decode<R: Buf>(buf: &mut R) -> Result<Self, ParseError> {
         match prefix_int::decode(4, buf)? {
-            (0b0001, i) => Ok(IndexedWithPostBase(i)),
+            (0b0001, i) => {
+                if i > (usize::MAX as u64) {
+                    return Err(ParseError::Integer(
+                        crate::qpack::prefix_int::Error::Overflow,
+                    ));
+                }
+
+                Ok(IndexedWithPostBase(i as usize))
+            }
             (f, _) => Err(ParseError::InvalidPrefix(f)),
         }
     }
 
     pub fn encode<W: BufMut>(&self, buf: &mut W) {
-        prefix_int::encode(4, 0b0001, self.0, buf)
+        prefix_int::encode(4, 0b0001, self.0 as u64, buf)
     }
 }
 
@@ -253,14 +290,30 @@ impl LiteralWithNameRef {
 
     pub fn decode<R: Buf>(buf: &mut R) -> Result<Self, ParseError> {
         match prefix_int::decode(4, buf)? {
-            (f, i) if f & 0b0101 == 0b0101 => Ok(LiteralWithNameRef::new_static(
-                i,
-                prefix_string::decode(8, buf)?,
-            )),
-            (f, i) if f & 0b0101 == 0b0100 => Ok(LiteralWithNameRef::new_dynamic(
-                i,
-                prefix_string::decode(8, buf)?,
-            )),
+            (f, i) if f & 0b0101 == 0b0101 => {
+                if i > (usize::MAX as u64) {
+                    return Err(ParseError::Integer(
+                        crate::qpack::prefix_int::Error::Overflow,
+                    ));
+                }
+
+                Ok(LiteralWithNameRef::new_static(
+                    i as usize,
+                    prefix_string::decode(8, buf)?,
+                ))
+            }
+            (f, i) if f & 0b0101 == 0b0100 => {
+                if i > (usize::MAX as u64) {
+                    return Err(ParseError::Integer(
+                        crate::qpack::prefix_int::Error::Overflow,
+                    ));
+                }
+
+                Ok(LiteralWithNameRef::new_dynamic(
+                    i as usize,
+                    prefix_string::decode(8, buf)?,
+                ))
+            }
             (f, _) => Err(ParseError::InvalidPrefix(f)),
         }
     }
@@ -268,11 +321,11 @@ impl LiteralWithNameRef {
     pub fn encode<W: BufMut>(&self, buf: &mut W) -> Result<(), prefix_string::Error> {
         match self {
             LiteralWithNameRef::Static { index, value } => {
-                prefix_int::encode(4, 0b0101, *index, buf);
+                prefix_int::encode(4, 0b0101, *index as u64, buf);
                 prefix_string::encode(8, 0, value, buf)?;
             }
             LiteralWithNameRef::Dynamic { index, value } => {
-                prefix_int::encode(4, 0b0100, *index, buf);
+                prefix_int::encode(4, 0b0100, *index as u64, buf);
                 prefix_string::encode(8, 0, value, buf)?;
             }
         }
@@ -296,16 +349,24 @@ impl LiteralWithPostBaseNameRef {
 
     pub fn decode<R: Buf>(buf: &mut R) -> Result<Self, ParseError> {
         match prefix_int::decode(3, buf)? {
-            (f, i) if f & 0b1111_0000 == 0 => Ok(LiteralWithPostBaseNameRef::new(
-                i,
-                prefix_string::decode(8, buf)?,
-            )),
+            (f, i) if f & 0b1111_0000 == 0 => {
+                if i > (usize::MAX as u64) {
+                    return Err(ParseError::Integer(
+                        crate::qpack::prefix_int::Error::Overflow,
+                    ));
+                }
+
+                Ok(LiteralWithPostBaseNameRef::new(
+                    i as usize,
+                    prefix_string::decode(8, buf)?,
+                ))
+            }
             (f, _) => Err(ParseError::InvalidPrefix(f)),
         }
     }
 
     pub fn encode<W: BufMut>(&self, buf: &mut W) -> Result<(), prefix_string::Error> {
-        prefix_int::encode(3, 0b0000, self.index, buf);
+        prefix_int::encode(3, 0b0000, self.index as u64, buf);
         prefix_string::encode(8, 0, &self.value, buf)?;
         Ok(())
     }
@@ -347,6 +408,7 @@ impl Literal {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::convert::TryInto;
     use std::io::Cursor;
 
     const TABLE_SIZE: usize = 4096;
@@ -424,7 +486,7 @@ mod test {
     #[test]
     fn base_index_too_small() {
         let mut buf = vec![];
-        let encoded_largest_ref = (2 % (2 * TABLE_SIZE / 32)) + 1;
+        let encoded_largest_ref: u64 = ((2 % (2 * TABLE_SIZE / 32)) + 1).try_into().unwrap();
         prefix_int::encode(8, 0, encoded_largest_ref, &mut buf);
         prefix_int::encode(7, 1, 2, &mut buf); // base index negative = 0
 
