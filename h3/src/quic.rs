@@ -43,6 +43,7 @@ impl Display for ErrorIncoming {
             ErrorIncoming::ConnectionClosed { error_code } => {
                 write!(f, "ConnectionClosed: {}", error_code)
             }
+            ErrorIncoming::Other => write!(f, "Connection Closed"),
         }
     }
 }
@@ -51,11 +52,14 @@ impl std::error::Error for ErrorIncoming {}
 
 impl Error for ErrorIncoming {
     fn is_timeout(&self) -> bool {
-        todo!()
+        matches!(self, ErrorIncoming::Timeout)
     }
 
     fn err_code(&self) -> Option<u64> {
-        todo!()
+        match self {
+            ErrorIncoming::ApplicationClose { error_code } => Some(*error_code),
+            _ => None,
+        }
     }
 }
 
@@ -74,6 +78,8 @@ pub enum ErrorIncoming {
         /// TODO
         error_code: u64,
     },
+    /// TODO
+    Other,
 }
 
 /// Trait representing a incoming QUIC stream.

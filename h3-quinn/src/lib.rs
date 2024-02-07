@@ -107,17 +107,42 @@ where
 ///
 /// Wraps reasons a Quinn connection might be lost.
 #[derive(Debug, Clone)]
+pub struct LegacyConnectionError(quinn::ConnectionError);
+
+/// Error Wrapper to implement traits
+#[derive(Debug, Clone)]
 pub struct ConnectionError(quinn::ConnectionError);
 
-impl fmt::Display for ConnectionError {
+impl From<ConnectionError> for ErrorIncoming {
+    fn from(e: ConnectionError) -> Self {
+        match e.0 {
+            quinn::ConnectionError::ApplicationClosed(quinn_proto::ApplicationClose {
+                error_code,
+                ..
+            }) => ErrorIncoming::ApplicationClose {
+                error_code: error_code.into_inner(),
+            },
+            quinn::ConnectionError::ConnectionClosed(quinn_proto::ConnectionClose {
+                error_code,
+                ..
+            }) => ErrorIncoming::ConnectionClosed {
+                error_code: error_code.into(),
+            },
+            quinn::ConnectionError::TimedOut => ErrorIncoming::Timeout,
+            _ => ErrorIncoming::Other,
+        }
+    }
+}
+
+impl fmt::Display for LegacyConnectionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
 }
 
-impl std::error::Error for ConnectionError {}
+impl std::error::Error for LegacyConnectionError {}
 
-impl Error for ConnectionError {
+impl Error for LegacyConnectionError {
     fn is_timeout(&self) -> bool {
         matches!(self.0, quinn::ConnectionError::TimedOut)
     }
@@ -133,7 +158,7 @@ impl Error for ConnectionError {
     }
 }
 
-impl From<quinn::ConnectionError> for ConnectionError {
+impl From<quinn::ConnectionError> for LegacyConnectionError {
     fn from(e: quinn::ConnectionError) -> Self {
         Self(e)
     }
@@ -185,7 +210,7 @@ impl From<quinn::SendDatagramError> for SendDatagramError {
             quinn::SendDatagramError::Disabled => Self::Disabled,
             quinn::SendDatagramError::TooLarge => Self::TooLarge,
             quinn::SendDatagramError::ConnectionLost(err) => {
-                Self::ConnectionLost(ConnectionError::from(err).into())
+                Self::ConnectionLost(LegacyConnectionError::from(err).into())
             }
         }
     }
@@ -226,9 +251,7 @@ where
 
         match ready!(self.incoming.poll_next_unpin(cx)).unwrap() {
             Ok(x) => Poll::Ready(Ok(x)),
-            Err(e) => {
-                return Poll::Ready(todo!());
-            }
+            Err(e) => Poll::Ready(Err(ConnectionError(e).into())),
         }
     }
 
@@ -247,9 +270,7 @@ where
                 send: Self::SendStream::new(send),
                 recv: Self::RecvStream::new(recv),
             })),
-            Err(e) => {
-                return Poll::Ready(todo!());
-            }
+            Err(e) => Poll::Ready(Err(ConnectionError(e).into())),
         }
     }
 
@@ -263,13 +284,10 @@ where
             })));
         }
 
-        let send = match ready!(self.opening_uni.as_mut().unwrap().poll_next_unpin(cx)).unwrap() {
-            Ok(s) => s,
-            Err(e) => {
-                return Poll::Ready(todo!());
-            }
-        };
-        Poll::Ready(Ok(Self::SendStream::new(send)))
+        match ready!(self.opening_uni.as_mut().unwrap().poll_next_unpin(cx)).unwrap() {
+            Ok(send) => Poll::Ready(Ok(Self::SendStream::new(send))),
+            Err(e) => Poll::Ready(Err(ConnectionError(e).into())),
+        }
     }
 
     fn opener(&self) -> Self::OpenStreams {
@@ -310,7 +328,7 @@ where
 {
     type Buf = Bytes;
 
-    type Error = ConnectionError;
+    type Error = LegacyConnectionError;
 
     #[inline]
     fn poll_accept_datagram(
@@ -353,19 +371,13 @@ where
             })));
         }
 
-        let (send, recv) =
-            match ready!(self.opening_bi.as_mut().unwrap().poll_next_unpin(cx)).unwrap() {
-                Ok(a) => a,
-                Err(err) => {
-                    // Todo - handle error
-                    return Poll::Ready(todo!());
-                }
-            };
-
-        Poll::Ready(Ok(Self::BidiStream {
-            send: Self::SendStream::new(send),
-            recv: Self::RecvStream::new(recv),
-        }))
+        match ready!(self.opening_bi.as_mut().unwrap().poll_next_unpin(cx)).unwrap() {
+            Ok((send, recv)) => Poll::Ready(Ok(Self::BidiStream {
+                send: Self::SendStream::new(send),
+                recv: Self::RecvStream::new(recv),
+            })),
+            Err(err) => Poll::Ready(Err(ConnectionError(err).into())),
+        }
     }
 
     fn poll_open_send(
@@ -378,14 +390,10 @@ where
             })));
         }
 
-        let send = match ready!(self.opening_uni.as_mut().unwrap().poll_next_unpin(cx)).unwrap() {
-            Ok(s) => s,
-            Err(e) => {
-                return Poll::Ready(todo!());
-            }
-        };
-
-        Poll::Ready(Ok(Self::SendStream::new(send)))
+        match ready!(self.opening_uni.as_mut().unwrap().poll_next_unpin(cx)).unwrap() {
+            Ok(send) => Poll::Ready(Ok(Self::SendStream::new(send))),
+            Err(e) => Poll::Ready(Err(ConnectionError(e).into())),
+        }
     }
 
     fn close(&mut self, code: h3::error::Code, reason: &[u8]) {
