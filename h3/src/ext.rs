@@ -8,7 +8,7 @@ use bytes::{Buf, Bytes};
 use crate::{
     error::Code,
     proto::{stream::StreamId, varint::VarInt},
-    Error,
+    LegacyErrorStruct,
 };
 
 /// Describes the `:protocol` pseudo-header for extended connect
@@ -64,7 +64,7 @@ where
     }
 
     /// Decodes a datagram frame from the QUIC datagram
-    pub fn decode(mut buf: B) -> Result<Self, Error> {
+    pub fn decode(mut buf: B) -> Result<Self, LegacyErrorStruct> {
         let q_stream_id = VarInt::decode(&mut buf)
             .map_err(|_| Code::H3_DATAGRAM_ERROR.with_cause("Malformed datagram frame"))?;
 

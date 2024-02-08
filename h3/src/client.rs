@@ -15,7 +15,7 @@ use tracing::{info, trace};
 use crate::{
     config::Config,
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
-    error::{Code, Error, ErrorLevel},
+    error::{Code, ErrorLevel, LegacyErrorStruct},
     frame::FrameStream,
     proto::{frame::Frame, headers::Header, push::PushId},
     qpack,
@@ -29,7 +29,9 @@ pub fn builder() -> Builder {
 }
 
 /// Create a new HTTP/3 client with default settings
-pub async fn new<C, O>(conn: C) -> Result<(Connection<C, Bytes>, SendRequest<O, Bytes>), Error>
+pub async fn new<C, O>(
+    conn: C,
+) -> Result<(Connection<C, Bytes>, SendRequest<O, Bytes>), LegacyErrorStruct>
 where
     C: quic::Connection<Bytes, OpenStreams = O>,
     O: quic::OpenStreams<Bytes>,
@@ -144,14 +146,14 @@ where
     pub async fn send_request(
         &mut self,
         req: http::Request<()>,
-    ) -> Result<RequestStream<T::BidiStream, B>, Error> {
+    ) -> Result<RequestStream<T::BidiStream, B>, LegacyErrorStruct> {
         let (peer_max_field_section_size, closing) = {
             let state = self.conn_state.read("send request lock state");
             (state.peer_config.max_field_section_size, state.closing)
         };
 
         if closing {
-            return Err(Error::closing());
+            return Err(LegacyErrorStruct::closing());
         }
 
         let (parts, _) = req.into_parts();
@@ -191,7 +193,10 @@ where
         //# that exceeds the indicated size, as the peer will likely refuse to
         //# process it.
         if mem_size > peer_max_field_section_size {
-            return Err(Error::header_too_big(mem_size, peer_max_field_section_size));
+            return Err(LegacyErrorStruct::header_too_big(
+                mem_size,
+                peer_max_field_section_size,
+            ));
         }
 
         stream::write(&mut stream, Frame::Headers(block.freeze()))
@@ -257,7 +262,7 @@ where
             if let Some(w) = Option::take(&mut self.conn_waker) {
                 w.wake()
             }
-            self.shared_state().write("SendRequest drop").error = Some(Error::closed());
+            self.shared_state().write("SendRequest drop").error = Some(LegacyErrorStruct::closed());
             self.open.close(Code::H3_NO_ERROR, b"");
         }
     }
@@ -363,18 +368,18 @@ where
     B: Buf,
 {
     /// Initiate a graceful shutdown, accepting `max_push` potentially in-flight server pushes
-    pub async fn shutdown(&mut self, _max_push: usize) -> Result<(), Error> {
+    pub async fn shutdown(&mut self, _max_push: usize) -> Result<(), LegacyErrorStruct> {
         // TODO: Calculate remaining pushes once server push is implemented.
         self.inner.shutdown(&mut self.sent_closing, PushId(0)).await
     }
 
     /// Wait until the connection is closed
-    pub async fn wait_idle(&mut self) -> Result<(), Error> {
+    pub async fn wait_idle(&mut self) -> Result<(), LegacyErrorStruct> {
         future::poll_fn(|cx| self.poll_close(cx)).await
     }
 
     /// Maintain the connection state until it is closed
-    pub fn poll_close(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+    pub fn poll_close(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), LegacyErrorStruct>> {
         if let Poll::Ready(Ok(_)) = self.inner.poll_handle_incoming(cx) {
             //= https://www.rfc-editor.org/rfc/rfc9114#section-6.1
             //# Clients MUST treat
@@ -507,7 +512,7 @@ impl Builder {
     pub async fn build<C, O, B>(
         &mut self,
         quic: C,
-    ) -> Result<(Connection<C, B>, SendRequest<O, B>), Error>
+    ) -> Result<(Connection<C, B>, SendRequest<O, B>), LegacyErrorStruct>
     where
         C: quic::Connection<B, OpenStreams = O>,
         O: quic::OpenStreams<B>,
@@ -608,7 +613,7 @@ where
     /// This should be called before trying to receive any data with [`recv_data()`].
     ///
     /// [`recv_data()`]: #method.recv_data
-    pub async fn recv_response(&mut self) -> Result<Response<()>, Error> {
+    pub async fn recv_response(&mut self) -> Result<Response<()>, LegacyErrorStruct> {
         let mut frame = future::poll_fn(|cx| self.inner.stream.poll_next(cx))
             .await
             .map_err(|e| self.maybe_conn_err(e))?
@@ -639,7 +644,7 @@ where
                 //# the message header it will accept on an individual HTTP message.
                 Err(qpack::DecoderError::HeaderTooLong(cancel_size)) => {
                     self.inner.stop_sending(Code::H3_REQUEST_CANCELLED);
-                    return Err(Error::header_too_big(
+                    return Err(LegacyErrorStruct::header_too_big(
                         cancel_size,
                         self.inner.max_field_section_size,
                     ));
@@ -667,12 +672,12 @@ where
 
     /// Receive some of the request body.
     // TODO what if called before recv_response ?
-    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
+    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, LegacyErrorStruct> {
         self.inner.recv_data().await
     }
 
     /// Receive an optional set of trailers for the response.
-    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
+    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, LegacyErrorStruct> {
         let res = self.inner.recv_trailers().await;
         if let Err(ref e) = res {
             if e.is_header_too_big() {
@@ -696,7 +701,7 @@ where
     B: Buf,
 {
     /// Send some data on the request body.
-    pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
+    pub async fn send_data(&mut self, buf: B) -> Result<(), LegacyErrorStruct> {
         self.inner.send_data(buf).await
     }
 
@@ -705,7 +710,7 @@ where
     /// Either [`RequestStream::finish`] or
     /// [`RequestStream::send_trailers`] must be called to finalize a
     /// request.
-    pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
+    pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), LegacyErrorStruct> {
         self.inner.send_trailers(trailers).await
     }
 
@@ -714,7 +719,7 @@ where
     /// Either [`RequestStream::finish`] or
     /// [`RequestStream::send_trailers`] must be called to finalize a
     /// request.
-    pub async fn finish(&mut self) -> Result<(), Error> {
+    pub async fn finish(&mut self) -> Result<(), LegacyErrorStruct> {
         self.inner.finish().await
     }
 

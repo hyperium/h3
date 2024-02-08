@@ -8,7 +8,7 @@ use http::{request, HeaderMap, Request, Response, StatusCode};
 use crate::{
     client,
     connection::ConnectionState,
-    error::{Code, Error, Kind},
+    error::{Code, LegacyErrorStruct, LegacyKind},
     proto::{
         coding::Encode,
         frame::{self, Frame, FrameType},
@@ -16,7 +16,9 @@ use crate::{
         push::PushId,
         varint::VarInt,
     },
-    qpack, server,
+    qpack,
+    quic::{self, StreamErrorIncoming},
+    server,
 };
 
 use super::h3_quinn;
@@ -291,7 +293,7 @@ async fn header_too_big_response_from_server() {
         let err_kind = incoming_req.accept().await.map(|_| ()).unwrap_err().kind();
         assert_matches!(
             err_kind,
-            Kind::HeaderTooBig {
+            LegacyKind::HeaderTooBig {
                 actual_size: 42,
                 max_size: 12,
                 ..
@@ -355,7 +357,7 @@ async fn header_too_big_response_from_server_trailers() {
         let err_kind = request_stream.recv_trailers().await.unwrap_err().kind();
         assert_matches!(
             err_kind,
-            Kind::HeaderTooBig {
+            LegacyKind::HeaderTooBig {
                 actual_size: 239,
                 max_size: 207,
                 ..
@@ -393,7 +395,7 @@ async fn header_too_big_client_error() {
                 .kind();
             assert_matches!(
                 err_kind,
-                Kind::HeaderTooBig {
+                LegacyKind::HeaderTooBig {
                     actual_size: 179,
                     max_size: 12,
                     ..
@@ -455,7 +457,7 @@ async fn header_too_big_client_error_trailer() {
                 .kind();
             assert_matches!(
                 err_kind,
-                Kind::HeaderTooBig {
+                LegacyKind::HeaderTooBig {
                     actual_size: 239,
                     max_size: 200,
                     ..
@@ -519,7 +521,7 @@ async fn header_too_big_discard_from_client() {
         let err_kind = request_stream.recv_response().await.unwrap_err().kind();
         assert_matches!(
             err_kind,
-            Kind::HeaderTooBig {
+            LegacyKind::HeaderTooBig {
                 actual_size: 42,
                 max_size: 12,
                 ..
@@ -566,7 +568,7 @@ async fn header_too_big_discard_from_client() {
         }
         assert_matches!(
             err.as_ref().unwrap().kind(),
-            Kind::Application {
+            LegacyKind::Application {
                 code: Code::H3_REQUEST_CANCELLED,
                 ..
             }
@@ -610,7 +612,7 @@ async fn header_too_big_discard_from_client_trailers() {
             let err_kind = request_stream.recv_trailers().await.unwrap_err().kind();
             assert_matches!(
                 err_kind,
-                Kind::HeaderTooBig {
+                LegacyKind::HeaderTooBig {
                     actual_size: 539,
                     max_size: 200,
                     ..
@@ -720,7 +722,7 @@ async fn header_too_big_server_error() {
 
         assert_matches!(
             err_kind,
-            Kind::HeaderTooBig {
+            LegacyKind::HeaderTooBig {
                 actual_size: 42,
                 max_size: 12,
                 ..
@@ -796,7 +798,7 @@ async fn header_too_big_server_error_trailers() {
             .kind();
         assert_matches!(
             err_kind,
-            Kind::HeaderTooBig {
+            LegacyKind::HeaderTooBig {
                 actual_size: 539,
                 max_size: 200,
                 ..
@@ -823,12 +825,12 @@ async fn get_timeout_client_recv_response() {
                 .expect("request");
 
             let response = request_stream.recv_response().await;
-            assert_matches!(response.unwrap_err().kind(), Kind::Timeout);
+            assert_matches!(response.unwrap_err().kind(), LegacyKind::Timeout);
         };
 
         let drive_fut = async move {
             let result = future::poll_fn(|cx| conn.poll_close(cx)).await;
-            assert_matches!(result.unwrap_err().kind(), Kind::Timeout);
+            assert_matches!(result.unwrap_err().kind(), LegacyKind::Timeout);
         };
 
         tokio::join!(drive_fut, request_fut);
@@ -864,12 +866,12 @@ async fn get_timeout_client_recv_data() {
 
             let _ = request_stream.recv_response().await.unwrap();
             let data = request_stream.recv_data().await;
-            assert_matches!(data.map(|_| ()).unwrap_err().kind(), Kind::Timeout);
+            assert_matches!(data.map(|_| ()).unwrap_err().kind(), LegacyKind::Timeout);
         };
 
         let drive_fut = async move {
             let result = future::poll_fn(|cx| conn.poll_close(cx)).await;
-            assert_matches!(result.unwrap_err().kind(), Kind::Timeout);
+            assert_matches!(result.unwrap_err().kind(), LegacyKind::Timeout);
         };
 
         tokio::join!(drive_fut, request_fut);
@@ -910,7 +912,7 @@ async fn get_timeout_server_accept() {
 
         let drive_fut = async move {
             let result = future::poll_fn(|cx| conn.poll_close(cx)).await;
-            assert_matches!(result.unwrap_err().kind(), Kind::Timeout);
+            assert_matches!(result.unwrap_err().kind(), LegacyKind::Timeout);
         };
 
         tokio::join!(drive_fut, request_fut);
@@ -922,7 +924,7 @@ async fn get_timeout_server_accept() {
 
         assert_matches!(
             incoming_req.accept().await.map(|_| ()).unwrap_err().kind(),
-            Kind::Timeout
+            LegacyKind::Timeout
         );
     };
 
@@ -952,7 +954,7 @@ async fn post_timeout_server_recv_data() {
         let (_, mut req_stream) = incoming_req.accept().await.expect("accept").unwrap();
         assert_matches!(
             req_stream.recv_data().await.map(|_| ()).unwrap_err().kind(),
-            Kind::Timeout
+            LegacyKind::Timeout
         );
     };
 
@@ -1374,7 +1376,7 @@ where
         //# connection error of type H3_FRAME_UNEXPECTED.
         assert_matches!(
             err.unwrap_err().kind(),
-            Kind::Application {
+            LegacyKind::Application {
                 code: Code::H3_FRAME_UNEXPECTED,
                 ..
             }
@@ -1390,7 +1392,7 @@ where
     request_sequence_check(request, |err| {
         assert_matches!(
             err.unwrap_err().kind(),
-            Kind::Application {
+            LegacyKind::Application {
                 code: Code::H3_FRAME_ERROR,
                 ..
             }
@@ -1402,7 +1404,7 @@ where
 async fn request_sequence_check<F, FC>(request: F, check: FC)
 where
     F: Fn(&mut BytesMut),
-    FC: Fn(Result<(), Error>),
+    FC: Fn(Result<(), LegacyErrorStruct>),
 {
     init_tracing();
     let mut pair = Pair::default();
@@ -1421,7 +1423,8 @@ where
             .read(&mut buf)
             .await
             .map_err(Into::<h3_quinn::ReadError>::into)
-            .map_err(Into::<Error>::into)
+            .map_err(Into::<quic::StreamErrorIncoming>::into)
+            .map_err(Into::<LegacyErrorStruct>::into)
             .map(|_| ());
         check(res);
 
@@ -1431,7 +1434,7 @@ where
 
         let res = future::poll_fn(|cx| driver.poll_close(cx))
             .await
-            .map_err(Into::<Error>::into)
+            .map_err(Into::<LegacyErrorStruct>::into)
             .map(|_| ());
         check(res);
     };
@@ -1445,7 +1448,7 @@ where
             .expect("request stream end unexpected");
         while stream.recv_data().await?.is_some() {}
         stream.recv_trailers().await?;
-        Result::<(), Error>::Ok(())
+        Result::<(), LegacyErrorStruct>::Ok(())
     };
 
     tokio::select! { res = server_fut => check(res)

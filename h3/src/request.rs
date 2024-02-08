@@ -3,7 +3,9 @@ use std::convert::TryFrom;
 use bytes::Buf;
 use http::{Request, StatusCode};
 
-use crate::{error::Code, proto::headers::Header, qpack, quic, server::RequestStream, Error};
+use crate::{
+    error::Code, proto::headers::Header, qpack, quic, server::RequestStream, LegacyErrorStruct,
+};
 
 pub struct ResolveRequest<C: quic::Connection<B>, B: Buf> {
     request_stream: RequestStream<C::BidiStream, B>,
@@ -28,7 +30,7 @@ impl<B: Buf, C: quic::Connection<B>> ResolveRequest<C, B> {
     /// Finishes the resolution of the request
     pub async fn resolve(
         mut self,
-    ) -> Result<(Request<()>, RequestStream<C::BidiStream, B>), Error> {
+    ) -> Result<(Request<()>, RequestStream<C::BidiStream, B>), LegacyErrorStruct> {
         let fields = match self.decoded {
             Ok(v) => v.fields,
             Err(cancel_size) => {
@@ -42,7 +44,7 @@ impl<B: Buf, C: quic::Connection<B>> ResolveRequest<C, B> {
                     )
                     .await?;
 
-                return Err(Error::header_too_big(
+                return Err(LegacyErrorStruct::header_too_big(
                     cancel_size,
                     self.max_field_section_size,
                 ));
@@ -57,7 +59,7 @@ impl<B: Buf, C: quic::Connection<B>> ResolveRequest<C, B> {
                     //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1.2
                     //# Malformed requests or responses that are
                     //# detected MUST be treated as a stream error of type H3_MESSAGE_ERROR.
-                    let error: Error = err.into();
+                    let error: LegacyErrorStruct = err.into();
                     self.request_stream
                         .stop_stream(error.try_get_code().unwrap_or(Code::H3_MESSAGE_ERROR));
                     return Err(error);
@@ -67,7 +69,7 @@ impl<B: Buf, C: quic::Connection<B>> ResolveRequest<C, B> {
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1.2
                 //# Malformed requests or responses that are
                 //# detected MUST be treated as a stream error of type H3_MESSAGE_ERROR.
-                let error: Error = err.into();
+                let error: LegacyErrorStruct = err.into();
                 self.request_stream
                     .stop_stream(error.try_get_code().unwrap_or(Code::H3_MESSAGE_ERROR));
                 return Err(error);

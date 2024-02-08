@@ -2,7 +2,49 @@
 
 use std::{fmt, sync::Arc};
 
-use crate::{frame, proto, qpack, quic};
+use crate::{
+    frame, proto, qpack,
+    quic::{self, ConnectionErrorIncoming},
+};
+
+/// Error type which faces the user of the library
+/// Users of this library will face this error type when a connection error occurs
+pub enum H3ConnectionError {
+    /// The peer implementation has thrown this error
+    PeerError(ConnectionErrorIncoming),
+    /// The local implementation has thrown this error
+    LocalError,
+}
+
+// Warning: this enum is public only for testing purposes. Do not use it in
+// downstream code or be prepared to refactor as changes happen.
+#[doc(hidden)]
+#[non_exhaustive]
+#[derive(Clone, Debug)]
+pub enum ConnectionClosedKind {
+    #[non_exhaustive]
+    Application {
+        code: Code,
+        reason: Option<Box<str>>,
+        level: ErrorLevel,
+    },
+    #[non_exhaustive]
+    HeaderTooBig {
+        actual_size: u64,
+        max_size: u64,
+    },
+    // Error from QUIC layer
+    #[non_exhaustive]
+    Transport(Arc<TransportError>),
+    // Connection has been closed with `Code::NO_ERROR`
+    Closed,
+    // Currently in a graceful shutdown procedure
+    Closing,
+    Timeout,
+}
+
+// Old Error implementation:
+//----------------------------------------------------------------------------------------
 
 /// Cause of an error thrown by our own h3 layer
 type Cause = Box<dyn std::error::Error + Send + Sync>;
@@ -11,7 +53,7 @@ pub(crate) type TransportError = Box<dyn quic::Error>;
 
 /// A general error that can occur when handling the HTTP/3 protocol.
 #[derive(Clone)]
-pub struct Error {
+pub struct LegacyErrorStruct {
     /// The error kind.
     pub(crate) inner: Box<ErrorImpl>,
 }
@@ -41,7 +83,7 @@ impl PartialEq<u64> for Code {
 /// The error kind.
 #[derive(Clone)]
 pub(crate) struct ErrorImpl {
-    pub(crate) kind: Kind,
+    pub(crate) kind: LegacyKind,
     cause: Option<Arc<Cause>>,
 }
 
@@ -60,7 +102,7 @@ pub enum ErrorLevel {
 #[doc(hidden)]
 #[non_exhaustive]
 #[derive(Clone, Debug)]
-pub enum Kind {
+pub enum LegacyKind {
     #[non_exhaustive]
     Application {
         code: Code,
@@ -192,20 +234,24 @@ codes! {
 }
 
 impl Code {
-    pub(crate) fn with_reason<S: Into<Box<str>>>(self, reason: S, level: ErrorLevel) -> Error {
-        Error::new(Kind::Application {
+    pub(crate) fn with_reason<S: Into<Box<str>>>(
+        self,
+        reason: S,
+        level: ErrorLevel,
+    ) -> LegacyErrorStruct {
+        LegacyErrorStruct::new(LegacyKind::Application {
             code: self,
             reason: Some(reason.into()),
             level,
         })
     }
 
-    pub(crate) fn with_cause<E: Into<Cause>>(self, cause: E) -> Error {
-        Error::from(self).with_cause(cause)
+    pub(crate) fn with_cause<E: Into<Cause>>(self, cause: E) -> LegacyErrorStruct {
+        LegacyErrorStruct::from(self).with_cause(cause)
     }
 
-    pub(crate) fn with_transport<E: Into<Box<dyn quic::Error>>>(self, err: E) -> Error {
-        Error::new(Kind::Transport(Arc::new(err.into())))
+    pub(crate) fn with_transport<E: Into<Box<dyn quic::Error>>>(self, err: E) -> LegacyErrorStruct {
+        LegacyErrorStruct::new(LegacyKind::Transport(Arc::new(err.into())))
     }
 }
 
@@ -217,9 +263,9 @@ impl From<Code> for u64 {
 
 // ===== impl Error =====
 
-impl Error {
-    fn new(kind: Kind) -> Self {
-        Error {
+impl LegacyErrorStruct {
+    fn new(kind: LegacyKind) -> Self {
+        LegacyErrorStruct {
             inner: Box::new(ErrorImpl { kind, cause: None }),
         }
     }
@@ -227,7 +273,7 @@ impl Error {
     /// Returns the error code from the error if available
     pub fn try_get_code(&self) -> Option<Code> {
         match self.inner.kind {
-            Kind::Application { code, .. } => Some(code),
+            LegacyKind::Application { code, .. } => Some(code),
             _ => None,
         }
     }
@@ -236,7 +282,7 @@ impl Error {
     /// This indicates weather a accept loop should continue.
     pub fn get_error_level(&self) -> ErrorLevel {
         match self.inner.kind {
-            Kind::Application {
+            LegacyKind::Application {
                 code: _,
                 reason: _,
                 level,
@@ -247,7 +293,7 @@ impl Error {
     }
 
     pub(crate) fn header_too_big(actual_size: u64, max_size: u64) -> Self {
-        Error::new(Kind::HeaderTooBig {
+        LegacyErrorStruct::new(LegacyKind::HeaderTooBig {
             actual_size,
             max_size,
         })
@@ -259,45 +305,45 @@ impl Error {
     }
 
     pub(crate) fn closing() -> Self {
-        Self::new(Kind::Closing)
+        Self::new(LegacyKind::Closing)
     }
 
     pub(crate) fn closed() -> Self {
-        Self::new(Kind::Closed)
+        Self::new(LegacyKind::Closed)
     }
 
     pub(crate) fn is_closed(&self) -> bool {
-        if let Kind::Closed = self.inner.kind {
+        if let LegacyKind::Closed = self.inner.kind {
             return true;
         }
         false
     }
 
     pub(crate) fn is_header_too_big(&self) -> bool {
-        matches!(&self.inner.kind, Kind::HeaderTooBig { .. })
+        matches!(&self.inner.kind, LegacyKind::HeaderTooBig { .. })
     }
 
     #[doc(hidden)]
-    pub fn kind(&self) -> Kind {
+    pub fn kind(&self) -> LegacyKind {
         self.inner.kind.clone()
     }
 }
 
-impl fmt::Debug for Error {
+impl fmt::Debug for LegacyErrorStruct {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("h3::Error");
 
         match self.inner.kind {
-            Kind::Closed => {
+            LegacyKind::Closed => {
                 builder.field("connection closed", &true);
             }
-            Kind::Closing => {
+            LegacyKind::Closing => {
                 builder.field("closing", &true);
             }
-            Kind::Timeout => {
+            LegacyKind::Timeout => {
                 builder.field("timeout", &true);
             }
-            Kind::Application {
+            LegacyKind::Application {
                 code, ref reason, ..
             } => {
                 builder.field("code", &code);
@@ -305,11 +351,11 @@ impl fmt::Debug for Error {
                     builder.field("reason", reason);
                 }
             }
-            Kind::Transport(ref e) => {
+            LegacyKind::Transport(ref e) => {
                 builder.field("kind", &e);
                 builder.field("code: ", &e.err_code());
             }
-            Kind::HeaderTooBig {
+            LegacyKind::HeaderTooBig {
                 actual_size,
                 max_size,
             } => {
@@ -326,14 +372,14 @@ impl fmt::Debug for Error {
     }
 }
 
-impl fmt::Display for Error {
+impl fmt::Display for LegacyErrorStruct {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.inner.kind {
-            Kind::Closed => write!(f, "connection is closed")?,
-            Kind::Closing => write!(f, "connection is gracefully closing")?,
-            Kind::Transport(ref e) => write!(f, "quic transport error: {}", e)?,
-            Kind::Timeout => write!(f, "timeout",)?,
-            Kind::Application {
+            LegacyKind::Closed => write!(f, "connection is closed")?,
+            LegacyKind::Closing => write!(f, "connection is gracefully closing")?,
+            LegacyKind::Transport(ref e) => write!(f, "quic transport error: {}", e)?,
+            LegacyKind::Timeout => write!(f, "timeout",)?,
+            LegacyKind::Application {
                 code, ref reason, ..
             } => {
                 if let Some(reason) = reason {
@@ -342,7 +388,7 @@ impl fmt::Display for Error {
                     write!(f, "application error {:?}", code)?
                 }
             }
-            Kind::HeaderTooBig {
+            LegacyKind::HeaderTooBig {
                 actual_size,
                 max_size,
             } => write!(
@@ -358,15 +404,15 @@ impl fmt::Display for Error {
     }
 }
 
-impl std::error::Error for Error {
+impl std::error::Error for LegacyErrorStruct {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         self.inner.cause.as_ref().map(|e| &***e as _)
     }
 }
 
-impl From<Code> for Error {
-    fn from(code: Code) -> Error {
-        Error::new(Kind::Application {
+impl From<Code> for LegacyErrorStruct {
+    fn from(code: Code) -> LegacyErrorStruct {
+        LegacyErrorStruct::new(LegacyKind::Application {
             code,
             reason: None,
             level: ErrorLevel::ConnectionError,
@@ -374,13 +420,13 @@ impl From<Code> for Error {
     }
 }
 
-impl From<qpack::EncoderError> for Error {
+impl From<qpack::EncoderError> for LegacyErrorStruct {
     fn from(e: qpack::EncoderError) -> Self {
         Self::from(Code::QPACK_ENCODER_STREAM_ERROR).with_cause(e)
     }
 }
 
-impl From<qpack::DecoderError> for Error {
+impl From<qpack::DecoderError> for LegacyErrorStruct {
     fn from(e: qpack::DecoderError) -> Self {
         match e {
             qpack::DecoderError::InvalidStaticIndex(_) => {
@@ -391,9 +437,9 @@ impl From<qpack::DecoderError> for Error {
     }
 }
 
-impl From<proto::headers::HeaderError> for Error {
+impl From<proto::headers::HeaderError> for LegacyErrorStruct {
     fn from(e: proto::headers::HeaderError) -> Self {
-        Error::new(Kind::Application {
+        LegacyErrorStruct::new(LegacyKind::Application {
             code: Code::H3_MESSAGE_ERROR,
             reason: None,
             level: ErrorLevel::StreamError,
@@ -402,7 +448,7 @@ impl From<proto::headers::HeaderError> for Error {
     }
 }
 
-impl From<frame::FrameStreamError> for Error {
+impl From<frame::FrameStreamError> for LegacyErrorStruct {
     fn from(e: frame::FrameStreamError) -> Self {
         match e {
             frame::FrameStreamError::Quic(e) => e.into(),
@@ -439,35 +485,35 @@ impl From<frame::FrameStreamError> for Error {
     }
 }
 
-impl From<Error> for Box<dyn std::error::Error + std::marker::Send> {
-    fn from(e: Error) -> Self {
+impl From<LegacyErrorStruct> for Box<dyn std::error::Error + std::marker::Send> {
+    fn from(e: LegacyErrorStruct) -> Self {
         Box::new(e)
     }
 }
 
-impl<T> From<T> for Error
+impl<T> From<T> for LegacyErrorStruct
 where
     T: Into<TransportError>,
 {
     fn from(e: T) -> Self {
         let quic_error: TransportError = e.into();
         if quic_error.is_timeout() {
-            return Error::new(Kind::Timeout);
+            return LegacyErrorStruct::new(LegacyKind::Timeout);
         }
 
         match quic_error.err_code() {
-            Some(c) if Code::H3_NO_ERROR == c => Error::new(Kind::Closed),
-            Some(c) => Error::new(Kind::Application {
+            Some(c) if Code::H3_NO_ERROR == c => LegacyErrorStruct::new(LegacyKind::Closed),
+            Some(c) => LegacyErrorStruct::new(LegacyKind::Application {
                 code: Code { code: c },
                 reason: None,
                 level: ErrorLevel::ConnectionError,
             }),
-            None => Error::new(Kind::Transport(Arc::new(quic_error))),
+            None => LegacyErrorStruct::new(LegacyKind::Transport(Arc::new(quic_error))),
         }
     }
 }
 
-impl From<proto::stream::InvalidStreamId> for Error {
+impl From<proto::stream::InvalidStreamId> for LegacyErrorStruct {
     fn from(e: proto::stream::InvalidStreamId) -> Self {
         Self::from(Code::H3_ID_ERROR).with_cause(format!("{}", e))
     }
@@ -475,11 +521,11 @@ impl From<proto::stream::InvalidStreamId> for Error {
 
 #[cfg(test)]
 mod tests {
-    use super::Error;
+    use super::LegacyErrorStruct;
     use std::mem;
 
     #[test]
     fn test_size_of() {
-        assert_eq!(mem::size_of::<Error>(), mem::size_of::<usize>());
+        assert_eq!(mem::size_of::<LegacyErrorStruct>(), mem::size_of::<usize>());
     }
 }

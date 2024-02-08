@@ -5,6 +5,7 @@ use bytes::Buf;
 use futures_util::ready;
 use tracing::trace;
 
+use crate::quic::StreamErrorIncoming;
 use crate::stream::{BufRecvStream, WriteBuf};
 use crate::{
     buf::BufList,
@@ -149,17 +150,15 @@ where
     T: SendStream<B>,
     B: Buf,
 {
-    type Error = <T as SendStream<B>>::Error;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), StreamErrorIncoming>> {
         self.stream.poll_ready(cx)
     }
 
-    fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), Self::Error> {
+    fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), StreamErrorIncoming> {
         self.stream.send_data(data)
     }
 
-    fn poll_finish(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_finish(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), StreamErrorIncoming>> {
         self.stream.poll_finish(cx)
     }
 
@@ -269,7 +268,7 @@ mod tests {
 
     use crate::{
         proto::{coding::Encode, frame::FrameType, varint::VarInt},
-        quic,
+        quic::{self, StreamErrorIncoming},
     };
 
     // Decoder
@@ -554,13 +553,14 @@ mod tests {
 
     impl RecvStream for FakeRecv {
         type Buf = Bytes;
-        type Error = FakeError;
 
         fn poll_data(
             &mut self,
             _: &mut Context<'_>,
-        ) -> Poll<Result<Option<Self::Buf>, Self::Error>> {
-            Poll::Ready(Ok(self.chunks.pop_front()))
+        ) -> Poll<Result<Self::Buf, StreamErrorIncoming>> {
+            // TODO
+            todo!("When pop_front is none then return error instead");
+            //Poll::Ready(Ok(self.chunks.pop_front()))
         }
 
         fn stop_sending(&mut self, _: u64) {

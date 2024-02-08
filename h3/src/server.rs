@@ -73,7 +73,7 @@ use tokio::sync::mpsc;
 use crate::{
     config::Config,
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
-    error::{Code, Error, ErrorLevel},
+    error::{Code, ErrorLevel, LegacyErrorStruct},
     ext::Datagram,
     frame::{FrameStream, FrameStreamError},
     proto::{
@@ -144,12 +144,12 @@ where
     /// Use a custom [`Builder`] with [`builder()`] to create a connection
     /// with different settings.
     /// Provide a Connection which implements [`quic::Connection`].
-    pub async fn new(conn: C) -> Result<Self, Error> {
+    pub async fn new(conn: C) -> Result<Self, LegacyErrorStruct> {
         builder().build(conn).await
     }
 
     /// Closes the connection with a code and a reason.
-    pub fn close<T: AsRef<str>>(&mut self, code: Code, reason: T) -> Error {
+    pub fn close<T: AsRef<str>>(&mut self, code: Code, reason: T) -> LegacyErrorStruct {
         self.inner.close(code, reason)
     }
 }
@@ -166,7 +166,7 @@ where
     /// The [`RequestStream`] can be used to send the response.
     pub async fn accept(
         &mut self,
-    ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
+    ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, LegacyErrorStruct> {
         // Accept the incoming stream
         let mut stream = match future::poll_fn(|cx| self.poll_accept_request(cx)).await {
             Ok(Some(s)) => FrameStream::new(BufRecvStream::new(s)),
@@ -178,8 +178,8 @@ where
             }
             Err(err) => {
                 match err.inner.kind {
-                    crate::error::Kind::Closed => return Ok(None),
-                    crate::error::Kind::Application {
+                    crate::error::LegacyKind::Closed => return Ok(None),
+                    crate::error::LegacyKind::Application {
                         code,
                         reason,
                         level: ErrorLevel::ConnectionError,
@@ -213,7 +213,7 @@ where
         &mut self,
         mut stream: FrameStream<C::BidiStream, B>,
         frame: Result<Option<Frame<PayloadLen>>, FrameStreamError>,
-    ) -> Result<Option<ResolveRequest<C, B>>, Error> {
+    ) -> Result<Option<ResolveRequest<C, B>>, LegacyErrorStruct> {
         let mut encoded = match frame {
             Ok(Some(Frame::Headers(h))) => h,
 
@@ -248,13 +248,13 @@ where
                 ));
             }
             Err(e) => {
-                let err: Error = e.into();
+                let err: LegacyErrorStruct = e.into();
                 if err.is_closed() {
                     return Ok(None);
                 }
                 match err.inner.kind {
-                    crate::error::Kind::Closed => return Ok(None),
-                    crate::error::Kind::Application {
+                    crate::error::LegacyKind::Closed => return Ok(None),
+                    crate::error::LegacyKind::Application {
                         code,
                         reason,
                         level: ErrorLevel::ConnectionError,
@@ -264,7 +264,7 @@ where
                             reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
                         ))
                     }
-                    crate::error::Kind::Application {
+                    crate::error::LegacyKind::Application {
                         code,
                         reason: _,
                         level: ErrorLevel::StreamError,
@@ -301,13 +301,13 @@ where
                 Ok(decoded)
             }
             Err(e) => {
-                let err: Error = e.into();
+                let err: LegacyErrorStruct = e.into();
                 if err.is_closed() {
                     return Ok(None);
                 }
                 match err.inner.kind {
-                    crate::error::Kind::Closed => return Ok(None),
-                    crate::error::Kind::Application {
+                    crate::error::LegacyKind::Closed => return Ok(None),
+                    crate::error::LegacyKind::Application {
                         code,
                         reason,
                         level: ErrorLevel::ConnectionError,
@@ -317,7 +317,7 @@ where
                             reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
                         ))
                     }
-                    crate::error::Kind::Application {
+                    crate::error::LegacyKind::Application {
                         code,
                         reason: _,
                         level: ErrorLevel::StreamError,
@@ -340,7 +340,7 @@ where
     /// Initiate a graceful shutdown, accepting `max_request` potentially still in-flight
     ///
     /// See [connection shutdown](https://www.rfc-editor.org/rfc/rfc9114.html#connection-shutdown) for more information.
-    pub async fn shutdown(&mut self, max_requests: usize) -> Result<(), Error> {
+    pub async fn shutdown(&mut self, max_requests: usize) -> Result<(), LegacyErrorStruct> {
         let max_id = self
             .last_accepted_stream
             .map(|id| id + max_requests)
@@ -356,7 +356,7 @@ where
     pub fn poll_accept_request(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<C::BidiStream>, Error>> {
+    ) -> Poll<Result<Option<C::BidiStream>, LegacyErrorStruct>> {
         let _ = self.poll_requests_completion(cx);
         let result = loop {
             let incoming = self.inner.poll_handle_incoming(cx);
@@ -396,7 +396,10 @@ where
         result
     }
 
-    pub(crate) fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+    pub(crate) fn poll_control(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), LegacyErrorStruct>> {
         while (self.poll_next_control(cx)?).is_ready() {}
         Poll::Pending
     }
@@ -404,7 +407,7 @@ where
     pub(crate) fn poll_next_control(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Frame<PayloadLen>, Error>> {
+    ) -> Poll<Result<Frame<PayloadLen>, LegacyErrorStruct>> {
         let frame = ready!(self.inner.poll_control(cx))?;
 
         match &frame {
@@ -470,7 +473,7 @@ where
     B: Buf,
 {
     /// Sends a datagram
-    pub fn send_datagram(&mut self, stream_id: StreamId, data: B) -> Result<(), Error> {
+    pub fn send_datagram(&mut self, stream_id: StreamId, data: B) -> Result<(), LegacyErrorStruct> {
         self.inner
             .conn
             .send_datagram(Datagram::new(stream_id, data))?;
@@ -608,7 +611,7 @@ impl Builder {
     /// Build an HTTP/3 connection from a QUIC connection
     ///
     /// This method creates a [`Connection`] instance with the settings in the [`Builder`].
-    pub async fn build<C, B>(&self, conn: C) -> Result<Connection<C, B>, Error>
+    pub async fn build<C, B>(&self, conn: C) -> Result<Connection<C, B>, LegacyErrorStruct>
     where
         C: quic::Connection<B>,
         B: Buf,
@@ -659,12 +662,12 @@ where
     B: Buf,
 {
     /// Receive data sent from the client
-    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
+    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, LegacyErrorStruct> {
         self.inner.recv_data().await
     }
 
     /// Receive an optional set of trailers for the request
-    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
+    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, LegacyErrorStruct> {
         self.inner.recv_trailers().await
     }
 
@@ -688,7 +691,7 @@ where
     ///
     /// This should be called before trying to send any data with
     /// [`RequestStream::send_data`].
-    pub async fn send_response(&mut self, resp: Response<()>) -> Result<(), Error> {
+    pub async fn send_response(&mut self, resp: Response<()>) -> Result<(), LegacyErrorStruct> {
         let (parts, _) = resp.into_parts();
         let response::Parts {
             status, headers, ..
@@ -711,7 +714,7 @@ where
         //# that exceeds the indicated size, as the peer will likely refuse to
         //# process it.
         if mem_size > max_mem_size {
-            return Err(Error::header_too_big(mem_size, max_mem_size));
+            return Err(LegacyErrorStruct::header_too_big(mem_size, max_mem_size));
         }
 
         stream::write(&mut self.inner.stream, Frame::Headers(block.freeze()))
@@ -722,7 +725,7 @@ where
     }
 
     /// Send some data on the response body.
-    pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
+    pub async fn send_data(&mut self, buf: B) -> Result<(), LegacyErrorStruct> {
         self.inner.send_data(buf).await
     }
 
@@ -738,7 +741,7 @@ where
     /// Either [`RequestStream::finish`] or
     /// [`RequestStream::send_trailers`] must be called to finalize a
     /// request.
-    pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
+    pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), LegacyErrorStruct> {
         self.inner.send_trailers(trailers).await
     }
 
@@ -747,7 +750,7 @@ where
     /// Either [`RequestStream::finish`] or
     /// [`RequestStream::send_trailers`] must be called to finalize a
     /// request.
-    pub async fn finish(&mut self) -> Result<(), Error> {
+    pub async fn finish(&mut self) -> Result<(), LegacyErrorStruct> {
         self.inner.finish().await
     }
 
@@ -820,7 +823,7 @@ where
     C: quic::Connection<B> + RecvDatagramExt,
     B: Buf,
 {
-    type Output = Result<Option<Datagram<C::Buf>>, Error>;
+    type Output = Result<Option<Datagram<C::Buf>>, LegacyErrorStruct>;
 
     fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         tracing::trace!("poll: read_datagram");

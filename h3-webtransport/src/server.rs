@@ -17,7 +17,7 @@ use h3::{
     proto::frame::Frame,
     quic::{self, OpenStreams, RecvDatagramExt, SendDatagramExt, WriteBuf},
     server::{self, Connection, RequestStream},
-    Error,
+    LegacyErrorStruct,
 };
 use h3::{
     quic::SendStreamUnframed,
@@ -60,7 +60,7 @@ where
         request: Request<()>,
         mut stream: RequestStream<C::BidiStream, B>,
         mut conn: Connection<C, B>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, LegacyErrorStruct> {
         let shared = conn.shared_state().clone();
         {
             let config = shared.write("Read WebTransport support").peer_config;
@@ -138,7 +138,7 @@ where
     /// Sends a datagram
     ///
     /// TODO: maybe make async. `quinn` does not require an async send
-    pub fn send_datagram(&self, data: B) -> Result<(), Error>
+    pub fn send_datagram(&self, data: B) -> Result<(), LegacyErrorStruct>
     where
         C: SendDatagramExt<B>,
     {
@@ -158,7 +158,7 @@ where
     }
 
     /// Accepts an incoming bidirectional stream or request
-    pub async fn accept_bi(&self) -> Result<Option<AcceptedBi<C, B>>, Error> {
+    pub async fn accept_bi(&self) -> Result<Option<AcceptedBi<C, B>>, LegacyErrorStruct> {
         // Get the next stream
         // Accept the incoming stream
         let stream = poll_fn(|cx| {
@@ -175,8 +175,8 @@ where
             }
             Err(err) => {
                 match err.kind() {
-                    h3::error::Kind::Closed => return Ok(None),
-                    h3::error::Kind::Application {
+                    h3::error::LegacyKind::Closed => return Ok(None),
+                    h3::error::LegacyKind::Application {
                         code,
                         reason,
                         level: ErrorLevel::ConnectionError,
@@ -275,7 +275,7 @@ where
     B: Buf,
     C::BidiStream: SendStreamUnframed<B>,
 {
-    type Output = Result<BidiStream<C::BidiStream, B>, Error>;
+    type Output = Result<BidiStream<C::BidiStream, B>, LegacyErrorStruct>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut p = self.project();
@@ -319,7 +319,7 @@ where
     B: Buf,
     C::SendStream: SendStreamUnframed<B>,
 {
-    type Output = Result<SendStream<C::SendStream, B>, Error>;
+    type Output = Result<SendStream<C::SendStream, B>, LegacyErrorStruct>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut p = self.project();
@@ -374,7 +374,7 @@ where
     C: quic::Connection<B> + RecvDatagramExt,
     B: Buf,
 {
-    type Output = Result<Option<(SessionId, C::Buf)>, Error>;
+    type Output = Result<Option<(SessionId, C::Buf)>, LegacyErrorStruct>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut conn = self.conn.lock().unwrap();
@@ -405,7 +405,7 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    type Output = Result<Option<(SessionId, RecvStream<C::RecvStream, B>)>, Error>;
+    type Output = Result<Option<(SessionId, RecvStream<C::RecvStream, B>)>, LegacyErrorStruct>;
 
     fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut conn = self.conn.lock().unwrap();

@@ -12,7 +12,7 @@ use tracing::{trace, warn};
 
 use crate::{
     config::Config,
-    error::{Code, Error},
+    error::{Code, LegacyErrorStruct},
     frame::FrameStream,
     proto::{
         frame::{Frame, PayloadLen, SettingId, Settings},
@@ -32,7 +32,7 @@ pub struct SharedState {
     // Peer settings
     pub peer_config: Config,
     // connection-wide error, concerns all RequestStreams and drivers
-    pub error: Option<Error>,
+    pub error: Option<LegacyErrorStruct>,
     // Has a GOAWAY frame been sent or received?
     pub closing: bool,
 }
@@ -65,7 +65,7 @@ impl Default for SharedStateRef {
 pub trait ConnectionState {
     fn shared_state(&self) -> &SharedStateRef;
 
-    fn maybe_conn_err<E: Into<Error>>(&self, err: E) -> Error {
+    fn maybe_conn_err<E: Into<LegacyErrorStruct>>(&self, err: E) -> LegacyErrorStruct {
         if let Some(ref e) = self.shared_state().0.read().unwrap().error {
             e.clone()
         } else {
@@ -143,7 +143,11 @@ where
     B: Buf,
 {
     /// Initiates the connection and opens a control stream
-    pub async fn new(mut conn: C, shared: SharedStateRef, config: Config) -> Result<Self, Error> {
+    pub async fn new(
+        mut conn: C,
+        shared: SharedStateRef,
+        config: Config,
+    ) -> Result<Self, LegacyErrorStruct> {
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
         //# Endpoints SHOULD create the HTTP control stream as well as the
         //# unidirectional streams required by mandatory extensions (such as the
@@ -272,7 +276,7 @@ where
         &mut self,
         sent_closing: &mut Option<T>,
         max_id: T,
-    ) -> Result<(), Error>
+    ) -> Result<(), LegacyErrorStruct>
     where
         T: From<VarInt> + PartialOrd<T> + Copy,
         VarInt: From<T>,
@@ -301,7 +305,7 @@ where
     pub fn poll_handle_incoming(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<C::BidiStream, Error>> {
+    ) -> Poll<Result<C::BidiStream, LegacyErrorStruct>> {
         if let Some(ref e) = self.shared.read("poll_handle_incoming").error {
             return Poll::Ready(Err(e.clone()));
         };
@@ -325,7 +329,7 @@ where
         &mut self,
         cx: &mut Context<'_>,
         recv_stream: <C as Connection<B>>::RecvStream,
-    ) -> Result<(), Error> {
+    ) -> Result<(), LegacyErrorStruct> {
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
             return Err(e.clone());
         }
@@ -398,7 +402,10 @@ where
     }
 
     /// Waits for the control stream to be received and reads subsequent frames.
-    pub fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<Frame<PayloadLen>, Error>> {
+    pub fn poll_control(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Frame<PayloadLen>, LegacyErrorStruct>> {
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
             return Poll::Ready(Err(e.clone()));
         }
@@ -525,7 +532,7 @@ where
         &mut self,
         recv_closing: &mut Option<T>,
         id: VarInt,
-    ) -> Result<(), Error>
+    ) -> Result<(), LegacyErrorStruct>
     where
         T: From<VarInt> + Copy,
         VarInt: From<T>,
@@ -565,7 +572,7 @@ where
 
     /// Closes a Connection with code and reason.
     /// It returns an [`Error`] which can be returned.
-    pub fn close<T: AsRef<str>>(&mut self, code: Code, reason: T) -> Error {
+    pub fn close<T: AsRef<str>>(&mut self, code: Code, reason: T) -> LegacyErrorStruct {
         self.shared.write("connection close err").error =
             Some(code.with_reason(reason.as_ref(), crate::error::ErrorLevel::ConnectionError));
         self.conn.close(code, reason.as_ref().as_bytes());
@@ -662,7 +669,7 @@ where
     S: quic::RecvStream,
 {
     /// Receive some of the request body.
-    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
+    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, LegacyErrorStruct> {
         if !self.stream.has_data() {
             let frame = future::poll_fn(|cx| self.stream.poll_next(cx))
                 .await
@@ -708,7 +715,7 @@ where
     }
 
     /// Receive trailers
-    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
+    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, LegacyErrorStruct> {
         let mut trailers = if let Some(encoded) = self.trailers.take() {
             encoded
         } else {
@@ -763,7 +770,7 @@ where
                 //# An HTTP/3 implementation MAY impose a limit on the maximum size of
                 //# the message header it will accept on an individual HTTP message.
                 Err(qpack::DecoderError::HeaderTooLong(cancel_size)) => {
-                    return Err(Error::header_too_big(
+                    return Err(LegacyErrorStruct::header_too_big(
                         cancel_size,
                         self.max_field_section_size,
                     ))
@@ -787,7 +794,7 @@ where
     B: Buf,
 {
     /// Send some data on the response body.
-    pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
+    pub async fn send_data(&mut self, buf: B) -> Result<(), LegacyErrorStruct> {
         let frame = Frame::Data(buf);
 
         stream::write(&mut self.stream, frame)
@@ -797,7 +804,7 @@ where
     }
 
     /// Send a set of trailers to end the request.
-    pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
+    pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), LegacyErrorStruct> {
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
         //= type=TODO
         //# Characters in field names MUST be
@@ -817,7 +824,7 @@ where
         //# that exceeds the indicated size, as the peer will likely refuse to
         //# process it.
         if mem_size > max_mem_size {
-            return Err(Error::header_too_big(mem_size, max_mem_size));
+            return Err(LegacyErrorStruct::header_too_big(mem_size, max_mem_size));
         }
         stream::write(&mut self.stream, Frame::Headers(block.freeze()))
             .await
@@ -832,7 +839,7 @@ where
     }
 
     #[allow(missing_docs)]
-    pub async fn finish(&mut self) -> Result<(), Error> {
+    pub async fn finish(&mut self) -> Result<(), LegacyErrorStruct> {
         if self.send_grease_frame {
             // send a grease frame once per Connection
             stream::write(&mut self.stream, Frame::Grease)
