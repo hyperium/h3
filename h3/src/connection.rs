@@ -623,16 +623,21 @@ where
     S: quic::RecvStream,
 {
     /// Receive some of the request body.
-    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
+    pub fn poll_recv_data(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<impl Buf>, Error>> {
         if !self.stream.has_data() {
-            let frame = future::poll_fn(|cx| self.stream.poll_next(cx))
-                .await
+            let frame = self
+                .stream
+                .poll_next(cx)
                 .map_err(|e| self.maybe_conn_err(e))?;
-            match frame {
+
+            match ready!(frame) {
                 Some(Frame::Data { .. }) => (),
                 Some(Frame::Headers(encoded)) => {
                     self.trailers = Some(encoded);
-                    return Ok(None);
+                    return Poll::Ready(Ok(None));
                 }
 
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
@@ -657,15 +662,18 @@ where
                 //# The MAX_PUSH_ID frame is always sent on the control stream.  Receipt
                 //# of a MAX_PUSH_ID frame on any other stream MUST be treated as a
                 //# connection error of type H3_FRAME_UNEXPECTED.
-                Some(_) => return Err(Code::H3_FRAME_UNEXPECTED.into()),
-                None => return Ok(None),
+                Some(_) => return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED.into())),
+                None => return Poll::Ready(Ok(None)),
             }
         }
 
-        let data = future::poll_fn(|cx| self.stream.poll_data(cx))
-            .await
-            .map_err(|e| self.maybe_conn_err(e))?;
-        Ok(data)
+        self.stream
+            .poll_data(cx)
+            .map_err(|e| self.maybe_conn_err(e))
+    }
+    /// Receive some of the request body.
+    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
+        future::poll_fn(|cx| self.poll_recv_data(cx)).await
     }
 
     /// Receive trailers
