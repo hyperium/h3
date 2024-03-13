@@ -181,6 +181,10 @@ impl Iterator for HeaderIter {
             if let Some(status) = pseudo.status.take() {
                 return Some((":status", status.as_str()).into());
             }
+
+            if let Some(protocol) = pseudo.protocol.take() {
+                return Some((":protocol", protocol.as_str().as_bytes()).into());
+            }
         }
 
         self.pseudo = None;

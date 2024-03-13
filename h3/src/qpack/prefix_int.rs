@@ -19,7 +19,7 @@ impl std::fmt::Display for Error {
     }
 }
 
-pub fn decode<B: Buf>(size: u8, buf: &mut B) -> Result<(u8, usize), Error> {
+pub fn decode<B: Buf>(size: u8, buf: &mut B) -> Result<(u8, u64), Error> {
     assert!(size <= 8);
     let mut first = buf.get::<u8>()?;
 
@@ -31,13 +31,13 @@ pub fn decode<B: Buf>(size: u8, buf: &mut B) -> Result<(u8, usize), Error> {
 
     // if first < 2usize.pow(size) - 1
     if first < mask {
-        return Ok((flags, first as usize));
+        return Ok((flags, first as u64));
     }
 
-    let mut value = mask as usize;
+    let mut value = mask as u64;
     let mut power = 0usize;
     loop {
-        let byte = buf.get::<u8>()? as usize;
+        let byte = buf.get::<u8>()? as u64;
         value += (byte & 127) << power;
         power += 7;
 
@@ -53,7 +53,7 @@ pub fn decode<B: Buf>(size: u8, buf: &mut B) -> Result<(u8, usize), Error> {
     Ok((flags, value))
 }
 
-pub fn encode<B: BufMut>(size: u8, flags: u8, value: usize, buf: &mut B) {
+pub fn encode<B: BufMut>(size: u8, flags: u8, value: u64, buf: &mut B) {
     assert!(size <= 8);
     // NOTE: following casts to u8 intend to trim the most significant bits, they are used as a
     //       workaround for shiftoverflow errors when size == 8.
@@ -61,13 +61,13 @@ pub fn encode<B: BufMut>(size: u8, flags: u8, value: usize, buf: &mut B) {
     let flags = ((flags as usize) << size) as u8;
 
     // if value < 2usize.pow(size) - 1
-    if value < (mask as usize) {
+    if value < (mask as u64) {
         buf.write(flags | value as u8);
         return;
     }
 
     buf.write(mask | flags);
-    let mut remaining = value - mask as usize;
+    let mut remaining = value - mask as u64;
 
     while remaining >= 128 {
         let rest = (remaining % 128) as u8;
@@ -93,7 +93,7 @@ impl From<coding::UnexpectedEnd> for Error {
 mod test {
     use std::io::Cursor;
 
-    fn check_codec(size: u8, flags: u8, value: usize, data: &[u8]) {
+    fn check_codec(size: u8, flags: u8, value: u64, data: &[u8]) {
         let mut buf = Vec::new();
         super::encode(size, flags, value, &mut buf);
         assert_eq!(buf, data);
@@ -110,7 +110,7 @@ mod test {
         check_codec(
             5,
             0b010,
-            usize::max_value(),
+            u64::max_value(),
             &[95, 224, 255, 255, 255, 255, 255, 255, 255, 255, 1],
         );
     }
@@ -122,7 +122,7 @@ mod test {
         check_codec(
             8,
             0,
-            usize::max_value(),
+            u64::max_value(),
             &[255, 128, 254, 255, 255, 255, 255, 255, 255, 255, 1],
         );
     }
