@@ -68,14 +68,13 @@ impl Display for StreamErrorIncoming {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // display enum with fields
         match self {
-            StreamErrorIncoming::ConnectionErrorConnectionErrorIncoming { connection_error } => {
+            StreamErrorIncoming::ConnectionErrorIncoming { connection_error } => {
                 write!(f, "ConnectionError: {}", connection_error)
             }
             StreamErrorIncoming::StreamReset { error_code } => {
                 write!(f, "StreamClosed: {}", error_code)
             }
             StreamErrorIncoming::NotReady => write!(f, "NotReady"),
-            StreamErrorIncoming::StreamFinished => write!(f, "StreamFinished"),
         }
     }
 }
@@ -83,7 +82,7 @@ impl Display for StreamErrorIncoming {
 impl Error for StreamErrorIncoming {
     fn is_timeout(&self) -> bool {
         match &self {
-            StreamErrorIncoming::ConnectionErrorConnectionErrorIncoming {
+            StreamErrorIncoming::ConnectionErrorIncoming {
                 connection_error: ConnectionErrorIncoming::Timeout,
             } => true,
             _ => false,
@@ -92,12 +91,11 @@ impl Error for StreamErrorIncoming {
 
     fn err_code(&self) -> Option<u64> {
         match self {
-            StreamErrorIncoming::ConnectionErrorConnectionErrorIncoming { connection_error } => {
+            StreamErrorIncoming::ConnectionErrorIncoming { connection_error } => {
                 connection_error.err_code()
             }
             StreamErrorIncoming::StreamReset { error_code } => Some(*error_code),
             StreamErrorIncoming::NotReady => todo!("! Remove this invariant from enum"),
-            StreamErrorIncoming::StreamFinished => None,
         }
     }
 }
@@ -126,10 +124,8 @@ pub enum ConnectionErrorIncoming {
 /// This is used by to implement the quic abstraction traits
 #[derive(Debug)]
 pub enum StreamErrorIncoming {
-    /// Stream finished
-    StreamFinished,
     /// Stream is closed because the whole connection is closed
-    ConnectionErrorConnectionErrorIncoming {
+    ConnectionErrorIncoming {
         /// Connection error
         connection_error: ConnectionErrorIncoming,
     },
@@ -302,7 +298,7 @@ pub trait RecvStream {
     fn poll_data(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Self::Buf, StreamErrorIncoming>>;
+    ) -> Poll<Result<Option<Self::Buf>, StreamErrorIncoming>>;
 
     /// Send a `STOP_SENDING` QUIC code.
     fn stop_sending(&mut self, error_code: u64);

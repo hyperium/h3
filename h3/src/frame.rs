@@ -557,10 +557,8 @@ mod tests {
         fn poll_data(
             &mut self,
             _: &mut Context<'_>,
-        ) -> Poll<Result<Self::Buf, StreamErrorIncoming>> {
-            // TODO
-            todo!("When pop_front is none then return error instead");
-            //Poll::Ready(Ok(self.chunks.pop_front()))
+        ) -> Poll<Result<Option<Self::Buf>, StreamErrorIncoming>> {
+            Poll::Ready(Ok(self.chunks.pop_front()))
         }
 
         fn stop_sending(&mut self, _: u64) {

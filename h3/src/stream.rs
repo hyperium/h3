@@ -423,10 +423,15 @@ impl<B, S: RecvStream> BufRecvStream<S, B> {
     ///
     /// Returns `true` if the end of the stream is reached.
     pub fn poll_read(&mut self, cx: &mut Context<'_>) -> Poll<Result<bool, StreamErrorIncoming>> {
-        let mut data = ready!(self.stream.poll_data(cx))?;
+        let data = ready!(self.stream.poll_data(cx))?;
 
-        self.buf.push_bytes(&mut data);
-        Poll::Ready(Ok(false))
+        if let Some(mut data) = data {
+            self.buf.push_bytes(&mut data);
+            Poll::Ready(Ok(false))
+        } else {
+            self.eos = true;
+            Poll::Ready(Ok(true))
+        }
     }
 
     /// Returns the currently buffered data, allowing it to be partially read
@@ -463,14 +468,18 @@ impl<S: RecvStream, B> RecvStream for BufRecvStream<S, B> {
     fn poll_data(
         &mut self,
         cx: &mut std::task::Context<'_>,
-    ) -> Poll<Result<Self::Buf, StreamErrorIncoming>> {
+    ) -> Poll<Result<Option<Self::Buf>, StreamErrorIncoming>> {
         // There is data buffered, return that immediately
         if let Some(chunk) = self.buf.take_first_chunk() {
-            return Poll::Ready(Ok(chunk));
+            return Poll::Ready(Ok(Some(chunk)));
         }
 
-        let mut data = ready!(self.stream.poll_data(cx))?;
-        Poll::Ready(Ok(data.copy_to_bytes(data.remaining())))
+        if let Some(mut data) = ready!(self.stream.poll_data(cx))? {
+            Poll::Ready(Ok(Some(data.copy_to_bytes(data.remaining()))))
+        } else {
+            self.eos = true;
+            Poll::Ready(Ok(None))
+        }
     }
 
     fn stop_sending(&mut self, error_code: u64) {

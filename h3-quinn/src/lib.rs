@@ -133,7 +133,7 @@ impl From<ConnectionError> for ConnectionErrorIncoming {
                 error_code: error_code.into(),
             },
             quinn::ConnectionError::TimedOut => ConnectionErrorIncoming::Timeout,
-            _ => todo!("What should happen here?"),
+            _ => ConnectionErrorIncoming::Timeout,
         }
     }
 }
@@ -449,7 +449,7 @@ impl<B: Buf> quic::RecvStream for BidiStream<B> {
     fn poll_data(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Self::Buf, StreamErrorIncoming>> {
+    ) -> Poll<Result<Option<Self::Buf>, StreamErrorIncoming>> {
         self.recv.poll_data(cx)
     }
 
@@ -531,7 +531,7 @@ impl quic::RecvStream for RecvStream {
     fn poll_data(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Self::Buf, StreamErrorIncoming>> {
+    ) -> Poll<Result<Option<Self::Buf>, StreamErrorIncoming>> {
         if let Some(mut stream) = self.stream.take() {
             self.read_chunk_fut.set(async move {
                 let chunk = stream.read_chunk(usize::MAX, true).await;
@@ -543,8 +543,8 @@ impl quic::RecvStream for RecvStream {
         self.stream = Some(stream);
 
         match chunk {
-            Ok(Some(a)) => Poll::Ready(Ok(a.bytes)),
-            Ok(None) => Poll::Ready(Err(StreamErrorIncoming::StreamFinished)),
+            Ok(Some(a)) => Poll::Ready(Ok(Some(a.bytes))),
+            Ok(None) => Poll::Ready(Ok(None)),
             Err(err) => Poll::Ready(Err(ReadError(err).into())),
         }
     }
@@ -580,11 +580,9 @@ impl From<ReadError> for StreamErrorIncoming {
             quinn::ReadError::Reset(var_int_error) => StreamErrorIncoming::StreamReset {
                 error_code: var_int_error.into_inner(),
             },
-            quinn::ReadError::ConnectionLost(err) => {
-                StreamErrorIncoming::ConnectionErrorConnectionErrorIncoming {
-                    connection_error: ConnectionError(err).into(),
-                }
-            }
+            quinn::ReadError::ConnectionLost(err) => StreamErrorIncoming::ConnectionErrorIncoming {
+                connection_error: ConnectionError(err).into(),
+            },
             quinn::ReadError::UnknownStream => panic!("H3 read from unknown stream"),
             quinn::ReadError::IllegalOrderedRead => panic!("H3 illegal ordered read"),
             quinn::ReadError::ZeroRttRejected => todo!("can this happen?"),
@@ -787,11 +785,17 @@ pub enum SendStreamError {
 impl From<SendStreamError> for StreamErrorIncoming {
     fn from(value: SendStreamError) -> Self {
         match value {
-            SendStreamError::Write(WriteError::ConnectionLost(err)) => todo!(),
-            SendStreamError::Write(WriteError::Stopped(err)) => todo!(),
-            SendStreamError::Write(WriteError::UnknownStream) => todo!(),
-            SendStreamError::Write(WriteError::ZeroRttRejected) => todo!(),
-            SendStreamError::NotReady => todo!(),
+            SendStreamError::Write(WriteError::ConnectionLost(err)) => {
+                StreamErrorIncoming::ConnectionErrorIncoming {
+                    connection_error: ConnectionError(err).into(),
+                }
+            }
+            SendStreamError::Write(WriteError::Stopped(err)) => StreamErrorIncoming::StreamReset {
+                error_code: err.into_inner(),
+            },
+            SendStreamError::Write(WriteError::UnknownStream) => panic!("H3 write to unknown stream"),
+            SendStreamError::Write(WriteError::ZeroRttRejected) => todo!("can this happen?"),
+            SendStreamError::NotReady => todo!("???"),
         }
     }
 }
