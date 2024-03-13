@@ -793,7 +793,9 @@ impl From<SendStreamError> for StreamErrorIncoming {
             SendStreamError::Write(WriteError::Stopped(err)) => StreamErrorIncoming::StreamReset {
                 error_code: err.into_inner(),
             },
-            SendStreamError::Write(WriteError::UnknownStream) => panic!("H3 write to unknown stream"),
+            SendStreamError::Write(WriteError::UnknownStream) => {
+                panic!("H3 write to unknown stream")
+            }
             SendStreamError::Write(WriteError::ZeroRttRejected) => todo!("can this happen?"),
             SendStreamError::NotReady => todo!("???"),
         }

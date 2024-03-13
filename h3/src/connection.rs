@@ -189,7 +189,11 @@ where
     }
 
     /// Initiates the connection and opens a control stream
-    pub async fn new(mut conn: C, shared: SharedStateRef, config: Config) -> Result<Self, LegacyErrorStruct> {
+    pub async fn new(
+        mut conn: C,
+        shared: SharedStateRef,
+        config: Config,
+    ) -> Result<Self, LegacyErrorStruct> {
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
         //# Endpoints SHOULD create the HTTP control stream as well as the
         //# unidirectional streams required by mandatory extensions (such as the
