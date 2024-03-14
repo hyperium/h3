@@ -99,7 +99,7 @@ impl InsertWithNameRef {
         };
         let index: usize = index
             .try_into()
-            .map_err(|e| ParseError::Integer(crate::qpack::prefix_int::Error::Overflow))?;
+            .map_err(|_e| ParseError::Integer(crate::qpack::prefix_int::Error::Overflow))?;
 
         let value = match prefix_string::decode(8, buf) {
             Ok(x) => x,
