@@ -28,7 +28,7 @@ async fn get() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, mut client) = crate::client::client::new(pair.client().await)
+        let (mut driver, mut client) = crate::client::builder::new(pair.client().await)
             .await
             .expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
@@ -84,7 +84,7 @@ async fn get_with_trailers_unknown_content_type() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, mut client) = crate::client::client::new(pair.client().await)
+        let (mut driver, mut client) = crate::client::builder::new(pair.client().await)
             .await
             .expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
@@ -148,7 +148,7 @@ async fn get_with_trailers_known_content_type() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, mut client) = crate::client::client::new(pair.client().await)
+        let (mut driver, mut client) = crate::client::builder::new(pair.client().await)
             .await
             .expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
@@ -212,7 +212,7 @@ async fn post() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, mut client) = crate::client::client::new(pair.client().await)
+        let (mut driver, mut client) = crate::client::builder::new(pair.client().await)
             .await
             .expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
@@ -267,7 +267,7 @@ async fn header_too_big_response_from_server() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, mut client) = crate::client::client::new(pair.client().await)
+        let (mut driver, mut client) = crate::client::builder::new(pair.client().await)
             .await
             .expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
@@ -320,7 +320,7 @@ async fn header_too_big_response_from_server_trailers() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, mut client) = crate::client::client::new(pair.client().await)
+        let (mut driver, mut client) = crate::client::builder::new(pair.client().await)
             .await
             .expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
@@ -385,7 +385,7 @@ async fn header_too_big_client_error() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, mut client) = crate::client::client::new(pair.client().await)
+        let (mut driver, mut client) = crate::client::builder::new(pair.client().await)
             .await
             .expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
@@ -439,7 +439,7 @@ async fn header_too_big_client_error_trailer() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, mut client) = crate::client::client::new(pair.client().await)
+        let (mut driver, mut client) = crate::client::builder::new(pair.client().await)
             .await
             .expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
@@ -519,7 +519,7 @@ async fn header_too_big_discard_from_client() {
         //# that exceeds the indicated size, as the peer will likely refuse to
         //# process it.
 
-        let (mut driver, mut client) = crate::client::client::builder()
+        let (mut driver, mut client) = crate::client::builder::builder()
             .max_field_section_size(12)
             // Don't send settings, so server doesn't know about the low max_field_section_size
             .send_settings(false)
@@ -604,7 +604,7 @@ async fn header_too_big_discard_from_client_trailers() {
         //# that exceeds the indicated size, as the peer will likely refuse to
         //# process it.
 
-        let (mut driver, mut client) = crate::client::client::builder()
+        let (mut driver, mut client) = crate::client::builder::builder()
             .max_field_section_size(200)
             // Don't send settings, so server doesn't know about the low max_field_section_size
             .send_settings(false)
@@ -677,7 +677,7 @@ async fn header_too_big_server_error() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, mut client) = crate::client::client::new(pair.client().await) // header size limit faked for brevity
+        let (mut driver, mut client) = crate::client::builder::new(pair.client().await) // header size limit faked for brevity
             .await
             .expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
@@ -745,7 +745,7 @@ async fn header_too_big_server_error_trailers() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, mut client) = crate::client::client::new(pair.client().await) // header size limit faked for brevity
+        let (mut driver, mut client) = crate::client::builder::new(pair.client().await) // header size limit faked for brevity
             .await
             .expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
@@ -822,7 +822,7 @@ async fn get_timeout_client_recv_response() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut conn, mut client) = crate::client::client::new(pair.client().await)
+        let (mut conn, mut client) = crate::client::builder::new(pair.client().await)
             .await
             .expect("client init");
         let request_fut = async {
@@ -864,7 +864,7 @@ async fn get_timeout_client_recv_data() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut conn, mut client) = crate::client::client::new(pair.client().await)
+        let (mut conn, mut client) = crate::client::builder::new(pair.client().await)
             .await
             .expect("client init");
         let request_fut = async {
@@ -914,7 +914,7 @@ async fn get_timeout_server_accept() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut conn, _client) = crate::client::client::new(pair.client().await)
+        let (mut conn, _client) = crate::client::builder::new(pair.client().await)
             .await
             .expect("client init");
         let request_fut = async {
@@ -950,7 +950,7 @@ async fn post_timeout_server_recv_data() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (_conn, mut client) = crate::client::client::new(pair.client().await)
+        let (_conn, mut client) = crate::client::builder::new(pair.client().await)
             .await
             .expect("client init");
         let _request_stream = client
@@ -1441,9 +1441,10 @@ where
             .map(|_| ());
         check(res);
 
-        let (mut driver, _send) = crate::client::client::new(h3_quinn::Connection::new(connection))
-            .await
-            .unwrap();
+        let (mut driver, _send) =
+            crate::client::builder::new(h3_quinn::Connection::new(connection))
+                .await
+                .unwrap();
 
         let res = future::poll_fn(|cx| driver.poll_close(cx))
             .await

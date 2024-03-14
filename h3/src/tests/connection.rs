@@ -8,7 +8,7 @@ use bytes::{Buf, Bytes, BytesMut};
 use futures_util::future;
 use http::{Request, Response, StatusCode};
 
-use crate::client::client::SendRequest;
+use crate::client::connection::SendRequest;
 use crate::server;
 use crate::{
     connection::ConnectionState,
@@ -32,7 +32,7 @@ async fn connect() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let _ = crate::client::client::new(pair.client().await)
+        let _ = crate::client::builder::new(pair.client().await)
             .await
             .expect("client init");
     };
@@ -51,7 +51,7 @@ async fn accept_request_end_on_client_close() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let _ = crate::client::client::new(pair.client().await)
+        let _ = crate::client::builder::new(pair.client().await)
             .await
             .expect("client init");
         // client is dropped, it will send H3_NO_ERROR
@@ -77,7 +77,7 @@ async fn server_drop_close() {
         let _ = server::connection::Connection::new(conn).await.unwrap();
     };
 
-    let (mut conn, mut send) = crate::client::client::new(pair.client().await)
+    let (mut conn, mut send) = crate::client::builder::new(pair.client().await)
         .await
         .expect("client init");
     let client_fut = async {
@@ -108,7 +108,7 @@ async fn server_send_data_without_finish() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (_driver, mut send_request) = crate::client::client::new(pair.client().await)
+        let (_driver, mut send_request) = crate::client::builder::new(pair.client().await)
             .await
             .unwrap();
 
@@ -152,7 +152,7 @@ async fn client_close_only_on_last_sender_drop() {
     };
 
     let client_fut = async {
-        let (mut conn, mut send1) = crate::client::client::new(pair.client().await)
+        let (mut conn, mut send1) = crate::client::builder::new(pair.client().await)
             .await
             .expect("client init");
         let mut send2 = send1.clone();
@@ -185,7 +185,7 @@ async fn settings_exchange_client() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut conn, client) = crate::client::client::new(pair.client().await)
+        let (mut conn, client) = crate::client::builder::new(pair.client().await)
             .await
             .expect("client init");
         let settings_change = async {
@@ -231,7 +231,7 @@ async fn settings_exchange_server() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut conn, _client) = crate::client::client::builder()
+        let (mut conn, _client) = crate::client::builder::builder()
             .max_field_section_size(12)
             .build::<_, _, Bytes>(pair.client().await)
             .await
@@ -285,7 +285,7 @@ async fn client_error_on_bidi_recv() {
     }
 
     let client_fut = async {
-        let (mut conn, mut send) = crate::client::client::new(pair.client().await)
+        let (mut conn, mut send) = crate::client::builder::new(pair.client().await)
             .await
             .expect("client init");
 
@@ -383,9 +383,10 @@ async fn control_close_send_error() {
         //# error of type H3_CLOSED_CRITICAL_STREAM.
         control_stream.finish().await.unwrap(); // close the client control stream immediately
 
-        let (mut driver, _send) = crate::client::client::new(h3_quinn::Connection::new(connection))
-            .await
-            .unwrap();
+        let (mut driver, _send) =
+            crate::client::builder::new(h3_quinn::Connection::new(connection))
+                .await
+                .unwrap();
 
         future::poll_fn(|cx| driver.poll_close(cx)).await
     };
@@ -494,7 +495,7 @@ async fn timeout_on_control_frame_read() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, _send_request) = crate::client::client::new(pair.client().await)
+        let (mut driver, _send_request) = crate::client::builder::new(pair.client().await)
             .await
             .unwrap();
         let _ = future::poll_fn(|cx| driver.poll_close(cx)).await;
@@ -527,9 +528,10 @@ async fn goaway_from_server_not_request_id() {
         control_stream.write_all(&buf[..]).await.unwrap();
         control_stream.finish().await.unwrap(); // close the client control stream immediately
 
-        let (mut driver, _send) = crate::client::client::new(h3_quinn::Connection::new(connection))
-            .await
-            .unwrap();
+        let (mut driver, _send) =
+            crate::client::builder::new(h3_quinn::Connection::new(connection))
+                .await
+                .unwrap();
 
         assert_matches!(
             future::poll_fn(|cx| driver.poll_close(cx))
@@ -574,7 +576,7 @@ async fn graceful_shutdown_server_rejects() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (_driver, mut send_request) = crate::client::client::new(pair.client().await)
+        let (_driver, mut send_request) = crate::client::builder::new(pair.client().await)
             .await
             .unwrap();
 
@@ -619,7 +621,7 @@ async fn graceful_shutdown_grace_interval() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, mut send_request) = crate::client::client::new(pair.client().await)
+        let (mut driver, mut send_request) = crate::client::builder::new(pair.client().await)
             .await
             .unwrap();
 
@@ -677,7 +679,7 @@ async fn graceful_shutdown_closes_when_idle() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, mut send_request) = crate::client::client::new(pair.client().await)
+        let (mut driver, mut send_request) = crate::client::builder::new(pair.client().await)
             .await
             .unwrap();
 
@@ -725,7 +727,7 @@ async fn graceful_shutdown_client() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let (mut driver, mut _send_request) = crate::client::client::new(pair.client().await)
+        let (mut driver, mut _send_request) = crate::client::builder::new(pair.client().await)
             .await
             .unwrap();
         driver.shutdown(0).await.unwrap();
