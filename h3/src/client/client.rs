@@ -62,7 +62,7 @@ where
 /// ## Sending a request with no body
 ///
 /// ```rust
-/// # use h3::{quic, client::*};
+/// # use h3::{quic, client::client::*};
 /// # use http::{Request, Response};
 /// # use bytes::Buf;
 /// # async fn doc<T,B>(mut send_request: SendRequest<T, B>) -> Result<(), Box<dyn std::error::Error>>
@@ -88,7 +88,7 @@ where
 /// ## Sending a request with a body and trailers
 ///
 /// ```rust
-/// # use h3::{quic, client::*};
+/// # use h3::{quic, client::client::*};
 /// # use http::{Request, Response, HeaderMap};
 /// # use bytes::{Buf, Bytes};
 /// # async fn doc<T,B>(mut send_request: SendRequest<T, Bytes>) -> Result<(), Box<dyn std::error::Error>>
@@ -283,7 +283,7 @@ where
 /// ```rust
 /// # use bytes::Buf;
 /// # use futures_util::future;
-/// # use h3::{client::*, quic};
+/// # use h3::{client::client::*, quic};
 /// # use tokio::task::JoinHandle;
 /// # async fn doc<C, B>(mut connection: Connection<C, B>)
 /// #    -> JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>
@@ -306,7 +306,7 @@ where
 /// ```rust
 /// # use bytes::Buf;
 /// # use futures_util::future;
-/// # use h3::{client::*, quic};
+/// # use h3::{client::client::*, quic};
 /// # use tokio::{self, sync::oneshot, task::JoinHandle};
 /// # async fn doc<C, B>(mut connection: Connection<C, B>)
 /// #    -> Result<(), Box<dyn std::error::Error + Send + Sync>>
@@ -476,7 +476,7 @@ where
 /// #   O: quic::OpenStreams<B>,
 /// #   B: bytes::Buf,
 /// # {
-/// let h3_conn = h3::client::builder()
+/// let h3_conn = h3::client::client::builder()
 ///     .max_field_section_size(8192)
 ///     .build(quic)
 ///     .await
@@ -573,7 +573,7 @@ impl Builder {
 /// # Examples
 ///
 /// ```rust
-/// # use h3::{quic, client::*};
+/// # use h3::{quic, client::client::*};
 /// # use http::{Request, Response};
 /// # use bytes::Buf;
 /// # use tokio::io::AsyncWriteExt;

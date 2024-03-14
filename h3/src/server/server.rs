@@ -11,7 +11,7 @@
 //! C: h3::quic::Connection<bytes::Bytes>,
 //! <C as h3::quic::Connection<bytes::Bytes>>::BidiStream: Send + 'static
 //! {
-//!     let mut server_builder = h3::server::builder();
+//!     let mut server_builder = h3::server::server::builder();
 //!     // Build the Connection
 //!     let mut h3_conn = server_builder.build(conn).await.unwrap();
 //!     loop {
@@ -83,9 +83,11 @@ use crate::{
     },
     qpack,
     quic::{self, RecvDatagramExt, SendDatagramExt, SendStream as _},
-    request::ResolveRequest,
     stream::{self, BufRecvStream},
 };
+
+use crate::server::request::ResolveRequest;
+
 use tracing::{error, trace, warn};
 
 /// Create a builder of HTTP/3 server connections
@@ -535,7 +537,7 @@ where
 /// C: h3::quic::Connection<B>,
 /// B: bytes::Buf,
 /// {
-///     let mut server_builder = h3::server::builder();
+///     let mut server_builder = h3::server::server::builder();
 ///     // Set the maximum header size
 ///     server_builder.max_field_section_size(1000);
 ///     // do not send grease types

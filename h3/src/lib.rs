@@ -2,12 +2,14 @@
 #![deny(missing_docs, clippy::self_named_module_files)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 
+/// HTTP/3 client
 pub mod client;
 mod config;
 pub mod error;
 pub mod ext;
 pub mod quic;
-pub(crate) mod request;
+
+/// HTTP/3 server
 pub mod server;
 
 pub use error::Error;
