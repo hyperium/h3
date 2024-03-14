@@ -5,7 +5,7 @@ use http::{Request, StatusCode};
 
 use crate::{error::Code, proto::headers::Header, qpack, quic, Error};
 
-use super::server::RequestStream;
+use super::stream::RequestStream;
 
 pub struct ResolveRequest<C: quic::Connection<B>, B: Buf> {
     request_stream: RequestStream<C::BidiStream, B>,

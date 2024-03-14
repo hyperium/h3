@@ -9,7 +9,6 @@ pub mod error;
 pub mod ext;
 pub mod quic;
 
-/// HTTP/3 server
 pub mod server;
 
 pub use error::Error;

@@ -53,7 +53,9 @@ async fn get() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming_req = crate::server::connection::Connection::new(conn)
+            .await
+            .unwrap();
 
         let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
         request_stream
@@ -111,7 +113,7 @@ async fn get_with_trailers_unknown_content_type() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming_req = server::connection::Connection::new(conn).await.unwrap();
 
         let (_, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
         request_stream
@@ -174,7 +176,7 @@ async fn get_with_trailers_known_content_type() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming_req = server::connection::Connection::new(conn).await.unwrap();
 
         let (_, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
         request_stream
@@ -233,7 +235,7 @@ async fn post() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming_req = server::connection::Connection::new(conn).await.unwrap();
 
         let (_, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
         request_stream
@@ -290,7 +292,7 @@ async fn header_too_big_response_from_server() {
         //= type=test
         //# An HTTP/3 implementation MAY impose a limit on the maximum size of
         //# the message header it will accept on an individual HTTP message.
-        let mut incoming_req = server::server::builder()
+        let mut incoming_req = server::builder::builder()
             .max_field_section_size(12)
             .build(conn)
             .await
@@ -349,7 +351,7 @@ async fn header_too_big_response_from_server_trailers() {
         //= type=test
         //# An HTTP/3 implementation MAY impose a limit on the maximum size of
         //# the message header it will accept on an individual HTTP message.
-        let mut incoming_req = server::server::builder()
+        let mut incoming_req = server::builder::builder()
             .max_field_section_size(207)
             .build(conn)
             .await
@@ -420,7 +422,7 @@ async fn header_too_big_client_error() {
         //= type=test
         //# An HTTP/3 implementation MAY impose a limit on the maximum size of
         //# the message header it will accept on an individual HTTP message.
-        server::server::builder()
+        server::builder::builder()
             .max_field_section_size(12)
             .build(conn)
             .await
@@ -485,7 +487,7 @@ async fn header_too_big_client_error_trailer() {
         //= type=test
         //# An HTTP/3 implementation MAY impose a limit on the maximum size of
         //# the message header it will accept on an individual HTTP message.
-        let mut incoming_req = server::server::builder()
+        let mut incoming_req = server::builder::builder()
             .max_field_section_size(207)
             .build(conn)
             .await
@@ -553,7 +555,7 @@ async fn header_too_big_discard_from_client() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming_req = server::connection::Connection::new(conn).await.unwrap();
 
         let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
         request_stream
@@ -635,7 +637,7 @@ async fn header_too_big_discard_from_client_trailers() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming_req = server::connection::Connection::new(conn).await.unwrap();
 
         let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
 
@@ -693,7 +695,7 @@ async fn header_too_big_server_error() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming_req = server::connection::Connection::new(conn).await.unwrap();
 
         let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
 
@@ -761,7 +763,7 @@ async fn header_too_big_server_error_trailers() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming_req = server::connection::Connection::new(conn).await.unwrap();
 
         let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
         request_stream
@@ -843,7 +845,7 @@ async fn get_timeout_client_recv_response() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming_req = server::connection::Connection::new(conn).await.unwrap();
 
         // _req must not be dropped, else the connection will be closed and the timeout
         // wont be triggered
@@ -886,7 +888,7 @@ async fn get_timeout_client_recv_data() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming_req = server::connection::Connection::new(conn).await.unwrap();
 
         let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
         request_stream
@@ -929,7 +931,7 @@ async fn get_timeout_server_accept() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming_req = server::connection::Connection::new(conn).await.unwrap();
 
         assert_matches!(
             incoming_req.accept().await.map(|_| ()).unwrap_err().kind(),
@@ -960,7 +962,7 @@ async fn post_timeout_server_recv_data() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming_req = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming_req = server::connection::Connection::new(conn).await.unwrap();
 
         let (_, mut req_stream) = incoming_req.accept().await.expect("accept").unwrap();
         assert_matches!(
@@ -1452,7 +1454,7 @@ where
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::connection::Connection::new(conn).await.unwrap();
         let (_, mut stream) = incoming
             .accept()
             .await?

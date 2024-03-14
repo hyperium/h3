@@ -39,7 +39,7 @@ async fn connect() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let _ = server::server::Connection::new(conn).await.unwrap();
+        let _ = server::connection::Connection::new(conn).await.unwrap();
     };
 
     tokio::join!(server_fut, client_fut);
@@ -59,7 +59,7 @@ async fn accept_request_end_on_client_close() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::connection::Connection::new(conn).await.unwrap();
         // Accept returns Ok(None)
         assert!(incoming.accept().await.unwrap().is_none());
     };
@@ -74,7 +74,7 @@ async fn server_drop_close() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let _ = server::server::Connection::new(conn).await.unwrap();
+        let _ = server::connection::Connection::new(conn).await.unwrap();
     };
 
     let (mut conn, mut send) = crate::client::client::new(pair.client().await)
@@ -126,7 +126,7 @@ async fn server_send_data_without_finish() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::connection::Connection::new(conn).await.unwrap();
         let (_, mut stream) = incoming.accept().await.unwrap().unwrap();
         let mut data = stream.recv_data().await.unwrap().unwrap();
         let data = data.copy_to_bytes(data.remaining());
@@ -145,7 +145,7 @@ async fn client_close_only_on_last_sender_drop() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::connection::Connection::new(conn).await.unwrap();
         assert!(incoming.accept().await.unwrap().is_some());
         assert!(incoming.accept().await.unwrap().is_some());
         assert!(incoming.accept().await.unwrap().is_none());
@@ -213,7 +213,7 @@ async fn settings_exchange_client() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::server::builder()
+        let mut incoming = server::builder::builder()
             .max_field_section_size(12)
             .build(conn)
             .await
@@ -245,7 +245,7 @@ async fn settings_exchange_server() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::connection::Connection::new(conn).await.unwrap();
 
         let state = incoming.shared_state().clone();
         let accept = async { incoming.accept().await.unwrap() };
@@ -349,7 +349,7 @@ async fn two_control_streams() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::connection::Connection::new(conn).await.unwrap();
         assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err().kind(),
             Kind::Application {
@@ -392,7 +392,7 @@ async fn control_close_send_error() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::connection::Connection::new(conn).await.unwrap();
         // Driver detects that the receiving side of the control stream has been closed
         assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err().kind(),
@@ -434,7 +434,7 @@ async fn missing_settings() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::connection::Connection::new(conn).await.unwrap();
         assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err().kind(),
             Kind::Application {
@@ -472,7 +472,7 @@ async fn control_stream_frame_unexpected() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::connection::Connection::new(conn).await.unwrap();
         assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err().kind(),
             Kind::Application {
@@ -502,7 +502,7 @@ async fn timeout_on_control_frame_read() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::connection::Connection::new(conn).await.unwrap();
         assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err().kind(),
             Kind::Timeout
@@ -601,7 +601,7 @@ async fn graceful_shutdown_server_rejects() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::connection::Connection::new(conn).await.unwrap();
         let (_, stream) = incoming.accept().await.unwrap().unwrap();
         response(stream).await;
         incoming.shutdown(0).await.unwrap();
@@ -652,7 +652,7 @@ async fn graceful_shutdown_grace_interval() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::connection::Connection::new(conn).await.unwrap();
         let (_, first) = incoming.accept().await.unwrap().unwrap();
         incoming.shutdown(1).await.unwrap();
         let (_, in_flight) = incoming.accept().await.unwrap().unwrap();
@@ -697,7 +697,7 @@ async fn graceful_shutdown_closes_when_idle() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::connection::Connection::new(conn).await.unwrap();
 
         let mut count = 0;
 
@@ -741,7 +741,7 @@ async fn graceful_shutdown_client() {
 
     let server_fut = async {
         let conn = server.next().await;
-        let mut incoming = server::server::Connection::new(conn).await.unwrap();
+        let mut incoming = server::connection::Connection::new(conn).await.unwrap();
         assert!(incoming.accept().await.unwrap().is_none());
     };
 
@@ -761,7 +761,7 @@ where
     request_stream.recv_response().await
 }
 
-async fn response<S, B>(mut stream: server::server::RequestStream<S, B>)
+async fn response<S, B>(mut stream: server::stream::RequestStream<S, B>)
 where
     S: quic::RecvStream + SendStream<B>,
     B: Buf,

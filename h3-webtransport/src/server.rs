@@ -7,7 +7,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use h3::server;
+use h3::server::{self, stream::RequestStream};
 
 use bytes::Buf;
 use futures_util::{future::poll_fn, ready, Future};
@@ -18,7 +18,7 @@ use h3::{
     frame::FrameStream,
     proto::frame::Frame,
     quic::{self, OpenStreams, RecvDatagramExt, SendDatagramExt, WriteBuf},
-    server::server::{Connection, RequestStream},
+    server::connection::Connection,
     Error,
 };
 use h3::{
@@ -399,7 +399,7 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    conn: &'a Mutex<server::server::Connection<C, B>>,
+    conn: &'a Mutex<server::connection::Connection<C, B>>,
 }
 
 impl<'a, C, B> Future for AcceptUni<'a, C, B>
