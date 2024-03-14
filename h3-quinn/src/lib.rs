@@ -28,6 +28,7 @@ use h3::{
     ext::Datagram,
     quic::{self, Error, StreamId, WriteBuf},
 };
+use sync_wrapper::SyncWrapper;
 use tokio_util::sync::ReusableBoxFuture;
 
 /// A QUIC connection backed by Quinn
@@ -273,8 +274,8 @@ impl quic::RecvDatagramExt for Connection {
 /// [`quinn::OpenBi`], [`quinn::OpenUni`].
 pub struct OpenStreams {
     conn: quinn::Connection,
-    opening_bi: Option<BoxStream<'static, <OpenBi<'static> as Future>::Output>>,
-    opening_uni: Option<BoxStream<'static, <OpenUni<'static> as Future>::Output>>,
+    opening_bi: Option<SyncWrapper<BoxStream<'static, <OpenBi<'static> as Future>::Output>>>,
+    opening_uni: Option<SyncWrapper<BoxStream<'static, <OpenUni<'static> as Future>::Output>>>,
 }
 
 impl<B> quic::OpenStreams<B> for OpenStreams
@@ -291,13 +292,19 @@ where
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Self::BidiStream, Self::Error>> {
         if self.opening_bi.is_none() {
-            self.opening_bi = Some(Box::pin(stream::unfold(self.conn.clone(), |conn| async {
-                Some((conn.open_bi().await, conn))
-            })));
+            self.opening_bi = Some(SyncWrapper::new(Box::pin(stream::unfold(
+                self.conn.clone(),
+                |conn| async { Some((conn.open_bi().await, conn)) },
+            ))));
         }
 
-        let (send, recv) =
-            ready!(self.opening_bi.as_mut().unwrap().poll_next_unpin(cx)).unwrap()?;
+        let (send, recv) = ready!(self
+            .opening_bi
+            .as_mut()
+            .unwrap()
+            .get_mut()
+            .poll_next_unpin(cx))
+        .unwrap()?;
         Poll::Ready(Ok(Self::BidiStream {
             send: Self::SendStream::new(send),
             recv: Self::RecvStream::new(recv),
@@ -309,12 +316,19 @@ where
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Self::SendStream, Self::Error>> {
         if self.opening_uni.is_none() {
-            self.opening_uni = Some(Box::pin(stream::unfold(self.conn.clone(), |conn| async {
-                Some((conn.open_uni().await, conn))
-            })));
+            self.opening_uni = Some(SyncWrapper::new(Box::pin(stream::unfold(
+                self.conn.clone(),
+                |conn| async { Some((conn.open_uni().await, conn)) },
+            ))));
         }
 
-        let send = ready!(self.opening_uni.as_mut().unwrap().poll_next_unpin(cx)).unwrap()?;
+        let send = ready!(self
+            .opening_uni
+            .as_mut()
+            .unwrap()
+            .get_mut()
+            .poll_next_unpin(cx))
+        .unwrap()?;
         Poll::Ready(Ok(Self::SendStream::new(send)))
     }
 
