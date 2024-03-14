@@ -105,16 +105,16 @@ impl Error for StreamErrorIncoming {
 /// This is used by to implement the quic abstraction traits
 #[derive(Debug)]
 pub enum ConnectionErrorIncoming {
-    /// Todo
+    /// Error from the http3 layer
     ApplicationClose {
-        /// TODO
+        /// http3 error code
         error_code: u64,
     },
-    /// TODO
+    /// Quic connection timeout
     Timeout,
-    /// TODO
+    /// Quic error
     ConnectionClosed {
-        /// TODO
+        /// quic error code
         error_code: u64,
     },
 }
