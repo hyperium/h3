@@ -1,7 +1,6 @@
 //! HTTP/3 server connection
 //!
 //! The [`Connection`] struct manages a connection from the side of the HTTP/3 server
-//! See the [`server`] module for more information.
 
 use std::{
     collections::HashSet,
@@ -87,7 +86,7 @@ where
 {
     /// Create a new HTTP/3 server connection with default settings
     ///
-    /// Use a custom [`Builder`] with [`builder()`] to create a connection
+    /// Use a custom [`super::builder::Builder`] with [`super::builder::builder()`] to create a connection
     /// with different settings.
     /// Provide a Connection which implements [`quic::Connection`].
     pub async fn new(conn: C) -> Result<Self, Error> {
