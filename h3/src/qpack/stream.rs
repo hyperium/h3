@@ -294,7 +294,7 @@ pub struct HeaderAck(pub u64);
 impl HeaderAck {
     pub fn decode<R: Buf>(buf: &mut R) -> Result<Option<Self>, ParseError> {
         let stream_id = match prefix_int::decode(7, buf) {
-            Ok((0b1, x)) => x as u64,
+            Ok((0b1, x)) => x,
             Ok((f, _)) => return Err(ParseError::InvalidPrefix(f)),
             Err(IntError::UnexpectedEnd) => return Ok(None),
             Err(e) => return Err(e.into()),
@@ -313,7 +313,7 @@ pub struct StreamCancel(pub u64);
 impl StreamCancel {
     pub fn decode<R: Buf>(buf: &mut R) -> Result<Option<Self>, ParseError> {
         let stream_id = match prefix_int::decode(6, buf) {
-            Ok((0b01, x)) => x as u64,
+            Ok((0b01, x)) => x,
             Ok((f, _)) => return Err(ParseError::InvalidPrefix(f)),
             Err(IntError::UnexpectedEnd) => return Ok(None),
             Err(e) => return Err(e.into()),
