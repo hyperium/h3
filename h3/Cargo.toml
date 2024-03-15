@@ -7,7 +7,7 @@ authors = [
     "Jean-Christophe BEGUE <jc.begue@pm.me>",
 ]
 license = "MIT"
-edition = "2018"
+edition = "2021"
 documentation = "https://docs.rs/h3"
 repository = "https://github.com/hyperium/h3"
 readme = "../README.md"
