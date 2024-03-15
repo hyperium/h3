@@ -2,7 +2,7 @@
 name = "examples"
 version = "0.0.0"
 publish = false
-edition = "2018"
+edition = "2021"
 
 # If you copy one of the examples into a new project, you should be using
 # [dependencies] instead.
@@ -19,7 +19,7 @@ quinn = { version = "0.10", default-features = false, features = [
     "tls-rustls",
     "ring",
 ] }
-rcgen = { version = "0.10" }
+rcgen = { version = "0.12" }
 rustls = { version = "0.21", features = ["dangerous_configuration"] }
 rustls-native-certs = "0.6"
 structopt = "0.3"
@@ -32,9 +32,9 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
     "time",
     "tracing-log",
 ] }
-octets = "0.2.0"
+octets = "0.3.0"
 
-tracing-tree = { version = "0.2" }
+tracing-tree = { version = "0.3" }
 
 [features]
 tree = []
