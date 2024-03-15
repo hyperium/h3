@@ -41,7 +41,7 @@ quinn = { version = "0.10", default-features = false, features = [
     "ring",
 ] }
 quinn-proto = { version = "0.10", default-features = false }
-rcgen = "0.11.3"
+rcgen = "0.12"
 rustls = "0.21"
 tokio = { version = "1", features = ["rt", "macros", "io-util", "io-std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = [
