@@ -11,7 +11,7 @@
 //! C: h3::quic::Connection<bytes::Bytes>,
 //! <C as h3::quic::Connection<bytes::Bytes>>::BidiStream: Send + 'static
 //! {
-//!     let mut server_builder = h3::server::builder::builder();
+//!     let mut server_builder = h3::server::builder();
 //!     // Build the Connection
 //!     let mut h3_conn = server_builder.build(conn).await.unwrap();
 //!     loop {
@@ -50,7 +50,13 @@
 //! ## File server
 //! A ready-to-use example of a file server is available [here](https://github.com/hyperium/h3/blob/master/examples/server.rs)
 
-pub mod builder;
-pub mod connection;
+mod builder;
+mod connection;
 mod request;
-pub mod stream;
+mod stream;
+
+pub use builder::builder;
+pub use builder::Builder;
+pub use connection::Connection;
+pub use stream::ReadDatagram;
+pub use stream::RequestStream;

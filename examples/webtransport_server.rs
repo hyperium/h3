@@ -4,7 +4,7 @@ use h3::{
     error::ErrorLevel,
     ext::Protocol,
     quic::{self, RecvDatagramExt, SendDatagramExt, SendStreamUnframed},
-    server::connection::Connection,
+    server::Connection,
 };
 use h3_quinn::quinn;
 use h3_webtransport::{
@@ -118,7 +118,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match new_conn.await {
                 Ok(conn) => {
                     info!("new http3 established");
-                    let h3_conn = h3::server::builder::builder()
+                    let h3_conn = h3::server::builder()
                         .enable_webtransport(true)
                         .enable_connect(true)
                         .enable_datagram(true)

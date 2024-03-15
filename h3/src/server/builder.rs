@@ -11,7 +11,7 @@
 //! C: h3::quic::Connection<B>,
 //! B: bytes::Buf,
 //! {
-//!     let mut server_builder = h3::server::builder::builder();
+//!     let mut server_builder = h3::server::builder();
 //!     // Set the maximum header size
 //!     server_builder.max_field_section_size(1000);
 //!     // do not send grease types

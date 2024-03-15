@@ -7,7 +7,7 @@ use structopt::StructOpt;
 use tokio::{fs::File, io::AsyncReadExt};
 use tracing::{error, info, trace_span};
 
-use h3::{error::ErrorLevel, quic::BidiStream, server::stream::RequestStream};
+use h3::{error::ErrorLevel, quic::BidiStream, server::RequestStream};
 use h3_quinn::quinn;
 
 #[derive(StructOpt, Debug)]
@@ -115,10 +115,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(conn) => {
                     info!("new connection established");
 
-                    let mut h3_conn =
-                        h3::server::connection::Connection::new(h3_quinn::Connection::new(conn))
-                            .await
-                            .unwrap();
+                    let mut h3_conn = h3::server::Connection::new(h3_quinn::Connection::new(conn))
+                        .await
+                        .unwrap();
 
                     loop {
                         match h3_conn.accept().await {
