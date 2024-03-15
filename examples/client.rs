@@ -113,7 +113,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // h3_quinn implements the trait w/ quinn to make it work with h3.
     let quinn_conn = h3_quinn::Connection::new(conn);
 
-    let (mut driver, mut send_request) = h3::client::builder::new(quinn_conn).await?;
+    let (mut driver, mut send_request) = h3::client::new(quinn_conn).await?;
 
     let drive = async move {
         future::poll_fn(|cx| driver.poll_close(cx)).await?;

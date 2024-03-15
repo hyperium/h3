@@ -1,56 +1,3 @@
-//! Manage request bodies transfer, response and trailers.
-//!
-//! Once a request has been sent via [`send_request()`], a response can be awaited by calling
-//! [`recv_response()`]. A body for this request can be sent with [`send_data()`], then the request
-//! shall be completed by either sending trailers with [`send_trailers()`], or [`finish()`].
-//!
-//! After receiving the response's headers, it's body can be read by [`recv_data()`] until it returns
-//! `None`. Then the trailers will eventually be available via [`recv_trailers()`].
-//!
-//! TODO: If data is polled before the response has been received, an error will be thrown.
-//!
-//! TODO: If trailers are polled but the body hasn't been fully received, an UNEXPECT_FRAME error will be
-//! thrown
-//!
-//! Whenever the client wants to cancel this request, it can call [`stop_sending()`], which will
-//! put an end to any transfer concerning it.
-//!
-//! # Examples
-//!
-//! ```rust
-//! # use h3::{quic, client::connection::*, client::stream::*, client::builder::*};
-//! # use http::{Request, Response};
-//! # use bytes::Buf;
-//! # use tokio::io::AsyncWriteExt;
-//! # async fn doc<T,B>(mut req_stream: RequestStream<T, B>) -> Result<(), Box<dyn std::error::Error>>
-//! # where
-//! #     T: quic::RecvStream,
-//! # {
-//! // Prepare the HTTP request to send to the server
-//! let request = Request::get("https://www.example.com/").body(())?;
-//!
-//! // Receive the response
-//! let response = req_stream.recv_response().await?;
-//! // Receive the body
-//! while let Some(mut chunk) = req_stream.recv_data().await? {
-//!     let mut out = tokio::io::stdout();
-//!     out.write_all_buf(&mut chunk).await?;
-//!     out.flush().await?;
-//! }
-//! # Ok(())
-//! # }
-//! # pub fn main() {}
-//! ```
-//!
-//! [`send_request()`]: struct.SendRequest.html#method.send_request
-//! [`recv_response()`]: #method.recv_response
-//! [`recv_data()`]: #method.recv_data
-//! [`send_data()`]: #method.send_data
-//! [`send_trailers()`]: #method.send_trailers
-//! [`recv_trailers()`]: #method.recv_trailers
-//! [`finish()`]: #method.finish
-//! [`stop_sending()`]: #method.stop_sending
-
 use bytes::Buf;
 use futures_util::future;
 use http::{HeaderMap, Response};
@@ -65,6 +12,57 @@ use crate::{
 use std::convert::TryFrom;
 
 /// Manage request bodies transfer, response and trailers.
+///
+/// Once a request has been sent via [`send_request()`], a response can be awaited by calling
+/// [`recv_response()`]. A body for this request can be sent with [`send_data()`], then the request
+/// shall be completed by either sending trailers with [`send_trailers()`], or [`finish()`].
+///
+/// After receiving the response's headers, it's body can be read by [`recv_data()`] until it returns
+/// `None`. Then the trailers will eventually be available via [`recv_trailers()`].
+///
+/// TODO: If data is polled before the response has been received, an error will be thrown.
+///
+/// TODO: If trailers are polled but the body hasn't been fully received, an UNEXPECT_FRAME error will be
+/// thrown
+///
+/// Whenever the client wants to cancel this request, it can call [`stop_sending()`], which will
+/// put an end to any transfer concerning it.
+///
+/// # Examples
+///
+/// ```rust
+/// # use h3::{quic, client::*};
+/// # use http::{Request, Response};
+/// # use bytes::Buf;
+/// # use tokio::io::AsyncWriteExt;
+/// # async fn doc<T,B>(mut req_stream: RequestStream<T, B>) -> Result<(), Box<dyn std::error::Error>>
+/// # where
+/// #     T: quic::RecvStream,
+/// # {
+/// // Prepare the HTTP request to send to the server
+/// let request = Request::get("https://www.example.com/").body(())?;
+///
+/// // Receive the response
+/// let response = req_stream.recv_response().await?;
+/// // Receive the body
+/// while let Some(mut chunk) = req_stream.recv_data().await? {
+///     let mut out = tokio::io::stdout();
+///     out.write_all_buf(&mut chunk).await?;
+///     out.flush().await?;
+/// }
+/// # Ok(())
+/// # }
+/// # pub fn main() {}
+/// ```
+///
+/// [`send_request()`]: struct.SendRequest.html#method.send_request
+/// [`recv_response()`]: #method.recv_response
+/// [`recv_data()`]: #method.recv_data
+/// [`send_data()`]: #method.send_data
+/// [`send_trailers()`]: #method.send_trailers
+/// [`recv_trailers()`]: #method.recv_trailers
+/// [`finish()`]: #method.finish
+/// [`stop_sending()`]: #method.stop_sending
 pub struct RequestStream<S, B> {
     pub(super) inner: connection::RequestStream<S, B>,
 }

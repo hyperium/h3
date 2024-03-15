@@ -1,6 +1,12 @@
 //! HTTP/3 client
 
-pub mod connection;
-pub mod stream;
+mod connection;
+mod stream;
 
-pub mod builder;
+mod builder;
+
+pub use builder::builder;
+pub use builder::new;
+pub use builder::Builder;
+pub use connection::{Connection, SendRequest};
+pub use stream::RequestStream;

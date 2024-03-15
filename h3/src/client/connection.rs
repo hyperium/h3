@@ -42,7 +42,7 @@ use super::stream::RequestStream;
 /// ## Sending a request with no body
 ///
 /// ```rust
-/// # use h3::{quic, client::connection::*, client::stream::*};
+/// # use h3::{quic, client::*};
 /// # use http::{Request, Response};
 /// # use bytes::Buf;
 /// # async fn doc<T,B>(mut send_request: SendRequest<T, B>) -> Result<(), Box<dyn std::error::Error>>
@@ -68,7 +68,7 @@ use super::stream::RequestStream;
 /// ## Sending a request with a body and trailers
 ///
 /// ```rust
-/// # use h3::{quic, client::connection::*};
+/// # use h3::{quic, client::*};
 /// # use http::{Request, Response, HeaderMap};
 /// # use bytes::{Buf, Bytes};
 /// # async fn doc<T,B>(mut send_request: SendRequest<T, Bytes>) -> Result<(), Box<dyn std::error::Error>>
@@ -263,7 +263,7 @@ where
 /// ```rust
 /// # use bytes::Buf;
 /// # use futures_util::future;
-/// # use h3::{client::connection::*, quic};
+/// # use h3::{client::*, quic};
 /// # use tokio::task::JoinHandle;
 /// # async fn doc<C, B>(mut connection: Connection<C, B>)
 /// #    -> JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>
@@ -287,8 +287,8 @@ where
 /// # use bytes::Buf;
 /// # use futures_util::future;
 /// # use h3::quic;
-/// # use h3::client::connection::Connection;
-/// # use h3::client::connection::SendRequest;
+/// # use h3::client::Connection;
+/// # use h3::client::SendRequest;
 /// # use tokio::{self, sync::oneshot, task::JoinHandle};
 /// # async fn doc<C, B>(mut connection: Connection<C, B>)
 /// #    -> Result<(), Box<dyn std::error::Error + Send + Sync>>

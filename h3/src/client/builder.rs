@@ -51,7 +51,7 @@ where
 /// #   O: quic::OpenStreams<B>,
 /// #   B: bytes::Buf,
 /// # {
-/// let h3_conn = h3::client::builder::builder()
+/// let h3_conn = h3::client::builder()
 ///     .max_field_section_size(8192)
 ///     .build(quic)
 ///     .await
