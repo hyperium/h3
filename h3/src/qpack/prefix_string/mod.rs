@@ -11,7 +11,7 @@ use bytes::{Buf, BufMut};
 pub use self::bitwin::BitWindow;
 
 pub use self::{
-    decode::{DecodeIter, Error as HuffmanDecodingError, HpackStringDecode},
+    decode::{Error as HuffmanDecodingError, HpackStringDecode},
     encode::{Error as HuffmanEncodingError, HpackStringEncode},
 };
 

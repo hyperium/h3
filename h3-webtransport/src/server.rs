@@ -16,7 +16,8 @@ use h3::{
     frame::FrameStream,
     proto::frame::Frame,
     quic::{self, OpenStreams, RecvDatagramExt, SendDatagramExt, WriteBuf},
-    server::{self, Connection, RequestStream},
+    server::Connection,
+    server::RequestStream,
     LegacyErrorStruct,
 };
 use h3::{
@@ -397,7 +398,7 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    conn: &'a Mutex<server::Connection<C, B>>,
+    conn: &'a Mutex<Connection<C, B>>,
 }
 
 impl<'a, C, B> Future for AcceptUni<'a, C, B>

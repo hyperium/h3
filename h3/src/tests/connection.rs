@@ -8,8 +8,9 @@ use bytes::{Buf, Bytes, BytesMut};
 use futures_util::future;
 use http::{Request, Response, StatusCode};
 
+use crate::client::SendRequest;
+use crate::{client, server};
 use crate::{
-    client::{self, SendRequest},
     connection::ConnectionState,
     error::{Code, LegacyErrorStruct, LegacyKind},
     proto::{
@@ -20,7 +21,6 @@ use crate::{
         varint::VarInt,
     },
     quic::{self, SendStream},
-    server,
 };
 
 use super::h3_quinn;

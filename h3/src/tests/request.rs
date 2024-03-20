@@ -17,7 +17,7 @@ use crate::{
         varint::VarInt,
     },
     qpack,
-    quic::{self, StreamErrorIncoming},
+    quic::{self},
     server,
 };
 

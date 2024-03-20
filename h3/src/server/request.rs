@@ -3,9 +3,9 @@ use std::convert::TryFrom;
 use bytes::Buf;
 use http::{Request, StatusCode};
 
-use crate::{
-    error::Code, proto::headers::Header, qpack, quic, server::RequestStream, LegacyErrorStruct,
-};
+use crate::{error::Code, proto::headers::Header, qpack, quic, LegacyErrorStruct};
+
+use super::stream::RequestStream;
 
 pub struct ResolveRequest<C: quic::Connection<B>, B: Buf> {
     request_stream: RequestStream<C::BidiStream, B>,

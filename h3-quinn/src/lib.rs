@@ -21,9 +21,7 @@ use futures::{
     StreamExt,
 };
 use quinn::ReadDatagram;
-pub use quinn::{
-    self, crypto::Session, AcceptBi, AcceptUni, Endpoint, OpenBi, OpenUni, VarInt, WriteError,
-};
+pub use quinn::{self, AcceptBi, AcceptUni, Endpoint, OpenBi, OpenUni, VarInt, WriteError};
 
 use h3::{
     ext::Datagram,
