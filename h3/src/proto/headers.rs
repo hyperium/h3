@@ -275,9 +275,15 @@ impl Field {
         //# character not permitted in a field value MUST be treated as
         //# malformed.
 
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
+        //= type=implication
+        //# A request or
+        //# response containing uppercase characters in field names MUST be
+        //# treated as malformed.
+
         if name[0] != b':' {
             return Ok(Field::Header((
-                HeaderName::from_bytes(name).map_err(|_| HeaderError::invalid_name(name))?,
+                HeaderName::from_lowercase(name).map_err(|_| HeaderError::invalid_name(name))?,
                 HeaderValue::from_bytes(value.as_ref())
                     .map_err(|_| HeaderError::invalid_value(name, value))?,
             )));
