@@ -1,9 +1,6 @@
 pub use self::{
-    decoder::{
-        ack_header, decode_stateless, stream_canceled, Decoded, Decoder, Error as DecoderError,
-    },
-    dynamic::Error as DynamicTableError,
-    encoder::{encode_stateless, Encoder, Error as EncoderError},
+    decoder::{decode_stateless, Decoded, Error as DecoderError},
+    encoder::{encode_stateless, Error as EncoderError},
     field::HeaderField,
 };
 
