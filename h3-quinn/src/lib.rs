@@ -579,7 +579,8 @@ where
             if let Some(data) = self.writing.take() {
                 if let Some(mut stream) = self.stream.take() {
                     self.write_fut.set(async move {
-                        let ret = stream.write(data.chunk()).await;
+                        let chunk = data.chunk();
+                        let ret = stream.write(chunk).await;
                         (stream, ret, data)
                     });
                 }
