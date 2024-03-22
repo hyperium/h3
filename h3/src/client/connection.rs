@@ -359,18 +359,18 @@ where
 
     /// Maintain the connection state until it is closed
     pub fn poll_close(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), LegacyErrorStruct>> {
+        if let Poll::Ready(Ok(_)) = self.inner.poll_handle_incoming(cx) {
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-6.1
+            //# Clients MUST treat
+            //# receipt of a server-initiated bidirectional stream as a connection
+            //# error of type H3_STREAM_CREATION_ERROR unless such an extension has
+            //# been negotiated.
+            return Poll::Ready(Err(self.inner.close(
+                Code::H3_STREAM_CREATION_ERROR,
+                "client received a bidirectional stream",
+            )));
+        }
         while let Poll::Ready(result) = self.inner.poll_control(cx) {
-            if let Poll::Ready(Ok(_)) = self.inner.poll_handle_incoming(cx) {
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-6.1
-                //# Clients MUST treat
-                //# receipt of a server-initiated bidirectional stream as a connection
-                //# error of type H3_STREAM_CREATION_ERROR unless such an extension has
-                //# been negotiated.
-                return Poll::Ready(Err(self.inner.close(
-                    Code::H3_STREAM_CREATION_ERROR,
-                    "client received a bidirectional stream",
-                )));
-            }
             match result {
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.2
                 //= type=TODO
