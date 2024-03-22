@@ -30,7 +30,7 @@ use tokio::sync::mpsc;
 use crate::{
     config::Config,
     connection::{ConnectionInner, SharedStateRef},
-    error::Error,
+    error::LegacyErrorStruct,
     quic::{self},
 };
 
@@ -120,7 +120,7 @@ impl Builder {
     /// Build an HTTP/3 connection from a QUIC connection
     ///
     /// This method creates a [`Connection`] instance with the settings in the [`Builder`].
-    pub async fn build<C, B>(&self, conn: C) -> Result<Connection<C, B>, Error>
+    pub async fn build<C, B>(&self, conn: C) -> Result<Connection<C, B>, LegacyErrorStruct>
     where
         C: quic::Connection<B>,
         B: Buf,

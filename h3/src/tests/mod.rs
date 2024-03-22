@@ -18,7 +18,7 @@ use std::{
     time::Duration,
 };
 
-use bytes::Bytes;
+use bytes::{Buf, Bytes};
 use rustls::{Certificate, PrivateKey};
 
 use crate::quic;
@@ -120,7 +120,10 @@ impl Pair {
             .unwrap()
     }
 
-    pub async fn client(&self) -> h3_quinn::Connection {
+    pub async fn client<B>(&self) -> h3_quinn::Connection<B>
+    where
+        B: Buf,
+    {
         Connection::new(self.client_inner().await)
     }
 }

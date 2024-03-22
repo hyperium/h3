@@ -12,7 +12,7 @@ use futures_util::future;
 use crate::{
     config::Config,
     connection::{ConnectionInner, SharedStateRef},
-    error::Error,
+    error::LegacyErrorStruct,
     quic::{self},
 };
 
@@ -24,7 +24,7 @@ pub fn builder() -> Builder {
 }
 
 /// Create a new HTTP/3 client with default settings
-pub async fn new<C, O>(conn: C) -> Result<(Connection<C, Bytes>, SendRequest<O, Bytes>), Error>
+pub async fn new<C, O>(conn: C) -> Result<(Connection<C, Bytes>, SendRequest<O, Bytes>), LegacyErrorStruct>
 where
     C: quic::Connection<Bytes, OpenStreams = O>,
     O: quic::OpenStreams<Bytes>,
@@ -98,7 +98,7 @@ impl Builder {
     pub async fn build<C, O, B>(
         &mut self,
         quic: C,
-    ) -> Result<(Connection<C, B>, SendRequest<O, B>), Error>
+    ) -> Result<(Connection<C, B>, SendRequest<O, B>), LegacyErrorStruct>
     where
         C: quic::Connection<B, OpenStreams = O>,
         O: quic::OpenStreams<B>,

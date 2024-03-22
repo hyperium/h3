@@ -6,11 +6,10 @@ use crate::{
     connection::{ConnectionState, SharedStateRef},
     ext::Datagram,
     quic::{self, RecvDatagramExt},
-    Error,
+    LegacyErrorStruct,
 };
 use pin_project_lite::pin_project;
 
-use super::connection::{Connection, RequestEnd};
 use std::{marker::PhantomData, sync::Arc};
 
 use std::{
@@ -34,6 +33,8 @@ use crate::{
 };
 
 use tracing::error;
+
+use super::{connection::RequestEnd, Connection};
 
 /// Manage request and response transfer for an incoming request
 ///
@@ -62,7 +63,7 @@ where
     B: Buf,
 {
     /// Receive data sent from the client
-    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
+    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, LegacyErrorStruct> {
         self.inner.recv_data().await
     }
 
@@ -70,12 +71,12 @@ where
     pub fn poll_recv_data(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<impl Buf>, Error>> {
+    ) -> Poll<Result<Option<impl Buf>, LegacyErrorStruct>> {
         self.inner.poll_recv_data(cx)
     }
 
     /// Receive an optional set of trailers for the request
-    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
+    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, LegacyErrorStruct> {
         self.inner.recv_trailers().await
     }
 
@@ -99,7 +100,7 @@ where
     ///
     /// This should be called before trying to send any data with
     /// [`RequestStream::send_data`].
-    pub async fn send_response(&mut self, resp: Response<()>) -> Result<(), Error> {
+    pub async fn send_response(&mut self, resp: Response<()>) -> Result<(), LegacyErrorStruct> {
         let (parts, _) = resp.into_parts();
         let response::Parts {
             status, headers, ..
@@ -122,7 +123,7 @@ where
         //# that exceeds the indicated size, as the peer will likely refuse to
         //# process it.
         if mem_size > max_mem_size {
-            return Err(Error::header_too_big(mem_size, max_mem_size));
+            return Err(LegacyErrorStruct::header_too_big(mem_size, max_mem_size));
         }
 
         stream::write(&mut self.inner.stream, Frame::Headers(block.freeze()))
@@ -133,7 +134,7 @@ where
     }
 
     /// Send some data on the response body.
-    pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
+    pub async fn send_data(&mut self, buf: B) -> Result<(), LegacyErrorStruct> {
         self.inner.send_data(buf).await
     }
 
@@ -149,7 +150,7 @@ where
     /// Either [`RequestStream::finish`] or
     /// [`RequestStream::send_trailers`] must be called to finalize a
     /// request.
-    pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
+    pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), LegacyErrorStruct> {
         self.inner.send_trailers(trailers).await
     }
 
@@ -158,7 +159,7 @@ where
     /// Either [`RequestStream::finish`] or
     /// [`RequestStream::send_trailers`] must be called to finalize a
     /// request.
-    pub async fn finish(&mut self) -> Result<(), Error> {
+    pub async fn finish(&mut self) -> Result<(), LegacyErrorStruct> {
         self.inner.finish().await
     }
 
@@ -231,7 +232,7 @@ where
     C: quic::Connection<B> + RecvDatagramExt,
     B: Buf,
 {
-    type Output = Result<Option<Datagram<C::Buf>>, Error>;
+    type Output = Result<Option<Datagram<C::Buf>>, LegacyErrorStruct>;
 
     fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         tracing::trace!("poll: read_datagram");

@@ -12,7 +12,7 @@ use crate::client::SendRequest;
 use crate::{client, server};
 use crate::{
     connection::ConnectionState,
-    error::{Code, Error, Kind},
+    error::{Code, LegacyErrorStruct, LegacyKind},
     proto::{
         coding::Encode as _,
         frame::{Frame, Settings},
@@ -81,7 +81,7 @@ async fn server_drop_close() {
                 .await
                 .unwrap();
             let response = request_stream.recv_response().await;
-            assert_matches!(response.unwrap_err().kind(), Kind::Closed);
+            assert_matches!(response.unwrap_err().kind(), LegacyKind::Closed);
         };
 
         let drive_fut = async {
@@ -267,7 +267,7 @@ async fn client_error_on_bidi_recv() {
         ($e:expr) => {
             assert_matches!(
                 $e.map(|_| ()).unwrap_err().kind(),
-                Kind::Application { reason: Some(reason), code: Code::H3_STREAM_CREATION_ERROR, .. }
+                LegacyKind::Application { reason: Some(reason), code: Code::H3_STREAM_CREATION_ERROR, .. }
                 if *reason == *"client received a bidirectional stream");
         }
     }
@@ -338,7 +338,7 @@ async fn two_control_streams() {
         let mut incoming = server::Connection::new(conn).await.unwrap();
         assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err().kind(),
-            Kind::Application {
+            LegacyKind::Application {
                 code: Code::H3_STREAM_CREATION_ERROR,
                 ..
             }
@@ -382,12 +382,12 @@ async fn control_close_send_error() {
         // Driver detects that the receiving side of the control stream has been closed
         assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err().kind(),
-            Kind::Application { reason: Some(reason), code: Code::H3_CLOSED_CRITICAL_STREAM, .. }
+            LegacyKind::Application { reason: Some(reason), code: Code::H3_CLOSED_CRITICAL_STREAM, .. }
             if *reason == *"control stream closed");
         // Poll it once again returns the previously stored error
         assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err().kind(),
-            Kind::Application { reason: Some(reason), code: Code::H3_CLOSED_CRITICAL_STREAM, .. }
+            LegacyKind::Application { reason: Some(reason), code: Code::H3_CLOSED_CRITICAL_STREAM, .. }
             if *reason == *"control stream closed");
     };
 
@@ -423,7 +423,7 @@ async fn missing_settings() {
         let mut incoming = server::Connection::new(conn).await.unwrap();
         assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err().kind(),
-            Kind::Application {
+            LegacyKind::Application {
                 code: Code::H3_MISSING_SETTINGS,
                 ..
             }
@@ -461,7 +461,7 @@ async fn control_stream_frame_unexpected() {
         let mut incoming = server::Connection::new(conn).await.unwrap();
         assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err().kind(),
-            Kind::Application {
+            LegacyKind::Application {
                 code: Code::H3_FRAME_UNEXPECTED,
                 ..
             }
@@ -489,7 +489,7 @@ async fn timeout_on_control_frame_read() {
         let mut incoming = server::Connection::new(conn).await.unwrap();
         assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err().kind(),
-            Kind::Timeout
+            LegacyKind::Timeout
         );
     };
 
@@ -520,7 +520,7 @@ async fn goaway_from_server_not_request_id() {
                 .await
                 .unwrap_err()
                 .kind(),
-            Kind::Application {
+            LegacyKind::Application {
                 // The sent in the GoAway frame from the client is not a Request:
                 code: Code::H3_ID_ERROR,
                 ..
@@ -574,7 +574,7 @@ async fn graceful_shutdown_server_rejects() {
         assert_matches!(first, Ok(_));
         assert_matches!(
             rejected.unwrap_err().kind(),
-            Kind::Application {
+            LegacyKind::Application {
                 code: Code::H3_REQUEST_REJECTED,
                 ..
             }
@@ -626,7 +626,7 @@ async fn graceful_shutdown_grace_interval() {
         let (too_late, driver) = tokio::join!(too_late, driver);
         assert_matches!(first, Ok(_));
         assert_matches!(in_flight, Ok(_));
-        assert_matches!(too_late.unwrap_err().kind(), Kind::Closing);
+        assert_matches!(too_late.unwrap_err().kind(), LegacyKind::Closing);
         assert_matches!(driver, Ok(_));
     };
 
@@ -724,7 +724,7 @@ async fn graceful_shutdown_client() {
     tokio::join!(server_fut, client_fut);
 }
 
-async fn request<T, O, B>(mut send_request: T) -> Result<Response<()>, Error>
+async fn request<T, O, B>(mut send_request: T) -> Result<Response<()>, LegacyErrorStruct>
 where
     T: BorrowMut<SendRequest<O, B>>,
     O: quic::OpenStreams<B>,

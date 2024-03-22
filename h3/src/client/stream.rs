@@ -4,7 +4,7 @@ use http::{HeaderMap, Response};
 
 use crate::{
     connection::{self, ConnectionState, SharedStateRef},
-    error::{Code, Error, ErrorLevel},
+    error::{Code, LegacyErrorStruct, ErrorLevel},
     proto::{frame::Frame, headers::Header},
     qpack,
     quic::{self},
@@ -82,7 +82,7 @@ where
     /// This should be called before trying to receive any data with [`recv_data()`].
     ///
     /// [`recv_data()`]: #method.recv_data
-    pub async fn recv_response(&mut self) -> Result<Response<()>, Error> {
+    pub async fn recv_response(&mut self) -> Result<Response<()>, LegacyErrorStruct> {
         let mut frame = future::poll_fn(|cx| self.inner.stream.poll_next(cx))
             .await
             .map_err(|e| self.maybe_conn_err(e))?
@@ -113,7 +113,7 @@ where
                 //# the message header it will accept on an individual HTTP message.
                 Err(qpack::DecoderError::HeaderTooLong(cancel_size)) => {
                     self.inner.stop_sending(Code::H3_REQUEST_CANCELLED);
-                    return Err(Error::header_too_big(
+                    return Err(LegacyErrorStruct::header_too_big(
                         cancel_size,
                         self.inner.max_field_section_size,
                     ));
@@ -141,12 +141,12 @@ where
 
     /// Receive some of the request body.
     // TODO what if called before recv_response ?
-    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
+    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, LegacyErrorStruct> {
         self.inner.recv_data().await
     }
 
     /// Receive an optional set of trailers for the response.
-    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
+    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, LegacyErrorStruct> {
         let res = self.inner.recv_trailers().await;
         if let Err(ref e) = res {
             if e.is_header_too_big() {
@@ -170,7 +170,7 @@ where
     B: Buf,
 {
     /// Send some data on the request body.
-    pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
+    pub async fn send_data(&mut self, buf: B) -> Result<(), LegacyErrorStruct> {
         self.inner.send_data(buf).await
     }
 
@@ -179,7 +179,7 @@ where
     /// Either [`RequestStream::finish`] or
     /// [`RequestStream::send_trailers`] must be called to finalize a
     /// request.
-    pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
+    pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), LegacyErrorStruct> {
         self.inner.send_trailers(trailers).await
     }
 
@@ -188,7 +188,7 @@ where
     /// Either [`RequestStream::finish`] or
     /// [`RequestStream::send_trailers`] must be called to finalize a
     /// request.
-    pub async fn finish(&mut self) -> Result<(), Error> {
+    pub async fn finish(&mut self) -> Result<(), LegacyErrorStruct> {
         self.inner.finish().await
     }
 

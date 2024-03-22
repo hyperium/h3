@@ -3,6 +3,8 @@
 //! This module includes traits and types meant to allow being generic over any
 //! QUIC implementation.
 
+use std::fmt::Display;
+use std::marker::PhantomData;
 use std::task::{self, Poll};
 
 use bytes::Buf;
@@ -30,6 +32,127 @@ impl<'a, E: Error + 'a> From<E> for Box<dyn Error + 'a> {
     }
 }
 
+impl Display for ConnectionErrorIncoming {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // display enum with fields
+        match self {
+            ConnectionErrorIncoming::ApplicationClose { error_code } => {
+                write!(f, "ApplicationClose: {}", error_code)
+            }
+            ConnectionErrorIncoming::Timeout => write!(f, "Timeout"),
+            ConnectionErrorIncoming::ConnectionClosed { error_code } => {
+                write!(f, "ConnectionClosed: {}", error_code)
+            }
+        }
+    }
+}
+
+impl std::error::Error for ConnectionErrorIncoming {}
+
+impl Error for ConnectionErrorIncoming {
+    fn is_timeout(&self) -> bool {
+        matches!(self, ConnectionErrorIncoming::Timeout)
+    }
+
+    fn err_code(&self) -> Option<u64> {
+        match self {
+            ConnectionErrorIncoming::ApplicationClose { error_code } => Some(*error_code),
+            _ => None,
+        }
+    }
+}
+
+impl std::error::Error for StreamErrorIncoming {}
+
+impl Display for StreamErrorIncoming {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // display enum with fields
+        match self {
+            StreamErrorIncoming::ConnectionErrorIncoming { connection_error } => {
+                write!(f, "ConnectionError: {}", connection_error)
+            }
+            StreamErrorIncoming::StreamReset { error_code } => {
+                write!(f, "StreamClosed: {}", error_code)
+            }
+            StreamErrorIncoming::NotReady => write!(f, "NotReady"),
+        }
+    }
+}
+
+impl Error for StreamErrorIncoming {
+    fn is_timeout(&self) -> bool {
+        match &self {
+            StreamErrorIncoming::ConnectionErrorIncoming {
+                connection_error: ConnectionErrorIncoming::Timeout,
+            } => true,
+            _ => false,
+        }
+    }
+
+    fn err_code(&self) -> Option<u64> {
+        match self {
+            StreamErrorIncoming::ConnectionErrorIncoming { connection_error } => {
+                connection_error.err_code()
+            }
+            StreamErrorIncoming::StreamReset { error_code } => Some(*error_code),
+            StreamErrorIncoming::NotReady => todo!("! Remove this invariant from enum"),
+        }
+    }
+}
+
+/// Error type to communicate that the quic connection was closed
+///
+/// This is used by to implement the quic abstraction traits
+#[derive(Debug)]
+pub enum ConnectionErrorIncoming {
+    /// Error from the http3 layer
+    ApplicationClose {
+        /// http3 error code
+        error_code: u64,
+    },
+    /// Quic connection timeout
+    Timeout,
+    /// Quic error
+    ConnectionClosed {
+        /// quic error code
+        error_code: u64,
+    },
+}
+
+/// Error type to communicate that the stream was closed
+///
+/// This is used by to implement the quic abstraction traits
+#[derive(Debug)]
+pub enum StreamErrorIncoming {
+    /// Stream is closed because the whole connection is closed
+    ConnectionErrorIncoming {
+        /// Connection error
+        connection_error: ConnectionErrorIncoming,
+    },
+    /// Stream was closed by the peer
+    StreamReset {
+        /// Error code sent by the peer
+        error_code: u64,
+    },
+    /// Todo! Why is this needed?.
+    ///
+    /// This invariant was in SendStreamError from h3-quinn but i dont know what happened if it was triggered
+    NotReady,
+}
+
+/// Trait representing a incoming QUIC stream.
+pub enum IncomingStreamType<BiDi, UniDi, B>
+where
+    B: Buf,
+    BiDi: SendStream<B> + RecvStream,
+    UniDi: RecvStream,
+{
+    /// A bidirectional stream
+    Bidirectional(BiDi, PhantomData<B>),
+    /// A unidirectional stream
+    Unidirectional(UniDi),
+}
+
 /// Trait representing a QUIC connection.
 pub trait Connection<B: Buf> {
     /// The type produced by `poll_accept_bidi()`
@@ -45,36 +168,31 @@ pub trait Connection<B: Buf> {
         RecvStream = Self::RecvStream,
         BidiStream = Self::BidiStream,
     >;
-    /// Error type yielded by this trait methods
-    type Error: Into<Box<dyn Error>>;
 
-    /// Accept an incoming unidirectional stream
+    /// The error type that can occur when accepting a new stream
     ///
-    /// Returning `None` implies the connection is closing or closed.
-    fn poll_accept_recv(
+    /// TODO: this should be a trait
+    ///
+
+    /// Poll the connection for incoming streams.
+    fn poll_incoming(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::RecvStream>, Self::Error>>;
-
-    /// Accept an incoming bidirectional stream
-    ///
-    /// Returning `None` implies the connection is closing or closed.
-    fn poll_accept_bidi(
-        &mut self,
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::BidiStream>, Self::Error>>;
+    ) -> Poll<
+        Result<IncomingStreamType<Self::BidiStream, Self::RecvStream, B>, ConnectionErrorIncoming>,
+    >;
 
     /// Poll the connection to create a new bidirectional stream.
     fn poll_open_bidi(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Self::BidiStream, Self::Error>>;
+    ) -> Poll<Result<Self::BidiStream, ConnectionErrorIncoming>>;
 
     /// Poll the connection to create a new unidirectional stream.
     fn poll_open_send(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Self::SendStream, Self::Error>>;
+    ) -> Poll<Result<Self::SendStream, ConnectionErrorIncoming>>;
 
     /// Get an object to open outgoing streams.
     fn opener(&self) -> Self::OpenStreams;
@@ -119,19 +237,18 @@ pub trait OpenStreams<B: Buf> {
     /// The type of the receiving part of `BidiStream`
     type RecvStream: RecvStream;
     /// Error type yielded by these trait methods
-    type Error: Into<Box<dyn Error>>;
 
     /// Poll the connection to create a new bidirectional stream.
     fn poll_open_bidi(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Self::BidiStream, Self::Error>>;
+    ) -> Poll<Result<Self::BidiStream, ConnectionErrorIncoming>>;
 
     /// Poll the connection to create a new unidirectional stream.
     fn poll_open_send(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Self::SendStream, Self::Error>>;
+    ) -> Poll<Result<Self::SendStream, ConnectionErrorIncoming>>;
 
     /// Close the connection immediately
     fn close(&mut self, code: crate::error::Code, reason: &[u8]);
@@ -139,17 +256,14 @@ pub trait OpenStreams<B: Buf> {
 
 /// A trait describing the "send" actions of a QUIC stream.
 pub trait SendStream<B: Buf> {
-    /// The error type returned by fallible send methods.
-    type Error: Into<Box<dyn Error>>;
-
     /// Polls if the stream can send more data.
-    fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>>;
+    fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), StreamErrorIncoming>>;
 
     /// Send more data on the stream.
-    fn send_data<T: Into<WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error>;
+    fn send_data<T: Into<WriteBuf<B>>>(&mut self, data: T) -> Result<(), StreamErrorIncoming>;
 
     /// Poll to finish the sending side of the stream.
-    fn poll_finish(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>>;
+    fn poll_finish(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), StreamErrorIncoming>>;
 
     /// Send a QUIC reset code.
     fn reset(&mut self, reset_code: u64);
@@ -169,15 +283,13 @@ pub trait SendStreamUnframed<B: Buf>: SendStream<B> {
         &mut self,
         cx: &mut task::Context<'_>,
         buf: &mut D,
-    ) -> Poll<Result<usize, Self::Error>>;
+    ) -> Poll<Result<usize, StreamErrorIncoming>>;
 }
 
 /// A trait describing the "receive" actions of a QUIC stream.
 pub trait RecvStream {
     /// The type of `Buf` for data received on this stream.
     type Buf: Buf;
-    /// The error type that can occur when receiving data.
-    type Error: Into<Box<dyn Error>>;
 
     /// Poll the stream for more data.
     ///
@@ -186,7 +298,7 @@ pub trait RecvStream {
     fn poll_data(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::Buf>, Self::Error>>;
+    ) -> Poll<Result<Option<Self::Buf>, StreamErrorIncoming>>;
 
     /// Send a `STOP_SENDING` QUIC code.
     fn stop_sending(&mut self, error_code: u64);
