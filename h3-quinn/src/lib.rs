@@ -584,7 +584,6 @@ where
                         (stream, ret, data)
                     });
                 }
-
             }
             let (stream, res, mut data2) = ready!(self.write_fut.poll(cx));
             self.stream = Some(stream);
