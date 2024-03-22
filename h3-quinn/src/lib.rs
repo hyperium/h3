@@ -590,11 +590,11 @@ where
             match res {
                 Ok(cnt) => data2.advance(cnt),
                 Err(err) => {
+                    self.writing = Some(data2);
                     return Poll::Ready(Err(SendStreamError::Write(err)));
                 }
             };
             if !data2.has_remaining() {
-                self.writing = Some(data2);
                 break;
             } else {
                 self.writing = Some(data2);
@@ -622,7 +622,8 @@ where
     }
 
     fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), Self::Error> {
-        if self.writing.is_some() {
+        // writing is moved into the write_fut, so stream should be present
+        if self.writing.is_some() || self.stream.is_none() {
             return Err(Self::Error::NotReady);
         }
         self.writing = Some(data.into());
