@@ -150,7 +150,7 @@ impl From<quinn::SendDatagramError> for SendDatagramError {
 
 impl<B> quic::Connection<B> for Connection
 where
-    B: Buf + Send,
+    B: Buf + Send + 'static,
 {
     type SendStream = SendStream<B>;
     type RecvStream = RecvStream;
@@ -277,7 +277,7 @@ pub struct OpenStreams {
 
 impl<B> quic::OpenStreams<B> for OpenStreams
 where
-    B: Buf + Send,
+    B: Buf + Send + 'static,
 {
     type RecvStream = RecvStream;
     type SendStream = SendStream<B>;
@@ -348,7 +348,7 @@ where
 
 impl<B> quic::BidiStream<B> for BidiStream<B>
 where
-    B: Buf + Send,
+    B: Buf + Send + 'static,
 {
     type SendStream = SendStream<B>;
     type RecvStream = RecvStream;
@@ -380,7 +380,7 @@ impl<B: Buf> quic::RecvStream for BidiStream<B> {
 
 impl<B> quic::SendStream<B> for BidiStream<B>
 where
-    B: Buf + Send,
+    B: Buf + Send + 'static,
 {
     type Error = SendStreamError;
 
@@ -406,7 +406,7 @@ where
 }
 impl<B> quic::SendStreamUnframed<B> for BidiStream<B>
 where
-    B: Buf + Send,
+    B: Buf + Send + 'static,
 {
     fn poll_send<D: Buf>(
         &mut self,
@@ -546,8 +546,14 @@ pub struct SendStream<B: Buf> {
     write_fut: WriteFuture<B>,
 }
 
-type WriteFuture<B> =
-    ReusableBoxFuture<'static, (quinn::SendStream, Result<usize, quinn::WriteError>, WriteBuf<B>)>;
+type WriteFuture<B> = ReusableBoxFuture<
+    'static,
+    (
+        quinn::SendStream,
+        Result<usize, quinn::WriteError>,
+        WriteBuf<B>,
+    ),
+>;
 
 impl<B> SendStream<B>
 where
@@ -564,31 +570,36 @@ where
 
 impl<B> quic::SendStream<B> for SendStream<B>
 where
-    B: Buf + Send,
+    B: Buf + Send + 'static,
 {
     type Error = SendStreamError;
 
     fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        if let Some(mut data) = self.writing.take() {
-            while data.has_remaining() {
+        loop {
+            if let Some(data) = self.writing.take() {
                 if let Some(mut stream) = self.stream.take() {
-                    let chunk = data.chunk();//.to_owned(); // FIXME - avoid copy
                     self.write_fut.set(async move {
+                        let chunk = data.chunk();
                         let ret = stream.write(&chunk).await;
                         (stream, ret, data)
                     });
                 }
 
-                let (stream, res, mut data2) = ready!(self.write_fut.poll(cx));
-                self.stream = Some(stream);
-                let x = match res {
-                    Ok(cnt) => data2.advance(cnt),
-                    Err(err) => {
-                        return Poll::Ready(Err(SendStreamError::Write(err)));
-                    }
-                };
+            }
+            let (stream, res, mut data2) = ready!(self.write_fut.poll(cx));
+            self.stream = Some(stream);
+            match res {
+                Ok(cnt) => data2.advance(cnt),
+                Err(err) => {
+                    return Poll::Ready(Err(SendStreamError::Write(err)));
+                }
+            };
+            if !data2.has_remaining() {
                 self.writing = Some(data2);
-                x
+                break;
+            } else {
+                self.writing = Some(data2);
+                continue;
             }
         }
         self.writing = None;
@@ -632,7 +643,7 @@ where
 
 impl<B> quic::SendStreamUnframed<B> for SendStream<B>
 where
-    B: Buf + Send,
+    B: Buf + Send + 'static,
 {
     fn poll_send<D: Buf>(
         &mut self,
