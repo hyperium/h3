@@ -29,12 +29,10 @@ use crate::{
 pub(crate) async fn write<S, D, B>(stream: &mut S, data: D) -> Result<(), Error>
 where
     S: SendStream<B>,
-    D: Into<WriteBuf<B>>,
+    D: Into<WriteBuf<B>> + Send,
     B: Buf,
 {
-    stream.send_data(data)?;
-    future::poll_fn(|cx| stream.poll_ready(cx)).await?;
-
+    stream.send_data(data).await?;
     Ok(())
 }
 
@@ -512,12 +510,11 @@ where
         self.stream.send_id()
     }
 
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.stream.poll_ready(cx)
-    }
-
-    fn send_data<T: Into<WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error> {
-        self.stream.send_data(data)
+    fn send_data<T: Into<WriteBuf<B>> + Send>(
+        &mut self,
+        data: T,
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>> {
+        async { self.stream.send_data(data).await }
     }
 }
 

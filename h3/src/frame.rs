@@ -154,12 +154,8 @@ where
 {
     type Error = <T as SendStream<B>>::Error;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.stream.poll_ready(cx)
-    }
-
-    fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), Self::Error> {
-        self.stream.send_data(data)
+    async fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), Self::Error> {
+        self.stream.send_data(data).await
     }
 
     fn poll_finish(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {

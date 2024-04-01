@@ -129,12 +129,8 @@ where
         self.stream.send_id()
     }
 
-    fn send_data<T: Into<h3::stream::WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error> {
-        self.stream.send_data(data)
-    }
-
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.stream.poll_ready(cx)
+    async fn send_data<T: Into<h3::stream::WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error> {
+        self.stream.send_data(data).await
     }
 }
 
@@ -234,12 +230,11 @@ where
         self.stream.send_id()
     }
 
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.stream.poll_ready(cx)
-    }
-
-    fn send_data<T: Into<h3::stream::WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error> {
-        self.stream.send_data(data)
+    async fn send_data<T: Into<h3::stream::WriteBuf<B>>>(
+        &mut self,
+        data: T,
+    ) -> Result<(), Self::Error> {
+        self.stream.send_data(data).await
     }
 }
 

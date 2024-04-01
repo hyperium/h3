@@ -6,6 +6,7 @@
 use std::task::{self, Poll};
 
 use bytes::Buf;
+use std::future::Future;
 
 use crate::ext::Datagram;
 pub use crate::proto::stream::{InvalidStreamId, StreamId};
@@ -138,15 +139,21 @@ pub trait OpenStreams<B: Buf> {
 }
 
 /// A trait describing the "send" actions of a QUIC stream.
-pub trait SendStream<B: Buf> {
+pub trait SendStream<B> {
     /// The error type returned by fallible send methods.
     type Error: Into<Box<dyn Error>>;
 
     /// Polls if the stream can send more data.
-    fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>>;
+    //fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>>;
 
-    /// Send more data on the stream.
-    fn send_data<T: Into<WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error>;
+    /// Prepares more data on the stream.
+    //fn set_data<T: Into<WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error>;
+
+    /// Sends data on the stream.
+    fn send_data<T: Into<WriteBuf<B>> + Send>(
+        &mut self,
+        data: T,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     /// Poll to finish the sending side of the stream.
     fn poll_finish(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>>;
