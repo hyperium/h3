@@ -167,7 +167,7 @@ where
 impl<S, B> RequestStream<S, B>
 where
     S: quic::SendStream<B>,
-    B: Buf,
+    B: Buf + Send,
 {
     /// Send some data on the request body.
     pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
@@ -204,7 +204,7 @@ where
 impl<S, B> RequestStream<S, B>
 where
     S: quic::BidiStream<B>,
-    B: Buf,
+    B: Buf + Send,
 {
     /// Split this stream into two halves that can be driven independently.
     pub fn split(

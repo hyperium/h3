@@ -563,21 +563,16 @@ where
 {
     type Error = SendStreamError;
 
-    fn send_data<T: Into<WriteBuf<B>> + Send>(
-        &mut self,
-        data: T,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        async {
-            let mut data = data.into();
-            while data.has_remaining() {
-                let chunk = data.chunk();
-                match self.stream.write(&chunk).await {
-                    Ok(cnt) => data.advance(cnt),
-                    Err(err) => return Err(SendStreamError::Write(err)),
-                };
-            }
-            Ok(())
+    async fn send_data<T: Into<WriteBuf<B>> + Send>(&mut self, data: T) -> Result<(), Self::Error> {
+        let mut data = data.into();
+        while data.has_remaining() {
+            let chunk = data.chunk();
+            match self.stream.write(&chunk).await {
+                Ok(cnt) => data.advance(cnt),
+                Err(err) => return Err(SendStreamError::Write(err)),
+            };
         }
+        Ok(())
     }
 
     fn poll_finish(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {

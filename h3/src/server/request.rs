@@ -14,7 +14,7 @@ pub struct ResolveRequest<C: quic::Connection<B>, B: Buf> {
     max_field_section_size: u64,
 }
 
-impl<B: Buf, C: quic::Connection<B>> ResolveRequest<C, B> {
+impl<B: Buf + Send, C: quic::Connection<B>> ResolveRequest<C, B> {
     pub fn new(
         request_stream: RequestStream<C::BidiStream, B>,
         decoded: Result<qpack::Decoded, u64>,

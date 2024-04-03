@@ -99,7 +99,7 @@ impl<S, B> SendStream<S, B> {
 impl<S, B> quic::SendStreamUnframed<B> for SendStream<S, B>
 where
     S: quic::SendStreamUnframed<B>,
-    B: Buf,
+    B: Buf + Send,
 {
     fn poll_send<D: Buf>(
         &mut self,
@@ -113,7 +113,7 @@ where
 impl<S, B> quic::SendStream<B> for SendStream<S, B>
 where
     S: quic::SendStream<B>,
-    B: Buf,
+    B: Buf + Send,
 {
     type Error = S::Error;
 
@@ -129,7 +129,7 @@ where
         self.stream.send_id()
     }
 
-    async fn send_data<T: Into<h3::stream::WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error> {
+    async fn send_data<T: Into<h3::stream::WriteBuf<B>> + Send>(&mut self, data: T) -> Result<(), Self::Error> {
         self.stream.send_data(data).await
     }
 }
@@ -214,7 +214,7 @@ impl<S, B> BidiStream<S, B> {
 impl<S, B> quic::SendStream<B> for BidiStream<S, B>
 where
     S: quic::SendStream<B>,
-    B: Buf,
+    B: Buf + Send,
 {
     type Error = S::Error;
 
@@ -230,7 +230,7 @@ where
         self.stream.send_id()
     }
 
-    async fn send_data<T: Into<h3::stream::WriteBuf<B>>>(
+    async fn send_data<T: Into<h3::stream::WriteBuf<B>> + Send>(
         &mut self,
         data: T,
     ) -> Result<(), Self::Error> {
@@ -241,7 +241,7 @@ where
 impl<S, B> quic::SendStreamUnframed<B> for BidiStream<S, B>
 where
     S: quic::SendStreamUnframed<B>,
-    B: Buf,
+    B: Buf + Send,
 {
     fn poll_send<D: Buf>(
         &mut self,
@@ -276,7 +276,7 @@ impl<S: quic::RecvStream, B> quic::RecvStream for BidiStream<S, B> {
 impl<S, B> quic::BidiStream<B> for BidiStream<S, B>
 where
     S: quic::BidiStream<B>,
-    B: Buf,
+    B: Buf + Send,
 {
     type SendStream = SendStream<S::SendStream, B>;
 

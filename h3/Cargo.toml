@@ -28,8 +28,10 @@ futures-util = { version = "0.3", default-features = false, features = ["io"] }
 http = "1"
 tokio = { version = "1", features = ["sync"] }
 pin-project-lite = { version = "0.2", default_features = false }
+pin-project = "1.1.5"
 tracing = "0.1.40"
 fastrand = "2.0.1"
+trait-variant = "0.1.2"
 
 [dev-dependencies]
 assert_matches = "1.5.0"

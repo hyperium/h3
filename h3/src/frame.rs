@@ -4,6 +4,7 @@ use bytes::Buf;
 
 use tracing::trace;
 
+use crate::quic::SendStream;
 use crate::stream::{BufRecvStream, WriteBuf};
 use crate::{
     buf::BufList,
@@ -12,7 +13,7 @@ use crate::{
         frame::{self, Frame, PayloadLen},
         stream::StreamId,
     },
-    quic::{BidiStream, RecvStream, SendStream},
+    quic::{BidiStream, RecvStream},
 };
 
 /// Decodes Frames from the underlying QUIC stream
@@ -149,12 +150,12 @@ where
 
 impl<T, B> SendStream<B> for FrameStream<T, B>
 where
-    T: SendStream<B>,
-    B: Buf,
+    T: SendStream<B> + Send,
+    B: Buf + Send,
 {
     type Error = <T as SendStream<B>>::Error;
 
-    async fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), Self::Error> {
+    async fn send_data<D: Into<WriteBuf<B>> + Send>(&mut self, data: D) -> Result<(), Self::Error> {
         self.stream.send_data(data).await
     }
 
@@ -174,7 +175,7 @@ where
 impl<S, B> FrameStream<S, B>
 where
     S: BidiStream<B>,
-    B: Buf,
+    B: Buf + Send,
 {
     pub(crate) fn split(self) -> (FrameStream<S::SendStream, B>, FrameStream<S::RecvStream, B>) {
         let (send, recv) = self.stream.split();

@@ -140,7 +140,7 @@ where
 impl<B, C> ConnectionInner<C, B>
 where
     C: quic::Connection<B>,
-    B: Buf,
+    B: Buf + Send,
 {
     pub async fn send_settings(&mut self) -> Result<(), Error> {
         #[cfg(test)]
@@ -753,7 +753,7 @@ where
 impl<S, B> RequestStream<S, B>
 where
     S: quic::SendStream<B>,
-    B: Buf,
+    B: Buf + Send,
 {
     /// Send some data on the response body.
     pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
@@ -819,7 +819,7 @@ where
 impl<S, B> RequestStream<S, B>
 where
     S: quic::BidiStream<B>,
-    B: Buf,
+    B: Buf + Send,
 {
     pub(crate) fn split(
         self,

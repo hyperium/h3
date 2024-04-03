@@ -493,8 +493,8 @@ impl<S: RecvStream, B> RecvStream for BufRecvStream<S, B> {
 
 impl<S, B> SendStream<B> for BufRecvStream<S, B>
 where
-    B: Buf,
-    S: SendStream<B>,
+    B: Buf + Send,
+    S: SendStream<B> + Send,
 {
     type Error = S::Error;
 
@@ -510,18 +510,15 @@ where
         self.stream.send_id()
     }
 
-    fn send_data<T: Into<WriteBuf<B>> + Send>(
-        &mut self,
-        data: T,
-    ) -> impl std::future::Future<Output = Result<(), Self::Error>> {
-        async { self.stream.send_data(data).await }
+    async fn send_data<T: Into<WriteBuf<B>> + Send>(&mut self, data: T) -> Result<(), Self::Error> {
+        self.stream.send_data(data).await
     }
 }
 
 impl<S, B> SendStreamUnframed<B> for BufRecvStream<S, B>
 where
-    B: Buf,
-    S: SendStreamUnframed<B>,
+    B: Buf + Send,
+    S: SendStreamUnframed<B> + Send,
 {
     #[inline]
     fn poll_send<D: Buf>(
@@ -535,8 +532,8 @@ where
 
 impl<S, B> BidiStream<B> for BufRecvStream<S, B>
 where
-    B: Buf,
-    S: BidiStream<B>,
+    B: Buf + Send,
+    S: BidiStream<B> + Send,
 {
     type SendStream = BufRecvStream<S::SendStream, B>;
 
@@ -635,7 +632,7 @@ where
 
 impl<S, B> futures_util::io::AsyncWrite for BufRecvStream<S, B>
 where
-    B: Buf,
+    B: Buf + Send,
     S: SendStreamUnframed<B>,
     S::Error: Into<std::io::Error>,
 {
@@ -660,7 +657,7 @@ where
 
 impl<S, B> tokio::io::AsyncWrite for BufRecvStream<S, B>
 where
-    B: Buf,
+    B: Buf + Send,
     S: SendStreamUnframed<B>,
     S::Error: Into<std::io::Error>,
 {

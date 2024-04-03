@@ -9,6 +9,7 @@ use futures_util::future;
 use http::{Request, Response, StatusCode};
 
 use crate::client::SendRequest;
+use crate::quic::SendStream;
 use crate::{client, server};
 use crate::{
     connection::ConnectionState,
@@ -20,7 +21,7 @@ use crate::{
         stream::StreamType,
         varint::VarInt,
     },
-    quic::{self, SendStream},
+    quic::{self, SendStreamLocal},
 };
 
 use super::h3_quinn;
@@ -728,7 +729,7 @@ async fn request<T, O, B>(mut send_request: T) -> Result<Response<()>, Error>
 where
     T: BorrowMut<SendRequest<O, B>>,
     O: quic::OpenStreams<B>,
-    B: Buf,
+    B: Buf + Send,
 {
     let mut request_stream = send_request
         .borrow_mut()
@@ -740,7 +741,7 @@ where
 async fn response<S, B>(mut stream: server::RequestStream<S, B>)
 where
     S: quic::RecvStream + SendStream<B>,
-    B: Buf,
+    B: Buf + Send,
 {
     stream
         .send_response(

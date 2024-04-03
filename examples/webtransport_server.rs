@@ -278,7 +278,7 @@ where
         + h3::quic::Connection<Bytes>
         + RecvDatagramExt<Buf = Bytes>
         + SendDatagramExt<Bytes>,
-    <C::SendStream as h3::quic::SendStream<Bytes>>::Error:
+    <C::SendStream as h3::quic::SendStreamLocal<Bytes>>::Error:
         'static + std::error::Error + Send + Sync + Into<std::io::Error>,
     <C::RecvStream as h3::quic::RecvStream>::Error:
         'static + std::error::Error + Send + Sync + Into<std::io::Error>,

@@ -139,7 +139,8 @@ pub trait OpenStreams<B: Buf> {
 }
 
 /// A trait describing the "send" actions of a QUIC stream.
-pub trait SendStream<B> {
+#[trait_variant::make(SendStream: Send)]
+pub trait SendStreamLocal<B> {
     /// The error type returned by fallible send methods.
     type Error: Into<Box<dyn Error>>;
 
@@ -150,10 +151,10 @@ pub trait SendStream<B> {
     //fn set_data<T: Into<WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error>;
 
     /// Sends data on the stream.
-    fn send_data<T: Into<WriteBuf<B>> + Send>(
+    async fn send_data<T: Into<WriteBuf<B>> + Send>(
         &mut self,
         data: T,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    ) -> Result<(), Self::Error>;
 
     /// Poll to finish the sending side of the stream.
     fn poll_finish(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>>;

@@ -39,7 +39,7 @@ use crate::stream::{BidiStream, RecvStream, SendStream};
 pub struct WebTransportSession<C, B>
 where
     C: quic::Connection<B>,
-    B: Buf,
+    B: Buf + Send,
 {
     // See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-2-3
     session_id: SessionId,
@@ -52,7 +52,7 @@ where
 impl<C, B> WebTransportSession<C, B>
 where
     C: quic::Connection<B>,
-    B: Buf,
+    B: Buf + Send,
 {
     /// Accepts a *CONNECT* request for establishing a WebTransport session.
     ///
@@ -273,7 +273,7 @@ pin_project! {
 impl<'a, B, C> Future for OpenBi<'a, C, B>
 where
     C: quic::Connection<B>,
-    B: Buf,
+    B: Buf + Send,
     C::BidiStream: SendStreamUnframed<B>,
 {
     type Output = Result<BidiStream<C::BidiStream, B>, Error>;
@@ -317,7 +317,7 @@ pin_project! {
 impl<'a, C, B> Future for OpenUni<'a, C, B>
 where
     C: quic::Connection<B>,
-    B: Buf,
+    B: Buf + Send,
     C::SendStream: SendStreamUnframed<B>,
 {
     type Output = Result<SendStream<C::SendStream, B>, Error>;
@@ -364,7 +364,7 @@ pub enum AcceptedBi<C: quic::Connection<B>, B: Buf> {
 pub struct ReadDatagram<'a, C, B>
 where
     C: quic::Connection<B>,
-    B: Buf,
+    B: Buf + Send,
 {
     conn: &'a Mutex<Connection<C, B>>,
     _marker: PhantomData<B>,
@@ -373,7 +373,7 @@ where
 impl<'a, C, B> Future for ReadDatagram<'a, C, B>
 where
     C: quic::Connection<B> + RecvDatagramExt,
-    B: Buf,
+    B: Buf + Send,
 {
     type Output = Result<Option<(SessionId, C::Buf)>, Error>;
 
@@ -396,7 +396,7 @@ where
 pub struct AcceptUni<'a, C, B>
 where
     C: quic::Connection<B>,
-    B: Buf,
+    B: Buf + Send,
 {
     conn: &'a Mutex<Connection<C, B>>,
 }
@@ -404,7 +404,7 @@ where
 impl<'a, C, B> Future for AcceptUni<'a, C, B>
 where
     C: quic::Connection<B>,
-    B: Buf,
+    B: Buf + Send,
 {
     type Output = Result<Option<(SessionId, RecvStream<C::RecvStream, B>)>, Error>;
 
