@@ -166,7 +166,7 @@ where
 
 impl<S, B> RequestStream<S, B>
 where
-    S: quic::SendStream<B>,
+    S: quic::SendStreamLocal<B>,
     B: Buf + Send,
 {
     /// Send some data on the request body.

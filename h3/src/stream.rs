@@ -19,7 +19,7 @@ use crate::{
         stream::StreamType,
         varint::VarInt,
     },
-    quic::{self, BidiStream, RecvStream, SendStream, SendStreamUnframed},
+    quic::{self, BidiStream, RecvStream, SendStream, SendStreamLocal, SendStreamUnframed},
     webtransport::SessionId,
     Error,
 };
@@ -28,7 +28,7 @@ use crate::{
 /// Transmits data by encoding in wire format.
 pub(crate) async fn write<S, D, B>(stream: &mut S, data: D) -> Result<(), Error>
 where
-    S: SendStream<B>,
+    S: SendStreamLocal<B>,
     D: Into<WriteBuf<B>> + Send,
     B: Buf,
 {
@@ -493,8 +493,8 @@ impl<S: RecvStream, B> RecvStream for BufRecvStream<S, B> {
 
 impl<S, B> BufRecvStream<S, B>
 where
-    B: Buf + Send,
-    S: SendStream<B> + Send,
+    B: Buf,
+    S: SendStreamLocal<B>,
 {
     pub fn poll_finish(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), S::Error>> {
         self.stream.poll_finish(cx)
@@ -518,8 +518,8 @@ where
 
 impl<S, B> BufRecvStream<S, B>
 where
-    B: Buf + Send,
-    S: SendStreamUnframed<B> + Send,
+    B: Buf,
+    S: SendStreamUnframed<B>,
 {
     #[inline]
     pub fn poll_send<D: Buf>(
@@ -534,7 +534,7 @@ where
 impl<S, B> BufRecvStream<S, B>
 where
     B: Buf + Send,
-    S: BidiStream<B> + Send,
+    S: BidiStream<B>,
 {
     pub fn split(
         self,

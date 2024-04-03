@@ -31,7 +31,7 @@ use crate::{
         push::PushId,
     },
     qpack,
-    quic::{self, RecvDatagramExt, SendDatagramExt, SendStream as _},
+    quic::{self, RecvDatagramExt, SendDatagramExt, SendStreamLocal as _},
     stream::BufRecvStream,
 };
 

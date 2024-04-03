@@ -740,7 +740,7 @@ where
 
 async fn response<S, B>(mut stream: server::RequestStream<S, B>)
 where
-    S: quic::RecvStream + SendStream<B>,
+    S: quic::RecvStream + SendStreamLocal<B>,
     B: Buf + Send,
 {
     stream

@@ -21,7 +21,7 @@ use crate::{
         varint::VarInt,
     },
     qpack,
-    quic::{self, SendStream as _},
+    quic::{self, SendStreamLocal as _},
     stream::{self, AcceptRecvStream, AcceptedRecvStream, BufRecvStream, UniStreamHeader},
     webtransport::SessionId,
 };
@@ -752,7 +752,7 @@ where
 
 impl<S, B> RequestStream<S, B>
 where
-    S: quic::SendStream<B>,
+    S: quic::SendStreamLocal<B>,
     B: Buf + Send,
 {
     /// Send some data on the response body.

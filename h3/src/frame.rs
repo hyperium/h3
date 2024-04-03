@@ -4,7 +4,7 @@ use bytes::Buf;
 
 use tracing::trace;
 
-use crate::quic::SendStream;
+use crate::quic::{SendStream, SendStreamLocal};
 use crate::stream::{BufRecvStream, WriteBuf};
 use crate::{
     buf::BufList,
@@ -150,10 +150,13 @@ where
 
 impl<T, B> FrameStream<T, B>
 where
-    T: SendStream<B> + Send,
-    B: Buf + Send,
+    T: SendStreamLocal<B>,
+    B: Buf,
 {
-    pub async fn send_data<D: Into<WriteBuf<B>> + Send>(&mut self, data: D) -> Result<(), T::Error> {
+    pub async fn send_data<D: Into<WriteBuf<B>> + Send>(
+        &mut self,
+        data: D,
+    ) -> Result<(), T::Error> {
         self.stream.send_data(data).await
     }
 

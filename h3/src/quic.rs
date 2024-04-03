@@ -34,9 +34,9 @@ impl<'a, E: Error + 'a> From<E> for Box<dyn Error + 'a> {
 /// Trait representing a QUIC connection.
 pub trait Connection<B: Buf> {
     /// The type produced by `poll_accept_bidi()`
-    type BidiStream: SendStream<B> + RecvStream;
+    type BidiStream: SendStreamLocal<B> + RecvStream;
     /// The type of the sending part of `BidiStream`
-    type SendStream: SendStream<B>;
+    type SendStream: SendStreamLocal<B>;
     /// The type produced by `poll_accept_recv()`
     type RecvStream: RecvStream;
     /// A producer of outgoing Unidirectional and Bidirectional streams.
@@ -114,9 +114,9 @@ pub trait RecvDatagramExt {
 /// Trait for opening outgoing streams
 pub trait OpenStreams<B: Buf> {
     /// The type produced by `poll_open_bidi()`
-    type BidiStream: SendStream<B> + RecvStream;
+    type BidiStream: SendStreamLocal<B> + RecvStream;
     /// The type produced by `poll_open_send()`
-    type SendStream: SendStream<B>;
+    type SendStream: SendStreamLocal<B>;
     /// The type of the receiving part of `BidiStream`
     type RecvStream: RecvStream;
     /// Error type yielded by these trait methods
@@ -151,10 +151,7 @@ pub trait SendStreamLocal<B> {
     //fn set_data<T: Into<WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error>;
 
     /// Sends data on the stream.
-    async fn send_data<T: Into<WriteBuf<B>> + Send>(
-        &mut self,
-        data: T,
-    ) -> Result<(), Self::Error>;
+    async fn send_data<T: Into<WriteBuf<B>> + Send>(&mut self, data: T) -> Result<(), Self::Error>;
 
     /// Poll to finish the sending side of the stream.
     fn poll_finish(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>>;
@@ -167,7 +164,7 @@ pub trait SendStreamLocal<B> {
 }
 
 /// Allows sending unframed pure bytes to a stream. Similar to [`AsyncWrite`](https://docs.rs/tokio/latest/tokio/io/trait.AsyncWrite.html)
-pub trait SendStreamUnframed<B: Buf>: SendStream<B> {
+pub trait SendStreamUnframed<B: Buf>: SendStreamLocal<B> {
     /// Attempts write data into the stream.
     ///
     /// Returns the number of bytes written.
@@ -204,9 +201,9 @@ pub trait RecvStream {
 }
 
 /// Optional trait to allow "splitting" a bidirectional stream into two sides.
-pub trait BidiStream<B: Buf>: SendStream<B> + RecvStream {
+pub trait BidiStream<B: Buf>: SendStreamLocal<B> + RecvStream {
     /// The type for the send half.
-    type SendStream: SendStream<B>;
+    type SendStream: SendStreamLocal<B>;
     /// The type for the receive half.
     type RecvStream: RecvStream;
 
