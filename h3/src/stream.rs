@@ -491,55 +491,57 @@ impl<S: RecvStream, B> RecvStream for BufRecvStream<S, B> {
     }
 }
 
-impl<S, B> SendStream<B> for BufRecvStream<S, B>
+impl<S, B> BufRecvStream<S, B>
 where
     B: Buf + Send,
     S: SendStream<B> + Send,
 {
-    type Error = S::Error;
-
-    fn poll_finish(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+    pub fn poll_finish(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), S::Error>> {
         self.stream.poll_finish(cx)
     }
 
-    fn reset(&mut self, reset_code: u64) {
+    pub fn reset(&mut self, reset_code: u64) {
         self.stream.reset(reset_code)
     }
 
-    fn send_id(&self) -> quic::StreamId {
+    pub fn send_id(&self) -> quic::StreamId {
         self.stream.send_id()
     }
 
-    async fn send_data<T: Into<WriteBuf<B>> + Send>(&mut self, data: T) -> Result<(), Self::Error> {
+    pub async fn send_data<T: Into<WriteBuf<B>> + Send>(
+        &mut self,
+        data: T,
+    ) -> Result<(), S::Error> {
         self.stream.send_data(data).await
     }
 }
 
-impl<S, B> SendStreamUnframed<B> for BufRecvStream<S, B>
+impl<S, B> BufRecvStream<S, B>
 where
     B: Buf + Send,
     S: SendStreamUnframed<B> + Send,
 {
     #[inline]
-    fn poll_send<D: Buf>(
+    pub fn poll_send<D: Buf>(
         &mut self,
         cx: &mut std::task::Context<'_>,
         buf: &mut D,
-    ) -> Poll<Result<usize, Self::Error>> {
+    ) -> Poll<Result<usize, S::Error>> {
         self.stream.poll_send(cx, buf)
     }
 }
 
-impl<S, B> BidiStream<B> for BufRecvStream<S, B>
+impl<S, B> BufRecvStream<S, B>
 where
     B: Buf + Send,
     S: BidiStream<B> + Send,
 {
-    type SendStream = BufRecvStream<S::SendStream, B>;
-
-    type RecvStream = BufRecvStream<S::RecvStream, B>;
-
-    fn split(self) -> (Self::SendStream, Self::RecvStream) {
+    pub fn split(
+        self,
+    ) -> (
+        BufRecvStream<S::SendStream, B>,
+        BufRecvStream<S::RecvStream, B>,
+    ) {
         let (send, recv) = self.stream.split();
         (
             BufRecvStream {

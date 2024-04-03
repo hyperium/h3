@@ -124,7 +124,9 @@ where
             return Err(Error::header_too_big(mem_size, max_mem_size));
         }
 
-        stream::write(&mut self.inner.stream, Frame::Headers(block.freeze()))
+        self.inner
+            .stream
+            .send_data(Frame::Headers(block.freeze()))
             .await
             .map_err(|e| self.maybe_conn_err(e))?;
 

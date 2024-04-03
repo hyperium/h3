@@ -759,7 +759,8 @@ where
     pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
         let frame = Frame::Data(buf);
 
-        stream::write(&mut self.stream, frame)
+        self.stream
+            .send_data(frame)
             .await
             .map_err(|e| self.maybe_conn_err(e))?;
         Ok(())
@@ -788,7 +789,8 @@ where
         if mem_size > max_mem_size {
             return Err(Error::header_too_big(mem_size, max_mem_size));
         }
-        stream::write(&mut self.stream, Frame::Headers(block.freeze()))
+        self.stream
+            .send_data(Frame::Headers(block.freeze()))
             .await
             .map_err(|e| self.maybe_conn_err(e))?;
 
@@ -804,7 +806,8 @@ where
     pub async fn finish(&mut self) -> Result<(), Error> {
         if self.send_grease_frame {
             // send a grease frame once per Connection
-            stream::write(&mut self.stream, Frame::Grease)
+            self.stream
+                .send_data(Frame::Grease)
                 .await
                 .map_err(|e| self.maybe_conn_err(e))?;
             self.send_grease_frame = false;

@@ -148,26 +148,24 @@ where
     }
 }
 
-impl<T, B> SendStream<B> for FrameStream<T, B>
+impl<T, B> FrameStream<T, B>
 where
     T: SendStream<B> + Send,
     B: Buf + Send,
 {
-    type Error = <T as SendStream<B>>::Error;
-
-    async fn send_data<D: Into<WriteBuf<B>> + Send>(&mut self, data: D) -> Result<(), Self::Error> {
+    pub async fn send_data<D: Into<WriteBuf<B>> + Send>(&mut self, data: D) -> Result<(), T::Error> {
         self.stream.send_data(data).await
     }
 
-    fn poll_finish(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    pub fn poll_finish(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), T::Error>> {
         self.stream.poll_finish(cx)
     }
 
-    fn reset(&mut self, reset_code: u64) {
+    pub fn reset(&mut self, reset_code: u64) {
         self.stream.reset(reset_code)
     }
 
-    fn send_id(&self) -> StreamId {
+    pub fn send_id(&self) -> StreamId {
         self.stream.send_id()
     }
 }
