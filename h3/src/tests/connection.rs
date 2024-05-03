@@ -377,7 +377,7 @@ async fn control_close_send_error() {
         //# If either control
         //# stream is closed at any point, this MUST be treated as a connection
         //# error of type H3_CLOSED_CRITICAL_STREAM.
-        control_stream.finish().await.unwrap(); // close the client control stream immediately
+        control_stream.finish().unwrap(); // close the client control stream immediately
 
         // create the Connection manually so it does not open a second Control stream
 
@@ -533,7 +533,7 @@ async fn goaway_from_server_not_request_id() {
         let mut buf = BytesMut::new();
         StreamType::CONTROL.encode(&mut buf);
         control_stream.write_all(&buf[..]).await.unwrap();
-        control_stream.finish().await.unwrap(); // close the client control stream immediately
+        control_stream.finish().unwrap(); // close the client control stream immediately
 
         let (mut driver, _send) = client::new(h3_quinn::Connection::new(connection))
             .await

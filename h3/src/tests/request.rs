@@ -1434,7 +1434,7 @@ where
         let mut buf = BytesMut::new();
         request(&mut buf);
         req_send.write_all(&buf[..]).await.unwrap();
-        req_send.finish().await.unwrap();
+        req_send.finish().unwrap();
 
         let res = req_recv
             .read(&mut buf)

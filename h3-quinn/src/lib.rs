@@ -20,7 +20,7 @@ use futures::{
     StreamExt,
 };
 pub use quinn::{self, AcceptBi, AcceptUni, Endpoint, OpenBi, OpenUni, VarInt, WriteError};
-use quinn::{ApplicationClose, ReadDatagram};
+use quinn::{ApplicationClose, ClosedStream, ReadDatagram};
 
 use h3::{
     ext::Datagram,
@@ -592,12 +592,8 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn poll_finish(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.stream
-            .as_mut()
-            .unwrap()
-            .poll_finish(cx)
-            .map_err(Into::into)
+    fn poll_finish(&mut self, _cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(self.stream.as_mut().unwrap().finish().map_err(|e| e.into()))
     }
 
     fn reset(&mut self, reset_code: u64) {
@@ -679,6 +675,8 @@ pub enum SendStreamError {
     /// Error when the stream is not ready, because it is still sending
     /// data from a previous call
     NotReady,
+    /// Error when the stream is closed
+    StreamClosed(ClosedStream),
 }
 
 impl From<SendStreamError> for std::io::Error {
@@ -688,6 +686,7 @@ impl From<SendStreamError> for std::io::Error {
             SendStreamError::NotReady => {
                 std::io::Error::new(std::io::ErrorKind::Other, "send stream is not ready")
             }
+            SendStreamError::StreamClosed(err) => err.into(),
         }
     }
 }
@@ -703,6 +702,12 @@ impl Display for SendStreamError {
 impl From<WriteError> for SendStreamError {
     fn from(e: WriteError) -> Self {
         Self::Write(e)
+    }
+}
+
+impl From<ClosedStream> for SendStreamError {
+    fn from(value: ClosedStream) -> Self {
+        Self::StreamClosed(value)
     }
 }
 
