@@ -250,7 +250,7 @@ where
     B: Buf,
 {
     Control(FrameStream<S, B>),
-    Push(u64, FrameStream<S, B>),
+    Push(FrameStream<S, B>),
     Encoder(BufRecvStream<S, B>),
     Decoder(BufRecvStream<S, B>),
     WebTransportUni(SessionId, BufRecvStream<S, B>),
@@ -283,10 +283,7 @@ where
     pub fn into_stream(self) -> Result<AcceptedRecvStream<S, B>, Error> {
         Ok(match self.ty.expect("Stream type not resolved yet") {
             StreamType::CONTROL => AcceptedRecvStream::Control(FrameStream::new(self.stream)),
-            StreamType::PUSH => AcceptedRecvStream::Push(
-                self.id.expect("Push ID not resolved yet").into_inner(),
-                FrameStream::new(self.stream),
-            ),
+            StreamType::PUSH => AcceptedRecvStream::Push(FrameStream::new(self.stream)),
             StreamType::ENCODER => AcceptedRecvStream::Encoder(self.stream),
             StreamType::DECODER => AcceptedRecvStream::Decoder(self.stream),
             StreamType::WEBTRANSPORT_UNI => AcceptedRecvStream::WebTransportUni(
