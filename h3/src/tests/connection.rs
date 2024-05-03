@@ -109,8 +109,7 @@ async fn server_send_data_without_finish() {
             .await
             .unwrap();
         let data = vec![0; 100];
-        let _ = req
-            .send_data(bytes::Bytes::copy_from_slice(&data))
+        req.send_data(bytes::Bytes::copy_from_slice(&data))
             .await
             .unwrap();
         let _ = req.recv_response().await.unwrap();
