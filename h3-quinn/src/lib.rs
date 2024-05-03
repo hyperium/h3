@@ -19,8 +19,8 @@ use futures::{
     stream::{self, BoxStream},
     StreamExt,
 };
-use quinn::ReadDatagram;
 pub use quinn::{self, AcceptBi, AcceptUni, Endpoint, OpenBi, OpenUni, VarInt, WriteError};
+use quinn::{ApplicationClose, ReadDatagram};
 
 use h3::{
     ext::Datagram,
@@ -81,10 +81,9 @@ impl Error for ConnectionError {
 
     fn err_code(&self) -> Option<u64> {
         match self.0 {
-            quinn::ConnectionError::ApplicationClosed(quinn_proto::ApplicationClose {
-                error_code,
-                ..
-            }) => Some(error_code.into_inner()),
+            quinn::ConnectionError::ApplicationClosed(ApplicationClose { error_code, .. }) => {
+                Some(error_code.into_inner())
+            }
             _ => None,
         }
     }
@@ -529,7 +528,7 @@ impl Error for ReadError {
     fn err_code(&self) -> Option<u64> {
         match self.0 {
             quinn::ReadError::ConnectionLost(quinn::ConnectionError::ApplicationClosed(
-                quinn_proto::ApplicationClose { error_code, .. },
+                ApplicationClose { error_code, .. },
             )) => Some(error_code.into_inner()),
             quinn::ReadError::Reset(error_code) => Some(error_code.into_inner()),
             _ => None,
@@ -721,10 +720,7 @@ impl Error for SendStreamError {
         match self {
             Self::Write(quinn::WriteError::Stopped(error_code)) => Some(error_code.into_inner()),
             Self::Write(quinn::WriteError::ConnectionLost(
-                quinn::ConnectionError::ApplicationClosed(quinn_proto::ApplicationClose {
-                    error_code,
-                    ..
-                }),
+                quinn::ConnectionError::ApplicationClosed(ApplicationClose { error_code, .. }),
             )) => Some(error_code.into_inner()),
             _ => None,
         }
