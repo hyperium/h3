@@ -47,6 +47,6 @@ path = "client.rs"
 name = "server"
 path = "server.rs"
 
-[[example]]
-name = "webtransport_server"
-path = "webtransport_server.rs"
+# [[example]]
+# name = "webtransport_server"
+# path = "webtransport_server.rs"

@@ -2,14 +2,15 @@
 //!
 //! It allows to accept incoming requests, and send responses.
 //!
-//! # Examples
+//! # Examplesm
 //!
 //! ## Simple example
 //! ```rust
 //! async fn doc<C>(conn: C)
 //! where
 //! C: h3::quic::Connection<bytes::Bytes>,
-//! <C as h3::quic::Connection<bytes::Bytes>>::BidiStream: Send + 'static
+//! <C as h3::quic::Connection<bytes::Bytes>>::BidiStream: h3::quic::SendStream<bytes::Bytes> + Send + 'static,
+//! <C as h3::quic::Connection<bytes::Bytes>>::SendStream: h3::quic::SendStream<bytes::Bytes> + Send + 'static,
 //! {
 //!     let mut server_builder = h3::server::builder();
 //!     // Build the Connection

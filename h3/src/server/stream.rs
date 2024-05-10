@@ -1,16 +1,15 @@
 //! Server-side HTTP/3 stream management
 
 use bytes::Buf;
+use pin_project::pin_project;
 
+use super::connection::{Connection, RequestEnd};
 use crate::{
     connection::{ConnectionState, SharedStateRef},
     ext::Datagram,
     quic::{self, RecvDatagramExt},
     Error,
 };
-use pin_project_lite::pin_project;
-
-use super::connection::{Connection, RequestEnd};
 use std::{marker::PhantomData, sync::Arc};
 
 use std::{
@@ -29,7 +28,7 @@ use crate::{
     error::Code,
     proto::{frame::Frame, headers::Header},
     qpack,
-    quic::SendStream as _,
+    quic::SendStreamLocal as _,
     stream::{self},
 };
 
@@ -92,8 +91,8 @@ where
 
 impl<S, B> RequestStream<S, B>
 where
-    S: quic::SendStream<B>,
-    B: Buf,
+    S: quic::SendStreamLocal<B>,
+    B: Buf + Send,
 {
     /// Send the HTTP/3 response
     ///
@@ -125,7 +124,9 @@ where
             return Err(Error::header_too_big(mem_size, max_mem_size));
         }
 
-        stream::write(&mut self.inner.stream, Frame::Headers(block.freeze()))
+        self.inner
+            .stream
+            .send_data(Frame::Headers(block.freeze()))
             .await
             .map_err(|e| self.maybe_conn_err(e))?;
 
@@ -179,7 +180,7 @@ where
 impl<S, B> RequestStream<S, B>
 where
     S: quic::BidiStream<B>,
-    B: Buf,
+    B: Buf + Send,
 {
     /// Splits the Request-Stream into send and receive.
     /// This can be used the send and receive data on different tasks.
@@ -214,22 +215,22 @@ impl Drop for RequestEnd {
     }
 }
 
-pin_project! {
-    /// Future for [`Connection::read_datagram`]
-    pub struct ReadDatagram<'a, C, B>
-    where
-            C: quic::Connection<B>,
-            B: Buf,
-        {
-            pub(super) conn: &'a mut Connection<C, B>,
-            pub(super) _marker: PhantomData<B>,
-        }
+/// Future for [`Connection::read_datagram`]
+#[pin_project]
+pub struct ReadDatagram<'a, C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf + Send,
+{
+    #[pin]
+    pub(super) conn: &'a mut Connection<C, B>,
+    pub(super) _marker: PhantomData<B>,
 }
 
 impl<'a, C, B> Future for ReadDatagram<'a, C, B>
 where
     C: quic::Connection<B> + RecvDatagramExt,
-    B: Buf,
+    B: Buf + Send,
 {
     type Output = Result<Option<Datagram<C::Buf>>, Error>;
 

@@ -4,6 +4,7 @@ use bytes::Buf;
 
 use tracing::trace;
 
+use crate::quic::{SendStream, SendStreamLocal};
 use crate::stream::{BufRecvStream, WriteBuf};
 use crate::{
     buf::BufList,
@@ -12,7 +13,7 @@ use crate::{
         frame::{self, Frame, PayloadLen},
         stream::StreamId,
     },
-    quic::{BidiStream, RecvStream, SendStream},
+    quic::{BidiStream, RecvStream},
 };
 
 /// Decodes Frames from the underlying QUIC stream
@@ -147,30 +148,27 @@ where
     }
 }
 
-impl<T, B> SendStream<B> for FrameStream<T, B>
+impl<T, B> FrameStream<T, B>
 where
-    T: SendStream<B>,
+    T: SendStreamLocal<B>,
     B: Buf,
 {
-    type Error = <T as SendStream<B>>::Error;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.stream.poll_ready(cx)
+    pub async fn send_data<D: Into<WriteBuf<B>> + Send>(
+        &mut self,
+        data: D,
+    ) -> Result<(), T::Error> {
+        self.stream.send_data(data).await
     }
 
-    fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), Self::Error> {
-        self.stream.send_data(data)
-    }
-
-    fn poll_finish(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    pub fn poll_finish(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), T::Error>> {
         self.stream.poll_finish(cx)
     }
 
-    fn reset(&mut self, reset_code: u64) {
+    pub fn reset(&mut self, reset_code: u64) {
         self.stream.reset(reset_code)
     }
 
-    fn send_id(&self) -> StreamId {
+    pub fn send_id(&self) -> StreamId {
         self.stream.send_id()
     }
 }
@@ -178,7 +176,7 @@ where
 impl<S, B> FrameStream<S, B>
 where
     S: BidiStream<B>,
-    B: Buf,
+    B: Buf + Send,
 {
     pub(crate) fn split(self) -> (FrameStream<S::SendStream, B>, FrameStream<S::RecvStream, B>) {
         let (send, recv) = self.stream.split();

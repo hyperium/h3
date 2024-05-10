@@ -6,6 +6,7 @@
 use std::task::{self, Poll};
 
 use bytes::Buf;
+use std::future::Future;
 
 use crate::ext::Datagram;
 pub use crate::proto::stream::{InvalidStreamId, StreamId};
@@ -33,9 +34,9 @@ impl<'a, E: Error + 'a> From<E> for Box<dyn Error + 'a> {
 /// Trait representing a QUIC connection.
 pub trait Connection<B: Buf> {
     /// The type produced by `poll_accept_bidi()`
-    type BidiStream: SendStream<B> + RecvStream;
+    type BidiStream: SendStreamLocal<B> + RecvStream;
     /// The type of the sending part of `BidiStream`
-    type SendStream: SendStream<B>;
+    type SendStream: SendStreamLocal<B>;
     /// The type produced by `poll_accept_recv()`
     type RecvStream: RecvStream;
     /// A producer of outgoing Unidirectional and Bidirectional streams.
@@ -113,9 +114,9 @@ pub trait RecvDatagramExt {
 /// Trait for opening outgoing streams
 pub trait OpenStreams<B: Buf> {
     /// The type produced by `poll_open_bidi()`
-    type BidiStream: SendStream<B> + RecvStream;
+    type BidiStream: SendStreamLocal<B> + RecvStream;
     /// The type produced by `poll_open_send()`
-    type SendStream: SendStream<B>;
+    type SendStream: SendStreamLocal<B>;
     /// The type of the receiving part of `BidiStream`
     type RecvStream: RecvStream;
     /// Error type yielded by these trait methods
@@ -138,15 +139,19 @@ pub trait OpenStreams<B: Buf> {
 }
 
 /// A trait describing the "send" actions of a QUIC stream.
-pub trait SendStream<B: Buf> {
+#[trait_variant::make(SendStream: Send)]
+pub trait SendStreamLocal<B> {
     /// The error type returned by fallible send methods.
     type Error: Into<Box<dyn Error>>;
 
     /// Polls if the stream can send more data.
-    fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>>;
+    //fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>>;
 
-    /// Send more data on the stream.
-    fn send_data<T: Into<WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error>;
+    /// Prepares more data on the stream.
+    //fn set_data<T: Into<WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error>;
+
+    /// Sends data on the stream.
+    async fn send_data<T: Into<WriteBuf<B>> + Send>(&mut self, data: T) -> Result<(), Self::Error>;
 
     /// Poll to finish the sending side of the stream.
     fn poll_finish(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>>;
@@ -159,7 +164,7 @@ pub trait SendStream<B: Buf> {
 }
 
 /// Allows sending unframed pure bytes to a stream. Similar to [`AsyncWrite`](https://docs.rs/tokio/latest/tokio/io/trait.AsyncWrite.html)
-pub trait SendStreamUnframed<B: Buf>: SendStream<B> {
+pub trait SendStreamUnframed<B: Buf>: SendStreamLocal<B> {
     /// Attempts write data into the stream.
     ///
     /// Returns the number of bytes written.
@@ -196,9 +201,9 @@ pub trait RecvStream {
 }
 
 /// Optional trait to allow "splitting" a bidirectional stream into two sides.
-pub trait BidiStream<B: Buf>: SendStream<B> + RecvStream {
+pub trait BidiStream<B: Buf>: SendStreamLocal<B> + RecvStream {
     /// The type for the send half.
-    type SendStream: SendStream<B>;
+    type SendStream: SendStreamLocal<B>;
     /// The type for the receive half.
     type RecvStream: RecvStream;
 

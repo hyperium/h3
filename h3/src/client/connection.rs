@@ -48,7 +48,7 @@ use super::stream::RequestStream;
 /// # async fn doc<T,B>(mut send_request: SendRequest<T, B>) -> Result<(), Box<dyn std::error::Error>>
 /// # where
 /// #     T: quic::OpenStreams<B>,
-/// #     B: Buf,
+/// #     B: Buf + Send,
 /// # {
 /// // Prepare the HTTP request to send to the server
 /// let request = Request::get("https://www.example.com/").body(())?;
@@ -118,7 +118,7 @@ where
 impl<T, B> SendRequest<T, B>
 where
     T: quic::OpenStreams<B>,
-    B: Buf,
+    B: Buf + Send,
 {
     /// Send a HTTP/3 request to the server
     pub async fn send_request(
@@ -343,7 +343,7 @@ where
 impl<C, B> Connection<C, B>
 where
     C: quic::Connection<B>,
-    B: Buf,
+    B: Buf + Send,
 {
     /// Initiate a graceful shutdown, accepting `max_push` potentially in-flight server pushes
     pub async fn shutdown(&mut self, _max_push: usize) -> Result<(), Error> {

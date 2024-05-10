@@ -49,7 +49,7 @@ where
 /// # where
 /// #   C: quic::Connection<B, OpenStreams = O>,
 /// #   O: quic::OpenStreams<B>,
-/// #   B: bytes::Buf,
+/// #   B: bytes::Buf + Send,
 /// # {
 /// let h3_conn = h3::client::builder()
 ///     .max_field_section_size(8192)
@@ -102,7 +102,7 @@ impl Builder {
     where
         C: quic::Connection<B, OpenStreams = O>,
         O: quic::OpenStreams<B>,
-        B: Buf,
+        B: Buf + Send,
     {
         let open = quic.opener();
         let conn_state = SharedStateRef::default();

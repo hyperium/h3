@@ -19,7 +19,7 @@ use crate::{
         stream::StreamType,
         varint::VarInt,
     },
-    quic::{self, BidiStream, RecvStream, SendStream, SendStreamUnframed},
+    quic::{self, BidiStream, RecvStream, SendStream, SendStreamLocal, SendStreamUnframed},
     webtransport::SessionId,
     Error,
 };
@@ -28,13 +28,11 @@ use crate::{
 /// Transmits data by encoding in wire format.
 pub(crate) async fn write<S, D, B>(stream: &mut S, data: D) -> Result<(), Error>
 where
-    S: SendStream<B>,
-    D: Into<WriteBuf<B>>,
+    S: SendStreamLocal<B>,
+    D: Into<WriteBuf<B>> + Send,
     B: Buf,
 {
-    stream.send_data(data)?;
-    future::poll_fn(|cx| stream.poll_ready(cx)).await?;
-
+    stream.send_data(data).await?;
     Ok(())
 }
 
@@ -490,59 +488,57 @@ impl<S: RecvStream, B> RecvStream for BufRecvStream<S, B> {
     }
 }
 
-impl<S, B> SendStream<B> for BufRecvStream<S, B>
+impl<S, B> BufRecvStream<S, B>
 where
     B: Buf,
-    S: SendStream<B>,
+    S: SendStreamLocal<B>,
 {
-    type Error = S::Error;
-
-    fn poll_finish(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+    pub fn poll_finish(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), S::Error>> {
         self.stream.poll_finish(cx)
     }
 
-    fn reset(&mut self, reset_code: u64) {
+    pub fn reset(&mut self, reset_code: u64) {
         self.stream.reset(reset_code)
     }
 
-    fn send_id(&self) -> quic::StreamId {
+    pub fn send_id(&self) -> quic::StreamId {
         self.stream.send_id()
     }
 
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.stream.poll_ready(cx)
-    }
-
-    fn send_data<T: Into<WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error> {
-        self.stream.send_data(data)
+    pub async fn send_data<T: Into<WriteBuf<B>> + Send>(
+        &mut self,
+        data: T,
+    ) -> Result<(), S::Error> {
+        self.stream.send_data(data).await
     }
 }
 
-impl<S, B> SendStreamUnframed<B> for BufRecvStream<S, B>
+impl<S, B> BufRecvStream<S, B>
 where
     B: Buf,
     S: SendStreamUnframed<B>,
 {
     #[inline]
-    fn poll_send<D: Buf>(
+    pub fn poll_send<D: Buf>(
         &mut self,
         cx: &mut std::task::Context<'_>,
         buf: &mut D,
-    ) -> Poll<Result<usize, Self::Error>> {
+    ) -> Poll<Result<usize, S::Error>> {
         self.stream.poll_send(cx, buf)
     }
 }
 
-impl<S, B> BidiStream<B> for BufRecvStream<S, B>
+impl<S, B> BufRecvStream<S, B>
 where
-    B: Buf,
+    B: Buf + Send,
     S: BidiStream<B>,
 {
-    type SendStream = BufRecvStream<S::SendStream, B>;
-
-    type RecvStream = BufRecvStream<S::RecvStream, B>;
-
-    fn split(self) -> (Self::SendStream, Self::RecvStream) {
+    pub fn split(
+        self,
+    ) -> (
+        BufRecvStream<S::SendStream, B>,
+        BufRecvStream<S::RecvStream, B>,
+    ) {
         let (send, recv) = self.stream.split();
         (
             BufRecvStream {
@@ -635,7 +631,7 @@ where
 
 impl<S, B> futures_util::io::AsyncWrite for BufRecvStream<S, B>
 where
-    B: Buf,
+    B: Buf + Send,
     S: SendStreamUnframed<B>,
     S::Error: Into<std::io::Error>,
 {
@@ -660,7 +656,7 @@ where
 
 impl<S, B> tokio::io::AsyncWrite for BufRecvStream<S, B>
 where
-    B: Buf,
+    B: Buf + Send,
     S: SendStreamUnframed<B>,
     S::Error: Into<std::io::Error>,
 {
