@@ -156,18 +156,24 @@ async fn client_close_only_on_last_sender_drop() {
     let client_fut = async {
         let (mut conn, mut send1) = client::new(pair.client().await).await.expect("client init");
         let mut send2 = send1.clone();
-        let _ = send1
+        let mut request_stream_1 = send1
             .send_request(Request::get("http://no.way").body(()).unwrap())
             .await
-            .unwrap()
-            .finish()
-            .await;
-        let _ = send2
+            .unwrap();
+
+        let _ = request_stream_1.recv_response().await;
+
+        let _ = request_stream_1.finish().await;
+
+        let mut request_stream_2 = send2
             .send_request(Request::get("http://no.way").body(()).unwrap())
             .await
-            .unwrap()
-            .finish()
-            .await;
+            .unwrap();
+
+        let _ = request_stream_2.recv_response().await;
+
+        let _ = request_stream_2.finish().await;
+
         drop(send1);
         drop(send2);
 
