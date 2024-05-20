@@ -19,8 +19,8 @@ use futures::{
     stream::{self, BoxStream},
     StreamExt,
 };
-use quinn::ReadDatagram;
 pub use quinn::{self, AcceptBi, AcceptUni, Endpoint, OpenBi, OpenUni, VarInt, WriteError};
+use quinn::{ApplicationClose, ClosedStream, ReadDatagram};
 
 use h3::{
     ext::Datagram,
@@ -81,10 +81,9 @@ impl Error for ConnectionError {
 
     fn err_code(&self) -> Option<u64> {
         match self.0 {
-            quinn::ConnectionError::ApplicationClosed(quinn_proto::ApplicationClose {
-                error_code,
-                ..
-            }) => Some(error_code.into_inner()),
+            quinn::ConnectionError::ApplicationClosed(ApplicationClose { error_code, .. }) => {
+                Some(error_code.into_inner())
+            }
             _ => None,
         }
     }
@@ -529,7 +528,7 @@ impl Error for ReadError {
     fn err_code(&self) -> Option<u64> {
         match self.0 {
             quinn::ReadError::ConnectionLost(quinn::ConnectionError::ApplicationClosed(
-                quinn_proto::ApplicationClose { error_code, .. },
+                ApplicationClose { error_code, .. },
             )) => Some(error_code.into_inner()),
             quinn::ReadError::Reset(error_code) => Some(error_code.into_inner()),
             _ => None,
@@ -593,12 +592,8 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn poll_finish(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.stream
-            .as_mut()
-            .unwrap()
-            .poll_finish(cx)
-            .map_err(Into::into)
+    fn poll_finish(&mut self, _cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(self.stream.as_mut().unwrap().finish().map_err(|e| e.into()))
     }
 
     fn reset(&mut self, reset_code: u64) {
@@ -680,6 +675,8 @@ pub enum SendStreamError {
     /// Error when the stream is not ready, because it is still sending
     /// data from a previous call
     NotReady,
+    /// Error when the stream is closed
+    StreamClosed(ClosedStream),
 }
 
 impl From<SendStreamError> for std::io::Error {
@@ -689,6 +686,7 @@ impl From<SendStreamError> for std::io::Error {
             SendStreamError::NotReady => {
                 std::io::Error::new(std::io::ErrorKind::Other, "send stream is not ready")
             }
+            SendStreamError::StreamClosed(err) => err.into(),
         }
     }
 }
@@ -707,6 +705,12 @@ impl From<WriteError> for SendStreamError {
     }
 }
 
+impl From<ClosedStream> for SendStreamError {
+    fn from(value: ClosedStream) -> Self {
+        Self::StreamClosed(value)
+    }
+}
+
 impl Error for SendStreamError {
     fn is_timeout(&self) -> bool {
         matches!(
@@ -721,10 +725,7 @@ impl Error for SendStreamError {
         match self {
             Self::Write(quinn::WriteError::Stopped(error_code)) => Some(error_code.into_inner()),
             Self::Write(quinn::WriteError::ConnectionLost(
-                quinn::ConnectionError::ApplicationClosed(quinn_proto::ApplicationClose {
-                    error_code,
-                    ..
-                }),
+                quinn::ConnectionError::ApplicationClosed(ApplicationClose { error_code, .. }),
             )) => Some(error_code.into_inner()),
             _ => None,
         }

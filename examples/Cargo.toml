@@ -14,14 +14,14 @@ h3 = { path = "../h3" }
 h3-quinn = { path = "../h3-quinn" }
 h3-webtransport = { path = "../h3-webtransport" }
 http = "1"
-quinn = { version = "0.10", default-features = false, features = [
+quinn = { version = "0.11", default-features = false, features = [
     "runtime-tokio",
-    "tls-rustls",
+    "rustls",
     "ring",
 ] }
-rcgen = { version = "0.12" }
-rustls = { version = "0.21", features = ["dangerous_configuration"] }
-rustls-native-certs = "0.6"
+rcgen = { version = "0.13" }
+rustls = { version = "0.23", default-features = false, features = ["logging", "ring", "std"] }
+rustls-native-certs = "0.7"
 structopt = "0.3"
 tokio = { version = "1.27", features = ["full"] }
 tracing = "0.1.37"

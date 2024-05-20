@@ -6,13 +6,13 @@ use h3::{
     quic::{self, RecvDatagramExt, SendDatagramExt, SendStreamUnframed},
     server::Connection,
 };
-use h3_quinn::quinn;
+use h3_quinn::quinn::{self, crypto::rustls::QuicServerConfig};
 use h3_webtransport::{
     server::{self, WebTransportSession},
     stream,
 };
 use http::Method;
-use rustls::{Certificate, PrivateKey};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use structopt::StructOpt;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -81,14 +81,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // create quinn server endpoint and bind UDP socket
 
     // both cert and key must be DER-encoded
-    let cert = Certificate(std::fs::read(cert)?);
-    let key = PrivateKey(std::fs::read(key)?);
+    let cert = CertificateDer::from(std::fs::read(cert)?);
+    let key = PrivateKeyDer::try_from(std::fs::read(key)?)?;
 
     let mut tls_config = rustls::ServerConfig::builder()
-        .with_safe_default_cipher_suites()
-        .with_safe_default_kx_groups()
-        .with_protocol_versions(&[&rustls::version::TLS13])
-        .unwrap()
         .with_no_client_auth()
         .with_single_cert(vec![cert], key)?;
 
@@ -102,7 +98,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ];
     tls_config.alpn_protocols = alpn;
 
-    let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(tls_config));
+    let mut server_config =
+        quinn::ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(tls_config)?));
     let mut transport_config = quinn::TransportConfig::default();
     transport_config.keep_alive_interval(Some(Duration::from_secs(2)));
     server_config.transport = Arc::new(transport_config);
