@@ -1,3 +1,8 @@
+### v0.0.5 (2024-05-20)
+* add `poll_recv_data()` for server
+* use 2021 edition
+* some cleanups
+
 ### v0.0.4 (2024-01-24)
 
 * Update to `http` v1.0
