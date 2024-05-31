@@ -1,11 +1,10 @@
-use std::marker::PhantomData;
 use std::task::{Context, Poll};
 
-use bytes::{Buf, Bytes};
+use bytes::Buf;
 
-use futures_util::ready;
 use tracing::trace;
 
+use crate::stream::{BufRecvStream, WriteBuf};
 use crate::{
     buf::BufList,
     error::TransportError,
@@ -14,33 +13,29 @@ use crate::{
         stream::StreamId,
     },
     quic::{BidiStream, RecvStream, SendStream},
-    stream::WriteBuf,
 };
 
+/// Decodes Frames from the underlying QUIC stream
 pub struct FrameStream<S, B> {
-    stream: S,
-    bufs: BufList<Bytes>,
+    pub stream: BufRecvStream<S, B>,
+    // Already read data from the stream
     decoder: FrameDecoder,
     remaining_data: usize,
-    /// Set to true when `stream` reaches the end.
-    is_eos: bool,
-    _phantom_buffer: PhantomData<B>,
 }
 
 impl<S, B> FrameStream<S, B> {
-    pub fn new(stream: S) -> Self {
-        Self::with_bufs(stream, BufList::new())
-    }
-
-    pub(crate) fn with_bufs(stream: S, bufs: BufList<Bytes>) -> Self {
+    pub fn new(stream: BufRecvStream<S, B>) -> Self {
         Self {
             stream,
-            bufs,
             decoder: FrameDecoder::default(),
             remaining_data: 0,
-            is_eos: false,
-            _phantom_buffer: PhantomData,
         }
+    }
+
+    /// Unwraps the Framed streamer and returns the underlying stream **without** data loss for
+    /// partially received/read frames.
+    pub fn into_inner(self) -> BufRecvStream<S, B> {
+        self.stream
     }
 }
 
@@ -60,10 +55,14 @@ where
         loop {
             let end = self.try_recv(cx)?;
 
-            return match self.decoder.decode(&mut self.bufs)? {
+            return match self.decoder.decode(self.stream.buf_mut())? {
                 Some(Frame::Data(PayloadLen(len))) => {
                     self.remaining_data = len;
                     Poll::Ready(Ok(Some(Frame::Data(PayloadLen(len)))))
+                }
+                frame @ Some(Frame::WebTransportStream(_)) => {
+                    self.remaining_data = usize::MAX;
+                    Poll::Ready(Ok(frame))
                 }
                 Some(frame) => Poll::Ready(Ok(Some(frame))),
                 None => match end {
@@ -71,7 +70,7 @@ where
                     Poll::Ready(false) => continue,
                     Poll::Pending => Poll::Pending,
                     Poll::Ready(true) => {
-                        if self.bufs.has_remaining() {
+                        if self.stream.buf_mut().has_remaining() {
                             // Reached the end of receive stream, but there is still some data:
                             // The frame is incomplete.
                             Poll::Ready(Err(FrameStreamError::UnexpectedEnd))
@@ -84,6 +83,10 @@ where
         }
     }
 
+    /// Retrieves the next piece of data in an incoming data packet or webtransport stream
+    ///
+    ///
+    /// WebTransport bidirectional payload has no finite length and is processed until the end of the stream.
     pub fn poll_data(
         &mut self,
         cx: &mut Context<'_>,
@@ -92,14 +95,19 @@ where
             return Poll::Ready(Ok(None));
         };
 
-        let end = ready!(self.try_recv(cx))?;
-        let data = self.bufs.take_chunk(self.remaining_data as usize);
+        let end = match self.try_recv(cx) {
+            Poll::Ready(Ok(end)) => end,
+            Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+            Poll::Pending => false,
+        };
+        let data = self.stream.buf_mut().take_chunk(self.remaining_data);
 
         match (data, end) {
             (None, true) => Poll::Ready(Ok(None)),
             (None, false) => Poll::Pending,
             (Some(d), true)
-                if d.remaining() < self.remaining_data && !self.bufs.has_remaining() =>
+                if d.remaining() < self.remaining_data
+                    && !self.stream.buf_mut().has_remaining() =>
             {
                 Poll::Ready(Err(FrameStreamError::UnexpectedEnd))
             }
@@ -110,6 +118,7 @@ where
         }
     }
 
+    /// Stops the underlying stream with the provided error code
     pub(crate) fn stop_sending(&mut self, error_code: crate::error::Code) {
         self.stream.stop_sending(error_code.into());
     }
@@ -119,25 +128,22 @@ where
     }
 
     pub(crate) fn is_eos(&self) -> bool {
-        self.is_eos && !self.bufs.has_remaining()
+        self.stream.is_eos() && !self.stream.buf().has_remaining()
     }
 
     fn try_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<bool, FrameStreamError>> {
-        if self.is_eos {
+        if self.stream.is_eos() {
             return Poll::Ready(Ok(true));
         }
-        match self.stream.poll_data(cx) {
+        match self.stream.poll_read(cx) {
             Poll::Ready(Err(e)) => Poll::Ready(Err(FrameStreamError::Quic(e.into()))),
             Poll::Pending => Poll::Pending,
-            Poll::Ready(Ok(None)) => {
-                self.is_eos = true;
-                Poll::Ready(Ok(true))
-            }
-            Poll::Ready(Ok(Some(mut d))) => {
-                self.bufs.push_bytes(&mut d);
-                Poll::Ready(Ok(false))
-            }
+            Poll::Ready(Ok(eos)) => Poll::Ready(Ok(eos)),
         }
+    }
+
+    pub fn id(&self) -> StreamId {
+        self.stream.recv_id()
     }
 }
 
@@ -164,8 +170,8 @@ where
         self.stream.reset(reset_code)
     }
 
-    fn id(&self) -> StreamId {
-        self.stream.id()
+    fn send_id(&self) -> StreamId {
+        self.stream.send_id()
     }
 }
 
@@ -179,19 +185,13 @@ where
         (
             FrameStream {
                 stream: send,
-                bufs: BufList::new(),
                 decoder: FrameDecoder::default(),
                 remaining_data: 0,
-                is_eos: false,
-                _phantom_buffer: PhantomData,
             },
             FrameStream {
                 stream: recv,
-                bufs: self.bufs,
                 decoder: self.decoder,
                 remaining_data: self.remaining_data,
-                is_eos: self.is_eos,
-                _phantom_buffer: PhantomData,
             },
         )
     }
@@ -223,7 +223,7 @@ impl FrameDecoder {
             let (pos, decoded) = {
                 let mut cur = src.cursor();
                 let decoded = Frame::decode(&mut cur);
-                (cur.position() as usize, decoded)
+                (cur.position(), decoded)
             };
 
             match decoded {
@@ -266,7 +266,7 @@ mod tests {
     use super::*;
 
     use assert_matches::assert_matches;
-    use bytes::{BufMut, BytesMut};
+    use bytes::{BufMut, Bytes, BytesMut};
     use futures_util::future::poll_fn;
     use std::{collections::VecDeque, fmt, sync::Arc};
 
@@ -373,7 +373,7 @@ mod tests {
         Frame::headers(&b"trailer"[..]).encode_with_payload(&mut buf);
         recv.chunk(buf.freeze());
 
-        let mut stream: FrameStream<_, ()> = FrameStream::new(recv);
+        let mut stream: FrameStream<_, ()> = FrameStream::new(BufRecvStream::new(recv));
 
         assert_poll_matches!(|cx| stream.poll_next(cx), Ok(Some(Frame::Headers(_))));
         assert_poll_matches!(
@@ -395,7 +395,7 @@ mod tests {
         Frame::headers(&b"header"[..]).encode_with_payload(&mut buf);
         let mut buf = buf.freeze();
         recv.chunk(buf.split_to(buf.len() - 1));
-        let mut stream: FrameStream<_, ()> = FrameStream::new(recv);
+        let mut stream: FrameStream<_, ()> = FrameStream::new(BufRecvStream::new(recv));
 
         assert_poll_matches!(
             |cx| stream.poll_next(cx),
@@ -414,7 +414,7 @@ mod tests {
         FrameType::DATA.encode(&mut buf);
         VarInt::from(4u32).encode(&mut buf);
         recv.chunk(buf.freeze());
-        let mut stream: FrameStream<_, ()> = FrameStream::new(recv);
+        let mut stream: FrameStream<_, ()> = FrameStream::new(BufRecvStream::new(recv));
 
         assert_poll_matches!(
             |cx| stream.poll_next(cx),
@@ -436,7 +436,7 @@ mod tests {
         let mut buf = buf.freeze();
         recv.chunk(buf.split_to(buf.len() - 2));
         recv.chunk(buf);
-        let mut stream: FrameStream<_, ()> = FrameStream::new(recv);
+        let mut stream: FrameStream<_, ()> = FrameStream::new(BufRecvStream::new(recv));
 
         // We get the total size of data about to be received
         assert_poll_matches!(
@@ -465,7 +465,7 @@ mod tests {
         VarInt::from(4u32).encode(&mut buf);
         buf.put_slice(&b"b"[..]);
         recv.chunk(buf.freeze());
-        let mut stream: FrameStream<_, ()> = FrameStream::new(recv);
+        let mut stream: FrameStream<_, ()> = FrameStream::new(BufRecvStream::new(recv));
 
         assert_poll_matches!(
             |cx| stream.poll_next(cx),
@@ -497,7 +497,7 @@ mod tests {
         Frame::Data(Bytes::from("body")).encode_with_payload(&mut buf);
 
         recv.chunk(buf.freeze());
-        let mut stream: FrameStream<_, ()> = FrameStream::new(recv);
+        let mut stream: FrameStream<_, ()> = FrameStream::new(BufRecvStream::new(recv));
 
         assert_poll_matches!(
             |cx| stream.poll_next(cx),
@@ -519,7 +519,7 @@ mod tests {
         buf.put_slice(&b"bo"[..]);
         recv.chunk(buf.clone().freeze());
 
-        let mut stream: FrameStream<_, ()> = FrameStream::new(recv);
+        let mut stream: FrameStream<_, ()> = FrameStream::new(BufRecvStream::new(recv));
 
         assert_poll_matches!(
             |cx| stream.poll_next(cx),
@@ -528,7 +528,7 @@ mod tests {
 
         buf.truncate(0);
         buf.put_slice(&b"dy"[..]);
-        stream.bufs.push_bytes(&mut buf.freeze());
+        stream.stream.buf_mut().push_bytes(&mut buf.freeze());
 
         assert_poll_matches!(
             |cx| to_bytes(stream.poll_data(cx)),
@@ -567,6 +567,10 @@ mod tests {
         }
 
         fn stop_sending(&mut self, _: u64) {
+            unimplemented!()
+        }
+
+        fn recv_id(&self) -> StreamId {
             unimplemented!()
         }
     }

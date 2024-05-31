@@ -1,9 +1,14 @@
 use bytes::{Buf, BufMut, Bytes};
-use std::{convert::TryInto, fmt};
+use std::{
+    convert::TryInto,
+    fmt::{self, Debug},
+};
 use tracing::trace;
 
+use crate::webtransport::SessionId;
+
 use super::{
-    coding::Encode,
+    coding::{Decode, Encode},
     push::{InvalidPushId, PushId},
     stream::InvalidStreamId,
     varint::{BufExt, BufMutExt, UnexpectedEnd, VarInt},
@@ -46,13 +51,21 @@ pub enum Frame<B> {
     PushPromise(PushPromise),
     Goaway(VarInt),
     MaxPushId(PushId),
+    /// Describes the header for a webtransport stream.
+    ///
+    /// The payload is sent streaming until the stream is closed
+    ///
+    /// Unwrap the framed streamer and read the inner stream until the end.
+    ///
+    /// Conversely, when sending, send this frame and unwrap the stream
+    WebTransportStream(SessionId),
     Grease,
 }
 
 /// Represents the available data len for a `Data` frame on a RecvStream
 ///
 /// Decoding received frames does not handle `Data` frames payload. Instead, receiving it
-/// and passing it to the user is left under the responsability of `RequestStream`s.
+/// and passing it to the user is left under the responsibility of `RequestStream`s.
 pub struct PayloadLen(pub usize);
 
 impl From<usize> for PayloadLen {
@@ -62,11 +75,21 @@ impl From<usize> for PayloadLen {
 }
 
 impl Frame<PayloadLen> {
-    pub const MAX_ENCODED_SIZE: usize = VarInt::MAX_SIZE * 3;
+    pub const MAX_ENCODED_SIZE: usize = VarInt::MAX_SIZE * 7;
 
+    /// Decodes a Frame from the stream according to <https://www.rfc-editor.org/rfc/rfc9114#section-7.1>
     pub fn decode<T: Buf>(buf: &mut T) -> Result<Self, FrameError> {
         let remaining = buf.remaining();
         let ty = FrameType::decode(buf).map_err(|_| FrameError::Incomplete(remaining + 1))?;
+
+        // Webtransport streams need special handling as they have no length.
+        //
+        // See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-4.2
+        if ty == FrameType::WEBTRANSPORT_BI_STREAM {
+            tracing::trace!("webtransport frame");
+            return Ok(Frame::WebTransportStream(SessionId::decode(buf)?));
+        }
+
         let len = buf
             .get_var()
             .map_err(|_| FrameError::Incomplete(remaining + 1))?;
@@ -80,6 +103,7 @@ impl Frame<PayloadLen> {
         }
 
         let mut payload = buf.take(len as usize);
+        trace!("frame ty: {:?}", ty);
         let frame = match ty {
             FrameType::HEADERS => Ok(Frame::Headers(payload.copy_to_bytes(len as usize))),
             FrameType::SETTINGS => Ok(Frame::Settings(Settings::decode(&mut payload)?)),
@@ -91,11 +115,13 @@ impl Frame<PayloadLen> {
             | FrameType::H2_PING
             | FrameType::H2_WINDOW_UPDATE
             | FrameType::H2_CONTINUATION => Err(FrameError::UnsupportedFrame(ty.0)),
+            FrameType::WEBTRANSPORT_BI_STREAM | FrameType::DATA => unreachable!(),
             _ => {
                 buf.advance(len as usize);
                 Err(FrameError::UnknownFrame(ty.0))
             }
         };
+
         if let Ok(frame) = &frame {
             trace!(
                 "got frame {:?}, len: {}, remaining: {}",
@@ -131,6 +157,11 @@ where
                 FrameType::grease().encode(buf);
                 buf.write_var(6);
                 buf.put_slice(b"grease");
+            }
+            Frame::WebTransportStream(id) => {
+                FrameType::WEBTRANSPORT_BI_STREAM.encode(buf);
+                id.encode(buf);
+                // rest of the data is sent streaming
             }
         }
     }
@@ -189,6 +220,7 @@ impl fmt::Debug for Frame<PayloadLen> {
             Frame::Goaway(id) => write!(f, "GoAway({})", id),
             Frame::MaxPushId(id) => write!(f, "MaxPushId({})", id),
             Frame::Grease => write!(f, "Grease()"),
+            Frame::WebTransportStream(session) => write!(f, "WebTransportStream({:?})", session),
         }
     }
 }
@@ -207,6 +239,7 @@ where
             Frame::Goaway(id) => write!(f, "GoAway({})", id),
             Frame::MaxPushId(id) => write!(f, "MaxPushId({})", id),
             Frame::Grease => write!(f, "Grease()"),
+            Frame::WebTransportStream(_) => write!(f, "WebTransportStream()"),
         }
     }
 }
@@ -226,6 +259,9 @@ impl<T, U> PartialEq<Frame<T>> for Frame<U> {
             Frame::Goaway(x) => matches!(other, Frame::Goaway(y) if x == y),
             Frame::MaxPushId(x) => matches!(other, Frame::MaxPushId(y) if x == y),
             Frame::Grease => matches!(other, Frame::Grease),
+            Frame::WebTransportStream(x) => {
+                matches!(other, Frame::WebTransportStream(y) if x == y)
+            }
         }
     }
 }
@@ -257,6 +293,8 @@ frame_types! {
     H2_WINDOW_UPDATE = 0x8,
     H2_CONTINUATION = 0x9,
     MAX_PUSH_ID = 0xD,
+    // Reserved frame types
+    WEBTRANSPORT_BI_STREAM = 0x41,
 }
 
 impl FrameType {
@@ -350,7 +388,11 @@ impl SettingId {
             self,
             SettingId::MAX_HEADER_LIST_SIZE
                 | SettingId::QPACK_MAX_TABLE_CAPACITY
-                | SettingId::QPACK_MAX_BLOCKED_STREAMS,
+                | SettingId::QPACK_MAX_BLOCKED_STREAMS
+                | SettingId::ENABLE_CONNECT_PROTOCOL
+                | SettingId::ENABLE_WEBTRANSPORT
+                | SettingId::WEBTRANSPORT_MAX_SESSIONS
+                | SettingId::H3_DATAGRAM,
         )
     }
 
@@ -389,9 +431,19 @@ setting_identifiers! {
     QPACK_MAX_TABLE_CAPACITY = 0x1,
     QPACK_MAX_BLOCKED_STREAMS = 0x7,
     MAX_HEADER_LIST_SIZE = 0x6,
+    // https://datatracker.ietf.org/doc/html/rfc9220#section-5
+    ENABLE_CONNECT_PROTOCOL = 0x8,
+    // https://datatracker.ietf.org/doc/html/rfc9297#name-http-3-setting
+    H3_DATAGRAM = 0x33,
+    // https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-8.2
+    ENABLE_WEBTRANSPORT = 0x2B603742,
+    // https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-8.2
+    H3_SETTING_ENABLE_DATAGRAM_CHROME_SPECIFIC= 0xFFD277,
+
+    WEBTRANSPORT_MAX_SESSIONS = 0x2b603743,
 }
 
-const SETTINGS_LEN: usize = 4;
+const SETTINGS_LEN: usize = 8;
 
 #[derive(Debug, PartialEq)]
 pub struct Settings {
@@ -446,7 +498,7 @@ impl Settings {
         None
     }
 
-    pub(super) fn encode<T: BufMut>(&self, buf: &mut T) {
+    pub(crate) fn encode<T: BufMut>(&self, buf: &mut T) {
         self.encode_header(buf);
         for (id, val) in self.entries[..self.len].iter() {
             id.encode(buf);
@@ -483,6 +535,8 @@ impl Settings {
                 //# their receipt MUST be treated as a connection error of type
                 //# H3_SETTINGS_ERROR.
                 settings.insert(identifier, value)?;
+            } else {
+                tracing::warn!("Unsupported setting: {:#x?}", identifier);
             }
         }
         Ok(settings)
@@ -594,6 +648,10 @@ mod tests {
                     (SettingId::QPACK_MAX_TABLE_CAPACITY, 0xfad2),
                     (SettingId::QPACK_MAX_BLOCKED_STREAMS, 0xfad3),
                     (SettingId(95), 0),
+                    (SettingId::NONE, 0),
+                    (SettingId::NONE, 0),
+                    (SettingId::NONE, 0),
+                    (SettingId::NONE, 0),
                 ],
                 len: 4,
             }),
@@ -607,6 +665,10 @@ mod tests {
                     (SettingId::QPACK_MAX_BLOCKED_STREAMS, 0xfad3),
                     // check without the Grease setting because this is ignored
                     (SettingId(0), 0),
+                    (SettingId::NONE, 0),
+                    (SettingId::NONE, 0),
+                    (SettingId::NONE, 0),
+                    (SettingId::NONE, 0),
                 ],
                 len: 3,
             }),

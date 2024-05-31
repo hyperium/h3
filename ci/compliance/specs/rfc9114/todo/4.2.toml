@@ -2,13 +2,6 @@ target = "https://www.rfc-editor.org/rfc/rfc9114#section-4.2"
 
 [[TODO]]
 quote = '''
-A request or
-response containing uppercase characters in field names MUST be
-treated as malformed.
-'''
-
-[[TODO]]
-quote = '''
 An endpoint MUST NOT generate
 an HTTP/3 field section containing connection-specific fields; any
 message containing connection-specific fields MUST be treated as

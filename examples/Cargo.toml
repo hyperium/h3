@@ -2,24 +2,42 @@
 name = "examples"
 version = "0.0.0"
 publish = false
-edition = "2018"
+edition = "2021"
 
 # If you copy one of the examples into a new project, you should be using
 # [dependencies] instead.
 [dev-dependencies]
+anyhow = "1.0"
 bytes = "1"
 futures = "0.3"
 h3 = { path = "../h3" }
 h3-quinn = { path = "../h3-quinn" }
-http = "0.2"
-quinn = { version = "0.8", default-features = false, features = ["tls-rustls", "ring"] }
-rcgen = { version = "0.9" }
-rustls = { version = "0.20", features = ["dangerous_configuration"] }
-rustls-native-certs = "0.6"
+h3-webtransport = { path = "../h3-webtransport" }
+http = "1"
+quinn = { version = "0.11", default-features = false, features = [
+    "runtime-tokio",
+    "rustls",
+    "ring",
+] }
+rcgen = { version = "0.13" }
+rustls = { version = "0.23", default-features = false, features = ["logging", "ring", "std"] }
+rustls-native-certs = "0.7"
 structopt = "0.3"
-tokio = { version = "1.6", features = ["full"] }
-tracing = "0.1.10"
-tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "ansi", "env-filter", "time", "tracing-log"] }
+tokio = { version = "1.27", features = ["full"] }
+tracing = "0.1.37"
+tracing-subscriber = { version = "0.3", default-features = false, features = [
+    "fmt",
+    "ansi",
+    "env-filter",
+    "time",
+    "tracing-log",
+] }
+octets = "0.3.0"
+
+tracing-tree = { version = "0.3" }
+
+[features]
+tree = []
 
 [[example]]
 name = "client"
@@ -28,3 +46,7 @@ path = "client.rs"
 [[example]]
 name = "server"
 path = "server.rs"
+
+[[example]]
+name = "webtransport_server"
+path = "webtransport_server.rs"

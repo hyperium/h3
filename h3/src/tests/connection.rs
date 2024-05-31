@@ -5,11 +5,13 @@ use std::{borrow::BorrowMut, time::Duration};
 
 use assert_matches::assert_matches;
 use bytes::{Buf, Bytes, BytesMut};
-use futures_util::{future, StreamExt};
+use futures_util::future;
 use http::{Request, Response, StatusCode};
+use tokio::sync::oneshot::{self};
 
+use crate::client::SendRequest;
+use crate::{client, server};
 use crate::{
-    client::{self, SendRequest},
     connection::ConnectionState,
     error::{Code, Error, Kind},
     proto::{
@@ -20,7 +22,6 @@ use crate::{
         varint::VarInt,
     },
     quic::{self, SendStream},
-    server,
 };
 
 use super::h3_quinn;
@@ -32,15 +33,16 @@ async fn connect() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let _ = client::new(pair.client().await).await.expect("client init");
+        let (mut drive, _client) = client::new(pair.client().await).await.expect("client init");
+        future::poll_fn(|cx| drive.poll_close(cx)).await.unwrap();
     };
 
     let server_fut = async {
         let conn = server.next().await;
-        let _ = server::Connection::new(conn).await.unwrap();
+        let _server = server::Connection::new(conn).await.unwrap();
     };
 
-    tokio::join!(server_fut, client_fut);
+    tokio::select!(() = server_fut => (), () = client_fut => panic!("client resolved first"));
 }
 
 #[tokio::test]
@@ -48,14 +50,21 @@ async fn accept_request_end_on_client_close() {
     let mut pair = Pair::default();
     let mut server = pair.server();
 
+    let (tx, rx) = oneshot::channel::<()>();
+
     let client_fut = async {
-        let _ = client::new(pair.client().await).await.expect("client init");
+        let client = pair.client().await;
+        let client = client::new(client).await.expect("client init");
+        // wait for the server to accept the connection
+        rx.await.unwrap();
         // client is dropped, it will send H3_NO_ERROR
+        drop(client);
     };
 
     let server_fut = async {
         let conn = server.next().await;
         let mut incoming = server::Connection::new(conn).await.unwrap();
+        tx.send(()).unwrap();
         // Accept returns Ok(None)
         assert!(incoming.accept().await.unwrap().is_none());
     };
@@ -65,6 +74,7 @@ async fn accept_request_end_on_client_close() {
 
 #[tokio::test]
 async fn server_drop_close() {
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -73,8 +83,8 @@ async fn server_drop_close() {
         let _ = server::Connection::new(conn).await.unwrap();
     };
 
-    let (mut conn, mut send) = client::new(pair.client().await).await.expect("client init");
     let client_fut = async {
+        let (mut conn, mut send) = client::new(pair.client().await).await.expect("client init");
         let request_fut = async move {
             let mut request_stream = send
                 .send_request(Request::get("http://no.way").body(()).unwrap())
@@ -93,8 +103,45 @@ async fn server_drop_close() {
     tokio::join!(server_fut, client_fut);
 }
 
+// In this test the client calls send_data() without doing a finish(),
+// i.e client keeps the body stream open. And cient expects server to
+// read_data() and send a response
+#[tokio::test]
+async fn server_send_data_without_finish() {
+    let mut pair = Pair::default();
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let (_driver, mut send_request) = client::new(pair.client().await).await.unwrap();
+
+        let mut req = send_request
+            .send_request(Request::get("http://no.way").body(()).unwrap())
+            .await
+            .unwrap();
+        let data = vec![0; 100];
+        req.send_data(bytes::Bytes::copy_from_slice(&data))
+            .await
+            .unwrap();
+        let _ = req.recv_response().await.unwrap();
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming = server::Connection::new(conn).await.unwrap();
+        let (_, mut stream) = incoming.accept().await.unwrap().unwrap();
+        let mut data = stream.recv_data().await.unwrap().unwrap();
+        let data = data.copy_to_bytes(data.remaining());
+        assert_eq!(data.len(), 100);
+        response(stream).await;
+        server.endpoint.wait_idle().await;
+    };
+
+    tokio::join!(server_fut, client_fut);
+}
+
 #[tokio::test]
 async fn client_close_only_on_last_sender_drop() {
+    init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
 
@@ -109,18 +156,24 @@ async fn client_close_only_on_last_sender_drop() {
     let client_fut = async {
         let (mut conn, mut send1) = client::new(pair.client().await).await.expect("client init");
         let mut send2 = send1.clone();
-        let _ = send1
+        let mut request_stream_1 = send1
             .send_request(Request::get("http://no.way").body(()).unwrap())
             .await
-            .unwrap()
-            .finish()
-            .await;
-        let _ = send2
+            .unwrap();
+
+        let _ = request_stream_1.recv_response().await;
+
+        let _ = request_stream_1.finish().await;
+
+        let mut request_stream_2 = send2
             .send_request(Request::get("http://no.way").body(()).unwrap())
             .await
-            .unwrap()
-            .finish()
-            .await;
+            .unwrap();
+
+        let _ = request_stream_2.recv_response().await;
+
+        let _ = request_stream_2.finish().await;
+
         drop(send1);
         drop(send2);
 
@@ -144,7 +197,8 @@ async fn settings_exchange_client() {
                 if client
                     .shared_state()
                     .read("client")
-                    .peer_max_field_section_size
+                    .peer_config
+                    .max_field_section_size
                     == 12
                 {
                     return;
@@ -202,7 +256,12 @@ async fn settings_exchange_server() {
 
         let settings_change = async {
             for _ in 0..10 {
-                if state.read("setting_change").peer_max_field_section_size == 12 {
+                if state
+                    .read("setting_change")
+                    .peer_config
+                    .max_field_section_size
+                    == 12
+                {
                     return;
                 }
                 tokio::time::sleep(Duration::from_millis(2)).await;
@@ -218,7 +277,7 @@ async fn settings_exchange_server() {
 #[tokio::test]
 async fn client_error_on_bidi_recv() {
     let mut pair = Pair::default();
-    let mut server = pair.server();
+    let server = pair.server();
 
     macro_rules! check_err {
         ($e:expr) => {
@@ -247,8 +306,7 @@ async fn client_error_on_bidi_recv() {
     };
 
     let server_fut = async {
-        let quinn::NewConnection { connection, .. } =
-            server.incoming.next().await.unwrap().await.unwrap();
+        let connection = server.endpoint.accept().await.unwrap().await.unwrap();
         let (mut send, _recv) = connection.open_bi().await.unwrap();
         for _ in 0..100 {
             match send.write(b"I'm not really a server").await {
@@ -274,7 +332,7 @@ async fn two_control_streams() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let new_connection = pair.client_inner().await;
+        let connection = pair.client_inner().await;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
         //= type=test
@@ -282,7 +340,7 @@ async fn two_control_streams() {
         //# receipt of a second stream claiming to be a control stream MUST be
         //# treated as a connection error of type H3_STREAM_CREATION_ERROR.
         for _ in 0..=1 {
-            let mut control_stream = new_connection.connection.open_uni().await.unwrap();
+            let mut control_stream = connection.open_uni().await.unwrap();
             let mut buf = BytesMut::new();
             StreamType::CONTROL.encode(&mut buf);
             control_stream.write_all(&buf[..]).await.unwrap();
@@ -313,8 +371,8 @@ async fn control_close_send_error() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let new_connection = pair.client_inner().await;
-        let mut control_stream = new_connection.connection.open_uni().await.unwrap();
+        let connection = pair.client_inner().await;
+        let mut control_stream = connection.open_uni().await.unwrap();
 
         let mut buf = BytesMut::new();
         StreamType::CONTROL.encode(&mut buf);
@@ -325,19 +383,33 @@ async fn control_close_send_error() {
         //# If either control
         //# stream is closed at any point, this MUST be treated as a connection
         //# error of type H3_CLOSED_CRITICAL_STREAM.
-        control_stream.finish().await.unwrap(); // close the client control stream immediately
+        control_stream.finish().unwrap(); // close the client control stream immediately
 
-        let (mut driver, _send) = client::new(h3_quinn::Connection::new(new_connection))
-            .await
-            .unwrap();
+        // create the Connection manually so it does not open a second Control stream
 
-        future::poll_fn(|cx| driver.poll_close(cx)).await
+        let connection_error = loop {
+            let accepted = connection.accept_bi().await;
+            match accepted {
+                // do nothing with the stream
+                Ok(_) => continue,
+                Err(err) => break err,
+            }
+        };
+
+        let err_code = match connection_error {
+            quinn::ConnectionError::ApplicationClosed(quinn::ApplicationClose {
+                error_code,
+                ..
+            }) => error_code.into_inner(),
+            e => panic!("unexpected error: {:?}", e),
+        };
+        assert_eq!(err_code, Code::H3_CLOSED_CRITICAL_STREAM.value());
     };
 
     let server_fut = async {
         let conn = server.next().await;
         let mut incoming = server::Connection::new(conn).await.unwrap();
-        // Driver detects that the recieving side of the control stream has been closed
+        // Driver detects that the receiving side of the control stream has been closed
         assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err().kind(),
             Kind::Application { reason: Some(reason), code: Code::H3_CLOSED_CRITICAL_STREAM, .. }
@@ -349,7 +421,7 @@ async fn control_close_send_error() {
             if *reason == *"control stream closed");
     };
 
-    tokio::select! { _ = server_fut => (), _ = client_fut => panic!("client resolved first") };
+    tokio::join!(server_fut, client_fut);
 }
 
 #[tokio::test]
@@ -359,8 +431,8 @@ async fn missing_settings() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let new_connection = pair.client_inner().await;
-        let mut control_stream = new_connection.connection.open_uni().await.unwrap();
+        let connection = pair.client_inner().await;
+        let mut control_stream = connection.open_uni().await.unwrap();
 
         let mut buf = BytesMut::new();
         StreamType::CONTROL.encode(&mut buf);
@@ -398,8 +470,8 @@ async fn control_stream_frame_unexpected() {
     let mut server = pair.server();
 
     let client_fut = async {
-        let new_connection = pair.client_inner().await;
-        let mut control_stream = new_connection.connection.open_uni().await.unwrap();
+        let connection = pair.client_inner().await;
+        let mut control_stream = connection.open_uni().await.unwrap();
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.1
         //= type=test
@@ -458,18 +530,18 @@ async fn timeout_on_control_frame_read() {
 async fn goaway_from_server_not_request_id() {
     init_tracing();
     let mut pair = Pair::default();
-    let (_, mut server) = pair.server_inner();
+    let server = pair.server_inner();
 
     let client_fut = async {
-        let new_connection = pair.client_inner().await;
-        let mut control_stream = new_connection.connection.open_uni().await.unwrap();
+        let connection = pair.client_inner().await;
+        let mut control_stream = connection.open_uni().await.unwrap();
 
         let mut buf = BytesMut::new();
         StreamType::CONTROL.encode(&mut buf);
         control_stream.write_all(&buf[..]).await.unwrap();
-        control_stream.finish().await.unwrap(); // close the client control stream immediately
+        control_stream.finish().unwrap(); // close the client control stream immediately
 
-        let (mut driver, _send) = client::new(h3_quinn::Connection::new(new_connection))
+        let (mut driver, _send) = client::new(h3_quinn::Connection::new(connection))
             .await
             .unwrap();
 
@@ -487,8 +559,8 @@ async fn goaway_from_server_not_request_id() {
     };
 
     let server_fut = async {
-        let conn = server.next().await.unwrap().await.unwrap();
-        let mut control_stream = conn.connection.open_uni().await.unwrap();
+        let conn = server.accept().await.unwrap().await.unwrap();
+        let mut control_stream = conn.open_uni().await.unwrap();
 
         let mut buf = BytesMut::new();
         StreamType::CONTROL.encode(&mut buf);

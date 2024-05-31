@@ -7,26 +7,30 @@ use std::{
 use bytes::{Buf, Bytes, BytesMut};
 use futures_util::{future, ready};
 use http::HeaderMap;
-use tracing::warn;
+use stream::WriteBuf;
+use tracing::{trace, warn};
 
 use crate::{
+    config::{Config, Settings},
     error::{Code, Error},
     frame::FrameStream,
     proto::{
-        frame::{Frame, PayloadLen, SettingId, Settings},
+        frame::{self, Frame, PayloadLen},
         headers::Header,
         stream::StreamType,
         varint::VarInt,
     },
     qpack,
     quic::{self, SendStream as _},
-    stream::{self, AcceptRecvStream, AcceptedRecvStream},
+    stream::{self, AcceptRecvStream, AcceptedRecvStream, BufRecvStream, UniStreamHeader},
+    webtransport::SessionId,
 };
 
 #[doc(hidden)]
+#[non_exhaustive]
 pub struct SharedState {
-    // maximum size for a header we send
-    pub peer_max_field_section_size: u64,
+    // Peer settings
+    pub peer_config: Settings,
     // connection-wide error, concerns all RequestStreams and drivers
     pub error: Option<Error>,
     // Has a GOAWAY frame been sent or received?
@@ -50,13 +54,14 @@ impl SharedStateRef {
 impl Default for SharedStateRef {
     fn default() -> Self {
         Self(Arc::new(RwLock::new(SharedState {
-            peer_max_field_section_size: VarInt::MAX.0,
+            peer_config: Default::default(),
             error: None,
             closing: false,
         })))
     }
 }
 
+#[allow(missing_docs)]
 pub trait ConnectionState {
     fn shared_state(&self) -> &SharedStateRef;
 
@@ -69,67 +74,84 @@ pub trait ConnectionState {
     }
 }
 
+#[allow(missing_docs)]
+pub struct AcceptedStreams<C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    #[allow(missing_docs)]
+    pub wt_uni_streams: Vec<(SessionId, BufRecvStream<C::RecvStream, B>)>,
+}
+
+impl<B, C> Default for AcceptedStreams<C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    fn default() -> Self {
+        Self {
+            wt_uni_streams: Default::default(),
+        }
+    }
+}
+
+#[allow(missing_docs)]
 pub struct ConnectionInner<C, B>
 where
     C: quic::Connection<B>,
     B: Buf,
 {
     pub(super) shared: SharedStateRef,
-    conn: C,
+    /// TODO: breaking encapsulation just to see if we can get this to work, will fix before merging
+    pub conn: C,
     control_send: C::SendStream,
     control_recv: Option<FrameStream<C::RecvStream, B>>,
     decoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
     encoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
-    pending_recv_streams: Vec<AcceptRecvStream<C::RecvStream>>,
+    /// Buffers incoming uni/recv streams which have yet to be claimed.
+    ///
+    /// This is opposed to discarding them by returning in `poll_accept_recv`, which may cause them to be missed by something else polling.
+    ///
+    /// See: <https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-4.5>
+    ///
+    /// In WebTransport over HTTP/3, the client MAY send its SETTINGS frame, as well as
+    /// multiple WebTransport CONNECT requests, WebTransport data streams and WebTransport
+    /// datagrams, all within a single flight. As those can arrive out of order, a WebTransport
+    /// server could be put into a situation where it receives a stream or a datagram without a
+    /// corresponding session. Similarly, a client may receive a server-initiated stream or a
+    /// datagram before receiving the CONNECT response headers from the server.To handle this
+    /// case, WebTransport endpoints SHOULD buffer streams and datagrams until those can be
+    /// associated with an established session. To avoid resource exhaustion, the endpoints
+    /// MUST limit the number of buffered streams and datagrams. When the number of buffered
+    /// streams is exceeded, a stream SHALL be closed by sending a RESET_STREAM and/or
+    /// STOP_SENDING with the H3_WEBTRANSPORT_BUFFERED_STREAM_REJECTED error code. When the
+    /// number of buffered datagrams is exceeded, a datagram SHALL be dropped. It is up to an
+    /// implementation to choose what stream or datagram to discard.
+    accepted_streams: AcceptedStreams<C, B>,
+
+    pending_recv_streams: Vec<AcceptRecvStream<C::RecvStream, B>>,
+
     got_peer_settings: bool,
-    pub(super) send_grease_frame: bool,
+    pub send_grease_frame: bool,
+    pub config: Config,
 }
 
-impl<C, B> ConnectionInner<C, B>
+impl<B, C> ConnectionInner<C, B>
 where
     C: quic::Connection<B>,
     B: Buf,
 {
-    pub async fn new(
-        mut conn: C,
-        max_field_section_size: u64,
-        shared: SharedStateRef,
-        grease: bool,
-    ) -> Result<Self, Error> {
-        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
-        //# Endpoints SHOULD create the HTTP control stream as well as the
-        //# unidirectional streams required by mandatory extensions (such as the
-        //# QPACK encoder and decoder streams) first, and then create additional
-        //# streams as allowed by their peer.
-        let mut control_send = future::poll_fn(|cx| conn.poll_open_send(cx))
-            .await
-            .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))?;
+    pub async fn send_settings(&mut self) -> Result<(), Error> {
+        #[cfg(test)]
+        if !self.config.send_settings {
+            return Ok(());
+        }
 
-        let mut settings = Settings::default();
-        settings
-            .insert(SettingId::MAX_HEADER_LIST_SIZE, max_field_section_size)
+        let settings = frame::Settings::try_from(self.config)
             .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
 
-        if grease {
-            //  Grease Settings (https://www.rfc-editor.org/rfc/rfc9114.html#name-defined-settings-parameters)
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
-            //# Setting identifiers of the format 0x1f * N + 0x21 for non-negative
-            //# integer values of N are reserved to exercise the requirement that
-            //# unknown identifiers be ignored.  Such settings have no defined
-            //# meaning.  Endpoints SHOULD include at least one such setting in their
-            //# SETTINGS frame.
-
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
-            //# Setting identifiers that were defined in [HTTP/2] where there is no
-            //# corresponding HTTP/3 setting have also been reserved
-            //# (Section 11.2.2).  These reserved settings MUST NOT be sent, and
-            //# their receipt MUST be treated as a connection error of type
-            //# H3_SETTINGS_ERROR.
-            match settings.insert(SettingId::grease(), 0) {
-                Ok(_) => (),
-                Err(err) => warn!("Error when adding the grease Setting. Reason {}", err),
-            }
-        }
+        tracing::debug!("Sending server settings: {:#x?}", settings);
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-3.2
         //# After the QUIC connection is
@@ -156,11 +178,26 @@ where
         //# Endpoints MUST NOT require any data to be received from
         //# the peer prior to sending the SETTINGS frame; settings MUST be sent
         //# as soon as the transport is ready to send data.
+        trace!("Sending Settings frame: {:#x?}", settings);
         stream::write(
-            &mut control_send,
-            (StreamType::CONTROL, Frame::Settings(settings)),
+            &mut self.control_send,
+            WriteBuf::from(UniStreamHeader::Control(settings)),
         )
         .await?;
+
+        Ok(())
+    }
+
+    /// Initiates the connection and opens a control stream
+    pub async fn new(mut conn: C, shared: SharedStateRef, config: Config) -> Result<Self, Error> {
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
+        //# Endpoints SHOULD create the HTTP control stream as well as the
+        //# unidirectional streams required by mandatory extensions (such as the
+        //# QPACK encoder and decoder streams) first, and then create additional
+        //# streams as allowed by their peer.
+        let control_send = future::poll_fn(|cx| conn.poll_open_send(cx))
+            .await
+            .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))?;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
         //= type=implication
@@ -176,10 +213,15 @@ where
             encoder_recv: None,
             pending_recv_streams: Vec::with_capacity(3),
             got_peer_settings: false,
-            send_grease_frame: grease,
+            send_grease_frame: config.send_grease,
+            config,
+            accepted_streams: Default::default(),
         };
+
+        conn_inner.send_settings().await?;
+
         // start a grease stream
-        if grease {
+        if config.send_grease {
             //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
             //= type=implication
             //# Frame types of the format 0x1f * N + 0x21 for non-negative integer
@@ -193,6 +235,7 @@ where
     }
 
     /// Send GOAWAY with specified max_id, iff max_id is smaller than the previous one.
+
     pub async fn shutdown<T>(
         &mut self,
         sent_closing: &mut Option<T>,
@@ -220,6 +263,7 @@ where
         stream::write(&mut self.control_send, Frame::Goaway(max_id.into())).await
     }
 
+    #[allow(missing_docs)]
     pub fn poll_accept_request(
         &mut self,
         cx: &mut Context<'_>,
@@ -231,26 +275,31 @@ where
             }
         }
 
+        // Accept the request by accepting the next bidirectional stream
         // .into().into() converts the impl QuicError into crate::error::Error.
         // The `?` operator doesn't work here for some reason.
         self.conn.poll_accept_bidi(cx).map_err(|e| e.into().into())
     }
 
-    pub fn poll_accept_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+    /// Polls incoming streams
+    ///
+    /// Accepted streams which are not control, decoder, or encoder streams are buffer in `accepted_recv_streams`
+    pub fn poll_accept_recv(&mut self, cx: &mut Context<'_>) -> Result<(), Error> {
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
-            return Poll::Ready(Err(e.clone()));
+            return Err(e.clone());
         }
 
+        // Get all currently pending streams
         loop {
             match self.conn.poll_accept_recv(cx)? {
                 Poll::Ready(Some(stream)) => self
                     .pending_recv_streams
                     .push(AcceptRecvStream::new(stream)),
                 Poll::Ready(None) => {
-                    return Poll::Ready(Err(Code::H3_GENERAL_PROTOCOL_ERROR.with_reason(
+                    return Err(Code::H3_GENERAL_PROTOCOL_ERROR.with_reason(
                         "Connection closed unexpected",
                         crate::error::ErrorLevel::ConnectionError,
-                    )))
+                    ))
                 }
                 Poll::Pending => break,
             }
@@ -275,6 +324,7 @@ where
                 .pending_recv_streams
                 .remove(index - removed)
                 .into_stream()?;
+
             match stream {
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
                 //# Only one control stream per peer is permitted;
@@ -282,25 +332,32 @@ where
                 //# treated as a connection error of type H3_STREAM_CREATION_ERROR.
                 AcceptedRecvStream::Control(s) => {
                     if self.control_recv.is_some() {
-                        return Poll::Ready(Err(
+                        return Err(
                             self.close(Code::H3_STREAM_CREATION_ERROR, "got two control streams")
-                        ));
+                        );
                     }
                     self.control_recv = Some(s);
                 }
                 enc @ AcceptedRecvStream::Encoder(_) => {
                     if let Some(_prev) = self.encoder_recv.replace(enc) {
-                        return Poll::Ready(Err(
+                        return Err(
                             self.close(Code::H3_STREAM_CREATION_ERROR, "got two encoder streams")
-                        ));
+                        );
                     }
                 }
                 dec @ AcceptedRecvStream::Decoder(_) => {
                     if let Some(_prev) = self.decoder_recv.replace(dec) {
-                        return Poll::Ready(Err(
+                        return Err(
                             self.close(Code::H3_STREAM_CREATION_ERROR, "got two decoder streams")
-                        ));
+                        );
                     }
+                }
+                AcceptedRecvStream::WebTransportUni(id, s)
+                    if self.config.settings.enable_webtransport =>
+                {
+                    // Store until someone else picks it up, like a webtransport session which is
+                    // not yet established.
+                    self.accepted_streams.wt_uni_streams.push((id, s))
                 }
 
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
@@ -311,28 +368,27 @@ where
             }
         }
 
-        Poll::Pending
+        Ok(())
     }
 
+    /// Waits for the control stream to be received and reads subsequent frames.
     pub fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<Frame<PayloadLen>, Error>> {
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
             return Poll::Ready(Err(e.clone()));
         }
 
-        loop {
-            match self.poll_accept_recv(cx) {
-                Poll::Ready(Ok(_)) => continue,
-                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
-                Poll::Pending if self.control_recv.is_none() => return Poll::Pending,
-                _ => break,
+        let recv = {
+            // TODO
+            self.poll_accept_recv(cx)?;
+            if let Some(v) = &mut self.control_recv {
+                v
+            } else {
+                // Try later
+                return Poll::Pending;
             }
-        }
+        };
 
-        let recvd = ready!(self
-            .control_recv
-            .as_mut()
-            .expect("control_recv")
-            .poll_next(cx))?;
+        let recvd = ready!(recv.poll_next(cx))?;
 
         let res = match recvd {
             //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
@@ -367,11 +423,9 @@ where
                         //= type=implication
                         //# Endpoints MUST NOT consider such settings to have
                         //# any meaning upon receipt.
-                        self.shared
-                            .write("connection settings write")
-                            .peer_max_field_section_size = settings
-                            .get(SettingId::MAX_HEADER_LIST_SIZE)
-                            .unwrap_or(VarInt::MAX.0);
+                        let mut shared = self.shared.write("connection settings write");
+                        shared.peer_config = (&settings).into();
+
                         Ok(Frame::Settings(settings))
                     }
                     f @ Frame::Goaway(_) => Ok(f),
@@ -524,8 +578,14 @@ where
             Err(err) => warn!("grease stream error on close {}", err),
         };
     }
+
+    #[allow(missing_docs)]
+    pub fn accepted_streams_mut(&mut self) -> &mut AcceptedStreams<C, B> {
+        &mut self.accepted_streams
+    }
 }
 
+#[allow(missing_docs)]
 pub struct RequestStream<S, B> {
     pub(super) stream: FrameStream<S, B>,
     pub(super) trailers: Option<Bytes>,
@@ -535,6 +595,7 @@ pub struct RequestStream<S, B> {
 }
 
 impl<S, B> RequestStream<S, B> {
+    #[allow(missing_docs)]
     pub fn new(
         stream: FrameStream<S, B>,
         max_field_section_size: u64,
@@ -562,16 +623,21 @@ where
     S: quic::RecvStream,
 {
     /// Receive some of the request body.
-    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
+    pub fn poll_recv_data(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<impl Buf>, Error>> {
         if !self.stream.has_data() {
-            let frame = future::poll_fn(|cx| self.stream.poll_next(cx))
-                .await
+            let frame = self
+                .stream
+                .poll_next(cx)
                 .map_err(|e| self.maybe_conn_err(e))?;
-            match frame {
+
+            match ready!(frame) {
                 Some(Frame::Data { .. }) => (),
                 Some(Frame::Headers(encoded)) => {
                     self.trailers = Some(encoded);
-                    return Ok(None);
+                    return Poll::Ready(Ok(None));
                 }
 
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
@@ -596,15 +662,18 @@ where
                 //# The MAX_PUSH_ID frame is always sent on the control stream.  Receipt
                 //# of a MAX_PUSH_ID frame on any other stream MUST be treated as a
                 //# connection error of type H3_FRAME_UNEXPECTED.
-                Some(_) => return Err(Code::H3_FRAME_UNEXPECTED.into()),
-                None => return Ok(None),
+                Some(_) => return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED.into())),
+                None => return Poll::Ready(Ok(None)),
             }
         }
 
-        let data = future::poll_fn(|cx| self.stream.poll_data(cx))
-            .await
-            .map_err(|e| self.maybe_conn_err(e))?;
-        Ok(data)
+        self.stream
+            .poll_data(cx)
+            .map_err(|e| self.maybe_conn_err(e))
+    }
+    /// Receive some of the request body.
+    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
+        future::poll_fn(|cx| self.poll_recv_data(cx)).await
     }
 
     /// Receive trailers
@@ -675,6 +744,7 @@ where
         Ok(Some(Header::try_from(fields)?.into_fields()))
     }
 
+    #[allow(missing_docs)]
     pub fn stop_sending(&mut self, err_code: Code) {
         self.stream.stop_sending(err_code);
     }
@@ -707,7 +777,8 @@ where
         let max_mem_size = self
             .conn_state
             .read("send_trailers shared state read")
-            .peer_max_field_section_size;
+            .peer_config
+            .max_field_section_size;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
         //# An implementation that
@@ -729,6 +800,7 @@ where
         self.stream.reset(code.into());
     }
 
+    #[allow(missing_docs)]
     pub async fn finish(&mut self) -> Result<(), Error> {
         if self.send_grease_frame {
             // send a grease frame once per Connection
@@ -737,9 +809,7 @@ where
                 .map_err(|e| self.maybe_conn_err(e))?;
             self.send_grease_frame = false;
         }
-        future::poll_fn(|cx| self.stream.poll_ready(cx))
-            .await
-            .map_err(|e| self.maybe_conn_err(e))?;
+
         future::poll_fn(|cx| self.stream.poll_finish(cx))
             .await
             .map_err(|e| self.maybe_conn_err(e))

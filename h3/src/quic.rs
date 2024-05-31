@@ -7,6 +7,7 @@ use std::task::{self, Poll};
 
 use bytes::Buf;
 
+use crate::ext::Datagram;
 pub use crate::proto::stream::{InvalidStreamId, StreamId};
 pub use crate::stream::WriteBuf;
 
@@ -34,7 +35,7 @@ pub trait Connection<B: Buf>: OpenStreams<B> {
     /// The type produced by `poll_accept_recv()`
     type RecvStream: RecvStream;
     /// A producer of outgoing Unidirectional and Bidirectional streams.
-    type OpenStreams: OpenStreams<B>;
+    type OpenStreams: OpenStreams<B, SendStream = Self::SendStream, BidiStream = Self::BidiStream>;
     /// Error type yielded by these trait methods
     type AcceptError: Into<Box<dyn Error>>;
 
@@ -56,6 +57,33 @@ pub trait Connection<B: Buf>: OpenStreams<B> {
 
     /// Get an object to open outgoing streams.
     fn opener(&self) -> Self::OpenStreams;
+}
+
+/// Extends the `Connection` trait for sending datagrams
+///
+/// See: <https://www.rfc-editor.org/rfc/rfc9297>
+pub trait SendDatagramExt<B: Buf> {
+    /// The error type that can occur when sending a datagram
+    type Error: Into<Box<dyn Error>>;
+
+    /// Send a datagram
+    fn send_datagram(&mut self, data: Datagram<B>) -> Result<(), Self::Error>;
+}
+
+/// Extends the `Connection` trait for receiving datagrams
+///
+/// See: <https://www.rfc-editor.org/rfc/rfc9297>
+pub trait RecvDatagramExt {
+    /// The type of `Buf` for *raw* datagrams (without the stream_id decoded)
+    type Buf: Buf;
+    /// The error type that can occur when receiving a datagram
+    type Error: Into<Box<dyn Error>>;
+
+    /// Poll the connection for incoming datagrams.
+    fn poll_accept_datagram(
+        &mut self,
+        cx: &mut task::Context<'_>,
+    ) -> Poll<Result<Option<Self::Buf>, Self::Error>>;
 }
 
 /// Trait for opening outgoing streams
@@ -101,7 +129,21 @@ pub trait SendStream<B: Buf> {
     fn reset(&mut self, reset_code: u64);
 
     /// Get QUIC send stream id
-    fn id(&self) -> StreamId;
+    fn send_id(&self) -> StreamId;
+}
+
+/// Allows sending unframed pure bytes to a stream. Similar to [`AsyncWrite`](https://docs.rs/tokio/latest/tokio/io/trait.AsyncWrite.html)
+pub trait SendStreamUnframed<B: Buf>: SendStream<B> {
+    /// Attempts write data into the stream.
+    ///
+    /// Returns the number of bytes written.
+    ///
+    /// `buf` is advanced by the number of bytes written.
+    fn poll_send<D: Buf>(
+        &mut self,
+        cx: &mut task::Context<'_>,
+        buf: &mut D,
+    ) -> Poll<Result<usize, Self::Error>>;
 }
 
 /// A trait describing the "receive" actions of a QUIC stream.
@@ -122,6 +164,9 @@ pub trait RecvStream {
 
     /// Send a `STOP_SENDING` QUIC code.
     fn stop_sending(&mut self, error_code: u64);
+
+    /// Get QUIC send stream id
+    fn recv_id(&self) -> StreamId;
 }
 
 /// Optional trait to allow "splitting" a bidirectional stream into two sides.
