@@ -201,9 +201,6 @@ impl Iterator for HeaderIter {
     }
 }
 
-//= https://www.rfc-editor.org/rfc/rfc9114#section-4.3.1
-//# If these fields are present, they MUST NOT be
-//# empty.
 impl TryFrom<Vec<HeaderField>> for Header {
     type Error = HeaderError;
     fn try_from(headers: Vec<HeaderField>) -> Result<Self, Self::Error> {
@@ -293,6 +290,9 @@ impl Field {
 
         Ok(match name {
             b":scheme" => Field::Scheme(try_value(name, value)?),
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3.1
+            //# If these fields are present, they MUST NOT be
+            //# empty.
             b":authority" => Field::Authority(try_value(name, value)?),
             b":path" => Field::Path(try_value(name, value)?),
             b":method" => Field::Method(
