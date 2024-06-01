@@ -1,6 +1,6 @@
 [package]
 name = "h3"
-version = "0.0.4"
+version = "0.0.5"
 rust-version = "1.63"
 authors = [
     "Sean McArthur <sean@seanmonstar.com>",
@@ -35,14 +35,14 @@ fastrand = "2.0.1"
 assert_matches = "1.5.0"
 futures-util = { version = "0.3", default-features = false, features = ["io"] }
 proptest = "1"
-quinn = { version = "0.10", default-features = false, features = [
+quinn = { version = "0.11", default-features = false, features = [
     "runtime-tokio",
-    "tls-rustls",
+    "rustls",
     "ring",
 ] }
-quinn-proto = { version = "0.10", default-features = false }
-rcgen = "0.12"
-rustls = "0.21"
+quinn-proto = { version = "0.11", default-features = false }
+rcgen = "0.13"
+rustls = { version = "0.23", default-features = false, features = ["logging", "ring", "std"] }
 tokio = { version = "1", features = ["rt", "macros", "io-util", "io-std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = [
     "fmt",

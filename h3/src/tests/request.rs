@@ -69,6 +69,8 @@ async fn get() {
             .await
             .expect("send_data");
         request_stream.finish().await.expect("finish");
+
+        let _ = incoming_req.accept().await.unwrap();
     };
 
     tokio::join!(server_fut, client_fut);
@@ -131,6 +133,8 @@ async fn get_with_trailers_unknown_content_type() {
             .await
             .expect("send_trailers");
         request_stream.finish().await.expect("finish");
+
+        let _ = incoming_req.accept().await.unwrap();
     };
 
     tokio::join!(server_fut, client_fut);
@@ -193,6 +197,8 @@ async fn get_with_trailers_known_content_type() {
             .await
             .expect("send_trailers");
         request_stream.finish().await.expect("finish");
+
+        let _ = incoming_req.accept().await.unwrap();
     };
 
     tokio::join!(server_fut, client_fut);
@@ -246,6 +252,9 @@ async fn post() {
             .expect("server recv body");
         assert_eq!(request_body.chunk(), b"wonderful json");
         request_stream.finish().await.expect("client finish");
+
+        // keep connection until client is finished
+        let _ = incoming_req.accept().await.expect("accept");
     };
 
     tokio::join!(server_fut, client_fut);
@@ -328,6 +337,7 @@ async fn header_too_big_response_from_server_trailers() {
                 .await
                 .expect("send trailers");
             request_stream.finish().await.expect("client finish");
+            let _ = request_stream.recv_response().await;
         };
         tokio::select! {biased; _ = req_fut => (), _ = drive_fut => () }
     };
@@ -373,7 +383,18 @@ async fn header_too_big_client_error() {
 
     let client_fut = async {
         let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
-        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let drive_fut = async {
+            let err = future::poll_fn(|cx| driver.poll_close(cx))
+                .await
+                .unwrap_err();
+            match err.kind() {
+                // The client never sends a data on the request stream
+                Kind::Application { code, .. } => {
+                    assert_eq!(code, Code::H3_REQUEST_INCOMPLETE)
+                }
+                _ => panic!("unexpected error: {:?}", err),
+            }
+        };
         let req_fut = async {
             // pretend client already received server's settings
             client
@@ -398,20 +419,19 @@ async fn header_too_big_client_error() {
                 }
             );
         };
-        tokio::select! {biased; _ = req_fut => (),_ = drive_fut => () }
+        tokio::join! {req_fut, drive_fut }
     };
 
     let server_fut = async {
         let conn = server.next().await;
-        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
-        //= type=test
-        //# An HTTP/3 implementation MAY impose a limit on the maximum size of
-        //# the message header it will accept on an individual HTTP message.
-        server::builder()
+
+        let mut incoming_req = server::builder()
             .max_field_section_size(12)
             .build(conn)
             .await
             .unwrap();
+
+        let _ = incoming_req.accept().await;
     };
 
     tokio::join!(server_fut, client_fut);
@@ -425,7 +445,15 @@ async fn header_too_big_client_error_trailer() {
 
     let client_fut = async {
         let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
-        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let drive_fut = async {
+            let err = future::poll_fn(|cx| driver.poll_close(cx))
+                .await
+                .unwrap_err();
+            match err.kind() {
+                Kind::Timeout => (),
+                _ => panic!("unexpected error: {:?}", err),
+            }
+        };
         let req_fut = async {
             client
                 .shared_state()
@@ -461,7 +489,7 @@ async fn header_too_big_client_error_trailer() {
 
             request_stream.finish().await.expect("client finish");
         };
-        tokio::select! {biased; _ = req_fut => (), _ = drive_fut => () }
+        tokio::join! {req_fut,drive_fut};
     };
 
     let server_fut = async {
@@ -1406,7 +1434,7 @@ where
         let mut buf = BytesMut::new();
         request(&mut buf);
         req_send.write_all(&buf[..]).await.unwrap();
-        req_send.finish().await.unwrap();
+        req_send.finish().unwrap();
 
         let res = req_recv
             .read(&mut buf)

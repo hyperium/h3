@@ -19,8 +19,8 @@ use futures::{
     stream::{self, BoxStream},
     StreamExt,
 };
-use quinn::ReadDatagram;
 pub use quinn::{self, AcceptBi, AcceptUni, Endpoint, OpenBi, OpenUni, VarInt, WriteError};
+use quinn::{ApplicationClose, ClosedStream, ReadDatagram};
 
 use h3::{
     ext::Datagram,
@@ -81,10 +81,9 @@ impl Error for ConnectionError {
 
     fn err_code(&self) -> Option<u64> {
         match self.0 {
-            quinn::ConnectionError::ApplicationClosed(quinn_proto::ApplicationClose {
-                error_code,
-                ..
-            }) => Some(error_code.into_inner()),
+            quinn::ConnectionError::ApplicationClosed(ApplicationClose { error_code, .. }) => {
+                Some(error_code.into_inner())
+            }
             _ => None,
         }
     }
@@ -152,16 +151,14 @@ impl<B> quic::Connection<B> for Connection
 where
     B: Buf,
 {
-    type SendStream = SendStream<B>;
     type RecvStream = RecvStream;
-    type BidiStream = BidiStream<B>;
     type OpenStreams = OpenStreams;
-    type Error = ConnectionError;
+    type AcceptError = ConnectionError;
 
     fn poll_accept_bidi(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::BidiStream>, Self::Error>> {
+    ) -> Poll<Result<Option<Self::BidiStream>, Self::AcceptError>> {
         let (send, recv) = match ready!(self.incoming_bi.poll_next_unpin(cx)) {
             Some(x) => x?,
             None => return Poll::Ready(Ok(None)),
@@ -175,7 +172,7 @@ where
     fn poll_accept_recv(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::RecvStream>, Self::Error>> {
+    ) -> Poll<Result<Option<Self::RecvStream>, Self::AcceptError>> {
         let recv = match ready!(self.incoming_uni.poll_next_unpin(cx)) {
             Some(x) => x?,
             None => return Poll::Ready(Ok(None)),
@@ -183,10 +180,27 @@ where
         Poll::Ready(Ok(Some(Self::RecvStream::new(recv))))
     }
 
+    fn opener(&self) -> Self::OpenStreams {
+        OpenStreams {
+            conn: self.conn.clone(),
+            opening_bi: None,
+            opening_uni: None,
+        }
+    }
+}
+
+impl<B> quic::OpenStreams<B> for Connection
+where
+    B: Buf,
+{
+    type SendStream = SendStream<B>;
+    type BidiStream = BidiStream<B>;
+    type OpenError = ConnectionError;
+
     fn poll_open_bidi(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Self::BidiStream, Self::Error>> {
+    ) -> Poll<Result<Self::BidiStream, Self::OpenError>> {
         if self.opening_bi.is_none() {
             self.opening_bi = Some(Box::pin(stream::unfold(self.conn.clone(), |conn| async {
                 Some((conn.clone().open_bi().await, conn))
@@ -197,14 +211,14 @@ where
             ready!(self.opening_bi.as_mut().unwrap().poll_next_unpin(cx)).unwrap()?;
         Poll::Ready(Ok(Self::BidiStream {
             send: Self::SendStream::new(send),
-            recv: Self::RecvStream::new(recv),
+            recv: RecvStream::new(recv),
         }))
     }
 
     fn poll_open_send(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Self::SendStream, Self::Error>> {
+    ) -> Poll<Result<Self::SendStream, Self::OpenError>> {
         if self.opening_uni.is_none() {
             self.opening_uni = Some(Box::pin(stream::unfold(self.conn.clone(), |conn| async {
                 Some((conn.open_uni().await, conn))
@@ -213,14 +227,6 @@ where
 
         let send = ready!(self.opening_uni.as_mut().unwrap().poll_next_unpin(cx)).unwrap()?;
         Poll::Ready(Ok(Self::SendStream::new(send)))
-    }
-
-    fn opener(&self) -> Self::OpenStreams {
-        OpenStreams {
-            conn: self.conn.clone(),
-            opening_bi: None,
-            opening_uni: None,
-        }
     }
 
     fn close(&mut self, code: h3::error::Code, reason: &[u8]) {
@@ -279,15 +285,14 @@ impl<B> quic::OpenStreams<B> for OpenStreams
 where
     B: Buf,
 {
-    type RecvStream = RecvStream;
     type SendStream = SendStream<B>;
     type BidiStream = BidiStream<B>;
-    type Error = ConnectionError;
+    type OpenError = ConnectionError;
 
     fn poll_open_bidi(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Self::BidiStream, Self::Error>> {
+    ) -> Poll<Result<Self::BidiStream, Self::OpenError>> {
         if self.opening_bi.is_none() {
             self.opening_bi = Some(Box::pin(stream::unfold(self.conn.clone(), |conn| async {
                 Some((conn.open_bi().await, conn))
@@ -298,14 +303,14 @@ where
             ready!(self.opening_bi.as_mut().unwrap().poll_next_unpin(cx)).unwrap()?;
         Poll::Ready(Ok(Self::BidiStream {
             send: Self::SendStream::new(send),
-            recv: Self::RecvStream::new(recv),
+            recv: RecvStream::new(recv),
         }))
     }
 
     fn poll_open_send(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Self::SendStream, Self::Error>> {
+    ) -> Poll<Result<Self::SendStream, Self::OpenError>> {
         if self.opening_uni.is_none() {
             self.opening_uni = Some(Box::pin(stream::unfold(self.conn.clone(), |conn| async {
                 Some((conn.open_uni().await, conn))
@@ -529,7 +534,7 @@ impl Error for ReadError {
     fn err_code(&self) -> Option<u64> {
         match self.0 {
             quinn::ReadError::ConnectionLost(quinn::ConnectionError::ApplicationClosed(
-                quinn_proto::ApplicationClose { error_code, .. },
+                ApplicationClose { error_code, .. },
             )) => Some(error_code.into_inner()),
             quinn::ReadError::Reset(error_code) => Some(error_code.into_inner()),
             _ => None,
@@ -593,12 +598,8 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn poll_finish(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.stream
-            .as_mut()
-            .unwrap()
-            .poll_finish(cx)
-            .map_err(Into::into)
+    fn poll_finish(&mut self, _cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(self.stream.as_mut().unwrap().finish().map_err(|e| e.into()))
     }
 
     fn reset(&mut self, reset_code: u64) {
@@ -680,6 +681,8 @@ pub enum SendStreamError {
     /// Error when the stream is not ready, because it is still sending
     /// data from a previous call
     NotReady,
+    /// Error when the stream is closed
+    StreamClosed(ClosedStream),
 }
 
 impl From<SendStreamError> for std::io::Error {
@@ -689,6 +692,7 @@ impl From<SendStreamError> for std::io::Error {
             SendStreamError::NotReady => {
                 std::io::Error::new(std::io::ErrorKind::Other, "send stream is not ready")
             }
+            SendStreamError::StreamClosed(err) => err.into(),
         }
     }
 }
@@ -707,6 +711,12 @@ impl From<WriteError> for SendStreamError {
     }
 }
 
+impl From<ClosedStream> for SendStreamError {
+    fn from(value: ClosedStream) -> Self {
+        Self::StreamClosed(value)
+    }
+}
+
 impl Error for SendStreamError {
     fn is_timeout(&self) -> bool {
         matches!(
@@ -721,10 +731,7 @@ impl Error for SendStreamError {
         match self {
             Self::Write(quinn::WriteError::Stopped(error_code)) => Some(error_code.into_inner()),
             Self::Write(quinn::WriteError::ConnectionLost(
-                quinn::ConnectionError::ApplicationClosed(quinn_proto::ApplicationClose {
-                    error_code,
-                    ..
-                }),
+                quinn::ConnectionError::ApplicationClosed(ApplicationClose { error_code, .. }),
             )) => Some(error_code.into_inner()),
             _ => None,
         }

@@ -251,13 +251,13 @@ where
 
 /// Streams are opened, but the initial webtransport header has not been sent
 type PendingStreams<C, B> = (
-    BidiStream<<C as quic::Connection<B>>::BidiStream, B>,
+    BidiStream<<C as quic::OpenStreams<B>>::BidiStream, B>,
     WriteBuf<&'static [u8]>,
 );
 
 /// Streams are opened, but the initial webtransport header has not been sent
 type PendingUniStreams<C, B> = (
-    SendStream<<C as quic::Connection<B>>::SendStream, B>,
+    SendStream<<C as quic::OpenStreams<B>>::SendStream, B>,
     WriteBuf<&'static [u8]>,
 );
 
