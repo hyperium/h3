@@ -154,17 +154,12 @@ where
 }
 
 pub enum BidiStreamHeader {
-    Control(Settings),
     WebTransportBidi(SessionId),
 }
 
 impl Encode for BidiStreamHeader {
     fn encode<B: BufMut>(&self, buf: &mut B) {
         match self {
-            Self::Control(settings) => {
-                StreamType::CONTROL.encode(buf);
-                settings.encode(buf);
-            }
             Self::WebTransportBidi(session_id) => {
                 StreamType::WEBTRANSPORT_BIDI.encode(buf);
                 session_id.encode(buf);
