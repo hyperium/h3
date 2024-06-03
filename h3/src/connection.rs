@@ -237,7 +237,7 @@ where
         //# unidirectional streams required by mandatory extensions (such as the
         //# QPACK encoder and decoder streams) first, and then create additional
 
-        // start streams concurrently
+        // start streams
         let (control_send, qpack_encoder, qpack_decoder) = (
             future::poll_fn(|cx| conn.poll_open_send(cx)).await,
             future::poll_fn(|cx| conn.poll_open_send(cx)).await,
@@ -670,6 +670,7 @@ where
             self.grease_step = GreaseStatus::Finished;
         };
 
+        warn!("grease stream finished");
         // grease stream is closed
         // dont do another one
         self.send_grease_stream_flag = false;
