@@ -1,5 +1,6 @@
 use std::{
     convert::TryFrom,
+    marker::PhantomData,
     sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
     task::{Context, Poll},
 };
@@ -8,7 +9,7 @@ use bytes::{Buf, Bytes, BytesMut};
 use futures_util::{future, ready};
 use http::HeaderMap;
 use stream::WriteBuf;
-use tracing::{debug, warn};
+use tracing::warn;
 
 use crate::{
     config::{Config, Settings},
@@ -21,7 +22,7 @@ use crate::{
         varint::VarInt,
     },
     qpack,
-    quic::{self, SendStream as _},
+    quic::{self, SendStream},
     stream::{self, AcceptRecvStream, AcceptedRecvStream, BufRecvStream, UniStreamHeader},
     webtransport::SessionId,
 };
@@ -111,7 +112,6 @@ where
     decoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
     encoder_send: Option<C::SendStream>,
     encoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
-    grease_send_stream: Option<C::SendStream>,
     /// Buffers incoming uni/recv streams which have yet to be claimed.
     ///
     /// This is opposed to discarding them by returning in `poll_accept_recv`, which may cause them to be missed by something else polling.
@@ -140,8 +140,25 @@ where
     // tells if the grease steam should be sent
     send_grease_stream_flag: bool,
     // step of the grease sending poll fn
-    grease_step: i32,
+    grease_step: GreaseStatus<C::SendStream, B>,
     pub config: Config,
+}
+
+enum GreaseStatus<S, B>
+where
+    S: SendStream<B>,
+    B: Buf,
+{
+    /// Grease stream is not started
+    NotStarted(PhantomData<B>),
+    /// Grease steam is started without data
+    Started(Option<S>),
+    /// Grease stream is started with data
+    DataPrepared(Option<S>),
+    /// Data is sent on grease stream
+    DataSent(S),
+    /// Grease stream is finished
+    Finished,
 }
 
 impl<B, C> ConnectionInner<C, B>
@@ -259,11 +276,10 @@ where
             accepted_streams: Default::default(),
             decoder_send: qpack_decoder,
             encoder_send: qpack_encoder,
-            grease_send_stream: None,
             // send grease stream if configured
             send_grease_stream_flag: config.send_grease,
             // start at first step
-            grease_step: 0,
+            grease_step: GreaseStatus::NotStarted(PhantomData),
         };
         conn_inner.send_control_stream_headers().await?;
 
@@ -580,9 +596,10 @@ where
         code.with_reason(reason.as_ref(), crate::error::ErrorLevel::ConnectionError)
     }
 
+    // start grease stream and send data
     fn poll_grease_stream(&mut self, cx: &mut Context<'_>) -> Poll<()> {
-        if self.grease_send_stream.is_none() {
-            self.grease_send_stream = match self.conn.poll_open_send(cx) {
+        if matches!(self.grease_step, GreaseStatus::NotStarted(_)) {
+            self.grease_step = match self.conn.poll_open_send(cx) {
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(Err(_)) => {
                     // could not create grease stream
@@ -591,7 +608,7 @@ where
                     warn!("grease stream creation failed with");
                     return Poll::Ready(());
                 }
-                Poll::Ready(Ok(stream)) => Some(stream),
+                Poll::Ready(Ok(stream)) => GreaseStatus::Started(Some(stream)),
             };
         };
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
@@ -600,20 +617,22 @@ where
         //# types be ignored.  These streams have no semantics, and they can be
         //# sent when application-layer padding is desired.  They MAY also be
         //# sent on connections where no data is currently being transferred.
-        if self.grease_step != 2 {
-            if let Some(stream) = &mut self.grease_send_stream {
-                if !self.grease_step < 1
-                    && stream
-                        .send_data((StreamType::grease(), Frame::Grease))
-                        .is_err()
+        if let GreaseStatus::Started(stream) = &mut self.grease_step {
+            if let Some(stream) = stream {
+                if stream
+                    .send_data((StreamType::grease(), Frame::Grease))
+                    .is_err()
                 {
                     self.send_grease_stream_flag = false;
                     warn!("write data on grease stream failed with");
                     return Poll::Ready(());
                 };
-                // grease stream is ready to send data
-                self.grease_step = 1;
-                // send data on grease stream
+            }
+            self.grease_step = GreaseStatus::DataPrepared(stream.take());
+        };
+
+        if let GreaseStatus::DataPrepared(stream) = &mut self.grease_step {
+            if let Some(stream) = stream {
                 match stream.poll_ready(cx) {
                     Poll::Ready(Ok(_)) => (),
                     Poll::Pending => return Poll::Pending,
@@ -625,16 +644,18 @@ where
                         return Poll::Ready(());
                     }
                 };
-                self.grease_step = 2;
-            };
-        }
+            }
+            self.grease_step = GreaseStatus::DataSent(match stream.take() {
+                Some(stream) => stream,
+                None => {
+                    // this should never happen
+                    self.send_grease_stream_flag = false;
+                    return Poll::Ready(());
+                }
+            });
+        };
 
-        if let Some(stream) = &mut self.grease_send_stream {
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
-            //# When sending a reserved stream type,
-            //# the implementation MAY either terminate the stream cleanly or reset
-            //# it.
-
+        if let GreaseStatus::DataSent(stream) = &mut self.grease_step {
             match stream.poll_finish(cx) {
                 Poll::Ready(Ok(_)) => (),
                 Poll::Pending => return Poll::Pending,
@@ -646,8 +667,9 @@ where
                     return Poll::Ready(());
                 }
             };
+            self.grease_step = GreaseStatus::Finished;
         };
-        debug!("grease stream finished");
+
         // grease stream is closed
         // dont do another one
         self.send_grease_stream_flag = false;
