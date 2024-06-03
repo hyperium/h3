@@ -26,7 +26,7 @@ i-implement-a-third-party-backend-and-opt-into-breaking-changes = []
 bytes = "1"
 futures-util = { version = "0.3", default-features = false, features = ["io"] }
 http = "1"
-tokio = { version = "1", features = ["sync", "macros"] }
+tokio = { version = "1", features = ["sync"] }
 pin-project-lite = { version = "0.2", default_features = false }
 tracing = "0.1.40"
 fastrand = "2.0.1"

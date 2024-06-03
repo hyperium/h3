@@ -207,7 +207,7 @@ where
         let mut decoder_send = Option::take(&mut self.decoder_send);
         let mut encoder_send = Option::take(&mut self.encoder_send);
 
-        let (control, ..) = tokio::join!(
+        let (control, ..) = future::join3(
             stream::write(
                 &mut self.control_send,
                 WriteBuf::from(UniStreamHeader::Control(settings)),
@@ -221,8 +221,9 @@ where
                 if let Some(stream) = &mut encoder_send {
                     let _ = stream::write(stream, WriteBuf::from(UniStreamHeader::Encoder)).await;
                 }
-            }
-        );
+            },
+        )
+        .await;
 
         self.decoder_send = decoder_send;
         self.encoder_send = encoder_send;
