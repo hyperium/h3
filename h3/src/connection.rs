@@ -655,6 +655,10 @@ where
             });
         };
 
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
+        //# When sending a reserved stream type,
+        //# the implementation MAY either terminate the stream cleanly or reset
+        //# it.
         if let GreaseStatus::DataSent(stream) = &mut self.grease_step {
             match stream.poll_finish(cx) {
                 Poll::Ready(Ok(_)) => (),
@@ -670,7 +674,6 @@ where
             self.grease_step = GreaseStatus::Finished;
         };
 
-        warn!("grease stream finished");
         // grease stream is closed
         // dont do another one
         self.send_grease_stream_flag = false;
