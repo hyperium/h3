@@ -119,6 +119,8 @@ where
 pub enum UniStreamHeader {
     Control(Settings),
     WebTransportUni(SessionId),
+    Encoder,
+    Decoder,
 }
 
 impl Encode for UniStreamHeader {
@@ -131,6 +133,12 @@ impl Encode for UniStreamHeader {
             Self::WebTransportUni(session_id) => {
                 StreamType::WEBTRANSPORT_UNI.encode(buf);
                 session_id.encode(buf);
+            }
+            UniStreamHeader::Encoder => {
+                StreamType::ENCODER.encode(buf);
+            }
+            UniStreamHeader::Decoder => {
+                StreamType::DECODER.encode(buf);
             }
         }
     }
@@ -154,17 +162,12 @@ where
 }
 
 pub enum BidiStreamHeader {
-    Control(Settings),
     WebTransportBidi(SessionId),
 }
 
 impl Encode for BidiStreamHeader {
     fn encode<B: BufMut>(&self, buf: &mut B) {
         match self {
-            Self::Control(settings) => {
-                StreamType::CONTROL.encode(buf);
-                settings.encode(buf);
-            }
             Self::WebTransportBidi(session_id) => {
                 StreamType::WEBTRANSPORT_BIDI.encode(buf);
                 session_id.encode(buf);

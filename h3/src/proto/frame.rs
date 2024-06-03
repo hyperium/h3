@@ -536,7 +536,7 @@ impl Settings {
                 //# H3_SETTINGS_ERROR.
                 settings.insert(identifier, value)?;
             } else {
-                tracing::warn!("Unsupported setting: {:#x?}", identifier);
+                tracing::debug!("Unsupported setting: {:#x?}", identifier);
             }
         }
         Ok(settings)
