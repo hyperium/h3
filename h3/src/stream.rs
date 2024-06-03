@@ -119,6 +119,8 @@ where
 pub enum UniStreamHeader {
     Control(Settings),
     WebTransportUni(SessionId),
+    Encoder,
+    Decoder,
 }
 
 impl Encode for UniStreamHeader {
@@ -131,6 +133,12 @@ impl Encode for UniStreamHeader {
             Self::WebTransportUni(session_id) => {
                 StreamType::WEBTRANSPORT_UNI.encode(buf);
                 session_id.encode(buf);
+            }
+            UniStreamHeader::Encoder => {
+                StreamType::ENCODER.encode(buf);
+            }
+            UniStreamHeader::Decoder => {
+                StreamType::DECODER.encode(buf);
             }
         }
     }

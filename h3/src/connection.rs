@@ -5,10 +5,11 @@ use std::{
 };
 
 use bytes::{Buf, Bytes, BytesMut};
+use futures::future::ready;
 use futures_util::{future, ready};
 use http::HeaderMap;
 use stream::WriteBuf;
-use tracing::{trace, warn};
+use tracing::{debug, warn};
 
 use crate::{
     config::{Config, Settings},
@@ -107,8 +108,11 @@ where
     pub conn: C,
     control_send: C::SendStream,
     control_recv: Option<FrameStream<C::RecvStream, B>>,
+    decoder_send: Option<C::SendStream>,
     decoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
+    encoder_send: Option<C::SendStream>,
     encoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
+    grease_send_stream: Option<C::SendStream>,
     /// Buffers incoming uni/recv streams which have yet to be claimed.
     ///
     /// This is opposed to discarding them by returning in `poll_accept_recv`, which may cause them to be missed by something else polling.
@@ -134,6 +138,10 @@ where
 
     got_peer_settings: bool,
     pub send_grease_frame: bool,
+    // tells if the grease steam should be sent
+    send_grease_stream_flag: bool,
+    // step of the grease sending poll fn
+    grease_step: i32,
     pub config: Config,
 }
 
@@ -142,7 +150,8 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    pub async fn send_settings(&mut self) -> Result<(), Error> {
+    /// Sends the settings and initializes the control streams
+    pub async fn send_control_stream_headers(&mut self) -> Result<(), Error> {
         #[cfg(test)]
         if !self.config.send_settings {
             return Ok(());
@@ -178,14 +187,31 @@ where
         //# Endpoints MUST NOT require any data to be received from
         //# the peer prior to sending the SETTINGS frame; settings MUST be sent
         //# as soon as the transport is ready to send data.
-        trace!("Sending Settings frame: {:#x?}", settings);
-        stream::write(
-            &mut self.control_send,
-            WriteBuf::from(UniStreamHeader::Control(settings)),
-        )
-        .await?;
 
-        Ok(())
+        let mut decoder_send = Option::take(&mut self.decoder_send);
+        let mut encoder_send = Option::take(&mut self.encoder_send);
+
+        let (control, ..) = tokio::join!(
+            stream::write(
+                &mut self.control_send,
+                WriteBuf::from(UniStreamHeader::Control(settings)),
+            ),
+            async {
+                if let Some(stream) = &mut decoder_send {
+                    let _ = stream::write(stream, WriteBuf::from(UniStreamHeader::Decoder)).await;
+                }
+            },
+            async {
+                if let Some(stream) = &mut encoder_send {
+                    let _ = stream::write(stream, WriteBuf::from(UniStreamHeader::Encoder)).await;
+                }
+            }
+        );
+
+        self.decoder_send = decoder_send;
+        self.encoder_send = encoder_send;
+
+        control
     }
 
     /// Initiates the connection and opens a control stream
@@ -194,10 +220,26 @@ where
         //# Endpoints SHOULD create the HTTP control stream as well as the
         //# unidirectional streams required by mandatory extensions (such as the
         //# QPACK encoder and decoder streams) first, and then create additional
-        //# streams as allowed by their peer.
-        let control_send = future::poll_fn(|cx| conn.poll_open_send(cx))
-            .await
-            .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))?;
+
+        // start streams concurrently
+        let (control_send, qpack_encoder, qpack_decoder) = (
+            future::poll_fn(|cx| conn.poll_open_send(cx)).await,
+            future::poll_fn(|cx| conn.poll_open_send(cx)).await,
+            future::poll_fn(|cx| conn.poll_open_send(cx)).await,
+        );
+
+        let control_send =
+            control_send.map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))?;
+
+        let qpack_encoder = match qpack_encoder {
+            Ok(stream) => Some(stream),
+            Err(_) => None,
+        };
+
+        let qpack_decoder = match qpack_decoder {
+            Ok(stream) => Some(stream),
+            Err(_) => None,
+        };
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
         //= type=implication
@@ -216,9 +258,15 @@ where
             send_grease_frame: config.send_grease,
             config,
             accepted_streams: Default::default(),
+            decoder_send: qpack_decoder,
+            encoder_send: qpack_encoder,
+            grease_send_stream: None,
+            // send grease stream if configured
+            send_grease_stream_flag: config.send_grease,
+            // start at first step
+            grease_step: 0,
         };
-
-        conn_inner.send_settings().await?;
+        conn_inner.send_control_stream_headers().await?;
 
         // start a grease stream
         if config.send_grease {
@@ -228,7 +276,6 @@ where
             //# values of N are reserved to exercise the requirement that unknown
             //# types be ignored (Section 9).  These frames have no semantics, and
             //# they MAY be sent on any stream where frames are allowed to be sent.
-            conn_inner.start_grease_stream().await;
         }
 
         Ok(conn_inner)
@@ -479,6 +526,11 @@ where
                 }
             }
         };
+
+        if self.send_grease_stream_flag {
+            ready!(self.poll_grease_stream(cx));
+        }
+
         Poll::Ready(res)
     }
 
@@ -533,9 +585,75 @@ where
         code.with_reason(reason.as_ref(), crate::error::ErrorLevel::ConnectionError)
     }
 
+    fn poll_grease_stream(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+        if self.grease_send_stream.is_none() {
+            self.grease_send_stream = match self.conn.poll_open_send(cx) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(_)) => {
+                    // could not create grease stream
+                    // dont try again
+                    self.send_grease_stream_flag = false;
+                    warn!("grease stream creation failed with");
+                    return Poll::Ready(());
+                }
+                Poll::Ready(Ok(stream)) => Some(stream),
+            };
+        };
+
+        if self.grease_step != 2 {
+            if let Some(stream) = &mut self.grease_send_stream {
+                if !self.grease_step < 1
+                    && stream
+                        .send_data((StreamType::grease(), Frame::Grease))
+                        .is_err()
+                {
+                    self.send_grease_stream_flag = false;
+                    warn!("write data on grease stream failed with");
+                    return Poll::Ready(());
+                };
+                // grease stream is ready to send data
+                self.grease_step = 1;
+                // send data on grease stream
+                match stream.poll_ready(cx) {
+                    Poll::Ready(Ok(_)) => (),
+                    Poll::Pending => return Poll::Pending,
+                    Poll::Ready(Err(_)) => {
+                        // could not write grease frame
+                        // dont try again
+                        self.send_grease_stream_flag = false;
+                        warn!("write data on grease stream failed with");
+                        return Poll::Ready(());
+                    }
+                };
+                self.grease_step = 2;
+            };
+        }
+
+        if let Some(stream) = &mut self.grease_send_stream {
+            match stream.poll_finish(cx) {
+                Poll::Ready(Ok(_)) => (),
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(_)) => {
+                    // could not finish grease stream
+                    // dont try again
+                    self.send_grease_stream_flag = false;
+                    warn!("finish grease stream failed with");
+                    return Poll::Ready(());
+                }
+            };
+        };
+        debug!("grease stream finished");
+        // grease stream is closed
+        // dont do another one
+        self.send_grease_stream_flag = false;
+        Poll::Ready(())
+
+    }
+
     /// starts an grease stream
     /// https://www.rfc-editor.org/rfc/rfc9114.html#stream-grease
     async fn start_grease_stream(&mut self) {
+        warn!("TEST XY");
         // start the stream
         let mut grease_stream = match future::poll_fn(|cx| self.conn.poll_open_send(cx))
             .await
