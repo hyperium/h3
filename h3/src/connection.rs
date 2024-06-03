@@ -5,7 +5,6 @@ use std::{
 };
 
 use bytes::{Buf, Bytes, BytesMut};
-use futures::future::ready;
 use futures_util::{future, ready};
 use http::HeaderMap;
 use stream::WriteBuf;
@@ -268,16 +267,6 @@ where
         };
         conn_inner.send_control_stream_headers().await?;
 
-        // start a grease stream
-        if config.send_grease {
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
-            //= type=implication
-            //# Frame types of the format 0x1f * N + 0x21 for non-negative integer
-            //# values of N are reserved to exercise the requirement that unknown
-            //# types be ignored (Section 9).  These frames have no semantics, and
-            //# they MAY be sent on any stream where frames are allowed to be sent.
-        }
-
         Ok(conn_inner)
     }
 
@@ -528,6 +517,12 @@ where
         };
 
         if self.send_grease_stream_flag {
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
+            //= type=implication
+            //# Frame types of the format 0x1f * N + 0x21 for non-negative integer
+            //# values of N are reserved to exercise the requirement that unknown
+            //# types be ignored (Section 9).  These frames have no semantics, and
+            //# they MAY be sent on any stream where frames are allowed to be sent.
             ready!(self.poll_grease_stream(cx));
         }
 
@@ -599,7 +594,12 @@ where
                 Poll::Ready(Ok(stream)) => Some(stream),
             };
         };
-
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
+        //# Stream types of the format 0x1f * N + 0x21 for non-negative integer
+        //# values of N are reserved to exercise the requirement that unknown
+        //# types be ignored.  These streams have no semantics, and they can be
+        //# sent when application-layer padding is desired.  They MAY also be
+        //# sent on connections where no data is currently being transferred.
         if self.grease_step != 2 {
             if let Some(stream) = &mut self.grease_send_stream {
                 if !self.grease_step < 1
@@ -630,6 +630,11 @@ where
         }
 
         if let Some(stream) = &mut self.grease_send_stream {
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
+            //# When sending a reserved stream type,
+            //# the implementation MAY either terminate the stream cleanly or reset
+            //# it.
+
             match stream.poll_finish(cx) {
                 Poll::Ready(Ok(_)) => (),
                 Poll::Pending => return Poll::Pending,
@@ -647,54 +652,6 @@ where
         // dont do another one
         self.send_grease_stream_flag = false;
         Poll::Ready(())
-
-    }
-
-    /// starts an grease stream
-    /// https://www.rfc-editor.org/rfc/rfc9114.html#stream-grease
-    async fn start_grease_stream(&mut self) {
-        warn!("TEST XY");
-        // start the stream
-        let mut grease_stream = match future::poll_fn(|cx| self.conn.poll_open_send(cx))
-            .await
-            .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))
-        {
-            Err(err) => {
-                warn!("grease stream creation failed with {}", err);
-                return;
-            }
-            Ok(grease) => grease,
-        };
-
-        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
-        //# Stream types of the format 0x1f * N + 0x21 for non-negative integer
-        //# values of N are reserved to exercise the requirement that unknown
-        //# types be ignored.  These streams have no semantics, and they can be
-        //# sent when application-layer padding is desired.  They MAY also be
-        //# sent on connections where no data is currently being transferred.
-        match stream::write(&mut grease_stream, (StreamType::grease(), Frame::Grease)).await {
-            Ok(()) => (),
-            Err(err) => {
-                warn!("write data on grease stream failed with {}", err);
-                return;
-            }
-        }
-
-        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
-        //# When sending a reserved stream type,
-        //# the implementation MAY either terminate the stream cleanly or reset
-        //# it.
-
-        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
-        //# When resetting the stream, either the H3_NO_ERROR error code or
-        //# a reserved error code (Section 8.1) SHOULD be used.
-        match future::poll_fn(|cx| grease_stream.poll_finish(cx))
-            .await
-            .map_err(|e| Code::H3_NO_ERROR.with_transport(e))
-        {
-            Ok(()) => (),
-            Err(err) => warn!("grease stream error on close {}", err),
-        };
     }
 
     #[allow(missing_docs)]
