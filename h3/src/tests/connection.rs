@@ -8,6 +8,7 @@ use bytes::{Buf, Bytes, BytesMut};
 use futures_util::future;
 use http::{Request, Response, StatusCode};
 use tokio::sync::oneshot::{self};
+use tracing::info;
 
 use crate::client::SendRequest;
 use crate::{client, server};
@@ -737,8 +738,9 @@ async fn graceful_shutdown_client() {
         driver.shutdown(0).await.unwrap();
         assert_matches!(
             future::poll_fn(|cx| {
-                println!("client drive");
-                driver.poll_close(cx)
+                info!("client drive");
+                let x = driver.poll_close(cx);
+                x
             })
             .await,
             Ok(())
@@ -750,8 +752,8 @@ async fn graceful_shutdown_client() {
         let mut incoming = server::Connection::new(conn).await.unwrap();
         assert!(incoming.accept().await.unwrap().is_none());
     };
-
-    tokio::join!(server_fut, client_fut);
+    
+   tokio::join!(server_fut, client_fut);
 }
 
 async fn request<T, O, B>(mut send_request: T) -> Result<Response<()>, Error>

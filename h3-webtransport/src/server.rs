@@ -410,7 +410,7 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut conn = self.conn.lock().unwrap();
-        conn.inner.poll_accept_recv(cx)?;
+        conn.inner.poll_handle_receive_stream(cx)?;
 
         // Get the currently available streams
         let streams = conn.inner.accepted_streams_mut();

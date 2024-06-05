@@ -156,7 +156,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn handle_connection(mut conn: Connection<h3_quinn::Connection, Bytes>) -> Result<()> {
+async fn handle_connection(mut conn: Connection<h3_quinn::Connection<Bytes>, Bytes>) -> Result<()> {
     // 3. TODO: Conditionally, if the client indicated that this is a webtransport session, we should accept it here, else use regular h3.
     // if this is a webtransport session, then h3 needs to stop handing the datagrams, bidirectional streams, and unidirectional streams and give them
     // to the webtransport session.

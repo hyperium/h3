@@ -18,9 +18,10 @@ use std::{
     time::Duration,
 };
 
-use bytes::Bytes;
+use bytes::{Buf, Bytes};
 use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use tracing::level_filters::LevelFilter;
 
 use crate::quic;
 use h3_quinn::{quinn::TransportConfig, Connection};
@@ -30,6 +31,7 @@ pub fn init_tracing() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_span_events(tracing_subscriber::fmt::format::FmtSpan::FULL)
         .with_test_writer()
+        .with_max_level(LevelFilter::DEBUG)
         .try_init();
 }
 
@@ -124,7 +126,7 @@ impl Pair {
             .unwrap()
     }
 
-    pub async fn client(&self) -> h3_quinn::Connection {
+    pub async fn client<B: Buf>(&self) -> h3_quinn::Connection<B> {
         Connection::new(self.client_inner().await)
     }
 }

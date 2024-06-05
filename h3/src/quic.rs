@@ -3,6 +3,7 @@
 //! This module includes traits and types meant to allow being generic over any
 //! QUIC implementation.
 
+use std::marker::PhantomData;
 use std::task::{self, Poll};
 
 use bytes::Buf;
@@ -30,6 +31,19 @@ impl<'a, E: Error + 'a> From<E> for Box<dyn Error + 'a> {
     }
 }
 
+/// Trait representing a incoming QUIC stream.
+pub enum IncomingStreamType<BiDi, UniDi, B>
+where
+    B: Buf,
+    BiDi: SendStream<B> + RecvStream,
+    UniDi: RecvStream,
+{
+    /// A bidirectional stream
+    Bidirectional(BiDi, PhantomData<B>),
+    /// A unidirectional stream
+    Unidirectional(UniDi),
+}
+
 /// Trait representing a QUIC connection.
 pub trait Connection<B: Buf>: OpenStreams<B> {
     /// The type produced by `poll_accept_recv()`
@@ -39,21 +53,14 @@ pub trait Connection<B: Buf>: OpenStreams<B> {
     /// Error type yielded by these trait methods
     type AcceptError: Into<Box<dyn Error>>;
 
-    /// Accept an incoming unidirectional stream
+    /// Polls the Connection for Incoming Streams
     ///
-    /// Returning `None` implies the connection is closing or closed.
-    fn poll_accept_recv(
+    /// Returning ['IncomingStreamType'] for the next incoming stream.
+    /// Returning `Err` implies the connection is closing or closed.
+    fn poll_incoming(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::RecvStream>, Self::AcceptError>>;
-
-    /// Accept an incoming bidirectional stream
-    ///
-    /// Returning `None` implies the connection is closing or closed.
-    fn poll_accept_bidi(
-        &mut self,
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::BidiStream>, Self::AcceptError>>;
+    ) -> Poll<Result<IncomingStreamType<Self::BidiStream, Self::RecvStream, B>, Self::AcceptError>>;
 
     /// Get an object to open outgoing streams.
     fn opener(&self) -> Self::OpenStreams;
