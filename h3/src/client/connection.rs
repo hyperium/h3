@@ -9,6 +9,8 @@ use std::{
 use bytes::{Buf, BytesMut};
 use futures_util::future;
 use http::request;
+use http::HeaderMap;
+use http::HeaderName;
 use tracing::{info, trace};
 
 use crate::{
@@ -142,7 +144,19 @@ where
             extensions,
             ..
         } = parts;
-        let headers = Header::request(method, uri, headers, extensions)?;
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
+        //# Characters in field names MUST be
+        //# converted to lowercase prior to their encoding.
+        let mut lower_headers = HeaderMap::new();
+
+        for (n, v) in headers.iter() {
+            lower_headers.append(
+                HeaderName::from_lowercase(n.as_str().to_ascii_lowercase().as_bytes()).unwrap(),
+                v.clone(),
+            );
+        }
+        let headers = Header::request(method, uri, lower_headers, extensions)?;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
         //= type=implication
@@ -151,11 +165,6 @@ where
         let mut stream = future::poll_fn(|cx| self.open.poll_open_bidi(cx))
             .await
             .map_err(|e| self.maybe_conn_err(e))?;
-
-        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
-        //= type=TODO
-        //# Characters in field names MUST be
-        //# converted to lowercase prior to their encoding.
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.1
         //= type=TODO

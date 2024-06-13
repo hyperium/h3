@@ -8,6 +8,7 @@ use std::{
 use bytes::{Buf, Bytes, BytesMut};
 use futures_util::{future, ready};
 use http::HeaderMap;
+use http::HeaderName;
 use stream::WriteBuf;
 use tracing::warn;
 
@@ -870,12 +871,20 @@ where
     /// Send a set of trailers to end the request.
     pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
-        //= type=TODO
         //# Characters in field names MUST be
         //# converted to lowercase prior to their encoding.
+        let mut lower_trailers = HeaderMap::new();
+
+        for (n, v) in trailers.iter() {
+            lower_trailers.append(
+                HeaderName::from_lowercase(n.as_str().to_ascii_lowercase().as_bytes()).unwrap(),
+                v.clone(),
+            );
+        }
+
         let mut block = BytesMut::new();
 
-        let mem_size = qpack::encode_stateless(&mut block, Header::trailer(trailers))?;
+        let mem_size = qpack::encode_stateless(&mut block, Header::trailer(lower_trailers))?;
         let max_mem_size = self
             .conn_state
             .read("send_trailers shared state read")
