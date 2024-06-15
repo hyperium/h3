@@ -3,7 +3,7 @@
 use std::{
     marker::PhantomData,
     sync::{atomic::AtomicUsize, Arc},
-    task::{Context, Poll, Waker},
+    task::{Context, Poll},
 };
 
 use bytes::{Buf, BytesMut};
@@ -110,7 +110,6 @@ where
     pub(super) max_field_section_size: u64, // maximum size for a header we receive
     // counts instances of SendRequest to close the connection when the last is dropped.
     pub(super) sender_count: Arc<AtomicUsize>,
-    pub(super) conn_waker: Option<Waker>,
     pub(super) _buf: PhantomData<fn(B)>,
     pub(super) send_grease_frame: bool,
 }
@@ -217,7 +216,6 @@ where
             conn_state: self.conn_state.clone(),
             max_field_section_size: self.max_field_section_size,
             sender_count: self.sender_count.clone(),
-            conn_waker: self.conn_waker.clone(),
             _buf: PhantomData,
             send_grease_frame: self.send_grease_frame,
         }
@@ -235,9 +233,6 @@ where
             .fetch_sub(1, std::sync::atomic::Ordering::AcqRel)
             == 1
         {
-            if let Some(w) = Option::take(&mut self.conn_waker) {
-                w.wake()
-            }
             self.shared_state().write("SendRequest drop").error = Some(Error::closed());
             self.open.close(Code::H3_NO_ERROR, b"");
         }
