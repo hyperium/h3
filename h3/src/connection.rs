@@ -50,6 +50,16 @@ impl SharedStateRef {
     pub fn write(&self, panic_msg: &'static str) -> RwLockWriteGuard<SharedState> {
         self.0.write().expect(panic_msg)
     }
+
+    /// if a error is set, return it,
+    /// otherwise the passed error is stored and returned
+    pub fn set_error(&self, err: Error, panic_msg: &'static str) -> Error {
+        if let Some(err) = self.read(panic_msg).error.clone() {
+            return err;
+        }
+        self.write(panic_msg).error = Some(err.clone());
+        err
+    }
 }
 
 impl Default for SharedStateRef {
@@ -430,7 +440,7 @@ where
             } else {
                 // Try later
                 return Poll::Pending;
-               // panic!("control stream not received");
+                // panic!("control stream not received");
             }
         };
 

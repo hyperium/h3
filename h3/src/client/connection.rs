@@ -361,7 +361,13 @@ where
         let incoming_result = self.inner.poll_handle_incoming(cx);
 
         match incoming_result {
-            Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+            Poll::Ready(Err(e)) => {
+                let connection_error = self.inner.shared.set_error(e, "poll_close error");
+                if connection_error.is_closed() {
+                    return Poll::Ready(Ok(()));
+                }
+                return Poll::Ready(Err(connection_error));
+            }
             //= https://www.rfc-editor.org/rfc/rfc9114#section-6.1
             //# Clients MUST treat
             //# receipt of a server-initiated bidirectional stream as a connection
@@ -432,14 +438,7 @@ where
                     )))
                 }
                 Err(e) => {
-                    let connection_error = self.inner.shared.read("poll_close").error.clone();
-                    let connection_error = match connection_error {
-                        Some(e) => e,
-                        None => {
-                            self.inner.shared.write("poll_close error").error = Some(e.clone());
-                            e
-                        }
-                    };
+                    let connection_error = self.inner.shared.set_error(e, "poll_close error");
                     if connection_error.is_closed() {
                         return Poll::Ready(Ok(()));
                     }

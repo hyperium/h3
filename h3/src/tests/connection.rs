@@ -8,7 +8,6 @@ use bytes::{Buf, Bytes, BytesMut};
 use futures_util::future;
 use http::{Request, Response, StatusCode};
 use tokio::sync::oneshot::{self};
-use tracing::info;
 
 use crate::client::SendRequest;
 use crate::{client, server};
