@@ -738,7 +738,6 @@ async fn graceful_shutdown_client() {
         driver.shutdown(0).await.unwrap();
         assert_matches!(
             future::poll_fn(|cx| {
-                info!("client drive");
                 let x = driver.poll_close(cx);
                 x
             })
