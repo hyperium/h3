@@ -360,7 +360,7 @@ where
     pub(crate) fn poll_next_control(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Frame<PayloadLen>, Error>> { 
+    ) -> Poll<Result<Frame<PayloadLen>, Error>> {
         let frame = ready!(self.inner.poll_control(cx))?;
 
         match &frame {

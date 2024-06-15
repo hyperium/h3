@@ -750,8 +750,8 @@ async fn graceful_shutdown_client() {
         let mut incoming = server::Connection::new(conn).await.unwrap();
         assert!(incoming.accept().await.unwrap().is_none());
     };
-    
-   tokio::join!(server_fut, client_fut);
+
+    tokio::join!(server_fut, client_fut);
 }
 
 async fn request<T, O, B>(mut send_request: T) -> Result<Response<()>, Error>
