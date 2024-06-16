@@ -191,31 +191,6 @@ where
     type OpenStreams = OpenStreams;
     type AcceptError = ConnectionError;
 
-    // fn poll_accept_bidi(
-    //     &mut self,
-    //     cx: &mut task::Context<'_>,
-    // ) -> Poll<Result<Option<Self::BidiStream>, Self::AcceptError>> {
-    //     let (send, recv) = match ready!(self.incoming_bi.poll_next_unpin(cx)) {
-    //         Some(x) => x?,
-    //         None => return Poll::Ready(Ok(None)),
-    //     };
-    //     Poll::Ready(Ok(Some(Self::BidiStream {
-    //         send: Self::SendStream::new(send),
-    //         recv: Self::RecvStream::new(recv),
-    //     })))
-    // }
-
-    // fn poll_accept_recv(
-    //     &mut self,
-    //     cx: &mut task::Context<'_>,
-    // ) -> Poll<Result<Option<Self::RecvStream>, Self::AcceptError>> {
-    //     let recv = match ready!(self.incoming_uni.poll_next_unpin(cx)) {
-    //         Some(x) => x?,
-    //         None => return Poll::Ready(Ok(None)),
-    //     };
-    //     Poll::Ready(Ok(Some(Self::RecvStream::new(recv))))
-    // }
-
     fn opener(&self) -> Self::OpenStreams {
         OpenStreams {
             conn: self.conn.clone(),

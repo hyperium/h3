@@ -151,13 +151,6 @@ where
         Ok(())
     }
 
-    // /// Accept an incoming unidirectional stream from the client, it reads the stream until EOF.
-    // pub fn accept_uni(&self) -> AcceptUni<C, B> {
-    //     AcceptUni {
-    //         conn: &self.server_conn,
-    //     }
-    // }
-
     /// Accepts an incoming bidirectional stream or request
     pub async fn accept_streams(&self) -> Result<Option<AcceptStream<C, B>>, Error> {
         {

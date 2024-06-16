@@ -440,7 +440,6 @@ where
             } else {
                 // Try later
                 return Poll::Pending;
-                // panic!("control stream not received");
             }
         };
 

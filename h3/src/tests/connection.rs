@@ -736,11 +736,7 @@ async fn graceful_shutdown_client() {
         let (mut driver, mut _send_request) = client::new(pair.client().await).await.unwrap();
         driver.shutdown(0).await.unwrap();
         assert_matches!(
-            future::poll_fn(|cx| {
-                let x = driver.poll_close(cx);
-                x
-            })
-            .await,
+            future::poll_fn(|cx| { driver.poll_close(cx) }).await,
             Ok(())
         );
     };

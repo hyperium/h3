@@ -329,7 +329,7 @@ where
                         tokio::spawn( async move { log_result!(echo_stream(send, stream).await); });
                     },
                     _ => (),
-                }                
+                }
             }
             else => {
                 break
