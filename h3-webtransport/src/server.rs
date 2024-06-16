@@ -382,7 +382,7 @@ where
     }
 }
 
-/// An accepted incoming bidirectional stream.
+/// An accepted incoming bidirectional or unidirectional stream.
 ///
 /// Since
 pub enum AcceptStream<C: quic::Connection<B>, B: Buf> {
