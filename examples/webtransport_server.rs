@@ -61,6 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_span_events(tracing_subscriber::fmt::format::FmtSpan::FULL)
         .with_writer(std::io::stderr)
+        .with_max_level(tracing::Level::INFO)
         .init();
 
     #[cfg(feature = "tree")]
@@ -69,6 +70,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::from_default_env())
         .with(tracing_tree::HierarchicalLayer::new(4).with_bracketed_fields(true))
+        .with_max_level(tracing::Level::INFO)
         .init();
 
     // process cli arguments
@@ -314,17 +316,20 @@ where
                     tracing::info!("Finished sending datagram");
                 }
             }
-            uni_stream = session.accept_uni() => {
-                let (id, stream) = uni_stream?.unwrap();
-
-                let send = session.open_uni(id).await?;
-                tokio::spawn( async move { log_result!(echo_stream(send, stream).await); });
-            }
-            stream = session.accept_bi() => {
-                if let Some(server::AcceptStream::BidiStream(_, stream)) = stream? {
-                    let (send, recv) = quic::BidiStream::split(stream);
-                    tokio::spawn( async move { log_result!(echo_stream(send, recv).await); });
-                }
+            stream = session.accept_streams() => {
+                match stream? {
+                    Some(server::AcceptStream::BidiStream(_, stream)) =>{
+                        info!("Received bidirectional stream");
+                        let (send, recv) = quic::BidiStream::split(stream);
+                        tokio::spawn( async move { log_result!(echo_stream(send, recv).await); });
+                    },
+                    Some(server::AcceptStream::UnidirectionalStream(id, stream)) => {
+                        info!("Received unidirectional stream with id: {:?}", id);
+                        let send = session.open_uni(id).await?;
+                        tokio::spawn( async move { log_result!(echo_stream(send, stream).await); });
+                    },
+                    _ => (),
+                }                
             }
             else => {
                 break
