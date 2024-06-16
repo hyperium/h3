@@ -321,7 +321,7 @@ where
                 tokio::spawn( async move { log_result!(echo_stream(send, stream).await); });
             }
             stream = session.accept_bi() => {
-                if let Some(server::AcceptedBi::BidiStream(_, stream)) = stream? {
+                if let Some(server::AcceptStream::BidiStream(_, stream)) = stream? {
                     let (send, recv) = quic::BidiStream::split(stream);
                     tokio::spawn( async move { log_result!(echo_stream(send, recv).await); });
                 }

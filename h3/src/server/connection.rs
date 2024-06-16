@@ -309,7 +309,6 @@ where
             if self.inner.control_recv.is_some() {
                 let _ = self.poll_control(cx)?;
             }
-            //let _ = self.poll_control(cx)?;
 
             match incoming {
                 Poll::Ready(Err(x)) => break Poll::Ready(Err(x)),
