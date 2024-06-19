@@ -857,7 +857,7 @@ async fn get_timeout_client_recv_response() {
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
         // _req must not be dropped, else the connection will be closed and the timeout
-        // wont be triggered
+        // won't be triggered
         let _req = incoming_req.accept().await.expect("accept").unwrap();
         tokio::time::sleep(Duration::from_millis(500)).await;
     };

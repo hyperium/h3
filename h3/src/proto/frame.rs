@@ -559,7 +559,7 @@ impl fmt::Display for SettingsError {
         match self {
             SettingsError::Exceeded => write!(
                 f,
-                "max settings number exeeded, check for duplicate entries"
+                "max settings number exceeded, check for duplicate entries"
             ),
             SettingsError::Malformed => write!(f, "malformed settings frame"),
             SettingsError::Repeated(id) => write!(f, "got setting 0x{:x} twice", id.0),

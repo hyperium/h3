@@ -7,7 +7,7 @@
 /*
  *  # Virtually infinite address space mapper.
  *
- *  It can be described as a infinitively growable list, with a visibility
+ *  It can be described as an infinitive growable list, with a visibility
  *  window that can only move in the direction of insertion.
  *
  *  Origin          Visible window
@@ -34,7 +34,7 @@
  *  pos: real index in memory container
  *  pst: post-base relative index (only with base index)
  *
- *    first      oldest              lastest
+ *    first      oldest              latest
  *    element    insertion           insertion
  *    (not       available           available
  *    available) |                   |
@@ -52,7 +52,7 @@
  *
  * # Base index
  * A base index can arbitrary shift the relative index.
- * The base index itself is a absolute index.
+ * The base index itself is an absolute index.
  *
  *                       base index: 17
  *                       |

@@ -9,7 +9,7 @@ use super::stream::RequestStream;
 
 pub struct ResolveRequest<C: quic::Connection<B>, B: Buf> {
     request_stream: RequestStream<C::BidiStream, B>,
-    // Ok or `REQUEST_HEADER_FIELDS_TO_LARGE` which neeeds to be sent
+    // Ok or `REQUEST_HEADER_FIELDS_TO_LARGE` which needs to be sent
     decoded: Result<qpack::Decoded, u64>,
     max_field_section_size: u64,
 }

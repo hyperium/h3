@@ -104,7 +104,7 @@ async fn server_drop_close() {
 }
 
 // In this test the client calls send_data() without doing a finish(),
-// i.e client keeps the body stream open. And cient expects server to
+// i.e client keeps the body stream open. And client expects server to
 // read_data() and send a response
 #[tokio::test]
 async fn server_send_data_without_finish() {
@@ -385,7 +385,7 @@ async fn control_close_send_error() {
         //# error of type H3_CLOSED_CRITICAL_STREAM.
         control_stream.finish().unwrap(); // close the client control stream immediately
 
-        // create the Connection manually so it does not open a second Control stream
+        // create the Connection manually, so it does not open a second Control stream
 
         let connection_error = loop {
             let accepted = connection.accept_bi().await;
