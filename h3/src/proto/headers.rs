@@ -94,7 +94,7 @@ impl Header {
 
         Ok((
             self.pseudo.method.ok_or(HeaderError::MissingMethod)?,
-            // When empty host field is built into a uri it fails
+            // When empty host field is built into an uri it fails
             //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3.1
             //# If these fields are present, they MUST NOT be
             //# empty.
