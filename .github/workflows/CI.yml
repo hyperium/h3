@@ -111,11 +111,7 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         toolchain: [stable, beta]
-        include:
-          - features: i-implement-a-third-party-backend-and-opt-into-breaking-changes
-          - features: enable-tracing
-          - features: enable-tracing,i-implement-a-third-party-backend-and-opt-into-breaking-changes
-
+        features: [i-implement-a-third-party-backend-and-opt-into-breaking-changes, enable-tracing, 'enable-tracing,i-implement-a-third-party-backend-and-opt-into-breaking-changes']
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
