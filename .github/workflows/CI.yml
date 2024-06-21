@@ -111,6 +111,11 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         toolchain: [stable, beta]
+        include:
+          - features: i-implement-a-third-party-backend-and-opt-into-breaking-changes
+          - features: enable-tracing
+          - features: enable-tracing,i-implement-a-third-party-backend-and-opt-into-breaking-changes
+
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
@@ -125,6 +130,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
+          args: --features ${{ matrix.features }}
       - name: h3Spec
         run: ./ci/h3spec.sh
         if: matrix.toolchain == 'stable'
