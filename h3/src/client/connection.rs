@@ -358,6 +358,31 @@ where
 
     /// Maintain the connection state until it is closed
     pub fn poll_close(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+        let incoming_result = self.inner.poll_handle_incoming(cx);
+
+        match incoming_result {
+            Poll::Ready(Err(e)) => {
+                let connection_error = self.inner.shared.set_error(e, "poll_close error");
+                if connection_error.is_closed() {
+                    return Poll::Ready(Ok(()));
+                }
+                return Poll::Ready(Err(connection_error));
+            }
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-6.1
+            //# Clients MUST treat
+            //# receipt of a server-initiated bidirectional stream as a connection
+            //# error of type H3_STREAM_CREATION_ERROR unless such an extension has
+            //# been negotiated.
+            Poll::Ready(Ok(_)) => {
+                return Poll::Ready(Err(self.inner.close(
+                    Code::H3_STREAM_CREATION_ERROR,
+                    "client received a bidirectional stream",
+                )))
+            }
+            // if pending, continue to poll the control stream
+            Poll::Pending => (),
+        }
+
         while let Poll::Ready(result) = self.inner.poll_control(cx) {
             match result {
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.2
@@ -413,14 +438,7 @@ where
                     )))
                 }
                 Err(e) => {
-                    let connection_error = self.inner.shared.read("poll_close").error.clone();
-                    let connection_error = match connection_error {
-                        Some(e) => e,
-                        None => {
-                            self.inner.shared.write("poll_close error").error = Some(e.clone());
-                            e
-                        }
-                    };
+                    let connection_error = self.inner.shared.set_error(e, "poll_close error");
                     if connection_error.is_closed() {
                         return Poll::Ready(Ok(()));
                     }
@@ -428,19 +446,6 @@ where
                 }
             }
         }
-
-        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.1
-        //# Clients MUST treat
-        //# receipt of a server-initiated bidirectional stream as a connection
-        //# error of type H3_STREAM_CREATION_ERROR unless such an extension has
-        //# been negotiated.
-        if self.inner.poll_accept_request(cx).is_ready() {
-            return Poll::Ready(Err(self.inner.close(
-                Code::H3_STREAM_CREATION_ERROR,
-                "client received a bidirectional stream",
-            )));
-        }
-
         Poll::Pending
     }
 }
