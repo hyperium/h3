@@ -141,7 +141,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     //     WebTransportSession::accept(h3_conn).await.unwrap();
                     // tracing::info!("Finished establishing webtransport session");
                     // // 4. Get datagrams, bidirectional streams, and unidirectional streams and wait for client requests here.
-                    // // h3_conn needs to handover the datagrams, bidirectional streams, and unidirectional streams to the webtransport session.
+                    // // h3_conn needs to hand over the datagrams, bidirectional streams, and unidirectional streams to the webtransport session.
                     // let result = handle.await;
                 }
                 Err(err) => {
@@ -177,7 +177,7 @@ async fn handle_connection(mut conn: Connection<h3_quinn::Connection<Bytes>, Byt
                         let session = WebTransportSession::accept(req, stream, conn).await?;
                         tracing::info!("Established webtransport session");
                         // 4. Get datagrams, bidirectional streams, and unidirectional streams and wait for client requests here.
-                        // h3_conn needs to handover the datagrams, bidirectional streams, and unidirectional streams to the webtransport session.
+                        // h3_conn needs to hand over the datagrams, bidirectional streams, and unidirectional streams to the webtransport session.
                         handle_session_and_echo_all_inbound_messages(session).await?;
 
                         return Ok(());

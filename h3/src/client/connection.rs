@@ -34,7 +34,7 @@ use super::stream::RequestStream;
 /// This struct is cloneable so multiple requests can be sent concurrently.
 ///
 /// Existing instances are atomically counted internally, so whenever all of them have been
-/// dropped, the connection will be automatically closed whith HTTP/3 connection error code
+/// dropped, the connection will be automatically closed with HTTP/3 connection error code
 /// `HTTP_NO_ERROR = 0`.
 ///
 /// # Examples
@@ -120,7 +120,7 @@ where
     T: quic::OpenStreams<B>,
     B: Buf,
 {
-    /// Send a HTTP/3 request to the server
+    /// Send an HTTP/3 request to the server
     pub async fn send_request(
         &mut self,
         req: http::Request<()>,
@@ -247,9 +247,9 @@ where
 /// Client connection driver
 ///
 /// Maintains the internal state of an HTTP/3 connection, including control and QPACK.
-/// It needs to be polled continously via [`poll_close()`]. On connection closure, this
+/// It needs to be polled continuously via [`poll_close()`]. On connection closure, this
 /// will resolve to `Ok(())` if the peer sent `HTTP_NO_ERROR`, or `Err()` if a connection-level
-/// error occured.
+/// error occurred.
 ///
 /// [`shutdown()`] initiates a graceful shutdown of this connection. After calling it, no request
 /// initiation will be further allowed. Then [`poll_close()`] will resolve when all ongoing requests
@@ -258,7 +258,7 @@ where
 ///
 /// # Examples
 ///
-/// ## Drive a connection concurrenty
+/// ## Drive a connection concurrently
 ///
 /// ```rust
 /// # use bytes::Buf;
@@ -318,7 +318,7 @@ where
 ///     Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
 /// });
 ///
-/// // Do client things, wait for close contition...
+/// // Do client things, wait for close condition...
 ///
 /// // Initiate shutdown
 /// shutdown_tx.send(2);

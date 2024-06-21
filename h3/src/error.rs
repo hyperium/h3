@@ -233,7 +233,7 @@ impl Error {
     }
 
     /// returns the [`ErrorLevel`] of an [`Error`]
-    /// This indicates weather a accept loop should continue.
+    /// This indicates weather an accept loop should continue.
     pub fn get_error_level(&self) -> ErrorLevel {
         match self.inner.kind {
             Kind::Application {

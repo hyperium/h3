@@ -148,7 +148,7 @@ where
         }
     }
 
-    /// Accepts an http request where the first frame has already been read and decoded.
+    /// Accepts a http request where the first frame has already been read and decoded.
     ///
     ///
     /// This is needed as a bidirectional stream may be read as part of incoming webtransport
