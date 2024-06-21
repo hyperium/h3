@@ -3,7 +3,7 @@ use std::{
     convert::TryInto,
     fmt::{self, Debug},
 };
-#[cfg(feature = "tracing")]
+#[cfg(feature = "h3-tracing")]
 use tracing::trace;
 
 use crate::webtransport::SessionId;
@@ -87,7 +87,7 @@ impl Frame<PayloadLen> {
         //
         // See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-4.2
         if ty == FrameType::WEBTRANSPORT_BI_STREAM {
-            #[cfg(feature = "tracing")]
+            #[cfg(feature = "h3-tracing")]
             tracing::trace!("webtransport frame");
 
             return Ok(Frame::WebTransportStream(SessionId::decode(buf)?));
@@ -107,7 +107,7 @@ impl Frame<PayloadLen> {
 
         let mut payload = buf.take(len as usize);
 
-        #[cfg(feature = "tracing")]
+        #[cfg(feature = "h3-tracing")]
         trace!("frame ty: {:?}", ty);
 
         let frame = match ty {
@@ -129,7 +129,7 @@ impl Frame<PayloadLen> {
         };
 
         if let Ok(_frame) = &frame {
-            #[cfg(feature = "tracing")]
+            #[cfg(feature = "h3-tracing")]
             trace!(
                 "got frame {:?}, len: {}, remaining: {}",
                 _frame,
@@ -543,7 +543,7 @@ impl Settings {
                 //# H3_SETTINGS_ERROR.
                 settings.insert(identifier, value)?;
             } else {
-                #[cfg(feature = "tracing")]
+                #[cfg(feature = "h3-tracing")]
                 tracing::debug!("Unsupported setting: {:#x?}", identifier);
             }
         }

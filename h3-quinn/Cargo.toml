@@ -24,4 +24,4 @@ tokio = { version = "1", features = ["io-util"], default-features = false }
 tracing = { version = "0.1.40", optional = true }
 
 [features]
-enable-tracing = ["tracing"]
+h3-quinn-tracing = ["tracing"]
