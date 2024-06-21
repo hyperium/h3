@@ -2,6 +2,8 @@ use std::convert::TryFrom;
 
 use bytes::Buf;
 use http::{Request, StatusCode};
+
+#[cfg(feature = "tracing")]
 use tracing::instrument;
 
 use crate::{error::Code, proto::headers::Header, qpack, quic, Error};
@@ -29,7 +31,7 @@ impl<B: Buf, C: quic::Connection<B>> ResolveRequest<C, B> {
     }
 
     /// Finishes the resolution of the request
-    #[instrument(skip_all)]
+    #[cfg_attr(feature = "enable-tracing", instrument(skip_all))]
     pub async fn resolve(
         mut self,
     ) -> Result<(Request<()>, RequestStream<C::BidiStream, B>), Error> {
@@ -90,7 +92,10 @@ impl<B: Buf, C: quic::Connection<B>> ResolveRequest<C, B> {
         *req.version_mut() = http::Version::HTTP_3;
         // send the grease frame only once
         // self.inner.send_grease_frame = false;
+
+        #[cfg(feature = "tracing")]
         tracing::trace!("replying with: {:?}", req);
+
         Ok((req, self.request_stream))
     }
 }

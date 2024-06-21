@@ -2,6 +2,7 @@ use std::task::{Context, Poll};
 
 use bytes::Buf;
 
+#[cfg(feature = "tracing")]
 use tracing::trace;
 
 use crate::stream::{BufRecvStream, WriteBuf};
@@ -227,8 +228,11 @@ impl FrameDecoder {
             };
 
             match decoded {
-                Err(frame::FrameError::UnknownFrame(ty)) => {
-                    trace!("ignore unknown frame type {:#x}", ty);
+                Err(frame::FrameError::UnknownFrame(_ty)) => {
+
+                    #[cfg(feature = "tracing")]
+                    trace!("ignore unknown frame type {:#x}", _ty);
+
                     src.advance(pos);
                     self.expected = None;
                     continue;
