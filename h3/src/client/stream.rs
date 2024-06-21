@@ -1,6 +1,7 @@
 use bytes::Buf;
 use futures_util::future;
 use http::{HeaderMap, Response};
+use tracing::instrument;
 
 use crate::{
     connection::{self, ConnectionState, SharedStateRef},
@@ -82,6 +83,7 @@ where
     /// This should be called before trying to receive any data with [`recv_data()`].
     ///
     /// [`recv_data()`]: #method.recv_data
+    #[instrument(skip_all)]
     pub async fn recv_response(&mut self) -> Result<Response<()>, Error> {
         let mut frame = future::poll_fn(|cx| self.inner.stream.poll_next(cx))
             .await
@@ -141,11 +143,13 @@ where
 
     /// Receive some of the request body.
     // TODO what if called before recv_response ?
+    #[instrument(skip_all)]
     pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
         self.inner.recv_data().await
     }
 
     /// Receive an optional set of trailers for the response.
+    #[instrument(skip_all)]
     pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
         let res = self.inner.recv_trailers().await;
         if let Err(ref e) = res {
@@ -157,6 +161,7 @@ where
     }
 
     /// Tell the peer to stop sending into the underlying QUIC stream
+    #[instrument(skip_all)]
     pub fn stop_sending(&mut self, error_code: crate::error::Code) {
         // TODO take by value to prevent any further call as this request is cancelled
         // rename `cancel()` ?
@@ -170,6 +175,7 @@ where
     B: Buf,
 {
     /// Send some data on the request body.
+    #[instrument(skip_all)]
     pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
         self.inner.send_data(buf).await
     }
@@ -179,6 +185,7 @@ where
     /// Either [`RequestStream::finish`] or
     /// [`RequestStream::send_trailers`] must be called to finalize a
     /// request.
+    #[instrument(skip_all)]
     pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
         self.inner.send_trailers(trailers).await
     }
@@ -188,6 +195,7 @@ where
     /// Either [`RequestStream::finish`] or
     /// [`RequestStream::send_trailers`] must be called to finalize a
     /// request.
+    #[instrument(skip_all)]
     pub async fn finish(&mut self) -> Result<(), Error> {
         self.inner.finish().await
     }

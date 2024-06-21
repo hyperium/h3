@@ -27,6 +27,7 @@ use h3::{
     quic::{self, Error, StreamId, WriteBuf},
 };
 use tokio_util::sync::ReusableBoxFuture;
+use tracing::instrument;
 
 /// A QUIC connection backed by Quinn
 ///
@@ -155,6 +156,7 @@ where
     type OpenStreams = OpenStreams;
     type AcceptError = ConnectionError;
 
+    #[instrument(skip_all)]
     fn poll_accept_bidi(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -169,6 +171,7 @@ where
         })))
     }
 
+    #[instrument(skip_all)]
     fn poll_accept_recv(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -197,6 +200,7 @@ where
     type BidiStream = BidiStream<B>;
     type OpenError = ConnectionError;
 
+    #[instrument(skip_all)]
     fn poll_open_bidi(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -215,6 +219,7 @@ where
         }))
     }
 
+    #[instrument(skip_all)]
     fn poll_open_send(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -229,6 +234,7 @@ where
         Poll::Ready(Ok(Self::SendStream::new(send)))
     }
 
+    #[instrument(skip_all)]
     fn close(&mut self, code: h3::error::Code, reason: &[u8]) {
         self.conn.close(
             VarInt::from_u64(code.value()).expect("error code VarInt"),
@@ -243,6 +249,7 @@ where
 {
     type Error = SendDatagramError;
 
+    #[instrument(skip_all)]
     fn send_datagram(&mut self, data: Datagram<B>) -> Result<(), SendDatagramError> {
         // TODO investigate static buffer from known max datagram size
         let mut buf = BytesMut::new();
@@ -259,6 +266,7 @@ impl quic::RecvDatagramExt for Connection {
     type Error = ConnectionError;
 
     #[inline]
+    #[instrument(skip_all)]
     fn poll_accept_datagram(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -289,6 +297,7 @@ where
     type BidiStream = BidiStream<B>;
     type OpenError = ConnectionError;
 
+    #[instrument(skip_all)]
     fn poll_open_bidi(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -307,6 +316,7 @@ where
         }))
     }
 
+    #[instrument(skip_all)]
     fn poll_open_send(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -321,6 +331,7 @@ where
         Poll::Ready(Ok(Self::SendStream::new(send)))
     }
 
+    #[instrument(skip_all)]
     fn close(&mut self, code: h3::error::Code, reason: &[u8]) {
         self.conn.close(
             VarInt::from_u64(code.value()).expect("error code VarInt"),
@@ -452,6 +463,7 @@ impl quic::RecvStream for RecvStream {
     type Buf = Bytes;
     type Error = ReadError;
 
+    #[instrument(skip_all)]
     fn poll_data(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -468,6 +480,7 @@ impl quic::RecvStream for RecvStream {
         Poll::Ready(Ok(chunk?.map(|c| c.bytes)))
     }
 
+    #[instrument(skip_all)]
     fn stop_sending(&mut self, error_code: u64) {
         self.stream
             .as_mut()
@@ -476,6 +489,7 @@ impl quic::RecvStream for RecvStream {
             .ok();
     }
 
+    #[instrument(skip_all)]
     fn recv_id(&self) -> StreamId {
         self.stream
             .as_ref()
@@ -573,6 +587,7 @@ where
 {
     type Error = SendStreamError;
 
+    #[instrument(skip_all)]
     fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         if let Some(ref mut data) = self.writing {
             while data.has_remaining() {
@@ -598,10 +613,12 @@ where
         Poll::Ready(Ok(()))
     }
 
+    #[instrument(skip_all)]
     fn poll_finish(&mut self, _cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(self.stream.as_mut().unwrap().finish().map_err(|e| e.into()))
     }
 
+    #[instrument(skip_all)]
     fn reset(&mut self, reset_code: u64) {
         let _ = self
             .stream
@@ -610,6 +627,7 @@ where
             .reset(VarInt::from_u64(reset_code).unwrap_or(VarInt::MAX));
     }
 
+    #[instrument(skip_all)]
     fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), Self::Error> {
         if self.writing.is_some() {
             return Err(Self::Error::NotReady);
@@ -618,6 +636,7 @@ where
         Ok(())
     }
 
+    #[instrument(skip_all)]
     fn send_id(&self) -> StreamId {
         self.stream
             .as_ref()
@@ -633,6 +652,7 @@ impl<B> quic::SendStreamUnframed<B> for SendStream<B>
 where
     B: Buf,
 {
+    #[instrument(skip_all)]
     fn poll_send<D: Buf>(
         &mut self,
         cx: &mut task::Context<'_>,

@@ -2,6 +2,7 @@ use std::convert::TryFrom;
 
 use bytes::Buf;
 use http::{Request, StatusCode};
+use tracing::instrument;
 
 use crate::{error::Code, proto::headers::Header, qpack, quic, Error};
 
@@ -28,6 +29,7 @@ impl<B: Buf, C: quic::Connection<B>> ResolveRequest<C, B> {
     }
 
     /// Finishes the resolution of the request
+    #[instrument(skip_all)]
     pub async fn resolve(
         mut self,
     ) -> Result<(Request<()>, RequestStream<C::BidiStream, B>), Error> {

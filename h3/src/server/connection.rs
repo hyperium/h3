@@ -37,7 +37,7 @@ use crate::{
 
 use crate::server::request::ResolveRequest;
 
-use tracing::{trace, warn};
+use tracing::{instrument, trace, warn};
 
 use super::stream::{ReadDatagram, RequestStream};
 
@@ -89,11 +89,13 @@ where
     /// Use a custom [`super::builder::Builder`] with [`super::builder::builder()`] to create a connection
     /// with different settings.
     /// Provide a Connection which implements [`quic::Connection`].
+    #[instrument(skip_all)]
     pub async fn new(conn: C) -> Result<Self, Error> {
         super::builder::builder().build(conn).await
     }
 
     /// Closes the connection with a code and a reason.
+    #[instrument(skip_all)]
     pub fn close<T: AsRef<str>>(&mut self, code: Code, reason: T) -> Error {
         self.inner.close(code, reason)
     }
@@ -109,6 +111,7 @@ where
     /// It returns a tuple with a [`http::Request`] and an [`RequestStream`].
     /// The [`http::Request`] is the received request from the client.
     /// The [`RequestStream`] can be used to send the response.
+    #[instrument(skip_all)]
     pub async fn accept(
         &mut self,
     ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
@@ -154,6 +157,7 @@ where
     /// This is needed as a bidirectional stream may be read as part of incoming webtransport
     /// bi-streams. If it turns out that the stream is *not* a `WEBTRANSPORT_STREAM` the request
     /// may still want to be handled and passed to the user.
+    #[instrument(skip_all)]
     pub fn accept_with_frame(
         &mut self,
         mut stream: FrameStream<C::BidiStream, B>,
@@ -285,6 +289,7 @@ where
     /// Initiate a graceful shutdown, accepting `max_request` potentially still in-flight
     ///
     /// See [connection shutdown](https://www.rfc-editor.org/rfc/rfc9114.html#connection-shutdown) for more information.
+    #[instrument(skip_all)]
     pub async fn shutdown(&mut self, max_requests: usize) -> Result<(), Error> {
         let max_id = self
             .last_accepted_stream
@@ -298,6 +303,7 @@ where
     ///
     /// This could be either a *Request* or a *WebTransportBiStream*, the first frame's type
     /// decides.
+    #[instrument(skip_all)]
     pub fn poll_accept_request(
         &mut self,
         cx: &mut Context<'_>,
@@ -346,11 +352,13 @@ where
         }
     }
 
+    #[instrument(skip_all)]
     pub(crate) fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         while (self.poll_next_control(cx)?).is_ready() {}
         Poll::Pending
     }
 
+    #[instrument(skip_all)]
     pub(crate) fn poll_next_control(
         &mut self,
         cx: &mut Context<'_>,
@@ -391,6 +399,7 @@ where
         Poll::Ready(Ok(frame))
     }
 
+    #[instrument(skip_all)]
     fn poll_requests_completion(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         loop {
             match self.request_end_recv.poll_recv(cx) {
@@ -420,6 +429,7 @@ where
     B: Buf,
 {
     /// Sends a datagram
+    #[instrument(skip_all)]
     pub fn send_datagram(&mut self, stream_id: StreamId, data: B) -> Result<(), Error> {
         self.inner
             .conn
@@ -436,6 +446,7 @@ where
     B: Buf,
 {
     /// Reads an incoming datagram
+    #[instrument(skip_all)]
     pub fn read_datagram(&mut self) -> ReadDatagram<C, B> {
         ReadDatagram {
             conn: self,
@@ -449,6 +460,7 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
+    #[instrument(skip_all)]
     fn drop(&mut self) {
         self.inner.close(Code::H3_NO_ERROR, "");
     }
