@@ -405,7 +405,7 @@ where
                         )));
                     }
                     self.inner.process_goaway(&mut self.recv_closing, id)?;
-                    
+
                     #[cfg(feature = "tracing")]
                     info!("Server initiated graceful shutdown, last: StreamId({})", id);
                 }

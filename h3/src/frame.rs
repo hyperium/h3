@@ -229,7 +229,6 @@ impl FrameDecoder {
 
             match decoded {
                 Err(frame::FrameError::UnknownFrame(_ty)) => {
-
                     #[cfg(feature = "tracing")]
                     trace!("ignore unknown frame type {:#x}", _ty);
 

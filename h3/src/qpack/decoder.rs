@@ -121,7 +121,7 @@ impl Decoder {
         while let Some(instruction) = self.parse_instruction(read)? {
             #[cfg(feature = "tracing")]
             trace!("instruction {:?}", instruction);
-            
+
             match instruction {
                 Instruction::Insert(field) => self.table.put(field)?,
                 Instruction::TableSizeUpdate(size) => {
