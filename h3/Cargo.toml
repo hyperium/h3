@@ -21,6 +21,7 @@ categories = [
 
 [features]
 i-implement-a-third-party-backend-and-opt-into-breaking-changes = []
+h3-tracing = ["tracing"]
 
 [dependencies]
 bytes = "1"
@@ -28,7 +29,7 @@ futures-util = { version = "0.3", default-features = false, features = ["io"] }
 http = "1"
 tokio = { version = "1", features = ["sync"] }
 pin-project-lite = { version = "0.2", default_features = false }
-tracing = "0.1.40"
+tracing = {version = "0.1.40", optional = true}
 fastrand = "2.0.1"
 
 [dev-dependencies]

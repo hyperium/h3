@@ -9,7 +9,9 @@ use bytes::{Buf, Bytes, BytesMut};
 use futures_util::{future, ready};
 use http::HeaderMap;
 use stream::WriteBuf;
-use tracing::warn;
+
+#[cfg(feature = "h3-tracing")]
+use tracing::{instrument, warn};
 
 use crate::{
     config::{Config, Settings},
@@ -167,6 +169,7 @@ where
     B: Buf,
 {
     /// Sends the settings and initializes the control streams
+    #[cfg_attr(feature = "h3-tracing", instrument(skip_all))]
     pub async fn send_control_stream_headers(&mut self) -> Result<(), Error> {
         #[cfg(test)]
         if !self.config.send_settings {
@@ -176,6 +179,7 @@ where
         let settings = frame::Settings::try_from(self.config)
             .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
 
+        #[cfg(feature = "h3-tracing")]
         tracing::debug!("Sending server settings: {:#x?}", settings);
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-3.2
@@ -232,6 +236,7 @@ where
     }
 
     /// Initiates the connection and opens a control stream
+    #[cfg_attr(feature = "h3-tracing", instrument(skip_all))]
     pub async fn new(mut conn: C, shared: SharedStateRef, config: Config) -> Result<Self, Error> {
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
         //# Endpoints SHOULD create the HTTP control stream as well as the
@@ -288,7 +293,7 @@ where
     }
 
     /// Send GOAWAY with specified max_id, iff max_id is smaller than the previous one.
-
+    #[cfg_attr(feature = "h3-tracing", instrument(skip_all))]
     pub async fn shutdown<T>(
         &mut self,
         sent_closing: &mut Option<T>,
@@ -317,6 +322,7 @@ where
     }
 
     #[allow(missing_docs)]
+    #[cfg_attr(feature = "h3-tracing", instrument(skip_all))]
     pub fn poll_accept_request(
         &mut self,
         cx: &mut Context<'_>,
@@ -337,6 +343,7 @@ where
     /// Polls incoming streams
     ///
     /// Accepted streams which are not control, decoder, or encoder streams are buffer in `accepted_recv_streams`
+    #[cfg_attr(feature = "h3-tracing", instrument(skip_all))]
     pub fn poll_accept_recv(&mut self, cx: &mut Context<'_>) -> Result<(), Error> {
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
             return Err(e.clone());
@@ -425,6 +432,7 @@ where
     }
 
     /// Waits for the control stream to be received and reads subsequent frames.
+    #[cfg_attr(feature = "h3-tracing", instrument(skip_all))]
     pub fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<Frame<PayloadLen>, Error>> {
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
             return Poll::Ready(Err(e.clone()));
@@ -546,6 +554,7 @@ where
         Poll::Ready(res)
     }
 
+    #[cfg_attr(feature = "h3-tracing", instrument(skip_all))]
     pub(crate) fn process_goaway<T>(
         &mut self,
         recv_closing: &mut Option<T>,
@@ -590,6 +599,7 @@ where
 
     /// Closes a Connection with code and reason.
     /// It returns an [`Error`] which can be returned.
+    #[cfg_attr(feature = "h3-tracing", instrument(skip_all))]
     pub fn close<T: AsRef<str>>(&mut self, code: Code, reason: T) -> Error {
         self.shared.write("connection close err").error =
             Some(code.with_reason(reason.as_ref(), crate::error::ErrorLevel::ConnectionError));
@@ -598,6 +608,7 @@ where
     }
 
     // start grease stream and send data
+    #[cfg_attr(feature = "h3-tracing", instrument(skip_all))]
     fn poll_grease_stream(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         if matches!(self.grease_step, GreaseStatus::NotStarted(_)) {
             self.grease_step = match self.conn.poll_open_send(cx) {
@@ -606,7 +617,10 @@ where
                     // could not create grease stream
                     // don't try again
                     self.send_grease_stream_flag = false;
+
+                    #[cfg(feature = "h3-tracing")]
                     warn!("grease stream creation failed with");
+
                     return Poll::Ready(());
                 }
                 Poll::Ready(Ok(stream)) => GreaseStatus::Started(Some(stream)),
@@ -625,7 +639,10 @@ where
                     .is_err()
                 {
                     self.send_grease_stream_flag = false;
+
+                    #[cfg(feature = "h3-tracing")]
                     warn!("write data on grease stream failed with");
+
                     return Poll::Ready(());
                 };
             }
@@ -641,7 +658,10 @@ where
                         // could not write grease frame
                         // don't try again
                         self.send_grease_stream_flag = false;
+
+                        #[cfg(feature = "h3-tracing")]
                         warn!("write data on grease stream failed with");
+
                         return Poll::Ready(());
                     }
                 };
@@ -668,7 +688,10 @@ where
                     // could not finish grease stream
                     // don't try again
                     self.send_grease_stream_flag = false;
+
+                    #[cfg(feature = "h3-tracing")]
                     warn!("finish grease stream failed with");
+
                     return Poll::Ready(());
                 }
             };
@@ -682,6 +705,7 @@ where
     }
 
     #[allow(missing_docs)]
+    #[cfg_attr(feature = "h3-tracing", instrument(skip_all))]
     pub fn accepted_streams_mut(&mut self) -> &mut AcceptedStreams<C, B> {
         &mut self.accepted_streams
     }
@@ -725,6 +749,7 @@ where
     S: quic::RecvStream,
 {
     /// Receive some of the request body.
+    #[cfg_attr(feature = "h3-tracing", instrument(skip_all))]
     pub fn poll_recv_data(
         &mut self,
         cx: &mut Context<'_>,
@@ -773,12 +798,15 @@ where
             .poll_data(cx)
             .map_err(|e| self.maybe_conn_err(e))
     }
+
     /// Receive some of the request body.
+    #[cfg_attr(feature = "h3-tracing", instrument(skip_all))]
     pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
         future::poll_fn(|cx| self.poll_recv_data(cx)).await
     }
 
     /// Receive trailers
+    #[cfg_attr(feature = "h3-tracing", instrument(skip_all))]
     pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
         let mut trailers = if let Some(encoded) = self.trailers.take() {
             encoded
@@ -847,6 +875,7 @@ where
     }
 
     #[allow(missing_docs)]
+    #[cfg_attr(feature = "h3-tracing", instrument(skip_all))]
     pub fn stop_sending(&mut self, err_code: Code) {
         self.stream.stop_sending(err_code);
     }
@@ -858,6 +887,7 @@ where
     B: Buf,
 {
     /// Send some data on the response body.
+    #[cfg_attr(feature = "h3-tracing", instrument(skip_all))]
     pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
         let frame = Frame::Data(buf);
 
@@ -868,6 +898,7 @@ where
     }
 
     /// Send a set of trailers to end the request.
+    #[cfg_attr(feature = "h3-tracing", instrument(skip_all))]
     pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
         //= type=TODO
@@ -898,11 +929,13 @@ where
     }
 
     /// Stops a stream with an error code
+    #[cfg_attr(feature = "h3-tracing", instrument(skip_all))]
     pub fn stop_stream(&mut self, code: Code) {
         self.stream.reset(code.into());
     }
 
     #[allow(missing_docs)]
+    #[cfg_attr(feature = "h3-tracing", instrument(skip_all))]
     pub async fn finish(&mut self) -> Result<(), Error> {
         if self.send_grease_frame {
             // send a grease frame once per Connection
@@ -923,6 +956,7 @@ where
     S: quic::BidiStream<B>,
     B: Buf,
 {
+    #[cfg_attr(feature = "h3-tracing", instrument(skip_all))]
     pub(crate) fn split(
         self,
     ) -> (

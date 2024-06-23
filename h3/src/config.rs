@@ -105,7 +105,10 @@ impl TryFrom<Config> for frame::Settings {
             //# H3_SETTINGS_ERROR.
             match settings.insert(frame::SettingId::grease(), 0) {
                 Ok(_) => (),
-                Err(err) => tracing::warn!("Error when adding the grease Setting. Reason {}", err),
+                Err(_err) => {
+                    #[cfg(feature = "h3-tracing")]
+                    tracing::warn!("Error when adding the grease Setting. Reason {}", _err);
+                }
             }
         }
 

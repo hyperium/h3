@@ -28,6 +28,9 @@ use h3::{
 };
 use tokio_util::sync::ReusableBoxFuture;
 
+#[cfg(feature = "h3-quinn-tracing")]
+use tracing::instrument;
+
 /// A QUIC connection backed by Quinn
 ///
 /// Implements a [`quic::Connection`] backed by a [`quinn::Connection`].
@@ -155,6 +158,7 @@ where
     type OpenStreams = OpenStreams;
     type AcceptError = ConnectionError;
 
+    #[cfg_attr(feature = "h3-quinn-tracing", instrument(skip_all))]
     fn poll_accept_bidi(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -169,6 +173,7 @@ where
         })))
     }
 
+    #[cfg_attr(feature = "h3-quinn-tracing", instrument(skip_all))]
     fn poll_accept_recv(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -197,6 +202,7 @@ where
     type BidiStream = BidiStream<B>;
     type OpenError = ConnectionError;
 
+    #[cfg_attr(feature = "h3-quinn-tracing", instrument(skip_all))]
     fn poll_open_bidi(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -215,6 +221,7 @@ where
         }))
     }
 
+    #[cfg_attr(feature = "h3-quinn-tracing", instrument(skip_all))]
     fn poll_open_send(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -229,6 +236,7 @@ where
         Poll::Ready(Ok(Self::SendStream::new(send)))
     }
 
+    #[cfg_attr(feature = "h3-quinn-tracing", instrument(skip_all))]
     fn close(&mut self, code: h3::error::Code, reason: &[u8]) {
         self.conn.close(
             VarInt::from_u64(code.value()).expect("error code VarInt"),
@@ -243,6 +251,7 @@ where
 {
     type Error = SendDatagramError;
 
+    #[cfg_attr(feature = "h3-quinn-tracing", instrument(skip_all))]
     fn send_datagram(&mut self, data: Datagram<B>) -> Result<(), SendDatagramError> {
         // TODO investigate static buffer from known max datagram size
         let mut buf = BytesMut::new();
@@ -259,6 +268,7 @@ impl quic::RecvDatagramExt for Connection {
     type Error = ConnectionError;
 
     #[inline]
+    #[cfg_attr(feature = "h3-quinn-tracing", instrument(skip_all))]
     fn poll_accept_datagram(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -289,6 +299,7 @@ where
     type BidiStream = BidiStream<B>;
     type OpenError = ConnectionError;
 
+    #[cfg_attr(feature = "h3-quinn-tracing", instrument(skip_all))]
     fn poll_open_bidi(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -307,6 +318,7 @@ where
         }))
     }
 
+    #[cfg_attr(feature = "h3-quinn-tracing", instrument(skip_all))]
     fn poll_open_send(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -321,6 +333,7 @@ where
         Poll::Ready(Ok(Self::SendStream::new(send)))
     }
 
+    #[cfg_attr(feature = "h3-quinn-tracing", instrument(skip_all))]
     fn close(&mut self, code: h3::error::Code, reason: &[u8]) {
         self.conn.close(
             VarInt::from_u64(code.value()).expect("error code VarInt"),
@@ -452,6 +465,7 @@ impl quic::RecvStream for RecvStream {
     type Buf = Bytes;
     type Error = ReadError;
 
+    #[cfg_attr(feature = "h3-quinn-tracing", instrument(skip_all))]
     fn poll_data(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -468,6 +482,7 @@ impl quic::RecvStream for RecvStream {
         Poll::Ready(Ok(chunk?.map(|c| c.bytes)))
     }
 
+    #[cfg_attr(feature = "h3-quinn-tracing", instrument(skip_all))]
     fn stop_sending(&mut self, error_code: u64) {
         self.stream
             .as_mut()
@@ -476,6 +491,7 @@ impl quic::RecvStream for RecvStream {
             .ok();
     }
 
+    #[cfg_attr(feature = "h3-quinn-tracing", instrument(skip_all))]
     fn recv_id(&self) -> StreamId {
         self.stream
             .as_ref()
@@ -573,6 +589,7 @@ where
 {
     type Error = SendStreamError;
 
+    #[cfg_attr(feature = "h3-quinn-tracing", instrument(skip_all))]
     fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         if let Some(ref mut data) = self.writing {
             while data.has_remaining() {
@@ -598,10 +615,12 @@ where
         Poll::Ready(Ok(()))
     }
 
+    #[cfg_attr(feature = "h3-quinn-tracing", instrument(skip_all))]
     fn poll_finish(&mut self, _cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(self.stream.as_mut().unwrap().finish().map_err(|e| e.into()))
     }
 
+    #[cfg_attr(feature = "h3-quinn-tracing", instrument(skip_all))]
     fn reset(&mut self, reset_code: u64) {
         let _ = self
             .stream
@@ -610,6 +629,7 @@ where
             .reset(VarInt::from_u64(reset_code).unwrap_or(VarInt::MAX));
     }
 
+    #[cfg_attr(feature = "h3-quinn-tracing", instrument(skip_all))]
     fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), Self::Error> {
         if self.writing.is_some() {
             return Err(Self::Error::NotReady);
@@ -618,6 +638,7 @@ where
         Ok(())
     }
 
+    #[cfg_attr(feature = "h3-quinn-tracing", instrument(skip_all))]
     fn send_id(&self) -> StreamId {
         self.stream
             .as_ref()
@@ -633,6 +654,7 @@ impl<B> quic::SendStreamUnframed<B> for SendStream<B>
 where
     B: Buf,
 {
+    #[cfg_attr(feature = "h3-quinn-tracing", instrument(skip_all))]
     fn poll_send<D: Buf>(
         &mut self,
         cx: &mut task::Context<'_>,

@@ -1,6 +1,7 @@
 use bytes::{Buf, BufMut};
 use std::{convert::TryInto, fmt, io::Cursor, num::TryFromIntError};
 
+#[cfg(feature = "h3-tracing")]
 use tracing::trace;
 
 use super::{
@@ -118,7 +119,9 @@ impl Decoder {
         let inserted_on_start = self.table.total_inserted();
 
         while let Some(instruction) = self.parse_instruction(read)? {
+            #[cfg(feature = "h3-tracing")]
             trace!("instruction {:?}", instruction);
+
             match instruction {
                 Instruction::Insert(field) => self.table.put(field)?,
                 Instruction::TableSizeUpdate(size) => {
