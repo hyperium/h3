@@ -21,7 +21,7 @@ categories = [
 
 [features]
 i-implement-a-third-party-backend-and-opt-into-breaking-changes = []
-h3-tracing = ["tracing"]
+tracing = ["dep:tracing"]
 
 [dependencies]
 bytes = "1"
