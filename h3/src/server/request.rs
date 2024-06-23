@@ -31,7 +31,7 @@ impl<B: Buf, C: quic::Connection<B>> ResolveRequest<C, B> {
     }
 
     /// Finishes the resolution of the request
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level="trace"))]
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn resolve(
         mut self,
     ) -> Result<(Request<()>, RequestStream<C::BidiStream, B>), Error> {
