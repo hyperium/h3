@@ -2,7 +2,7 @@ use std::task::{Context, Poll};
 
 use bytes::Buf;
 
-#[cfg(feature = "h3-tracing")]
+#[cfg(feature = "tracing")]
 use tracing::trace;
 
 use crate::stream::{BufRecvStream, WriteBuf};
@@ -229,7 +229,7 @@ impl FrameDecoder {
 
             match decoded {
                 Err(frame::FrameError::UnknownFrame(_ty)) => {
-                    #[cfg(feature = "h3-tracing")]
+                    #[cfg(feature = "tracing")]
                     trace!("ignore unknown frame type {:#x}", _ty);
 
                     src.advance(pos);

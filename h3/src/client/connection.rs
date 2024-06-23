@@ -10,7 +10,7 @@ use bytes::{Buf, BytesMut};
 use futures_util::future;
 use http::request;
 
-#[cfg(feature = "h3-tracing")]
+#[cfg(feature = "tracing")]
 use tracing::{info, instrument, trace};
 
 use crate::{
@@ -123,7 +123,7 @@ where
     B: Buf,
 {
     /// Send an HTTP/3 request to the server
-    #[cfg_attr(feature = "h3-tracing", instrument(skip_all))]
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn send_request(
         &mut self,
         req: http::Request<()>,
@@ -349,20 +349,20 @@ where
     B: Buf,
 {
     /// Initiate a graceful shutdown, accepting `max_push` potentially in-flight server pushes
-    #[cfg_attr(feature = "h3-tracing", instrument(skip_all))]
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn shutdown(&mut self, _max_push: usize) -> Result<(), Error> {
         // TODO: Calculate remaining pushes once server push is implemented.
         self.inner.shutdown(&mut self.sent_closing, PushId(0)).await
     }
 
     /// Wait until the connection is closed
-    #[cfg_attr(feature = "h3-tracing", instrument(skip_all))]
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn wait_idle(&mut self) -> Result<(), Error> {
         future::poll_fn(|cx| self.poll_close(cx)).await
     }
 
     /// Maintain the connection state until it is closed
-    #[cfg_attr(feature = "h3-tracing", instrument(skip_all))]
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_close(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         while let Poll::Ready(result) = self.inner.poll_control(cx) {
             match result {
@@ -386,7 +386,7 @@ where
                 //# Once a server has provided new settings,
                 //# clients MUST comply with those values.
                 Ok(Frame::Settings(_)) => {
-                    #[cfg(feature = "h3-tracing")]
+                    #[cfg(feature = "tracing")]
                     trace!("Got settings");
                     ()
                 }
@@ -406,7 +406,7 @@ where
                     }
                     self.inner.process_goaway(&mut self.recv_closing, id)?;
 
-                    #[cfg(feature = "h3-tracing")]
+                    #[cfg(feature = "tracing")]
                     info!("Server initiated graceful shutdown, last: StreamId({})", id);
                 }
 
