@@ -111,7 +111,7 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         toolchain: [stable, beta]
-        features: [i-implement-a-third-party-backend-and-opt-into-breaking-changes, h3-tracing, 'h3-tracing,i-implement-a-third-party-backend-and-opt-into-breaking-changes']
+        features: [i-implement-a-third-party-backend-and-opt-into-breaking-changes, tracing, 'tracing,i-implement-a-third-party-backend-and-opt-into-breaking-changes']
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
