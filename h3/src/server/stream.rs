@@ -33,7 +33,8 @@ use crate::{
     stream::{self},
 };
 
-use tracing::error;
+#[cfg(feature = "tracing")]
+use tracing::{error, instrument};
 
 /// Manage request and response transfer for an incoming request
 ///
@@ -62,11 +63,13 @@ where
     B: Buf,
 {
     /// Receive data sent from the client
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
         self.inner.recv_data().await
     }
 
     /// Poll for data sent from the client
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_recv_data(
         &mut self,
         cx: &mut Context<'_>,
@@ -75,11 +78,13 @@ where
     }
 
     /// Receive an optional set of trailers for the request
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
         self.inner.recv_trailers().await
     }
 
     /// Tell the peer to stop sending into the underlying QUIC stream
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn stop_sending(&mut self, error_code: crate::error::Code) {
         self.inner.stream.stop_sending(error_code)
     }
@@ -205,10 +210,11 @@ where
 
 impl Drop for RequestEnd {
     fn drop(&mut self) {
-        if let Err(e) = self.request_end.send(self.stream_id) {
+        if let Err(_error) = self.request_end.send(self.stream_id) {
+            #[cfg(feature = "tracing")]
             error!(
                 "failed to notify connection of request end: {} {}",
-                self.stream_id, e
+                self.stream_id, _error
             );
         }
     }
@@ -234,7 +240,9 @@ where
     type Output = Result<Option<Datagram<C::Buf>>, Error>;
 
     fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        #[cfg(feature = "tracing")]
         tracing::trace!("poll: read_datagram");
+
         match ready!(self.conn.inner.conn.poll_accept_datagram(cx))? {
             Some(v) => Poll::Ready(Ok(Some(Datagram::decode(v)?))),
             None => Poll::Ready(Ok(None)),

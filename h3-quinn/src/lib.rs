@@ -28,6 +28,9 @@ use h3::{
 };
 use tokio_util::sync::ReusableBoxFuture;
 
+#[cfg(feature = "tracing")]
+use tracing::instrument;
+
 /// A QUIC connection backed by Quinn
 ///
 /// Implements a [`quic::Connection`] backed by a [`quinn::Connection`].
@@ -198,7 +201,7 @@ where
             opening_uni: None,
         }
     }
-
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn poll_incoming(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -221,6 +224,7 @@ where
     type BidiStream = BidiStream<B>;
     type OpenError = ConnectionError;
 
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn poll_open_bidi(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -239,6 +243,7 @@ where
         }))
     }
 
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn poll_open_send(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -253,6 +258,7 @@ where
         Poll::Ready(Ok(Self::SendStream::new(send)))
     }
 
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn close(&mut self, code: h3::error::Code, reason: &[u8]) {
         self.conn.close(
             VarInt::from_u64(code.value()).expect("error code VarInt"),
@@ -267,6 +273,7 @@ where
 {
     type Error = SendDatagramError;
 
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn send_datagram(&mut self, data: Datagram<B>) -> Result<(), SendDatagramError> {
         // TODO investigate static buffer from known max datagram size
         let mut buf = BytesMut::new();
@@ -286,6 +293,7 @@ where
     type Error = ConnectionError;
 
     #[inline]
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn poll_accept_datagram(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -316,6 +324,7 @@ where
     type BidiStream = BidiStream<B>;
     type OpenError = ConnectionError;
 
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn poll_open_bidi(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -334,6 +343,7 @@ where
         }))
     }
 
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn poll_open_send(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -348,6 +358,7 @@ where
         Poll::Ready(Ok(Self::SendStream::new(send)))
     }
 
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn close(&mut self, code: h3::error::Code, reason: &[u8]) {
         self.conn.close(
             VarInt::from_u64(code.value()).expect("error code VarInt"),
@@ -479,6 +490,7 @@ impl quic::RecvStream for RecvStream {
     type Buf = Bytes;
     type Error = ReadError;
 
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn poll_data(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -495,6 +507,7 @@ impl quic::RecvStream for RecvStream {
         Poll::Ready(Ok(chunk?.map(|c| c.bytes)))
     }
 
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn stop_sending(&mut self, error_code: u64) {
         self.stream
             .as_mut()
@@ -503,6 +516,7 @@ impl quic::RecvStream for RecvStream {
             .ok();
     }
 
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn recv_id(&self) -> StreamId {
         self.stream
             .as_ref()
@@ -600,6 +614,7 @@ where
 {
     type Error = SendStreamError;
 
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         if let Some(ref mut data) = self.writing {
             while data.has_remaining() {
@@ -625,10 +640,12 @@ where
         Poll::Ready(Ok(()))
     }
 
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn poll_finish(&mut self, _cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(self.stream.as_mut().unwrap().finish().map_err(|e| e.into()))
     }
 
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn reset(&mut self, reset_code: u64) {
         let _ = self
             .stream
@@ -637,6 +654,7 @@ where
             .reset(VarInt::from_u64(reset_code).unwrap_or(VarInt::MAX));
     }
 
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), Self::Error> {
         if self.writing.is_some() {
             return Err(Self::Error::NotReady);
@@ -645,6 +663,7 @@ where
         Ok(())
     }
 
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn send_id(&self) -> StreamId {
         self.stream
             .as_ref()
@@ -660,6 +679,7 @@ impl<B> quic::SendStreamUnframed<B> for SendStream<B>
 where
     B: Buf,
 {
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn poll_send<D: Buf>(
         &mut self,
         cx: &mut task::Context<'_>,

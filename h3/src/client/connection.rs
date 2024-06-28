@@ -9,7 +9,9 @@ use std::{
 use bytes::{Buf, BytesMut};
 use futures_util::future;
 use http::request;
-use tracing::{info, trace};
+
+#[cfg(feature = "tracing")]
+use tracing::{info, instrument, trace};
 
 use crate::{
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
@@ -121,6 +123,7 @@ where
     B: Buf,
 {
     /// Send an HTTP/3 request to the server
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn send_request(
         &mut self,
         req: http::Request<()>,
@@ -346,17 +349,20 @@ where
     B: Buf,
 {
     /// Initiate a graceful shutdown, accepting `max_push` potentially in-flight server pushes
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn shutdown(&mut self, _max_push: usize) -> Result<(), Error> {
         // TODO: Calculate remaining pushes once server push is implemented.
         self.inner.shutdown(&mut self.sent_closing, PushId(0)).await
     }
 
     /// Wait until the connection is closed
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn wait_idle(&mut self) -> Result<(), Error> {
         future::poll_fn(|cx| self.poll_close(cx)).await
     }
 
     /// Maintain the connection state until it is closed
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_close(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         let incoming_result = self.inner.poll_handle_incoming(cx);
 
@@ -404,7 +410,12 @@ where
                 //= type=TODO
                 //# Once a server has provided new settings,
                 //# clients MUST comply with those values.
-                Ok(Frame::Settings(_)) => trace!("Got settings"),
+                Ok(Frame::Settings(_)) => {
+                    #[cfg(feature = "tracing")]
+                    trace!("Got settings");
+                    ()
+                }
+
                 Ok(Frame::Goaway(id)) => {
                     //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.6
                     //# The GOAWAY frame is always sent on the control stream.  In the
@@ -420,6 +431,7 @@ where
                     }
                     self.inner.process_goaway(&mut self.recv_closing, id)?;
 
+                    #[cfg(feature = "tracing")]
                     info!("Server initiated graceful shutdown, last: StreamId({})", id);
                 }
 
