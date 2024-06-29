@@ -16,8 +16,8 @@ use bytes::{Buf, Bytes, BytesMut};
 
 use futures::{
     ready,
-    stream::{self, BoxStream},
-    StreamExt,
+    stream::{self},
+    Stream, StreamExt,
 };
 pub use quinn::{self, AcceptBi, AcceptUni, Endpoint, OpenBi, OpenUni, VarInt, WriteError};
 use quinn::{ApplicationClose, ClosedStream, ReadDatagram};
@@ -31,16 +31,19 @@ use tokio_util::sync::ReusableBoxFuture;
 #[cfg(feature = "tracing")]
 use tracing::instrument;
 
+/// BoxStream with Sync trait
+type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Sync + Send + 'a>>;
+
 /// A QUIC connection backed by Quinn
 ///
 /// Implements a [`quic::Connection`] backed by a [`quinn::Connection`].
 pub struct Connection {
     conn: quinn::Connection,
-    incoming_bi: BoxStream<'static, <AcceptBi<'static> as Future>::Output>,
-    opening_bi: Option<BoxStream<'static, <OpenBi<'static> as Future>::Output>>,
-    incoming_uni: BoxStream<'static, <AcceptUni<'static> as Future>::Output>,
-    opening_uni: Option<BoxStream<'static, <OpenUni<'static> as Future>::Output>>,
-    datagrams: BoxStream<'static, <ReadDatagram<'static> as Future>::Output>,
+    incoming_bi: BoxStreamSync<'static, <AcceptBi<'static> as Future>::Output>,
+    opening_bi: Option<BoxStreamSync<'static, <OpenBi<'static> as Future>::Output>>,
+    incoming_uni: BoxStreamSync<'static, <AcceptUni<'static> as Future>::Output>,
+    opening_uni: Option<BoxStreamSync<'static, <OpenUni<'static> as Future>::Output>>,
+    datagrams: BoxStreamSync<'static, <ReadDatagram<'static> as Future>::Output>,
 }
 
 impl Connection {
@@ -287,8 +290,8 @@ impl quic::RecvDatagramExt for Connection {
 /// [`quinn::OpenBi`], [`quinn::OpenUni`].
 pub struct OpenStreams {
     conn: quinn::Connection,
-    opening_bi: Option<BoxStream<'static, <OpenBi<'static> as Future>::Output>>,
-    opening_uni: Option<BoxStream<'static, <OpenUni<'static> as Future>::Output>>,
+    opening_bi: Option<BoxStreamSync<'static, <OpenBi<'static> as Future>::Output>>,
+    opening_uni: Option<BoxStreamSync<'static, <OpenUni<'static> as Future>::Output>>,
 }
 
 impl<B> quic::OpenStreams<B> for OpenStreams
