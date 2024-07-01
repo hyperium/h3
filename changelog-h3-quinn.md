@@ -1,3 +1,7 @@
+### v0.0.6 (2024-07-01)
+* Consolidate quic trait redundancy
+* make types Sync
+
 ### v0.0.6 (2024-05-20)
 * use quinn 0.11
 
