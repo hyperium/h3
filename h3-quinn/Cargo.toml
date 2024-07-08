@@ -1,6 +1,6 @@
 [package]
 name = "h3-quinn"
-version = "0.0.6"
+version = "0.0.7"
 rust-version = "1.66"
 authors = ["Jean-Christophe BEGUE <jc.begue@pm.me>"]
 edition = "2021"
@@ -13,7 +13,7 @@ categories = ["network-programming", "web-programming"]
 license = "MIT"
 
 [dependencies]
-h3 = { version = "0.0.5", path = "../h3" }
+h3 = { version = "0.0.6", path = "../h3" }
 bytes = "1"
 quinn = { version = "0.11", default-features = false, features = [
     "futures-io",

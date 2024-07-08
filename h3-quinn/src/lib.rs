@@ -17,10 +17,10 @@ use bytes::{Buf, Bytes, BytesMut};
 use futures::{
     ready,
     stream::{self, select, BoxStream, Select},
-    StreamExt,
+    Stream, StreamExt,
 };
 pub use quinn::{self, Endpoint, OpenBi, OpenUni, VarInt, WriteError};
-use quinn::{ApplicationClose, ClosedStream, ReadDatagram};
+use quinn::{AcceptBi, AcceptUni, ApplicationClose, ClosedStream, ReadDatagram};
 
 use h3::{
     ext::Datagram,
@@ -31,6 +31,9 @@ use tokio_util::sync::ReusableBoxFuture;
 #[cfg(feature = "tracing")]
 use tracing::instrument;
 
+/// BoxStream with Sync trait
+type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Sync + Send + 'a>>;
+
 /// A QUIC connection backed by Quinn
 ///
 /// Implements a [`quic::Connection`] backed by a [`quinn::Connection`].
@@ -39,15 +42,15 @@ where
     B: Buf,
 {
     conn: quinn::Connection,
-    opening_bi: Option<BoxStream<'static, <OpenBi<'static> as Future>::Output>>,
-    opening_uni: Option<BoxStream<'static, <OpenUni<'static> as Future>::Output>>,
-    datagrams: BoxStream<'static, <ReadDatagram<'static> as Future>::Output>,
+    opening_bi: Option<BoxStreamSync<'static, <OpenBi<'static> as Future>::Output>>,
+    opening_uni: Option<BoxStreamSync<'static, <OpenUni<'static> as Future>::Output>>,
+    datagrams: BoxStreamSync<'static, <ReadDatagram<'static> as Future>::Output>,
     incoming: Select<
-        BoxStream<
+        BoxStreamSync<
             'static,
             Result<IncomingStreamType<BidiStream<B>, RecvStream, B>, quinn::ConnectionError>,
         >,
-        BoxStream<
+        BoxStreamSync<
             'static,
             Result<IncomingStreamType<BidiStream<B>, RecvStream, B>, quinn::ConnectionError>,
         >,
@@ -312,8 +315,8 @@ where
 /// [`quinn::OpenBi`], [`quinn::OpenUni`].
 pub struct OpenStreams {
     conn: quinn::Connection,
-    opening_bi: Option<BoxStream<'static, <OpenBi<'static> as Future>::Output>>,
-    opening_uni: Option<BoxStream<'static, <OpenUni<'static> as Future>::Output>>,
+    opening_bi: Option<BoxStreamSync<'static, <OpenBi<'static> as Future>::Output>>,
+    opening_uni: Option<BoxStreamSync<'static, <OpenUni<'static> as Future>::Output>>,
 }
 
 impl<B> quic::OpenStreams<B> for OpenStreams

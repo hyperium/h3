@@ -1,3 +1,9 @@
+### v0.0.6 (2024-07-01)
+* Consolidate quic trait redundancy
+* start qpack streams 
+* send grease stream in the background
+* new tracing feature
+
 ### v0.0.5 (2024-05-20)
 * add `poll_recv_data()` for server
 * use 2021 edition
