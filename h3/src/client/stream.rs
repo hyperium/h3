@@ -1,17 +1,15 @@
 use bytes::Buf;
-use futures_util::future;
+use futures_util::{future, future::Future, ready};
 use http::{HeaderMap, Response};
+use pin_project_lite::pin_project;
 #[cfg(feature = "tracing")]
 use tracing::instrument;
 
 use crate::{
-    connection::{self, ConnectionState, SharedStateRef},
-    error::{Code, Error, ErrorLevel},
-    proto::{frame::Frame, headers::Header},
-    qpack,
-    quic::{self},
+    connection::{self, ConnectionState, SharedStateRef}, error::{Code, Error, ErrorLevel}, ext::Datagram, proto::{frame::Frame, headers::Header}, qpack, quic::{self, RecvDatagramExt, SendStream as _, StreamId}
 };
-use std::convert::TryFrom;
+use super::connection::Connection;
+use std::{convert::TryFrom, marker::PhantomData, task::{Context, Poll},};
 
 /// Manage request bodies transfer, response and trailers.
 ///
@@ -168,6 +166,11 @@ where
         // rename `cancel()` ?
         self.inner.stream.stop_sending(error_code)
     }
+
+    /// Returns the underlying stream id
+    pub fn id(&self) -> StreamId {
+        self.inner.stream.id()
+    }
 }
 
 impl<S, B> RequestStream<S, B>
@@ -208,6 +211,11 @@ where
     //# implementation resets the sending parts of streams and aborts reading
     //# on the receiving parts of streams; see Section 2.4 of
     //# [QUIC-TRANSPORT].
+
+    /// Returns the underlying stream id
+    pub fn send_id(&self) -> StreamId {
+        self.inner.stream.send_id()
+    }
 }
 
 impl<S, B> RequestStream<S, B>
@@ -224,5 +232,35 @@ where
     ) {
         let (send, recv) = self.inner.split();
         (RequestStream { inner: send }, RequestStream { inner: recv })
+    }
+}
+
+pin_project! {
+    /// Future for [`Connection::read_datagram`]
+    pub struct ReadDatagram<'a, C, B>
+    where
+            C: quic::Connection<B>,
+            B: Buf,
+        {
+            pub(super) conn: &'a mut Connection<C, B>,
+            pub(super) _marker: PhantomData<B>,
+        }
+}
+
+impl<'a, C, B> Future for ReadDatagram<'a, C, B>
+where
+    C: quic::Connection<B> + RecvDatagramExt,
+    B: Buf,
+{
+    type Output = Result<Option<Datagram<C::Buf>>, Error>;
+
+    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        #[cfg(feature = "tracing")]
+        tracing::trace!("poll: read_datagram");
+
+        match ready!(self.conn.inner.conn.poll_accept_datagram(cx))? {
+            Some(v) => Poll::Ready(Ok(Some(Datagram::decode(v)?))),
+            None => Poll::Ready(Ok(None)),
+        }
     }
 }
