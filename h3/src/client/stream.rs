@@ -6,12 +6,7 @@ use pin_project_lite::pin_project;
 use tracing::instrument;
 
 use crate::{
-    connection::{self, ConnectionState, SharedStateRef},
-    error::{Code, Error, ErrorLevel},
-    proto::{frame::Frame, headers::Header},
-    qpack,
-	ext::Datagram,
-    quic::{self, RecvDatagramExt},
+    connection::{self, ConnectionState, SharedStateRef}, error::{Code, Error, ErrorLevel}, ext::Datagram, proto::{frame::Frame, headers::Header}, qpack, quic::{self, RecvDatagramExt, SendStream as _, StreamId}
 };
 use super::connection::Connection;
 use std::{convert::TryFrom, marker::PhantomData, task::{Context, Poll},};
@@ -171,6 +166,11 @@ where
         // rename `cancel()` ?
         self.inner.stream.stop_sending(error_code)
     }
+
+    /// Returns the underlying stream id
+    pub fn id(&self) -> StreamId {
+        self.inner.stream.id()
+    }
 }
 
 impl<S, B> RequestStream<S, B>
@@ -211,6 +211,11 @@ where
     //# implementation resets the sending parts of streams and aborts reading
     //# on the receiving parts of streams; see Section 2.4 of
     //# [QUIC-TRANSPORT].
+
+    /// Returns the underlying stream id
+    pub fn send_id(&self) -> StreamId {
+        self.inner.stream.send_id()
+    }
 }
 
 impl<S, B> RequestStream<S, B>
