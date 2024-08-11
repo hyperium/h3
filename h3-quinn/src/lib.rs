@@ -16,11 +16,11 @@ use bytes::{Buf, Bytes, BytesMut};
 
 use futures::{
     ready,
-    stream::{self, select, BoxStream, Select},
+    stream::{self, select, Select},
     Stream, StreamExt,
 };
 pub use quinn::{self, Endpoint, OpenBi, OpenUni, VarInt, WriteError};
-use quinn::{AcceptBi, AcceptUni, ApplicationClose, ClosedStream, ReadDatagram};
+use quinn::{ApplicationClose, ClosedStream, ReadDatagram};
 
 use h3::{
     ext::Datagram,

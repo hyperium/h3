@@ -40,6 +40,7 @@ quinn = { version = "0.11", default-features = false, features = [
     "runtime-tokio",
     "rustls",
     "ring",
+    "futures-io",
 ] }
 quinn-proto = { version = "0.11", default-features = false }
 rcgen = "0.13"
