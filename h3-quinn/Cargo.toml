@@ -15,9 +15,9 @@ license = "MIT"
 [dependencies]
 h3 = { version = "0.0.6", path = "../h3" }
 bytes = "1"
-quinn = { version = "0.11", default-features = false, features = [
+quinn = { git = "https://github.com/Ruben2424/quinn.git", branch = "stop_sending1", features = [
     "futures-io",
-] }
+], default-features = false }
 tokio-util = { version = "0.7.9" }
 futures = { version = "0.3.28" }
 tokio = { version = "1", features = ["io-util"], default-features = false }
