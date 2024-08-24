@@ -16,7 +16,8 @@ use h3::{
     frame::FrameStream,
     proto::frame::Frame,
     quic::{self, OpenStreams, WriteBuf},
-    server::{self, Connection, RequestStream},
+    server::Connection,
+    server::RequestStream,
     Error,
 };
 use h3::{
@@ -91,15 +92,15 @@ where
         //
         // However, it is still advantageous to show a log on the server as (attempting) to
         // establish a WebTransportSession without the proper h3 config is usually a mistake.
-        if !conn.inner.config.enable_webtransport() {
+        if !conn.inner.config.settings.enable_webtransport() {
             tracing::warn!("Server does not support webtransport");
         }
 
-        if !conn.inner.config.enable_datagram() {
+        if !conn.inner.config.settings.enable_datagram() {
             tracing::warn!("Server does not support datagrams");
         }
 
-        if !conn.inner.config.enable_extended_connect() {
+        if !conn.inner.config.settings.enable_extended_connect() {
             tracing::warn!("Server does not support CONNECT");
         }
 
@@ -257,13 +258,13 @@ where
 
 /// Streams are opened, but the initial webtransport header has not been sent
 type PendingStreams<C, B> = (
-    BidiStream<<C as quic::Connection<B>>::BidiStream, B>,
+    BidiStream<<C as quic::OpenStreams<B>>::BidiStream, B>,
     WriteBuf<&'static [u8]>,
 );
 
 /// Streams are opened, but the initial webtransport header has not been sent
 type PendingUniStreams<C, B> = (
-    SendStream<<C as quic::Connection<B>>::SendStream, B>,
+    SendStream<<C as quic::OpenStreams<B>>::SendStream, B>,
     WriteBuf<&'static [u8]>,
 );
 
@@ -405,7 +406,7 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    conn: &'a Mutex<server::Connection<C, B>>,
+    conn: &'a Mutex<Connection<C, B>>,
 }
 
 impl<'a, C, B> Future for AcceptUni<'a, C, B>

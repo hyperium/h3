@@ -3,6 +3,7 @@ use std::{
     convert::TryInto,
     fmt::{self, Debug},
 };
+#[cfg(feature = "tracing")]
 use tracing::trace;
 
 use crate::webtransport::SessionId;
@@ -86,7 +87,9 @@ impl Frame<PayloadLen> {
         //
         // See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-4.2
         if ty == FrameType::WEBTRANSPORT_BI_STREAM {
+            #[cfg(feature = "tracing")]
             tracing::trace!("webtransport frame");
+
             return Ok(Frame::WebTransportStream(SessionId::decode(buf)?));
         }
 
@@ -103,7 +106,10 @@ impl Frame<PayloadLen> {
         }
 
         let mut payload = buf.take(len as usize);
+
+        #[cfg(feature = "tracing")]
         trace!("frame ty: {:?}", ty);
+
         let frame = match ty {
             FrameType::HEADERS => Ok(Frame::Headers(payload.copy_to_bytes(len as usize))),
             FrameType::SETTINGS => Ok(Frame::Settings(Settings::decode(&mut payload)?)),
@@ -122,10 +128,11 @@ impl Frame<PayloadLen> {
             }
         };
 
-        if let Ok(frame) = &frame {
+        if let Ok(_frame) = &frame {
+            #[cfg(feature = "tracing")]
             trace!(
                 "got frame {:?}, len: {}, remaining: {}",
-                frame,
+                _frame,
                 len,
                 buf.remaining()
             );
@@ -433,8 +440,8 @@ setting_identifiers! {
     MAX_HEADER_LIST_SIZE = 0x6,
     // https://datatracker.ietf.org/doc/html/rfc9220#section-5
     ENABLE_CONNECT_PROTOCOL = 0x8,
-    // https://datatracker.ietf.org/doc/html/draft-ietf-masque-h3-datagram-05#section-9.1
-    H3_DATAGRAM = 0xFFD277,
+    // https://datatracker.ietf.org/doc/html/rfc9297#name-http-3-setting
+    H3_DATAGRAM = 0x33,
     // https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-8.2
     ENABLE_WEBTRANSPORT = 0x2B603742,
     // https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-8.2
@@ -536,7 +543,8 @@ impl Settings {
                 //# H3_SETTINGS_ERROR.
                 settings.insert(identifier, value)?;
             } else {
-                tracing::warn!("Unsupported setting: {:#x?}", identifier);
+                #[cfg(feature = "tracing")]
+                tracing::debug!("Unsupported setting: {:#x?}", identifier);
             }
         }
         Ok(settings)
@@ -559,7 +567,7 @@ impl fmt::Display for SettingsError {
         match self {
             SettingsError::Exceeded => write!(
                 f,
-                "max settings number exeeded, check for duplicate entries"
+                "max settings number exceeded, check for duplicate entries"
             ),
             SettingsError::Malformed => write!(f, "malformed settings frame"),
             SettingsError::Repeated(id) => write!(f, "got setting 0x{:x} twice", id.0),

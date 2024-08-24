@@ -119,6 +119,8 @@ where
 pub enum UniStreamHeader {
     Control(Settings),
     WebTransportUni(SessionId),
+    Encoder,
+    Decoder,
 }
 
 impl Encode for UniStreamHeader {
@@ -131,6 +133,12 @@ impl Encode for UniStreamHeader {
             Self::WebTransportUni(session_id) => {
                 StreamType::WEBTRANSPORT_UNI.encode(buf);
                 session_id.encode(buf);
+            }
+            UniStreamHeader::Encoder => {
+                StreamType::ENCODER.encode(buf);
+            }
+            UniStreamHeader::Decoder => {
+                StreamType::DECODER.encode(buf);
             }
         }
     }
@@ -154,17 +162,12 @@ where
 }
 
 pub enum BidiStreamHeader {
-    Control(Settings),
     WebTransportBidi(SessionId),
 }
 
 impl Encode for BidiStreamHeader {
     fn encode<B: BufMut>(&self, buf: &mut B) {
         match self {
-            Self::Control(settings) => {
-                StreamType::CONTROL.encode(buf);
-                settings.encode(buf);
-            }
             Self::WebTransportBidi(session_id) => {
                 StreamType::WEBTRANSPORT_BIDI.encode(buf);
                 session_id.encode(buf);
@@ -250,7 +253,7 @@ where
     B: Buf,
 {
     Control(FrameStream<S, B>),
-    Push(u64, FrameStream<S, B>),
+    Push(FrameStream<S, B>),
     Encoder(BufRecvStream<S, B>),
     Decoder(BufRecvStream<S, B>),
     WebTransportUni(SessionId, BufRecvStream<S, B>),
@@ -283,10 +286,7 @@ where
     pub fn into_stream(self) -> Result<AcceptedRecvStream<S, B>, Error> {
         Ok(match self.ty.expect("Stream type not resolved yet") {
             StreamType::CONTROL => AcceptedRecvStream::Control(FrameStream::new(self.stream)),
-            StreamType::PUSH => AcceptedRecvStream::Push(
-                self.id.expect("Push ID not resolved yet").into_inner(),
-                FrameStream::new(self.stream),
-            ),
+            StreamType::PUSH => AcceptedRecvStream::Push(FrameStream::new(self.stream)),
             StreamType::ENCODER => AcceptedRecvStream::Encoder(self.stream),
             StreamType::DECODER => AcceptedRecvStream::Decoder(self.stream),
             StreamType::WEBTRANSPORT_UNI => AcceptedRecvStream::WebTransportUni(

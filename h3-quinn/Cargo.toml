@@ -1,9 +1,9 @@
 [package]
 name = "h3-quinn"
-version = "0.0.3"
-rust-version = "1.63"
+version = "0.0.7"
+rust-version = "1.70"
 authors = ["Jean-Christophe BEGUE <jc.begue@pm.me>"]
-edition = "2018"
+edition = "2021"
 documentation = "https://docs.rs/h3-quinn"
 repository = "https://github.com/hyperium/h3"
 readme = "../README.md"
@@ -13,13 +13,16 @@ categories = ["network-programming", "web-programming"]
 license = "MIT"
 
 [dependencies]
-h3 = { version = "0.0.2", path = "../h3" }
+h3 = { version = "0.0.6", path = "../h3" }
 bytes = "1"
-quinn = { version = "0.10", default-features = false, features = [
+quinn = { version = "0.11", default-features = false, features = [
     "futures-io",
 ] }
-quinn-proto = { version = "0.10", default-features = false }
-tokio-util = { version = "0.7.7" }
-futures = { version = "0.3.27" }
-tokio = { version = "1.28", features = ["io-util"], default-features = false }
+tokio-util = { version = "0.7.9" }
+futures = { version = "0.3.28" }
+tokio = { version = "1", features = ["io-util"], default-features = false }
 h3-datagram = { path = "../h3-datagram" }
+tracing = { version = "0.1.40", optional = true }
+
+[features]
+tracing = ["dep:tracing"]

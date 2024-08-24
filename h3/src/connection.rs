@@ -1,5 +1,6 @@
 use std::{
     convert::TryFrom,
+    marker::PhantomData,
     sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
     task::{Context, Poll},
 };
@@ -8,20 +9,22 @@ use bytes::{Buf, Bytes, BytesMut};
 use futures_util::{future, ready};
 use http::HeaderMap;
 use stream::WriteBuf;
-use tracing::{trace, warn};
+
+#[cfg(feature = "tracing")]
+use tracing::{instrument, warn};
 
 use crate::{
-    config::Config,
+    config::{Config, Settings},
     error::{Code, Error},
     frame::FrameStream,
     proto::{
-        frame::{Frame, PayloadLen, SettingId, Settings},
+        frame::{self, Frame, PayloadLen},
         headers::Header,
         stream::StreamType,
         varint::VarInt,
     },
     qpack,
-    quic::{self, SendStream as _},
+    quic::{self, SendStream},
     stream::{self, AcceptRecvStream, AcceptedRecvStream, BufRecvStream, UniStreamHeader},
     webtransport::SessionId,
 };
@@ -30,7 +33,7 @@ use crate::{
 #[non_exhaustive]
 pub struct SharedState {
     // Peer settings
-    pub peer_config: Config,
+    pub peer_config: Settings,
     // connection-wide error, concerns all RequestStreams and drivers
     pub error: Option<Error>,
     // Has a GOAWAY frame been sent or received?
@@ -54,7 +57,7 @@ impl SharedStateRef {
 impl Default for SharedStateRef {
     fn default() -> Self {
         Self(Arc::new(RwLock::new(SharedState {
-            peer_config: Config::default(),
+            peer_config: Default::default(),
             error: None,
             closing: false,
         })))
@@ -107,7 +110,9 @@ where
     pub conn: C,
     control_send: C::SendStream,
     control_recv: Option<FrameStream<C::RecvStream, B>>,
+    decoder_send: Option<C::SendStream>,
     decoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
+    encoder_send: Option<C::SendStream>,
     encoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
     /// Buffers incoming uni/recv streams which have yet to be claimed.
     ///
@@ -134,7 +139,28 @@ where
 
     got_peer_settings: bool,
     pub send_grease_frame: bool,
+    // tells if the grease steam should be sent
+    send_grease_stream_flag: bool,
+    // step of the grease sending poll fn
+    grease_step: GreaseStatus<C::SendStream, B>,
     pub config: Config,
+}
+
+enum GreaseStatus<S, B>
+where
+    S: SendStream<B>,
+    B: Buf,
+{
+    /// Grease stream is not started
+    NotStarted(PhantomData<B>),
+    /// Grease steam is started without data
+    Started(Option<S>),
+    /// Grease stream is started with data
+    DataPrepared(Option<S>),
+    /// Data is sent on grease stream
+    DataSent(S),
+    /// Grease stream is finished
+    Finished,
 }
 
 impl<B, C> ConnectionInner<C, B>
@@ -142,64 +168,19 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    /// Initiates the connection and opens a control stream
-    pub async fn new(mut conn: C, shared: SharedStateRef, config: Config) -> Result<Self, Error> {
-        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
-        //# Endpoints SHOULD create the HTTP control stream as well as the
-        //# unidirectional streams required by mandatory extensions (such as the
-        //# QPACK encoder and decoder streams) first, and then create additional
-        //# streams as allowed by their peer.
-        let mut control_send = future::poll_fn(|cx| conn.poll_open_send(cx))
-            .await
-            .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))?;
-
-        let mut settings = Settings::default();
-
-        settings
-            .insert(
-                SettingId::MAX_HEADER_LIST_SIZE,
-                config.max_field_section_size,
-            )
-            .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
-
-        settings
-            .insert(
-                SettingId::ENABLE_CONNECT_PROTOCOL,
-                config.enable_extended_connect as u64,
-            )
-            .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
-        settings
-            .insert(
-                SettingId::ENABLE_WEBTRANSPORT,
-                config.enable_webtransport as u64,
-            )
-            .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
-        settings
-            .insert(SettingId::H3_DATAGRAM, config.enable_datagram as u64)
-            .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
-
-        tracing::debug!("Sending server settings: {:#x?}", settings);
-
-        if config.send_grease {
-            //  Grease Settings (https://www.rfc-editor.org/rfc/rfc9114.html#name-defined-settings-parameters)
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
-            //# Setting identifiers of the format 0x1f * N + 0x21 for non-negative
-            //# integer values of N are reserved to exercise the requirement that
-            //# unknown identifiers be ignored.  Such settings have no defined
-            //# meaning.  Endpoints SHOULD include at least one such setting in their
-            //# SETTINGS frame.
-
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
-            //# Setting identifiers that were defined in [HTTP/2] where there is no
-            //# corresponding HTTP/3 setting have also been reserved
-            //# (Section 11.2.2).  These reserved settings MUST NOT be sent, and
-            //# their receipt MUST be treated as a connection error of type
-            //# H3_SETTINGS_ERROR.
-            match settings.insert(SettingId::grease(), 0) {
-                Ok(_) => (),
-                Err(err) => warn!("Error when adding the grease Setting. Reason {}", err),
-            }
+    /// Sends the settings and initializes the control streams
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub async fn send_control_stream_headers(&mut self) -> Result<(), Error> {
+        #[cfg(test)]
+        if !self.config.send_settings {
+            return Ok(());
         }
+
+        let settings = frame::Settings::try_from(self.config)
+            .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
+
+        #[cfg(feature = "tracing")]
+        tracing::debug!("Sending server settings: {:#x?}", settings);
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-3.2
         //# After the QUIC connection is
@@ -226,12 +207,61 @@ where
         //# Endpoints MUST NOT require any data to be received from
         //# the peer prior to sending the SETTINGS frame; settings MUST be sent
         //# as soon as the transport is ready to send data.
-        trace!("Sending Settings frame: {:#x?}", settings);
-        stream::write(
-            &mut control_send,
-            WriteBuf::from(UniStreamHeader::Control(settings)),
+
+        let mut decoder_send = Option::take(&mut self.decoder_send);
+        let mut encoder_send = Option::take(&mut self.encoder_send);
+
+        let (control, ..) = future::join3(
+            stream::write(
+                &mut self.control_send,
+                WriteBuf::from(UniStreamHeader::Control(settings)),
+            ),
+            async {
+                if let Some(stream) = &mut decoder_send {
+                    let _ = stream::write(stream, WriteBuf::from(UniStreamHeader::Decoder)).await;
+                }
+            },
+            async {
+                if let Some(stream) = &mut encoder_send {
+                    let _ = stream::write(stream, WriteBuf::from(UniStreamHeader::Encoder)).await;
+                }
+            },
         )
-        .await?;
+        .await;
+
+        self.decoder_send = decoder_send;
+        self.encoder_send = encoder_send;
+
+        control
+    }
+
+    /// Initiates the connection and opens a control stream
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub async fn new(mut conn: C, shared: SharedStateRef, config: Config) -> Result<Self, Error> {
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
+        //# Endpoints SHOULD create the HTTP control stream as well as the
+        //# unidirectional streams required by mandatory extensions (such as the
+        //# QPACK encoder and decoder streams) first, and then create additional
+
+        // start streams
+        let (control_send, qpack_encoder, qpack_decoder) = (
+            future::poll_fn(|cx| conn.poll_open_send(cx)).await,
+            future::poll_fn(|cx| conn.poll_open_send(cx)).await,
+            future::poll_fn(|cx| conn.poll_open_send(cx)).await,
+        );
+
+        let control_send =
+            control_send.map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))?;
+
+        let qpack_encoder = match qpack_encoder {
+            Ok(stream) => Some(stream),
+            Err(_) => None,
+        };
+
+        let qpack_decoder = match qpack_decoder {
+            Ok(stream) => Some(stream),
+            Err(_) => None,
+        };
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
         //= type=implication
@@ -250,23 +280,20 @@ where
             send_grease_frame: config.send_grease,
             config,
             accepted_streams: Default::default(),
+            decoder_send: qpack_decoder,
+            encoder_send: qpack_encoder,
+            // send grease stream if configured
+            send_grease_stream_flag: config.send_grease,
+            // start at first step
+            grease_step: GreaseStatus::NotStarted(PhantomData),
         };
-        // start a grease stream
-        if config.send_grease {
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
-            //= type=implication
-            //# Frame types of the format 0x1f * N + 0x21 for non-negative integer
-            //# values of N are reserved to exercise the requirement that unknown
-            //# types be ignored (Section 9).  These frames have no semantics, and
-            //# they MAY be sent on any stream where frames are allowed to be sent.
-            conn_inner.start_grease_stream().await;
-        }
+        conn_inner.send_control_stream_headers().await?;
 
         Ok(conn_inner)
     }
 
     /// Send GOAWAY with specified max_id, iff max_id is smaller than the previous one.
-
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn shutdown<T>(
         &mut self,
         sent_closing: &mut Option<T>,
@@ -295,6 +322,7 @@ where
     }
 
     #[allow(missing_docs)]
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_accept_request(
         &mut self,
         cx: &mut Context<'_>,
@@ -315,6 +343,7 @@ where
     /// Polls incoming streams
     ///
     /// Accepted streams which are not control, decoder, or encoder streams are buffer in `accepted_recv_streams`
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_accept_recv(&mut self, cx: &mut Context<'_>) -> Result<(), Error> {
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
             return Err(e.clone());
@@ -383,7 +412,9 @@ where
                         );
                     }
                 }
-                AcceptedRecvStream::WebTransportUni(id, s) if self.config.enable_webtransport => {
+                AcceptedRecvStream::WebTransportUni(id, s)
+                    if self.config.settings.enable_webtransport =>
+                {
                     // Store until someone else picks it up, like a webtransport session which is
                     // not yet established.
                     self.accepted_streams.wt_uni_streams.push((id, s))
@@ -401,6 +432,7 @@ where
     }
 
     /// Waits for the control stream to be received and reads subsequent frames.
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<Frame<PayloadLen>, Error>> {
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
             return Poll::Ready(Err(e.clone()));
@@ -453,24 +485,7 @@ where
                         //# Endpoints MUST NOT consider such settings to have
                         //# any meaning upon receipt.
                         let mut shared = self.shared.write("connection settings write");
-                        shared.peer_config.max_field_section_size = settings
-                            .get(SettingId::MAX_HEADER_LIST_SIZE)
-                            .unwrap_or(VarInt::MAX.0);
-
-                        shared.peer_config.enable_webtransport =
-                            settings.get(SettingId::ENABLE_WEBTRANSPORT).unwrap_or(0) != 0;
-
-                        shared.peer_config.max_webtransport_sessions = settings
-                            .get(SettingId::WEBTRANSPORT_MAX_SESSIONS)
-                            .unwrap_or(0);
-
-                        shared.peer_config.enable_datagram =
-                            settings.get(SettingId::H3_DATAGRAM).unwrap_or(0) != 0;
-
-                        shared.peer_config.enable_extended_connect = settings
-                            .get(SettingId::ENABLE_CONNECT_PROTOCOL)
-                            .unwrap_or(0)
-                            != 0;
+                        shared.peer_config = (&settings).into();
 
                         Ok(Frame::Settings(settings))
                     }
@@ -525,9 +540,21 @@ where
                 }
             }
         };
+
+        if self.send_grease_stream_flag {
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
+            //= type=implication
+            //# Frame types of the format 0x1f * N + 0x21 for non-negative integer
+            //# values of N are reserved to exercise the requirement that unknown
+            //# types be ignored (Section 9).  These frames have no semantics, and
+            //# they MAY be sent on any stream where frames are allowed to be sent.
+            ready!(self.poll_grease_stream(cx));
+        }
+
         Poll::Ready(res)
     }
 
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub(crate) fn process_goaway<T>(
         &mut self,
         recv_closing: &mut Option<T>,
@@ -572,6 +599,7 @@ where
 
     /// Closes a Connection with code and reason.
     /// It returns an [`Error`] which can be returned.
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn close<T: AsRef<str>>(&mut self, code: Code, reason: T) -> Error {
         self.shared.write("connection close err").error =
             Some(code.with_reason(reason.as_ref(), crate::error::ErrorLevel::ConnectionError));
@@ -579,53 +607,105 @@ where
         code.with_reason(reason.as_ref(), crate::error::ErrorLevel::ConnectionError)
     }
 
-    /// starts an grease stream
-    /// https://www.rfc-editor.org/rfc/rfc9114.html#stream-grease
-    async fn start_grease_stream(&mut self) {
-        // start the stream
-        let mut grease_stream = match future::poll_fn(|cx| self.conn.poll_open_send(cx))
-            .await
-            .map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))
-        {
-            Err(err) => {
-                warn!("grease stream creation failed with {}", err);
-                return;
-            }
-            Ok(grease) => grease,
-        };
+    // start grease stream and send data
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    fn poll_grease_stream(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+        if matches!(self.grease_step, GreaseStatus::NotStarted(_)) {
+            self.grease_step = match self.conn.poll_open_send(cx) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(_)) => {
+                    // could not create grease stream
+                    // don't try again
+                    self.send_grease_stream_flag = false;
 
+                    #[cfg(feature = "tracing")]
+                    warn!("grease stream creation failed with");
+
+                    return Poll::Ready(());
+                }
+                Poll::Ready(Ok(stream)) => GreaseStatus::Started(Some(stream)),
+            };
+        };
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
         //# Stream types of the format 0x1f * N + 0x21 for non-negative integer
         //# values of N are reserved to exercise the requirement that unknown
         //# types be ignored.  These streams have no semantics, and they can be
         //# sent when application-layer padding is desired.  They MAY also be
         //# sent on connections where no data is currently being transferred.
-        match stream::write(&mut grease_stream, (StreamType::grease(), Frame::Grease)).await {
-            Ok(()) => (),
-            Err(err) => {
-                warn!("write data on grease stream failed with {}", err);
-                return;
+        if let GreaseStatus::Started(stream) = &mut self.grease_step {
+            if let Some(stream) = stream {
+                if stream
+                    .send_data((StreamType::grease(), Frame::Grease))
+                    .is_err()
+                {
+                    self.send_grease_stream_flag = false;
+
+                    #[cfg(feature = "tracing")]
+                    warn!("write data on grease stream failed with");
+
+                    return Poll::Ready(());
+                };
             }
-        }
+            self.grease_step = GreaseStatus::DataPrepared(stream.take());
+        };
+
+        if let GreaseStatus::DataPrepared(stream) = &mut self.grease_step {
+            if let Some(stream) = stream {
+                match stream.poll_ready(cx) {
+                    Poll::Ready(Ok(_)) => (),
+                    Poll::Pending => return Poll::Pending,
+                    Poll::Ready(Err(_)) => {
+                        // could not write grease frame
+                        // don't try again
+                        self.send_grease_stream_flag = false;
+
+                        #[cfg(feature = "tracing")]
+                        warn!("write data on grease stream failed with");
+
+                        return Poll::Ready(());
+                    }
+                };
+            }
+            self.grease_step = GreaseStatus::DataSent(match stream.take() {
+                Some(stream) => stream,
+                None => {
+                    // this should never happen
+                    self.send_grease_stream_flag = false;
+                    return Poll::Ready(());
+                }
+            });
+        };
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
         //# When sending a reserved stream type,
         //# the implementation MAY either terminate the stream cleanly or reset
         //# it.
+        if let GreaseStatus::DataSent(stream) = &mut self.grease_step {
+            match stream.poll_finish(cx) {
+                Poll::Ready(Ok(_)) => (),
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(_)) => {
+                    // could not finish grease stream
+                    // don't try again
+                    self.send_grease_stream_flag = false;
 
-        //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
-        //# When resetting the stream, either the H3_NO_ERROR error code or
-        //# a reserved error code (Section 8.1) SHOULD be used.
-        match future::poll_fn(|cx| grease_stream.poll_finish(cx))
-            .await
-            .map_err(|e| Code::H3_NO_ERROR.with_transport(e))
-        {
-            Ok(()) => (),
-            Err(err) => warn!("grease stream error on close {}", err),
+                    #[cfg(feature = "tracing")]
+                    warn!("finish grease stream failed with");
+
+                    return Poll::Ready(());
+                }
+            };
+            self.grease_step = GreaseStatus::Finished;
         };
+
+        // grease stream is closed
+        // don't do another one
+        self.send_grease_stream_flag = false;
+        Poll::Ready(())
     }
 
     #[allow(missing_docs)]
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn accepted_streams_mut(&mut self) -> &mut AcceptedStreams<C, B> {
         &mut self.accepted_streams
     }
@@ -669,16 +749,22 @@ where
     S: quic::RecvStream,
 {
     /// Receive some of the request body.
-    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub fn poll_recv_data(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<impl Buf>, Error>> {
         if !self.stream.has_data() {
-            let frame = future::poll_fn(|cx| self.stream.poll_next(cx))
-                .await
+            let frame = self
+                .stream
+                .poll_next(cx)
                 .map_err(|e| self.maybe_conn_err(e))?;
-            match frame {
+
+            match ready!(frame) {
                 Some(Frame::Data { .. }) => (),
                 Some(Frame::Headers(encoded)) => {
                     self.trailers = Some(encoded);
-                    return Ok(None);
+                    return Poll::Ready(Ok(None));
                 }
 
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
@@ -703,18 +789,24 @@ where
                 //# The MAX_PUSH_ID frame is always sent on the control stream.  Receipt
                 //# of a MAX_PUSH_ID frame on any other stream MUST be treated as a
                 //# connection error of type H3_FRAME_UNEXPECTED.
-                Some(_) => return Err(Code::H3_FRAME_UNEXPECTED.into()),
-                None => return Ok(None),
+                Some(_) => return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED.into())),
+                None => return Poll::Ready(Ok(None)),
             }
         }
 
-        let data = future::poll_fn(|cx| self.stream.poll_data(cx))
-            .await
-            .map_err(|e| self.maybe_conn_err(e))?;
-        Ok(data)
+        self.stream
+            .poll_data(cx)
+            .map_err(|e| self.maybe_conn_err(e))
+    }
+
+    /// Receive some of the request body.
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
+        future::poll_fn(|cx| self.poll_recv_data(cx)).await
     }
 
     /// Receive trailers
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
         let mut trailers = if let Some(encoded) = self.trailers.take() {
             encoded
@@ -783,6 +875,7 @@ where
     }
 
     #[allow(missing_docs)]
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn stop_sending(&mut self, err_code: Code) {
         self.stream.stop_sending(err_code);
     }
@@ -794,6 +887,7 @@ where
     B: Buf,
 {
     /// Send some data on the response body.
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
         let frame = Frame::Data(buf);
 
@@ -804,6 +898,7 @@ where
     }
 
     /// Send a set of trailers to end the request.
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
         //= type=TODO
@@ -833,12 +928,14 @@ where
         Ok(())
     }
 
-    /// Stops an stream with an error code
+    /// Stops a stream with an error code
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn stop_stream(&mut self, code: Code) {
         self.stream.reset(code.into());
     }
 
     #[allow(missing_docs)]
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn finish(&mut self) -> Result<(), Error> {
         if self.send_grease_frame {
             // send a grease frame once per Connection
@@ -859,6 +956,7 @@ where
     S: quic::BidiStream<B>,
     B: Buf,
 {
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub(crate) fn split(
         self,
     ) -> (

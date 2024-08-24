@@ -2,7 +2,7 @@
 name = "examples"
 version = "0.0.0"
 publish = false
-edition = "2018"
+edition = "2021"
 
 # If you copy one of the examples into a new project, you should be using
 # [dependencies] instead.
@@ -10,18 +10,22 @@ edition = "2018"
 anyhow = "1.0"
 bytes = "1"
 futures = "0.3"
-h3 = { path = "../h3" }
-h3-quinn = { path = "../h3-quinn" }
+h3 = { path = "../h3", features = ["tracing"] }
+h3-quinn = { path = "../h3-quinn", features = ["tracing"] }
 h3-webtransport = { path = "../h3-webtransport" }
-http = "0.2"
-quinn = { version = "0.10", default-features = false, features = [
+http = "1"
+quinn = { version = "0.11", default-features = false, features = [
     "runtime-tokio",
-    "tls-rustls",
+    "rustls",
     "ring",
 ] }
-rcgen = { version = "0.10" }
-rustls = { version = "0.21", features = ["dangerous_configuration"] }
-rustls-native-certs = "0.6"
+rcgen = { version = "0.13" }
+rustls = { version = "0.23", default-features = false, features = [
+    "logging",
+    "ring",
+    "std",
+] }
+rustls-native-certs = "0.7"
 structopt = "0.3"
 tokio = { version = "1.27", features = ["full"] }
 tracing = "0.1.37"
@@ -32,9 +36,9 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
     "time",
     "tracing-log",
 ] }
-octets = "0.2.0"
+octets = "0.3.0"
 
-tracing-tree = { version = "0.2" }
+tracing-tree = { version = "0.3" }
 h3-datagram = { path = "../h3-datagram" }
 
 [features]

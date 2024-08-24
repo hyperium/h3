@@ -1,13 +1,13 @@
 [package]
 name = "h3"
-version = "0.0.2"
-rust-version = "1.57"
+version = "0.0.6"
+rust-version = "1.70"
 authors = [
     "Sean McArthur <sean@seanmonstar.com>",
     "Jean-Christophe BEGUE <jc.begue@pm.me>",
 ]
 license = "MIT"
-edition = "2018"
+edition = "2021"
 documentation = "https://docs.rs/h3"
 repository = "https://github.com/hyperium/h3"
 readme = "../README.md"
@@ -21,28 +21,29 @@ categories = [
 
 [features]
 i-implement-a-third-party-backend-and-opt-into-breaking-changes = []
+tracing = ["dep:tracing"]
 
 [dependencies]
 bytes = "1"
 futures-util = { version = "0.3", default-features = false, features = ["io"] }
-http = "0.2.9"
+http = "1"
 tokio = { version = "1", features = ["sync"] }
-pin-project-lite = { version = "0.2", default_features = false }
-tracing = "0.1.37"
-fastrand = "1.9.0"
+pin-project-lite = { version = "0.2", default-features = false }
+tracing = {version = "0.1.40", optional = true}
+fastrand = "2.0.1"
 
 [dev-dependencies]
 assert_matches = "1.5.0"
 futures-util = { version = "0.3", default-features = false, features = ["io"] }
 proptest = "1"
-quinn = { version = "0.10", default-features = false, features = [
+quinn = { version = "0.11", default-features = false, features = [
     "runtime-tokio",
-    "tls-rustls",
+    "rustls",
     "ring",
 ] }
-quinn-proto = { version = "0.10", default-features = false }
-rcgen = "0.10"
-rustls = "0.21"
+quinn-proto = { version = "0.11", default-features = false }
+rcgen = "0.13"
+rustls = { version = "0.23", default-features = false, features = ["logging", "ring", "std"] }
 tokio = { version = "1", features = ["rt", "macros", "io-util", "io-std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = [
     "fmt",
@@ -51,6 +52,6 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
     "time",
     "tracing-log",
 ] }
-futures = { version = "0.3.27" }
-tokio-util = { version = "0.7.7" }
+futures = { version = "0.3.28" }
+tokio-util = { version = "0.7.9" }
 h3-datagram = {path = "../h3-datagram" }

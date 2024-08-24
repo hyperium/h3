@@ -1,6 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use futures::future;
+use rustls::pki_types::CertificateDer;
 use structopt::StructOpt;
 use tokio::io::AsyncWriteExt;
 use tracing::{error, info};
@@ -64,7 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match rustls_native_certs::load_native_certs() {
         Ok(certs) => {
             for cert in certs {
-                if let Err(e) = roots.add(&rustls::Certificate(cert.0)) {
+                if let Err(e) = roots.add(cert) {
                     error!("failed to parse trust anchor: {}", e);
                 }
             }
@@ -76,14 +77,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // load certificate of CA who issues the server certificate
     // NOTE that this should be used for dev only
-    if let Err(e) = roots.add(&rustls::Certificate(std::fs::read(opt.ca)?)) {
+    if let Err(e) = roots.add(CertificateDer::from(std::fs::read(opt.ca)?)) {
         error!("failed to parse trust anchor: {}", e);
     }
 
     let mut tls_config = rustls::ClientConfig::builder()
-        .with_safe_default_cipher_suites()
-        .with_safe_default_kx_groups()
-        .with_protocol_versions(&[&rustls::version::TLS13])?
         .with_root_certificates(roots)
         .with_no_client_auth();
 
@@ -99,7 +97,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut client_endpoint = h3_quinn::quinn::Endpoint::client("[::]:0".parse().unwrap())?;
 
-    let client_config = quinn::ClientConfig::new(Arc::new(tls_config));
+    let client_config = quinn::ClientConfig::new(Arc::new(
+        quinn::crypto::rustls::QuicClientConfig::try_from(tls_config)?,
+    ));
     client_endpoint.set_default_client_config(client_config);
 
     let conn = client_endpoint.connect(addr, auth.host())?.await?;

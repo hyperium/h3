@@ -77,11 +77,6 @@ impl Header {
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3.1
         //= type=TODO
-        //# If these fields are present, they MUST NOT be
-        //# empty.
-
-        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3.1
-        //= type=TODO
         //# If the scheme does not have a mandatory authority component and none
         //# is provided in the request target, the request MUST NOT contain the
         //# :authority pseudo-header or Host header fields.
@@ -99,6 +94,10 @@ impl Header {
 
         Ok((
             self.pseudo.method.ok_or(HeaderError::MissingMethod)?,
+            // When empty host field is built into an uri it fails
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3.1
+            //# If these fields are present, they MUST NOT be
+            //# empty.
             uri.build().map_err(HeaderError::InvalidRequest)?,
             self.pseudo.protocol,
             self.fields,
@@ -180,6 +179,10 @@ impl Iterator for HeaderIter {
 
             if let Some(status) = pseudo.status.take() {
                 return Some((":status", status.as_str()).into());
+            }
+
+            if let Some(protocol) = pseudo.protocol.take() {
+                return Some((":protocol", protocol.as_str().as_bytes()).into());
             }
         }
 
@@ -271,9 +274,15 @@ impl Field {
         //# character not permitted in a field value MUST be treated as
         //# malformed.
 
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
+        //= type=implication
+        //# A request or
+        //# response containing uppercase characters in field names MUST be
+        //# treated as malformed.
+
         if name[0] != b':' {
             return Ok(Field::Header((
-                HeaderName::from_bytes(name).map_err(|_| HeaderError::invalid_name(name))?,
+                HeaderName::from_lowercase(name).map_err(|_| HeaderError::invalid_name(name))?,
                 HeaderValue::from_bytes(value.as_ref())
                     .map_err(|_| HeaderError::invalid_value(name, value))?,
             )));
@@ -281,6 +290,9 @@ impl Field {
 
         Ok(match name {
             b":scheme" => Field::Scheme(try_value(name, value)?),
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3.1
+            //# If these fields are present, they MUST NOT be
+            //# empty.
             b":authority" => Field::Authority(try_value(name, value)?),
             b":path" => Field::Path(try_value(name, value)?),
             b":method" => Field::Method(
@@ -485,6 +497,38 @@ mod tests {
         assert_matches!(
             headers.into_request_parts(),
             Err(HeaderError::MissingAuthority)
+        );
+    }
+
+    #[test]
+    fn request_has_empty_authority() {
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3.1
+        //= type=test
+        //# If these fields are present, they MUST NOT be
+        //# empty.
+        assert_matches!(
+            Header::try_from(vec![
+                (b":method", Method::GET.as_str()).into(),
+                (b":authority", b"").into(),
+            ]),
+            Err(HeaderError::InvalidHeaderValue(_))
+        );
+    }
+
+    #[test]
+    fn request_has_empty_host() {
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3.1
+        //= type=test
+        //# If these fields are present, they MUST NOT be
+        //# empty.
+        let headers = Header::try_from(vec![
+            (b":method", Method::GET.as_str()).into(),
+            (b"host", b"").into(),
+        ])
+        .unwrap();
+        assert_matches!(
+            headers.into_request_parts(),
+            Err(HeaderError::InvalidRequest(_))
         );
     }
 

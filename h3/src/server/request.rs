@@ -3,11 +3,16 @@ use std::convert::TryFrom;
 use bytes::Buf;
 use http::{Request, StatusCode};
 
-use crate::{error::Code, proto::headers::Header, qpack, quic, server::RequestStream, Error};
+#[cfg(feature = "tracing")]
+use tracing::instrument;
+
+use crate::{error::Code, proto::headers::Header, qpack, quic, Error};
+
+use super::stream::RequestStream;
 
 pub struct ResolveRequest<C: quic::Connection<B>, B: Buf> {
     request_stream: RequestStream<C::BidiStream, B>,
-    // Ok or `REQUEST_HEADER_FIELDS_TO_LARGE` which neeeds to be sent
+    // Ok or `REQUEST_HEADER_FIELDS_TO_LARGE` which needs to be sent
     decoded: Result<qpack::Decoded, u64>,
     max_field_section_size: u64,
 }
@@ -26,6 +31,7 @@ impl<B: Buf, C: quic::Connection<B>> ResolveRequest<C, B> {
     }
 
     /// Finishes the resolution of the request
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn resolve(
         mut self,
     ) -> Result<(Request<()>, RequestStream<C::BidiStream, B>), Error> {
@@ -86,7 +92,10 @@ impl<B: Buf, C: quic::Connection<B>> ResolveRequest<C, B> {
         *req.version_mut() = http::Version::HTTP_3;
         // send the grease frame only once
         // self.inner.send_grease_frame = false;
+
+        #[cfg(feature = "tracing")]
         tracing::trace!("replying with: {:?}", req);
+
         Ok((req, self.request_stream))
     }
 }

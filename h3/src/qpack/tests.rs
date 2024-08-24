@@ -1,4 +1,6 @@
-use crate::qpack::{dynamic::DynamicTable, Decoded, Decoder, DecoderError, Encoder, HeaderField};
+use crate::qpack::decoder::Decoder;
+use crate::qpack::encoder::Encoder;
+use crate::qpack::{dynamic::DynamicTable, Decoded, DecoderError, HeaderField};
 use std::io::Cursor;
 
 pub mod helpers {
@@ -44,7 +46,7 @@ fn codec_basic_get() {
     ];
 
     encoder
-        .encode(42, &mut block_buf, &mut enc_buf, header.clone().into_iter())
+        .encode(42, &mut block_buf, &mut enc_buf, header.clone())
         .unwrap();
 
     let mut enc_cur = Cursor::new(&mut enc_buf);
@@ -111,7 +113,7 @@ fn codec_table_size_0() {
     let mut decoder = Decoder::from(dec_table);
 
     encoder
-        .encode(42, &mut block_buf, &mut enc_buf, header.clone().into_iter())
+        .encode(42, &mut block_buf, &mut enc_buf, header.clone())
         .unwrap();
 
     let mut enc_cur = Cursor::new(&mut enc_buf);
@@ -146,7 +148,7 @@ fn codec_table_full() {
     let mut decoder = Decoder::from(dec_table);
 
     encoder
-        .encode(42, &mut block_buf, &mut enc_buf, header.clone().into_iter())
+        .encode(42, &mut block_buf, &mut enc_buf, header.clone())
         .unwrap();
 
     let mut enc_cur = Cursor::new(&mut enc_buf);

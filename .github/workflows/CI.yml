@@ -8,11 +8,11 @@ on:
 env:
   RUST_BACKTRACE: 1
   toolchain_style: stable
-  toolchain_msrv: 1.57
-  toolchain_h3_quinn_msrv: 1.63
-  toolchain_doc: nightly-2023-03-22
+  toolchain_msrv: 1.70.0
+  toolchain_h3_quinn_msrv: 1.70.0
+  toolchain_doc: nightly-2023-10-21
   toolchain_lint: stable
-  toolchain_fuzz: nightly-2023-03-22
+  toolchain_fuzz: nightly-2023-10-21
 
 jobs:
   ci-pass:
@@ -111,6 +111,7 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         toolchain: [stable, beta]
+        features: [i-implement-a-third-party-backend-and-opt-into-breaking-changes, tracing, 'tracing,i-implement-a-third-party-backend-and-opt-into-breaking-changes']
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
@@ -125,6 +126,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
+          args: --features ${{ matrix.features }}
       - name: h3Spec
         run: ./ci/h3spec.sh
         if: matrix.toolchain == 'stable'

@@ -1,97 +1,46 @@
-//! This module provides methods to create a http/3 Server.
+//! HTTP/3 server connection
 //!
-//! It allows to accept incoming requests, and send responses.
-//!
-//! # Examples
-//!
-//! ## Simple example
-//! ```rust
-//! async fn doc<C>(conn: C)
-//! where
-//! C: h3::quic::Connection<bytes::Bytes>,
-//! <C as h3::quic::Connection<bytes::Bytes>>::BidiStream: Send + 'static
-//! {
-//!     let mut server_builder = h3::server::builder();
-//!     // Build the Connection
-//!     let mut h3_conn = server_builder.build(conn).await.unwrap();
-//!     loop {
-//!         // Accept incoming requests
-//!         match h3_conn.accept().await {
-//!             Ok(Some((req, mut stream))) => {
-//!                 // spawn a new task to handle the request
-//!                 tokio::spawn(async move {
-//!                     // build a http response
-//!                     let response = http::Response::builder().status(http::StatusCode::OK).body(()).unwrap();
-//!                     // send the response to the wire
-//!                     stream.send_response(response).await.unwrap();
-//!                     // send some date
-//!                     stream.send_data(bytes::Bytes::from("test")).await.unwrap();
-//!                     // finnish the stream
-//!                     stream.finish().await.unwrap();
-//!                 });
-//!             }
-//!             Ok(None) => {
-//!                 // break if no Request is accepted
-//!                 break;
-//!             }
-//!             Err(err) => {
-//!                 match err.get_error_level() {
-//!                     // break on connection errors
-//!                     h3::error::ErrorLevel::ConnectionError => break,
-//!                     // continue on stream errors
-//!                     h3::error::ErrorLevel::StreamError => continue,
-//!                 }
-//!             }
-//!         }
-//!     }
-//! }
-//! ```
-//!
-//! ## File server
-//! A ready-to-use example of a file server is available [here](https://github.com/hyperium/h3/blob/master/examples/client.rs)
+//! The [`Connection`] struct manages a connection from the side of the HTTP/3 server
 
 use std::{
     collections::HashSet,
+    marker::PhantomData,
     option::Option,
     result::Result,
     sync::Arc,
     task::{Context, Poll},
 };
 
-use bytes::{Buf, BytesMut};
+use bytes::Buf;
 use futures_util::{
     future::{self},
     ready,
 };
-use http::{response, HeaderMap, Request, Response};
+use http::Request;
 use quic::RecvStream;
 use quic::StreamId;
 use tokio::sync::mpsc;
 
 use crate::{
-    config::Config,
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
     error::{Code, Error, ErrorLevel},
+    ext::Datagram,
     frame::{FrameStream, FrameStreamError},
     proto::{
         frame::{Frame, PayloadLen},
-        headers::Header,
         push::PushId,
     },
     qpack,
-    quic::{self, SendStream as _},
-    request::ResolveRequest,
-    stream::{self, BufRecvStream},
+    quic::{self, RecvDatagramExt, SendDatagramExt, SendStream as _},
+    stream::BufRecvStream,
 };
-use tracing::{error, trace, warn};
 
-/// Create a builder of HTTP/3 server connections
-///
-/// This function creates a [`Builder`] that carries settings that can
-/// be shared between server connections.
-pub fn builder() -> Builder {
-    Builder::new()
-}
+use crate::server::request::ResolveRequest;
+
+#[cfg(feature = "tracing")]
+use tracing::{instrument, trace, warn};
+
+use super::stream::{ReadDatagram, RequestStream};
 
 /// Server connection driver
 ///
@@ -107,18 +56,18 @@ where
 {
     /// TODO: temporarily break encapsulation for `WebTransportSession`
     pub inner: ConnectionInner<C, B>,
-    max_field_section_size: u64,
+    pub(super) max_field_section_size: u64,
     // List of all incoming streams that are currently running.
-    ongoing_streams: HashSet<StreamId>,
+    pub(super) ongoing_streams: HashSet<StreamId>,
     // Let the streams tell us when they are no longer running.
-    request_end_recv: mpsc::UnboundedReceiver<StreamId>,
-    request_end_send: mpsc::UnboundedSender<StreamId>,
+    pub(super) request_end_recv: mpsc::UnboundedReceiver<StreamId>,
+    pub(super) request_end_send: mpsc::UnboundedSender<StreamId>,
     // Has a GOAWAY frame been sent? If so, this StreamId is the last we are willing to accept.
-    sent_closing: Option<StreamId>,
+    pub(super) sent_closing: Option<StreamId>,
     // Has a GOAWAY frame been received? If so, this is PushId the last the remote will accept.
-    recv_closing: Option<PushId>,
+    pub(super) recv_closing: Option<PushId>,
     // The id of the last stream received by this connection.
-    last_accepted_stream: Option<StreamId>,
+    pub(super) last_accepted_stream: Option<StreamId>,
 }
 
 impl<C, B> ConnectionState for Connection<C, B>
@@ -138,14 +87,16 @@ where
 {
     /// Create a new HTTP/3 server connection with default settings
     ///
-    /// Use a custom [`Builder`] with [`builder()`] to create a connection
+    /// Use a custom [`super::builder::Builder`] with [`super::builder::builder()`] to create a connection
     /// with different settings.
     /// Provide a Connection which implements [`quic::Connection`].
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn new(conn: C) -> Result<Self, Error> {
-        builder().build(conn).await
+        super::builder::builder().build(conn).await
     }
 
     /// Closes the connection with a code and a reason.
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn close<T: AsRef<str>>(&mut self, code: Code, reason: T) -> Error {
         self.inner.close(code, reason)
     }
@@ -161,6 +112,7 @@ where
     /// It returns a tuple with a [`http::Request`] and an [`RequestStream`].
     /// The [`http::Request`] is the received request from the client.
     /// The [`RequestStream`] can be used to send the response.
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn accept(
         &mut self,
     ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
@@ -200,12 +152,13 @@ where
         }
     }
 
-    /// Accepts an http request where the first frame has already been read and decoded.
+    /// Accepts a http request where the first frame has already been read and decoded.
     ///
     ///
     /// This is needed as a bidirectional stream may be read as part of incoming webtransport
     /// bi-streams. If it turns out that the stream is *not* a `WEBTRANSPORT_STREAM` the request
     /// may still want to be handled and passed to the user.
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn accept_with_frame(
         &mut self,
         mut stream: FrameStream<C::BidiStream, B>,
@@ -337,6 +290,7 @@ where
     /// Initiate a graceful shutdown, accepting `max_request` potentially still in-flight
     ///
     /// See [connection shutdown](https://www.rfc-editor.org/rfc/rfc9114.html#connection-shutdown) for more information.
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn shutdown(&mut self, max_requests: usize) -> Result<(), Error> {
         let max_id = self
             .last_accepted_stream
@@ -350,6 +304,7 @@ where
     ///
     /// This could be either a *Request* or a *WebTransportBiStream*, the first frame's type
     /// decides.
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_accept_request(
         &mut self,
         cx: &mut Context<'_>,
@@ -398,11 +353,13 @@ where
         }
     }
 
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub(crate) fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         while (self.poll_next_control(cx)?).is_ready() {}
         Poll::Pending
     }
 
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub(crate) fn poll_next_control(
         &mut self,
         cx: &mut Context<'_>,
@@ -410,10 +367,15 @@ where
         let frame = ready!(self.inner.poll_control(cx))?;
 
         match &frame {
-            Frame::Settings(w) => trace!("Got settings > {:?}", w),
+            Frame::Settings(_setting) => {
+                #[cfg(feature = "tracing")]
+                trace!("Got settings > {:?}", _setting);
+                ()
+            }
             &Frame::Goaway(id) => self.inner.process_goaway(&mut self.recv_closing, id)?,
-            f @ Frame::MaxPushId(_) | f @ Frame::CancelPush(_) => {
-                warn!("Control frame ignored {:?}", f);
+            _frame @ Frame::MaxPushId(_) | _frame @ Frame::CancelPush(_) => {
+                #[cfg(feature = "tracing")]
+                warn!("Control frame ignored {:?}", _frame);
 
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
                 //= type=TODO
@@ -443,6 +405,7 @@ where
         Poll::Ready(Ok(frame))
     }
 
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn poll_requests_completion(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         loop {
             match self.request_end_recv.poll_recv(cx) {
@@ -466,11 +429,46 @@ where
     }
 }
 
+impl<C, B> Connection<C, B>
+where
+    C: quic::Connection<B> + SendDatagramExt<B>,
+    B: Buf,
+{
+    /// Sends a datagram
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub fn send_datagram(&mut self, stream_id: StreamId, data: B) -> Result<(), Error> {
+        self.inner
+            .conn
+            .send_datagram(Datagram::new(stream_id, data))?;
+
+        #[cfg(feature = "tracing")]
+        tracing::info!("Sent datagram");
+
+        Ok(())
+    }
+}
+
+impl<C, B> Connection<C, B>
+where
+    C: quic::Connection<B> + RecvDatagramExt,
+    B: Buf,
+{
+    /// Reads an incoming datagram
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub fn read_datagram(&mut self) -> ReadDatagram<C, B> {
+        ReadDatagram {
+            conn: self,
+            _marker: PhantomData,
+        }
+    }
+}
+
 impl<C, B> Drop for Connection<C, B>
 where
     C: quic::Connection<B>,
     B: Buf,
 {
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn drop(&mut self) {
         self.inner.close(Code::H3_NO_ERROR, "");
     }
@@ -489,288 +487,7 @@ where
 //# parallelism, at least 100 request streams SHOULD be permitted at a
 //# time.
 
-/// Builder of HTTP/3 server connections.
-///
-/// Use this struct to create a new [`Connection`].
-/// Settings for the [`Connection`] can be provided here.
-///
-/// # Example
-///
-/// ```rust
-/// fn doc<C,B>(conn: C)
-/// where
-/// C: h3::quic::Connection<B>,
-/// B: bytes::Buf,
-/// {
-///     let mut server_builder = h3::server::builder();
-///     // Set the maximum header size
-///     server_builder.max_field_section_size(1000);
-///     // do not send grease types
-///     server_builder.send_grease(false);
-///     // Build the Connection
-///     let mut h3_conn = server_builder.build(conn);
-/// }
-/// ```
-pub struct Builder {
-    pub(crate) config: Config,
-}
-
-impl Builder {
-    /// Creates a new [`Builder`] with default settings.
-    pub(super) fn new() -> Self {
-        Builder {
-            config: Default::default(),
-        }
-    }
-
-    /// Set the maximum header size this client is willing to accept
-    ///
-    /// See [header size constraints] section of the specification for details.
-    ///
-    /// [header size constraints]: https://www.rfc-editor.org/rfc/rfc9114.html#name-header-size-constraints
-    pub fn max_field_section_size(&mut self, value: u64) -> &mut Self {
-        self.config.max_field_section_size = value;
-        self
-    }
-
-    /// Send grease values to the Client.
-    /// See [setting](https://www.rfc-editor.org/rfc/rfc9114.html#settings-parameters), [frame](https://www.rfc-editor.org/rfc/rfc9114.html#frame-reserved) and [stream](https://www.rfc-editor.org/rfc/rfc9114.html#stream-grease) for more information.
-    #[inline]
-    pub fn send_grease(&mut self, value: bool) -> &mut Self {
-        self.config.send_grease = value;
-        self
-    }
-
-    /// Indicates to the peer that WebTransport is supported.
-    ///
-    /// See: [establishing a webtransport session](https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-3.1)
-    ///
-    ///
-    /// **Server**:
-    /// Supporting for webtransport also requires setting `enable_connect` `enable_datagram`
-    /// and `max_webtransport_sessions`.
-    #[inline]
-    pub fn enable_webtransport(&mut self, value: bool) -> &mut Self {
-        self.config.enable_webtransport = value;
-        self
-    }
-
-    /// Enables the CONNECT protocol
-    pub fn enable_connect(&mut self, value: bool) -> &mut Self {
-        self.config.enable_extended_connect = value;
-        self
-    }
-
-    /// Limits the maximum number of WebTransport sessions
-    pub fn max_webtransport_sessions(&mut self, value: u64) -> &mut Self {
-        self.config.max_webtransport_sessions = value;
-        self
-    }
-
-    /// Indicates that the client or server supports HTTP/3 datagrams
-    ///
-    /// See: <https://www.rfc-editor.org/rfc/rfc9297#section-2.1.1>
-    pub fn enable_datagram(&mut self, value: bool) -> &mut Self {
-        self.config.enable_datagram = value;
-        self
-    }
-}
-
-impl Builder {
-    /// Build an HTTP/3 connection from a QUIC connection
-    ///
-    /// This method creates a [`Connection`] instance with the settings in the [`Builder`].
-    pub async fn build<C, B>(&self, conn: C) -> Result<Connection<C, B>, Error>
-    where
-        C: quic::Connection<B>,
-        B: Buf,
-    {
-        let (sender, receiver) = mpsc::unbounded_channel();
-        Ok(Connection {
-            inner: ConnectionInner::new(conn, SharedStateRef::default(), self.config).await?,
-            max_field_section_size: self.config.max_field_section_size,
-            request_end_send: sender,
-            request_end_recv: receiver,
-            ongoing_streams: HashSet::new(),
-            sent_closing: None,
-            recv_closing: None,
-            last_accepted_stream: None,
-        })
-    }
-}
-
-struct RequestEnd {
-    request_end: mpsc::UnboundedSender<StreamId>,
-    stream_id: StreamId,
-}
-
-/// Manage request and response transfer for an incoming request
-///
-/// The [`RequestStream`] struct is used to send and/or receive
-/// information from the client.
-pub struct RequestStream<S, B> {
-    inner: connection::RequestStream<S, B>,
-    request_end: Arc<RequestEnd>,
-}
-
-impl<S, B> AsMut<connection::RequestStream<S, B>> for RequestStream<S, B> {
-    fn as_mut(&mut self) -> &mut connection::RequestStream<S, B> {
-        &mut self.inner
-    }
-}
-
-impl<S, B> ConnectionState for RequestStream<S, B> {
-    fn shared_state(&self) -> &SharedStateRef {
-        &self.inner.conn_state
-    }
-}
-
-impl<S, B> RequestStream<S, B>
-where
-    S: quic::RecvStream,
-    B: Buf,
-{
-    /// Receive data sent from the client
-    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
-        self.inner.recv_data().await
-    }
-
-    /// Receive an optional set of trailers for the request
-    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
-        self.inner.recv_trailers().await
-    }
-
-    /// Tell the peer to stop sending into the underlying QUIC stream
-    pub fn stop_sending(&mut self, error_code: crate::error::Code) {
-        self.inner.stream.stop_sending(error_code)
-    }
-
-    /// Returns the underlying stream id
-    pub fn id(&self) -> StreamId {
-        self.inner.stream.id()
-    }
-}
-
-impl<S, B> RequestStream<S, B>
-where
-    S: quic::SendStream<B>,
-    B: Buf,
-{
-    /// Send the HTTP/3 response
-    ///
-    /// This should be called before trying to send any data with
-    /// [`RequestStream::send_data`].
-    pub async fn send_response(&mut self, resp: Response<()>) -> Result<(), Error> {
-        let (parts, _) = resp.into_parts();
-        let response::Parts {
-            status, headers, ..
-        } = parts;
-        let headers = Header::response(status, headers);
-
-        let mut block = BytesMut::new();
-        let mem_size = qpack::encode_stateless(&mut block, headers)?;
-
-        let max_mem_size = self
-            .inner
-            .conn_state
-            .read("send_response")
-            .peer_config
-            .max_field_section_size;
-
-        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
-        //# An implementation that
-        //# has received this parameter SHOULD NOT send an HTTP message header
-        //# that exceeds the indicated size, as the peer will likely refuse to
-        //# process it.
-        if mem_size > max_mem_size {
-            return Err(Error::header_too_big(mem_size, max_mem_size));
-        }
-
-        stream::write(&mut self.inner.stream, Frame::Headers(block.freeze()))
-            .await
-            .map_err(|e| self.maybe_conn_err(e))?;
-
-        Ok(())
-    }
-
-    /// Send some data on the response body.
-    pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
-        self.inner.send_data(buf).await
-    }
-
-    /// Stop a stream with an error code
-    ///
-    /// The code can be [`Code::H3_NO_ERROR`].
-    pub fn stop_stream(&mut self, error_code: Code) {
-        self.inner.stop_stream(error_code);
-    }
-
-    /// Send a set of trailers to end the response.
-    ///
-    /// Either [`RequestStream::finish`] or
-    /// [`RequestStream::send_trailers`] must be called to finalize a
-    /// request.
-    pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
-        self.inner.send_trailers(trailers).await
-    }
-
-    /// End the response without trailers.
-    ///
-    /// Either [`RequestStream::finish`] or
-    /// [`RequestStream::send_trailers`] must be called to finalize a
-    /// request.
-    pub async fn finish(&mut self) -> Result<(), Error> {
-        self.inner.finish().await
-    }
-
-    //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1.1
-    //= type=TODO
-    //# Implementations SHOULD cancel requests by abruptly terminating any
-    //# directions of a stream that are still open.  To do so, an
-    //# implementation resets the sending parts of streams and aborts reading
-    //# on the receiving parts of streams; see Section 2.4 of
-    //# [QUIC-TRANSPORT].
-
-    /// Returns the underlying stream id
-    pub fn send_id(&self) -> StreamId {
-        self.inner.stream.send_id()
-    }
-}
-
-impl<S, B> RequestStream<S, B>
-where
-    S: quic::BidiStream<B>,
-    B: Buf,
-{
-    /// Splits the Request-Stream into send and receive.
-    /// This can be used the send and receive data on different tasks.
-    pub fn split(
-        self,
-    ) -> (
-        RequestStream<S::SendStream, B>,
-        RequestStream<S::RecvStream, B>,
-    ) {
-        let (send, recv) = self.inner.split();
-        (
-            RequestStream {
-                inner: send,
-                request_end: self.request_end.clone(),
-            },
-            RequestStream {
-                inner: recv,
-                request_end: self.request_end,
-            },
-        )
-    }
-}
-
-impl Drop for RequestEnd {
-    fn drop(&mut self) {
-        if let Err(e) = self.request_end.send(self.stream_id) {
-            error!(
-                "failed to notify connection of request end: {} {}",
-                self.stream_id, e
-            );
-        }
-    }
+pub(super) struct RequestEnd {
+    pub(super) request_end: mpsc::UnboundedSender<StreamId>,
+    pub(super) stream_id: StreamId,
 }

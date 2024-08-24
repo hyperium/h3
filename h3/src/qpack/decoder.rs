@@ -1,6 +1,7 @@
 use bytes::{Buf, BufMut};
-use std::{fmt, io::Cursor};
+use std::{convert::TryInto, fmt, io::Cursor, num::TryFromIntError};
 
+#[cfg(feature = "tracing")]
 use tracing::trace;
 
 use super::{
@@ -36,6 +37,7 @@ pub enum Error {
     BadBaseIndex(isize),
     UnexpectedEnd,
     HeaderTooLong(u64),
+    BufSize(TryFromIntError),
 }
 
 impl std::error::Error for Error {}
@@ -53,6 +55,7 @@ impl std::fmt::Display for Error {
             Error::BadBaseIndex(i) => write!(f, "out of bounds base index: {}", i),
             Error::UnexpectedEnd => write!(f, "unexpected end"),
             Error::HeaderTooLong(_) => write!(f, "header too long"),
+            Error::BufSize(_) => write!(f, "number in buffer wrong size"),
         }
     }
 }
@@ -116,7 +119,9 @@ impl Decoder {
         let inserted_on_start = self.table.total_inserted();
 
         while let Some(instruction) = self.parse_instruction(read)? {
+            #[cfg(feature = "tracing")]
             trace!("instruction {:?}", instruction);
+
             match instruction {
                 Instruction::Insert(field) => self.table.put(field)?,
                 Instruction::TableSizeUpdate(size) => {
@@ -126,7 +131,8 @@ impl Decoder {
         }
 
         if self.table.total_inserted() != inserted_on_start {
-            InsertCountIncrement(self.table.total_inserted() - inserted_on_start).encode(write);
+            InsertCountIncrement((self.table.total_inserted() - inserted_on_start).try_into()?)
+                .encode(write);
         }
 
         Ok(self.table.total_inserted())
@@ -323,6 +329,12 @@ impl From<ParseError> for Error {
             ParseError::InvalidPrefix(p) => Error::UnknownPrefix(p),
             ParseError::InvalidBase(b) => Error::BadBaseIndex(b),
         }
+    }
+}
+
+impl From<TryFromIntError> for Error {
+    fn from(error: TryFromIntError) -> Self {
+        Error::BufSize(error)
     }
 }
 
