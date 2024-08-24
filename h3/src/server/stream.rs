@@ -4,8 +4,7 @@ use bytes::Buf;
 
 use crate::{
     connection::{ConnectionState, SharedStateRef},
-    ext::Datagram,
-    quic::{self, RecvDatagramExt},
+    quic::{self},
     Error,
 };
 use pin_project_lite::pin_project;
@@ -220,6 +219,8 @@ impl Drop for RequestEnd {
     }
 }
 
+/*
+
 pin_project! {
     /// Future for [`Connection::read_datagram`]
     pub struct ReadDatagram<'a, C, B>
@@ -249,3 +250,5 @@ where
         }
     }
 }
+
+    */

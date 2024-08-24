@@ -24,14 +24,13 @@ use tokio::sync::mpsc;
 use crate::{
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
     error::{Code, Error, ErrorLevel},
-    ext::Datagram,
     frame::{FrameStream, FrameStreamError},
     proto::{
         frame::{Frame, PayloadLen},
         push::PushId,
     },
     qpack,
-    quic::{self, RecvDatagramExt, SendDatagramExt, SendStream as _},
+    quic::{self, SendStream as _},
     stream::BufRecvStream,
 };
 
@@ -40,7 +39,7 @@ use crate::server::request::ResolveRequest;
 #[cfg(feature = "tracing")]
 use tracing::{instrument, trace, warn};
 
-use super::stream::{ReadDatagram, RequestStream};
+use super::stream::RequestStream;
 
 /// Server connection driver
 ///
@@ -429,6 +428,7 @@ where
     }
 }
 
+/*
 impl<C, B> Connection<C, B>
 where
     C: quic::Connection<B> + SendDatagramExt<B>,
@@ -462,6 +462,7 @@ where
         }
     }
 }
+    */
 
 impl<C, B> Drop for Connection<C, B>
 where
