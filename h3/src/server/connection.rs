@@ -427,42 +427,6 @@ where
     }
 }
 
-/*
-impl<C, B> Connection<C, B>
-where
-    C: quic::Connection<B> + SendDatagramExt<B>,
-    B: Buf,
-{
-    /// Sends a datagram
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn send_datagram(&mut self, stream_id: StreamId, data: B) -> Result<(), Error> {
-        self.inner
-            .conn
-            .send_datagram(Datagram::new(stream_id, data))?;
-
-        #[cfg(feature = "tracing")]
-        tracing::info!("Sent datagram");
-
-        Ok(())
-    }
-}
-
-impl<C, B> Connection<C, B>
-where
-    C: quic::Connection<B> + RecvDatagramExt,
-    B: Buf,
-{
-    /// Reads an incoming datagram
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn read_datagram(&mut self) -> ReadDatagram<C, B> {
-        ReadDatagram {
-            conn: self,
-            _marker: PhantomData,
-        }
-    }
-}
-    */
-
 impl<C, B> Drop for Connection<C, B>
 where
     C: quic::Connection<B>,

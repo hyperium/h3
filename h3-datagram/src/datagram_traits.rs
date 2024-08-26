@@ -9,7 +9,7 @@ use h3::{
 
 use crate::server::ReadDatagram;
 
-pub trait HandleDatagrams<C, B>
+pub trait HandleDatagramsExt<C, B>
 where
     B: Buf,
     C: quic::Connection<B>,

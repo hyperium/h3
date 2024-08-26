@@ -16,11 +16,11 @@ use pin_project_lite::pin_project;
 
 use crate::{
     datagram::Datagram,
-    datagram_traits::HandleDatagrams,
+    datagram_traits::HandleDatagramsExt,
     quic_traits::{self, RecvDatagramExt, SendDatagramExt},
 };
 
-impl<B, C> HandleDatagrams<C, B> for Connection<C, B>
+impl<B, C> HandleDatagramsExt<C, B> for Connection<C, B>
 where
     B: Buf,
     C: quic::Connection<B> + SendDatagramExt<B> + RecvDatagramExt,
@@ -32,9 +32,6 @@ where
         self.inner
             .conn
             .send_datagram(Datagram::new(stream_id, data))?;
-        //Todo Import tracing
-        //tracing::info!("Sent datagram");
-
         Ok(())
     }
 
@@ -68,8 +65,6 @@ where
     type Output = Result<Option<Datagram<C::Buf>>, Error>;
 
     fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        //Todo Import tracing
-        // tracing::trace!("poll: read_datagram");
         match ready!(self.conn.inner.conn.poll_accept_datagram(cx))? {
             Some(v) => Poll::Ready(Ok(Some(Datagram::decode(v)?))),
             None => Poll::Ready(Ok(None)),

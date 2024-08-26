@@ -26,7 +26,7 @@ use h3::{
 };
 use h3_datagram::{
     datagram::Datagram,
-    datagram_traits::HandleDatagrams,
+    datagram_traits::HandleDatagramsExt,
     quic_traits::{RecvDatagramExt, SendDatagramExt},
 };
 use http::{Method, Request, Response, StatusCode};
@@ -44,7 +44,7 @@ use crate::stream::{BidiStream, RecvStream, SendStream};
 pub struct WebTransportSession<C, B>
 where
     C: quic::Connection<B>,
-    Connection<C, B>: HandleDatagrams<C, B>,
+    Connection<C, B>: HandleDatagramsExt<C, B>,
     B: Buf,
 {
     // See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-2-3
@@ -57,7 +57,7 @@ where
 
 impl<C, B> WebTransportSession<C, B>
 where
-    Connection<C, B>: HandleDatagrams<C, B>,
+    Connection<C, B>: HandleDatagramsExt<C, B>,
     C: quic::Connection<B>,
     B: Buf,
 {
