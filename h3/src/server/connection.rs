@@ -4,7 +4,6 @@
 
 use std::{
     collections::HashSet,
-    marker::PhantomData,
     option::Option,
     result::Result,
     sync::Arc,
