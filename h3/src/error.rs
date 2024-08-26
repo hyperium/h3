@@ -200,7 +200,6 @@ impl Code {
         })
     }
 
-    // Todo: public? private?
     #[doc(hidden)]
     pub fn with_cause<E: Into<Cause>>(self, cause: E) -> Error {
         Error::from(self).with_cause(cause)

@@ -134,7 +134,7 @@ impl StreamId {
         }
     }
 
-    // TODO: pub? better option?
+    #[allow(missing_docs)]
     pub fn into_inner(self) -> u64 {
         self.0
     }
