@@ -40,6 +40,7 @@ use tracing::{error, instrument};
 ///
 /// The [`RequestStream`] struct is used to send and/or receive
 /// information from the client.
+/// After sending the final response, call [`RequestStream::finish`] to close the stream.
 pub struct RequestStream<S, B> {
     pub(super) inner: crate::connection::RequestStream<S, B>,
     pub(super) request_end: Arc<RequestEnd>,
@@ -151,18 +152,14 @@ where
 
     /// Send a set of trailers to end the response.
     ///
-    /// Either [`RequestStream::finish`] or
-    /// [`RequestStream::send_trailers`] must be called to finalize a
-    /// request.
+    /// [`RequestStream::finish`] must be called to finalize a request.
     pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
         self.inner.send_trailers(trailers).await
     }
 
     /// End the response without trailers.
     ///
-    /// Either [`RequestStream::finish`] or
-    /// [`RequestStream::send_trailers`] must be called to finalize a
-    /// request.
+    /// [`RequestStream::finish`] must be called to finalize a request.
     pub async fn finish(&mut self) -> Result<(), Error> {
         self.inner.finish().await
     }
