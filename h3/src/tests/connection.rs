@@ -186,6 +186,12 @@ async fn client_close_only_on_last_sender_drop() {
 
 #[tokio::test]
 async fn settings_exchange_client() {
+    //= https://www.rfc-editor.org/rfc/rfc9114#section-3.2
+    //= type=test
+    //# After the QUIC connection is
+    //# established, a SETTINGS frame MUST be sent by each endpoint as the
+    //# initial frame of their respective HTTP control stream.
+
     init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
@@ -230,6 +236,12 @@ async fn settings_exchange_client() {
 
 #[tokio::test]
 async fn settings_exchange_server() {
+    //= https://www.rfc-editor.org/rfc/rfc9114#section-3.2
+    //= type=test
+    //# After the QUIC connection is
+    //# established, a SETTINGS frame MUST be sent by each endpoint as the
+    //# initial frame of their respective HTTP control stream.
+
     init_tracing();
     let mut pair = Pair::default();
     let mut server = pair.server();
@@ -244,7 +256,7 @@ async fn settings_exchange_server() {
             future::poll_fn(|cx| conn.poll_close(cx)).await.unwrap();
         };
 
-        tokio::select! { _ = drive => () };
+        drive.await;
     };
 
     let server_fut = async {
@@ -271,7 +283,7 @@ async fn settings_exchange_server() {
         tokio::select! { _ = accept => panic!("server resolved first"), _ = settings_change => () };
     };
 
-    tokio::select! { _ = server_fut => (), _ = client_fut => () };
+    tokio::join!(server_fut, client_fut);
 }
 
 #[tokio::test]
