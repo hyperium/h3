@@ -19,7 +19,10 @@ use futures::{
     stream::{self},
     Stream, StreamExt,
 };
+
+#[cfg(feature = "datagram")]
 use h3_datagram::{datagram::Datagram, quic_traits};
+
 pub use quinn::{self, AcceptBi, AcceptUni, Endpoint, OpenBi, OpenUni, VarInt, WriteError};
 use quinn::{ApplicationClose, ClosedStream, ReadDatagram};
 
@@ -246,6 +249,7 @@ where
     }
 }
 
+#[cfg(feature = "datagram")]
 impl<B> quic_traits::SendDatagramExt<B> for Connection
 where
     B: Buf,
@@ -263,6 +267,7 @@ where
     }
 }
 
+#[cfg(feature = "datagram")]
 impl quic_traits::RecvDatagramExt for Connection {
     type Buf = Bytes;
 
