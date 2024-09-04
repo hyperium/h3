@@ -15,19 +15,19 @@ use std::convert::TryFrom;
 
 /// Manage request bodies transfer, response and trailers.
 ///
-/// Once a request has been sent via [`send_request()`], a response can be awaited by calling
-/// [`recv_response()`]. A body for this request can be sent with [`send_data()`], then the request
-/// shall be completed by either sending trailers with [`send_trailers()`], or [`finish()`].
+/// Once a request has been sent via [`crate::client::SendRequest::send_request()`], a response can be awaited by calling
+/// [`RequestStream::recv_response()`]. A body for this request can be sent with [`RequestStream::send_data()`], then the request
+/// shall be completed by either sending trailers with  [`RequestStream::finish()`].
 ///
-/// After receiving the response's headers, it's body can be read by [`recv_data()`] until it returns
-/// `None`. Then the trailers will eventually be available via [`recv_trailers()`].
+/// After receiving the response's headers, it's body can be read by [`RequestStream::recv_data()`] until it returns
+/// `None`. Then the trailers will eventually be available via [`RequestStream::recv_trailers()`].
 ///
 /// TODO: If data is polled before the response has been received, an error will be thrown.
 ///
 /// TODO: If trailers are polled but the body hasn't been fully received, an UNEXPECT_FRAME error will be
 /// thrown
 ///
-/// Whenever the client wants to cancel this request, it can call [`stop_sending()`], which will
+/// Whenever the client wants to cancel this request, it can call [`RequestStream::stop_sending()`], which will
 /// put an end to any transfer concerning it.
 ///
 /// # Examples
@@ -183,9 +183,7 @@ where
 
     /// Send a set of trailers to end the request.
     ///
-    /// Either [`RequestStream::finish`] or
-    /// [`RequestStream::send_trailers`] must be called to finalize a
-    /// request.
+    /// [`RequestStream::finish()`] must be called to finalize a request.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
         self.inner.send_trailers(trailers).await
@@ -193,9 +191,7 @@ where
 
     /// End the request without trailers.
     ///
-    /// Either [`RequestStream::finish`] or
-    /// [`RequestStream::send_trailers`] must be called to finalize a
-    /// request.
+    /// [`RequestStream::finish()`] must be called to finalize a request.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn finish(&mut self) -> Result<(), Error> {
         self.inner.finish().await
