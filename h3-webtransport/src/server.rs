@@ -151,22 +151,47 @@ where
         Ok(())
     }
 
-    /// Accept an incoming unidirectional stream from the client, it reads the stream until EOF.
-    pub fn accept_uni(&self) -> AcceptUni<C, B> {
-        AcceptUni {
-            conn: &self.server_conn,
-        }
-    }
-
     /// Accepts an incoming bidirectional stream or request
-    pub async fn accept_bi(&self) -> Result<Option<AcceptedBi<C, B>>, Error> {
+    pub async fn accept_streams(&self) -> Result<Option<AcceptStream<C, B>>, Error> {
+        {
+            let mut conn = self.server_conn.lock().unwrap();
+            // if there are pending unidirectional streams, return them before the first await
+            if let Some((id, stream)) = conn.inner.accepted_streams_mut().wt_uni_streams.pop() {
+                return Ok(Some(AcceptStream::UnidirectionalStream::<C, _>(
+                    id,
+                    RecvStream::new(stream),
+                )));
+            }
+        }
+
         // Get the next stream
         // Accept the incoming stream
         let stream = poll_fn(|cx| {
             let mut conn = self.server_conn.lock().unwrap();
-            conn.poll_accept_request(cx)
+            let accepted_stream = conn.poll_accept_request(cx);
+            if matches!(accepted_stream, Poll::Pending) {
+                // if there are accepted uni streams, return them
+                if let Some((id, stream)) = conn.inner.accepted_streams_mut().wt_uni_streams.pop() {
+                    return Poll::Ready(PollAcceptRequestResult::UnidirectionalStream::<C, _>(
+                        id, stream,
+                    ));
+                }
+                return Poll::Pending;
+            }
+            let bidi_stream = ready!(accepted_stream);
+            Poll::Ready(PollAcceptRequestResult::BidirectionalStream(bidi_stream))
         })
         .await;
+
+        let stream = match stream {
+            PollAcceptRequestResult::UnidirectionalStream(id, stream) => {
+                return Ok(Some(AcceptStream::UnidirectionalStream(
+                    id,
+                    RecvStream::new(stream),
+                )));
+            }
+            PollAcceptRequestResult::BidirectionalStream(stream) => stream,
+        };
 
         let mut stream = match stream {
             Ok(Some(s)) => FrameStream::new(BufRecvStream::new(s)),
@@ -204,7 +229,7 @@ where
                 // Take the stream out of the framed reader and split it in half like Paul Allen
                 let stream = stream.into_inner();
 
-                Ok(Some(AcceptedBi::BidiStream(
+                Ok(Some(AcceptStream::BidiStream(
                     session_id,
                     BidiStream::new(stream),
                 )))
@@ -217,7 +242,7 @@ where
                 };
                 if let Some(req) = req {
                     let (req, resp) = req.resolve().await?;
-                    Ok(Some(AcceptedBi::Request(req, resp)))
+                    Ok(Some(AcceptStream::Request(req, resp)))
                 } else {
                     Ok(None)
                 }
@@ -247,6 +272,15 @@ where
     pub fn session_id(&self) -> SessionId {
         self.session_id
     }
+}
+
+enum PollAcceptRequestResult<C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    UnidirectionalStream(SessionId, BufRecvStream<C::RecvStream, B>),
+    BidirectionalStream(Result<Option<C::BidiStream>, Error>),
 }
 
 /// Streams are opened, but the initial webtransport header has not been sent
@@ -348,12 +382,15 @@ where
     }
 }
 
-/// An accepted incoming bidirectional stream.
+/// An accepted incoming bidirectional or unidirectional stream.
 ///
 /// Since
-pub enum AcceptedBi<C: quic::Connection<B>, B: Buf> {
+pub enum AcceptStream<C: quic::Connection<B>, B: Buf> {
     /// An incoming bidirectional stream
     BidiStream(SessionId, BidiStream<C::BidiStream, B>),
+    /// An incoming unidirectional stream
+    UnidirectionalStream(SessionId, RecvStream<C::RecvStream, B>),
+
     /// An incoming HTTP/3 request, passed through a webtransport session.
     ///
     /// This makes it possible to respond to multiple CONNECT requests
@@ -389,36 +426,6 @@ where
             }
             None => Poll::Ready(Ok(None)),
         }
-    }
-}
-
-/// Future for [`WebTransportSession::accept_uni`]
-pub struct AcceptUni<'a, C, B>
-where
-    C: quic::Connection<B>,
-    B: Buf,
-{
-    conn: &'a Mutex<Connection<C, B>>,
-}
-
-impl<'a, C, B> Future for AcceptUni<'a, C, B>
-where
-    C: quic::Connection<B>,
-    B: Buf,
-{
-    type Output = Result<Option<(SessionId, RecvStream<C::RecvStream, B>)>, Error>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut conn = self.conn.lock().unwrap();
-        conn.inner.poll_accept_recv(cx)?;
-
-        // Get the currently available streams
-        let streams = conn.inner.accepted_streams_mut();
-        if let Some((id, stream)) = streams.wt_uni_streams.pop() {
-            return Poll::Ready(Ok(Some((id, RecvStream::new(stream)))));
-        }
-
-        Poll::Pending
     }
 }
 
