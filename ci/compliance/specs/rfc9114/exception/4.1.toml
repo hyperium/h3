@@ -45,3 +45,26 @@ the request and close the stream normally.
 reason = '''
 h3 does not need to do anything specific.
 '''
+
+
+[[exception]]
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-4.1"
+quote = '''
+After sending a final
+response, the server MUST close the stream for sending.
+'''
+reason = '''
+Users of h3 should close the stream for sending after sending a final response. As documented in the server docs.
+'''
+
+[[exception]]
+target = "https://www.rfc-editor.org/rfc/rfc9114#section-4.1"
+quote = '''
+After sending a request, a client MUST
+close the stream for sending.
+'''
+reason = '''
+Users of h3 should close the stream for sending after sending a request. As documented in the client docs.
+'''
+
+
