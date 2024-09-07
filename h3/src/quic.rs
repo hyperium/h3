@@ -7,7 +7,6 @@ use std::task::{self, Poll};
 
 use bytes::Buf;
 
-use crate::ext::Datagram;
 pub use crate::proto::stream::{InvalidStreamId, StreamId};
 pub use crate::stream::WriteBuf;
 
@@ -57,33 +56,6 @@ pub trait Connection<B: Buf>: OpenStreams<B> {
 
     /// Get an object to open outgoing streams.
     fn opener(&self) -> Self::OpenStreams;
-}
-
-/// Extends the `Connection` trait for sending datagrams
-///
-/// See: <https://www.rfc-editor.org/rfc/rfc9297>
-pub trait SendDatagramExt<B: Buf> {
-    /// The error type that can occur when sending a datagram
-    type Error: Into<Box<dyn Error>>;
-
-    /// Send a datagram
-    fn send_datagram(&mut self, data: Datagram<B>) -> Result<(), Self::Error>;
-}
-
-/// Extends the `Connection` trait for receiving datagrams
-///
-/// See: <https://www.rfc-editor.org/rfc/rfc9297>
-pub trait RecvDatagramExt {
-    /// The type of `Buf` for *raw* datagrams (without the stream_id decoded)
-    type Buf: Buf;
-    /// The error type that can occur when receiving a datagram
-    type Error: Into<Box<dyn Error>>;
-
-    /// Poll the connection for incoming datagrams.
-    fn poll_accept_datagram(
-        &mut self,
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::Buf>, Self::Error>>;
 }
 
 /// Trait for opening outgoing streams

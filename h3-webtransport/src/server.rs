@@ -12,10 +12,10 @@ use futures_util::{future::poll_fn, ready, Future};
 use h3::{
     connection::ConnectionState,
     error::{Code, ErrorLevel},
-    ext::{Datagram, Protocol},
+    ext::Protocol,
     frame::FrameStream,
     proto::frame::Frame,
-    quic::{self, OpenStreams, RecvDatagramExt, SendDatagramExt, WriteBuf},
+    quic::{self, OpenStreams, WriteBuf},
     server::Connection,
     server::RequestStream,
     Error,
@@ -23,6 +23,11 @@ use h3::{
 use h3::{
     quic::SendStreamUnframed,
     stream::{BidiStreamHeader, BufRecvStream, UniStreamHeader},
+};
+use h3_datagram::{
+    datagram::Datagram,
+    datagram_traits::HandleDatagramsExt,
+    quic_traits::{RecvDatagramExt, SendDatagramExt},
 };
 use http::{Method, Request, Response, StatusCode};
 
@@ -39,6 +44,7 @@ use crate::stream::{BidiStream, RecvStream, SendStream};
 pub struct WebTransportSession<C, B>
 where
     C: quic::Connection<B>,
+    Connection<C, B>: HandleDatagramsExt<C, B>,
     B: Buf,
 {
     // See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-2-3
@@ -51,6 +57,7 @@ where
 
 impl<C, B> WebTransportSession<C, B>
 where
+    Connection<C, B>: HandleDatagramsExt<C, B>,
     C: quic::Connection<B>,
     B: Buf,
 {
@@ -374,6 +381,7 @@ impl<'a, C, B> Future for ReadDatagram<'a, C, B>
 where
     C: quic::Connection<B> + RecvDatagramExt,
     B: Buf,
+    <C as RecvDatagramExt>::Error: h3::quic::Error + 'static,
 {
     type Output = Result<Option<(SessionId, C::Buf)>, Error>;
 
