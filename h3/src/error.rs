@@ -42,7 +42,7 @@ impl PartialEq<u64> for Code {
 #[derive(Clone)]
 pub(crate) struct ErrorImpl {
     pub(crate) kind: Kind,
-    cause: Option<Arc<Cause>>,
+    cause: Option<Arc<dyn std::error::Error + Send + Sync>>,
 }
 
 /// Some errors affect the whole connection, others only one Request or Stream.
@@ -74,7 +74,7 @@ pub enum Kind {
     },
     // Error from QUIC layer
     #[non_exhaustive]
-    Transport(Arc<TransportError>),
+    Transport(Arc<dyn quic::Error>),
     // Connection has been closed with `Code::NO_ERROR`
     Closed,
     // Currently in a graceful shutdown procedure
@@ -205,7 +205,7 @@ impl Code {
     }
 
     pub(crate) fn with_transport<E: Into<Box<dyn quic::Error>>>(self, err: E) -> Error {
-        Error::new(Kind::Transport(Arc::new(err.into())))
+        Error::new(Kind::Transport(Arc::from(err.into())))
     }
 }
 
@@ -254,7 +254,7 @@ impl Error {
     }
 
     pub(crate) fn with_cause<E: Into<Cause>>(mut self, cause: E) -> Self {
-        self.inner.cause = Some(Arc::new(cause.into()));
+        self.inner.cause = Some(Arc::from(cause.into()));
         self
     }
 
@@ -360,7 +360,7 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.inner.cause.as_ref().map(|e| &***e as _)
+        self.inner.cause.as_ref().map(|e| e as _)
     }
 }
 
@@ -462,7 +462,7 @@ where
                 reason: None,
                 level: ErrorLevel::ConnectionError,
             }),
-            None => Error::new(Kind::Transport(Arc::new(quic_error))),
+            None => Error::new(Kind::Transport(Arc::from(quic_error))),
         }
     }
 }
