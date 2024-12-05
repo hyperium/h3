@@ -14,16 +14,16 @@ use http::request;
 use tracing::{info, instrument, trace};
 
 use crate::{
-    connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
-    error::{Code, Error, ErrorLevel},
-    frame::FrameStream,
-    proto::{frame::Frame, headers::Header, push::PushId},
-    qpack,
-    quic::{self, StreamId},
-    stream::{self, BufRecvStream},
+    connection::{self, ConnectionInner, ConnectionState, SharedStateRef}, 
+	error::{Code, Error, ErrorLevel}, 
+	ext::Datagram, 
+	frame::FrameStream, 
+	proto::{frame::Frame, headers::Header, push::PushId}, 
+	qpack, quic::{self, RecvDatagramExt, SendDatagramExt, StreamId}, 
+	stream::{self, BufRecvStream}
 };
 
-use super::stream::RequestStream;
+use super::stream::{ReadDatagram, RequestStream};
 
 /// HTTP/3 request sender
 ///
@@ -454,5 +454,39 @@ where
         }
 
         Poll::Pending
+    }
+}
+
+impl<C, B> Connection<C, B>
+where
+    C: quic::Connection<B> + SendDatagramExt<B>,
+    B: Buf,
+{
+    /// Sends a datagram
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub fn send_datagram(&mut self, stream_id: StreamId, data: B) -> Result<(), Error> {
+        self.inner
+            .conn
+            .send_datagram(Datagram::new(stream_id, data))?;
+
+        #[cfg(feature = "tracing")]
+        tracing::info!("Sent datagram");
+
+        Ok(())
+    }
+}
+
+impl<C, B> Connection<C, B>
+where
+    C: quic::Connection<B> + RecvDatagramExt,
+    B: Buf,
+{
+    /// Reads an incoming datagram
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub fn read_datagram(&mut self) -> ReadDatagram<C, B> {
+        ReadDatagram {
+            conn: self,
+            _marker: PhantomData,
+        }
     }
 }
