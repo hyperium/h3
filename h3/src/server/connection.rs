@@ -4,7 +4,6 @@
 
 use std::{
     collections::HashSet,
-    marker::PhantomData,
     option::Option,
     result::Result,
     sync::Arc,
@@ -24,14 +23,13 @@ use tokio::sync::mpsc;
 use crate::{
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
     error::{Code, Error, ErrorLevel},
-    ext::Datagram,
     frame::{FrameStream, FrameStreamError},
     proto::{
         frame::{Frame, PayloadLen},
         push::PushId,
     },
     qpack,
-    quic::{self, RecvDatagramExt, SendDatagramExt, SendStream as _},
+    quic::{self, SendStream as _},
     stream::BufRecvStream,
 };
 
@@ -40,7 +38,7 @@ use crate::server::request::ResolveRequest;
 #[cfg(feature = "tracing")]
 use tracing::{instrument, trace, warn};
 
-use super::stream::{ReadDatagram, RequestStream};
+use super::stream::RequestStream;
 
 /// Server connection driver
 ///
@@ -425,40 +423,6 @@ where
                     }
                 }
             }
-        }
-    }
-}
-
-impl<C, B> Connection<C, B>
-where
-    C: quic::Connection<B> + SendDatagramExt<B>,
-    B: Buf,
-{
-    /// Sends a datagram
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn send_datagram(&mut self, stream_id: StreamId, data: B) -> Result<(), Error> {
-        self.inner
-            .conn
-            .send_datagram(Datagram::new(stream_id, data))?;
-
-        #[cfg(feature = "tracing")]
-        tracing::info!("Sent datagram");
-
-        Ok(())
-    }
-}
-
-impl<C, B> Connection<C, B>
-where
-    C: quic::Connection<B> + RecvDatagramExt,
-    B: Buf,
-{
-    /// Reads an incoming datagram
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn read_datagram(&mut self) -> ReadDatagram<C, B> {
-        ReadDatagram {
-            conn: self,
-            _marker: PhantomData,
         }
     }
 }

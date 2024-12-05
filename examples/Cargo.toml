@@ -11,7 +11,7 @@ anyhow = "1.0"
 bytes = "1"
 futures = "0.3"
 h3 = { path = "../h3", features = ["tracing"] }
-h3-quinn = { path = "../h3-quinn", features = ["tracing"] }
+h3-quinn = { path = "../h3-quinn", features = ["tracing", "datagram"] }
 h3-webtransport = { path = "../h3-webtransport" }
 http = "1"
 quinn = { version = "0.11", default-features = false, features = [
@@ -39,6 +39,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
 octets = "0.3.0"
 
 tracing-tree = { version = "0.3" }
+h3-datagram = { path = "../h3-datagram" }
 
 [features]
 tree = []

@@ -4,14 +4,12 @@ use bytes::Buf;
 
 use crate::{
     connection::{ConnectionState, SharedStateRef},
-    ext::Datagram,
-    quic::{self, RecvDatagramExt},
+    quic::{self},
     Error,
 };
-use pin_project_lite::pin_project;
 
-use super::connection::{Connection, RequestEnd};
-use std::{marker::PhantomData, sync::Arc};
+use super::connection::RequestEnd;
+use std::sync::Arc;
 
 use std::{
     option::Option,
@@ -20,7 +18,6 @@ use std::{
 };
 
 use bytes::BytesMut;
-use futures_util::{future::Future, ready};
 use http::{response, HeaderMap, Response};
 
 use quic::StreamId;
@@ -213,36 +210,6 @@ impl Drop for RequestEnd {
                 "failed to notify connection of request end: {} {}",
                 self.stream_id, _error
             );
-        }
-    }
-}
-
-pin_project! {
-    /// Future for [`Connection::read_datagram`]
-    pub struct ReadDatagram<'a, C, B>
-    where
-            C: quic::Connection<B>,
-            B: Buf,
-        {
-            pub(super) conn: &'a mut Connection<C, B>,
-            pub(super) _marker: PhantomData<B>,
-        }
-}
-
-impl<'a, C, B> Future for ReadDatagram<'a, C, B>
-where
-    C: quic::Connection<B> + RecvDatagramExt,
-    B: Buf,
-{
-    type Output = Result<Option<Datagram<C::Buf>>, Error>;
-
-    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        #[cfg(feature = "tracing")]
-        tracing::trace!("poll: read_datagram");
-
-        match ready!(self.conn.inner.conn.poll_accept_datagram(cx))? {
-            Some(v) => Poll::Ready(Ok(Some(Datagram::decode(v)?))),
-            None => Poll::Ready(Ok(None)),
         }
     }
 }
