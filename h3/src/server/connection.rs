@@ -4,18 +4,15 @@
 
 use std::{
     collections::HashSet,
+    future::poll_fn,
     marker::PhantomData,
     option::Option,
     result::Result,
     sync::Arc,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
 };
 
 use bytes::Buf;
-use futures_util::{
-    future::{self},
-    ready,
-};
 use http::Request;
 use quic::RecvStream;
 use quic::StreamId;
@@ -117,7 +114,7 @@ where
         &mut self,
     ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
         // Accept the incoming stream
-        let mut stream = match future::poll_fn(|cx| self.poll_accept_request(cx)).await {
+        let mut stream = match poll_fn(|cx| self.poll_accept_request_stream(cx)).await {
             Ok(Some(s)) => FrameStream::new(BufRecvStream::new(s)),
             Ok(None) => {
                 // We always send a last GoAway frame to the client, so it knows which was the last
@@ -132,18 +129,13 @@ where
                         code,
                         reason,
                         level: ErrorLevel::ConnectionError,
-                    } => {
-                        return Err(self.inner.close(
-                            code,
-                            reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
-                        ))
-                    }
+                    } => return Err(self.inner.close(code, reason.unwrap_or_default())),
                     _ => return Err(err),
                 };
             }
         };
 
-        let frame = future::poll_fn(|cx| stream.poll_next(cx)).await;
+        let frame = poll_fn(|cx| stream.poll_next(cx)).await;
         let req = self.accept_with_frame(stream, frame)?;
         if let Some(req) = req {
             Ok(Some(req.resolve().await?))
@@ -305,33 +297,31 @@ where
     /// This could be either a *Request* or a *WebTransportBiStream*, the first frame's type
     /// decides.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn poll_accept_request(
+    pub fn poll_accept_request_stream(
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<C::BidiStream>, Error>> {
         let _ = self.poll_control(cx)?;
         let _ = self.poll_requests_completion(cx);
         loop {
-            match self.inner.poll_accept_request(cx) {
-                Poll::Ready(Err(x)) => break Poll::Ready(Err(x)),
-                Poll::Ready(Ok(None)) => {
-                    if self.poll_requests_completion(cx).is_ready() {
-                        break Poll::Ready(Ok(None));
+            let conn = self.inner.poll_accept_bi(cx)?;
+            return match conn {
+                Poll::Ready(None) | Poll::Pending => {
+                    let done = if conn.is_pending() {
+                        self.recv_closing.is_some() && self.poll_requests_completion(cx).is_ready()
+                    } else {
+                        self.poll_requests_completion(cx).is_ready()
+                    };
+
+                    if done {
+                        Poll::Ready(Ok(None))
                     } else {
                         // Wait for all the requests to be finished, request_end_recv will wake
                         // us on each request completion.
-                        break Poll::Pending;
+                        Poll::Pending
                     }
                 }
-                Poll::Pending => {
-                    if self.recv_closing.is_some() && self.poll_requests_completion(cx).is_ready() {
-                        // The connection is now idle.
-                        break Poll::Ready(Ok(None));
-                    } else {
-                        return Poll::Pending;
-                    }
-                }
-                Poll::Ready(Ok(Some(mut s))) => {
+                Poll::Ready(Some(mut s)) => {
                     // When the connection is in a graceful shutdown procedure, reject all
                     // incoming requests not belonging to the grace interval. It's possible that
                     // some acceptable request streams arrive after rejected requests.
@@ -347,7 +337,7 @@ where
                     }
                     self.last_accepted_stream = Some(s.send_id());
                     self.ongoing_streams.insert(s.send_id());
-                    break Poll::Ready(Ok(Some(s)));
+                    Poll::Ready(Ok(Some(s)))
                 }
             };
         }

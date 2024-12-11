@@ -250,19 +250,6 @@ where
             future::poll_fn(|cx| conn.poll_open_send(cx)).await,
         );
 
-        let control_send =
-            control_send.map_err(|e| Code::H3_STREAM_CREATION_ERROR.with_transport(e))?;
-
-        let qpack_encoder = match qpack_encoder {
-            Ok(stream) => Some(stream),
-            Err(_) => None,
-        };
-
-        let qpack_decoder = match qpack_decoder {
-            Ok(stream) => Some(stream),
-            Err(_) => None,
-        };
-
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
         //= type=implication
         //# The
@@ -271,7 +258,7 @@ where
         let mut conn_inner = Self {
             shared,
             conn,
-            control_send,
+            control_send: control_send.map_err(Error::transport_err)?,
             control_recv: None,
             decoder_recv: None,
             encoder_recv: None,
@@ -280,8 +267,8 @@ where
             send_grease_frame: config.send_grease,
             config,
             accepted_streams: Default::default(),
-            decoder_send: qpack_decoder,
-            encoder_send: qpack_encoder,
+            decoder_send: qpack_decoder.ok(),
+            encoder_send: qpack_encoder.ok(),
             // send grease stream if configured
             send_grease_stream_flag: config.send_grease,
             // start at first step
@@ -323,7 +310,7 @@ where
 
     #[allow(missing_docs)]
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn poll_accept_request(
+    pub fn poll_accept_bi(
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<C::BidiStream>, Error>> {

@@ -203,10 +203,6 @@ impl Code {
     pub(crate) fn with_cause<E: Into<Cause>>(self, cause: E) -> Error {
         Error::from(self).with_cause(cause)
     }
-
-    pub(crate) fn with_transport<E: Into<Box<dyn quic::Error>>>(self, err: E) -> Error {
-        Error::new(Kind::Transport(Arc::from(err.into())))
-    }
 }
 
 impl From<Code> for u64 {
@@ -222,6 +218,10 @@ impl Error {
         Error {
             inner: Box::new(ErrorImpl { kind, cause: None }),
         }
+    }
+
+    pub(crate) fn transport_err<E: Into<Box<dyn quic::Error>>>(err: E) -> Error {
+        Error::new(Kind::Transport(Arc::from(err.into())))
     }
 
     /// Returns the error code from the error if available
