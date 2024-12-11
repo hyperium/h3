@@ -446,7 +446,7 @@ where
         //# receipt of a server-initiated bidirectional stream as a connection
         //# error of type H3_STREAM_CREATION_ERROR unless such an extension has
         //# been negotiated.
-        if self.inner.poll_accept_request(cx).is_ready() {
+        if self.inner.poll_accept_bi(cx).is_ready() {
             return Poll::Ready(Err(self.inner.close(
                 Code::H3_STREAM_CREATION_ERROR,
                 "client received a bidirectional stream",
