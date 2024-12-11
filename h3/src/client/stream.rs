@@ -1,6 +1,7 @@
 use bytes::Buf;
 use futures_util::future;
 use http::{HeaderMap, Response};
+use quic::StreamId;
 #[cfg(feature = "tracing")]
 use tracing::instrument;
 
@@ -167,6 +168,11 @@ where
         // TODO take by value to prevent any further call as this request is cancelled
         // rename `cancel()` ?
         self.inner.stream.stop_sending(error_code)
+    }
+
+    /// Returns the underlying stream id
+    pub fn id(&self) -> StreamId {
+        self.inner.stream.id()
     }
 }
 
