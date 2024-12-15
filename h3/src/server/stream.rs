@@ -84,6 +84,14 @@ where
         self.inner.recv_trailers().await
     }
 
+    /// Poll for trailers sent from client
+    pub fn poll_recv_trailers(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<HeaderMap>, Error>> {
+        self.inner.poll_recv_trailers(cx)
+    }
+
     /// Tell the peer to stop sending into the underlying QUIC stream
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn stop_sending(&mut self, error_code: crate::error::Code) {
