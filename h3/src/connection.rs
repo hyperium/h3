@@ -792,14 +792,16 @@ where
         future::poll_fn(|cx| self.poll_recv_data(cx)).await
     }
 
-    /// Receive trailers
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
+    // matching h2 impl https://github.com/hyperium/h2/blob/3bce93e9b0dad742ffbf62d25f9607ef7651a70c/src/share.rs#L427
+
+    pub fn poll_recv_trailers(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<HeaderMap>, Error>> {
         let mut trailers = if let Some(encoded) = self.trailers.take() {
             encoded
         } else {
-            let frame = future::poll_fn(|cx| self.stream.poll_next(cx))
-                .await
+            let frame = futures_util::ready!(self.stream.poll_next(cx))
                 .map_err(|e| self.maybe_conn_err(e))?;
             match frame {
                 Some(Frame::Headers(encoded)) => encoded,
@@ -826,20 +828,18 @@ where
                 //# The MAX_PUSH_ID frame is always sent on the control stream.  Receipt
                 //# of a MAX_PUSH_ID frame on any other stream MUST be treated as a
                 //# connection error of type H3_FRAME_UNEXPECTED.
-                Some(_) => return Err(Code::H3_FRAME_UNEXPECTED.into()),
-                None => return Ok(None),
+                Some(_) => return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED.into())),
+                None => return Poll::Ready(Ok(None)),
             }
         };
-
         if !self.stream.is_eos() {
             // Get the trailing frame
-            let trailing_frame = future::poll_fn(|cx| self.stream.poll_next(cx))
-                .await
+            let trailing_frame = futures_util::ready!(self.stream.poll_next(cx))
                 .map_err(|e| self.maybe_conn_err(e))?;
 
             if trailing_frame.is_some() {
                 // if it's not unknown or reserved, fail.
-                return Err(Code::H3_FRAME_UNEXPECTED.into());
+                return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED.into()));
             }
         }
 
@@ -849,16 +849,22 @@ where
                 //# An HTTP/3 implementation MAY impose a limit on the maximum size of
                 //# the message header it will accept on an individual HTTP message.
                 Err(qpack::DecoderError::HeaderTooLong(cancel_size)) => {
-                    return Err(Error::header_too_big(
+                    return Poll::Ready(Err(Error::header_too_big(
                         cancel_size,
                         self.max_field_section_size,
-                    ))
+                    )))
                 }
                 Ok(decoded) => decoded,
-                Err(e) => return Err(e.into()),
+                Err(e) => return Poll::Ready(Err(e.into())),
             };
 
-        Ok(Some(Header::try_from(fields)?.into_fields()))
+        Poll::Ready(Ok(Some(Header::try_from(fields)?.into_fields())))
+    }
+
+    /// Receive trailers
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
+        future::poll_fn(|cx| self.poll_recv_trailers(cx)).await
     }
 
     #[allow(missing_docs)]
