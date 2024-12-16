@@ -12,7 +12,10 @@ use crate::{
     qpack,
     quic::{self},
 };
-use std::convert::TryFrom;
+use std::{
+    convert::TryFrom,
+    task::{Context, Poll},
+};
 
 /// Manage request bodies transfer, response and trailers.
 ///
@@ -150,11 +153,33 @@ where
         self.inner.recv_data().await
     }
 
+    /// Receive request body
+    pub fn poll_recv_data(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<impl Buf>, Error>> {
+        self.inner.poll_recv_data(cx)
+    }
+
     /// Receive an optional set of trailers for the response.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
         let res = self.inner.recv_trailers().await;
         if let Err(ref e) = res {
+            if e.is_header_too_big() {
+                self.inner.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
+            }
+        }
+        res
+    }
+
+    /// Receive an optional set of trailers for the response.
+    pub fn poll_recv_trailers(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<HeaderMap>, Error>> {
+        let res = self.inner.poll_recv_trailers(cx);
+        if let Poll::Ready(Err(e)) = &res {
             if e.is_header_too_big() {
                 self.inner.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
             }
