@@ -792,8 +792,8 @@ where
         future::poll_fn(|cx| self.poll_recv_data(cx)).await
     }
 
-    // matching h2 impl https://github.com/hyperium/h2/blob/3bce93e9b0dad742ffbf62d25f9607ef7651a70c/src/share.rs#L427
-
+    /// Poll receive trailers.
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_recv_trailers(
         &mut self,
         cx: &mut Context<'_>,

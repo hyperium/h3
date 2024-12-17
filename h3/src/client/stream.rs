@@ -173,7 +173,7 @@ where
         res
     }
 
-    /// Receive an optional set of trailers for the response.
+    /// Poll receive an optional set of trailers for the response.
     pub fn poll_recv_trailers(
         &mut self,
         cx: &mut Context<'_>,

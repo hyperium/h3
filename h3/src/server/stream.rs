@@ -84,7 +84,8 @@ where
         self.inner.recv_trailers().await
     }
 
-    /// Poll for trailers sent from client
+    /// Poll for an optional set of trailers for the request
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_recv_trailers(
         &mut self,
         cx: &mut Context<'_>,
