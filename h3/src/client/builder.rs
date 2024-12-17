@@ -3,11 +3,9 @@
 use std::{
     marker::PhantomData,
     sync::{atomic::AtomicUsize, Arc},
-    task::Poll,
 };
 
 use bytes::{Buf, Bytes};
-use futures_util::future;
 
 use crate::{
     config::Config,
@@ -109,8 +107,6 @@ impl Builder {
         let open = quic.opener();
         let conn_state = SharedStateRef::default();
 
-        let conn_waker = Some(future::poll_fn(|cx| Poll::Ready(cx.waker().clone())).await);
-
         Ok((
             Connection {
                 inner: ConnectionInner::new(quic, conn_state.clone(), self.config).await?,
@@ -120,7 +116,6 @@ impl Builder {
             SendRequest {
                 open,
                 conn_state,
-                conn_waker,
                 max_field_section_size: self.config.settings.max_field_section_size,
                 sender_count: Arc::new(AtomicUsize::new(1)),
                 send_grease_frame: self.config.send_grease,
