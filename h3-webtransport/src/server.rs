@@ -171,7 +171,7 @@ where
         // Accept the incoming stream
         let stream = poll_fn(|cx| {
             let mut conn = self.server_conn.lock().unwrap();
-            conn.poll_accept_request(cx)
+            conn.poll_accept_request_stream(cx)
         })
         .await;
 

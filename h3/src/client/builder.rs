@@ -69,6 +69,8 @@ impl Builder {
         }
     }
 
+    // Not public API, just used in unit tests
+    #[doc(hidden)]
     #[cfg(test)]
     pub fn send_settings(&mut self, value: bool) -> &mut Self {
         self.config.send_settings = value;
