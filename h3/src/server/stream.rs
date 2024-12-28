@@ -20,7 +20,7 @@ use std::{
 };
 
 use bytes::BytesMut;
-use futures_util::{future::Future, ready};
+use futures_util::{future, future::Future, ready};
 use http::{response, HeaderMap, Response};
 
 use quic::StreamId;
@@ -81,7 +81,7 @@ where
     /// Receive an optional set of trailers for the request
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
-        self.inner.recv_trailers().await
+        future::poll_fn(|cx| self.poll_recv_trailers(cx)).await
     }
 
     /// Poll for an optional set of trailers for the request

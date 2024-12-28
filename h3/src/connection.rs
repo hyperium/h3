@@ -834,12 +834,22 @@ where
         };
         if !self.stream.is_eos() {
             // Get the trailing frame
-            let trailing_frame = futures_util::ready!(self.stream.poll_next(cx))
-                .map_err(|e| self.maybe_conn_err(e))?;
-
-            if trailing_frame.is_some() {
-                // if it's not unknown or reserved, fail.
-                return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED.into()));
+            match self
+                .stream
+                .poll_next(cx)
+                .map_err(|e| self.maybe_conn_err(e))?
+            {
+                Poll::Ready(trailing_frame) => {
+                    if trailing_frame.is_some() {
+                        // if it's not unknown or reserved, fail.
+                        return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED.into()));
+                    }
+                }
+                Poll::Pending => {
+                    // save the trailers and try again.
+                    self.trailers = Some(trailers);
+                    return Poll::Pending;
+                }
             }
         }
 
@@ -859,12 +869,6 @@ where
             };
 
         Poll::Ready(Ok(Some(Header::try_from(fields)?.into_fields())))
-    }
-
-    /// Receive trailers
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
-        future::poll_fn(|cx| self.poll_recv_trailers(cx)).await
     }
 
     #[allow(missing_docs)]

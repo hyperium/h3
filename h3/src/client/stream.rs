@@ -164,16 +164,11 @@ where
     /// Receive an optional set of trailers for the response.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
-        let res = self.inner.recv_trailers().await;
-        if let Err(ref e) = res {
-            if e.is_header_too_big() {
-                self.inner.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
-            }
-        }
-        res
+        future::poll_fn(|cx| self.poll_recv_trailers(cx)).await
     }
 
     /// Poll receive an optional set of trailers for the response.
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_recv_trailers(
         &mut self,
         cx: &mut Context<'_>,
