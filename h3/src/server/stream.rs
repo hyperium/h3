@@ -18,6 +18,7 @@ use std::{
 };
 
 use bytes::BytesMut;
+use futures_util::future;
 use http::{response, HeaderMap, Response};
 
 use quic::StreamId;
@@ -78,7 +79,16 @@ where
     /// Receive an optional set of trailers for the request
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
-        self.inner.recv_trailers().await
+        future::poll_fn(|cx| self.poll_recv_trailers(cx)).await
+    }
+
+    /// Poll for an optional set of trailers for the request
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub fn poll_recv_trailers(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<HeaderMap>, Error>> {
+        self.inner.poll_recv_trailers(cx)
     }
 
     /// Tell the peer to stop sending into the underlying QUIC stream
