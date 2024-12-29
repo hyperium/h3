@@ -1431,28 +1431,32 @@ where
         let connection = pair.client_inner().await;
         let (mut req_send, mut req_recv) = connection.open_bi().await.unwrap();
 
-        let mut buf = BytesMut::new();
-        request(&mut buf);
-        req_send.write_all(&buf[..]).await.unwrap();
-        req_send.finish().unwrap();
+        let client = async {
+            let mut buf = BytesMut::new();
+            request(&mut buf);
+            req_send.write_all(&buf[..]).await.unwrap();
+            req_send.finish().unwrap();
 
-        let res = req_recv
-            .read(&mut buf)
-            .await
-            .map_err(Into::<h3_quinn::ReadError>::into)
-            .map_err(Into::<Error>::into)
-            .map(|_| ());
-        check(res);
+            req_recv
+                .read(&mut buf)
+                .await
+                .map_err(Into::<h3_quinn::ReadError>::into)
+                .map_err(Into::<Error>::into)?;
 
-        let (mut driver, _send) = client::new(h3_quinn::Connection::new(connection))
-            .await
-            .unwrap();
+            Result::<(), Error>::Ok(())
+        };
 
-        let res = future::poll_fn(|cx| driver.poll_close(cx))
-            .await
-            .map_err(Into::<Error>::into)
-            .map(|_| ());
-        check(res);
+        let driver = async {
+            let (mut driver, _send) = client::new(h3_quinn::Connection::new(connection))
+                .await
+                .unwrap();
+
+            future::poll_fn(|cx| driver.poll_close(cx)).await?;
+
+            Result::<(), Error>::Ok(())
+        };
+
+        tokio::join!(client, driver)
     };
 
     let server_fut = async {
@@ -1460,22 +1464,20 @@ where
         let mut incoming = server::Connection::new(conn).await.unwrap();
         let (_, mut stream) = incoming
             .accept()
-            .await.map(| x | ());
+            .await?
             .expect("request stream end unexpected");
 
-        loop {
-            let data = stream.recv_data().await;
-            check(data);
-            match stream.recv_data().await {
-                Ok(Some(_)) => continue,
-                Ok(None) => break,
-            }
-        }
-        let trailers = stream.recv_trailers().await;
+        while stream.recv_data().await?.is_some() {}
 
+        stream.recv_trailers().await?;
+
+        Result::<(), Error>::Ok(())
     };
 
-    tokio::join!(server_fut, client_fut);
-    /*tokio::select! { res = server_fut => check(res)
-    , _ = client_fut => panic!("client resolved first") };*/
+    let (r1, (r2, r3)) = tokio::join!(server_fut, client_fut);
+
+    check(r1);
+    check(r2);
+    check(r3);
+
 }
