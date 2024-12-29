@@ -1460,13 +1460,22 @@ where
         let mut incoming = server::Connection::new(conn).await.unwrap();
         let (_, mut stream) = incoming
             .accept()
-            .await?
+            .await.map(| x | ());
             .expect("request stream end unexpected");
-        while stream.recv_data().await?.is_some() {}
-        stream.recv_trailers().await?;
-        Result::<(), Error>::Ok(())
+
+        loop {
+            let data = stream.recv_data().await;
+            check(data);
+            match stream.recv_data().await {
+                Ok(Some(_)) => continue,
+                Ok(None) => break,
+            }
+        }
+        let trailers = stream.recv_trailers().await;
+
     };
 
-    tokio::select! { res = server_fut => check(res)
-    , _ = client_fut => panic!("client resolved first") };
+    tokio::join!(server_fut, client_fut);
+    /*tokio::select! { res = server_fut => check(res)
+    , _ = client_fut => panic!("client resolved first") };*/
 }
