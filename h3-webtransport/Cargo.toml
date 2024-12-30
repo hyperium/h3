@@ -12,6 +12,7 @@ http = "1"
 pin-project-lite = { version = "0.2", default-features = false }
 tracing = "0.1.37"
 tokio = { version = "1.28", default-features = false }
+h3-datagram = { path = "../h3-datagram" }
 
 [dependencies.h3]
 version = "0.0.6"

@@ -58,5 +58,4 @@ mod stream;
 pub use builder::builder;
 pub use builder::Builder;
 pub use connection::Connection;
-pub use stream::ReadDatagram;
 pub use stream::RequestStream;

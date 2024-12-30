@@ -1,0 +1,14 @@
+[package]
+name = "h3-datagram"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+#h3 = { path = "../h3" }
+bytes = "1.4"
+pin-project-lite = { version = "0.2", default-features = false }
+
+[dependencies.h3]
+version = "0.0.6"
+path = "../h3"
+features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes"]
