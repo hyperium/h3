@@ -786,12 +786,6 @@ where
             .map_err(|e| self.maybe_conn_err(e))
     }
 
-    /// Receive some of the request body.
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
-        future::poll_fn(|cx| self.poll_recv_data(cx)).await
-    }
-
     /// Poll receive trailers.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_recv_trailers(
