@@ -1479,5 +1479,4 @@ where
     check(r1);
     check(r2);
     check(r3);
-
 }
