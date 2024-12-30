@@ -134,7 +134,8 @@ impl StreamId {
         }
     }
 
-    pub(crate) fn into_inner(self) -> u64 {
+    #[allow(missing_docs)]
+    pub fn into_inner(self) -> u64 {
         self.0
     }
 }
