@@ -156,7 +156,7 @@ impl From<quinn::SendDatagramError> for SendDatagramError {
 
 impl<B> quic::Connection<B> for Connection
 where
-    B: Buf,
+    B: Buf + Send + 'static,
 {
     type RecvStream = RecvStream;
     type OpenStreams = OpenStreams;
@@ -299,7 +299,7 @@ pub struct OpenStreams {
 
 impl<B> quic::OpenStreams<B> for OpenStreams
 where
-    B: Buf,
+    B: Buf + Send + 'static,
 {
     type SendStream = SendStream<B>;
     type BidiStream = BidiStream<B>;
@@ -372,7 +372,7 @@ where
 
 impl<B> quic::BidiStream<B> for BidiStream<B>
 where
-    B: Buf,
+    B: Buf + Send + 'static,
 {
     type SendStream = SendStream<B>;
     type RecvStream = RecvStream;
@@ -404,7 +404,7 @@ impl<B: Buf> quic::RecvStream for BidiStream<B> {
 
 impl<B> quic::SendStream<B> for BidiStream<B>
 where
-    B: Buf,
+    B: Buf + Send + 'static,
 {
     type Error = SendStreamError;
 
@@ -430,7 +430,7 @@ where
 }
 impl<B> quic::SendStreamUnframed<B> for BidiStream<B>
 where
-    B: Buf,
+    B: Buf + Send + 'static,
 {
     fn poll_send<D: Buf>(
         &mut self,
@@ -570,11 +570,17 @@ impl Error for ReadError {
 pub struct SendStream<B: Buf> {
     stream: Option<quinn::SendStream>,
     writing: Option<WriteBuf<B>>,
-    write_fut: WriteFuture,
+    write_fut: WriteFuture<B>,
 }
 
-type WriteFuture =
-    ReusableBoxFuture<'static, (quinn::SendStream, Result<usize, quinn::WriteError>)>;
+type WriteFuture<B> = ReusableBoxFuture<
+    'static,
+    (
+        quinn::SendStream,
+        Result<usize, quinn::WriteError>,
+        WriteBuf<B>,
+    ),
+>;
 
 impl<B> SendStream<B>
 where
@@ -591,30 +597,36 @@ where
 
 impl<B> quic::SendStream<B> for SendStream<B>
 where
-    B: Buf,
+    B: Buf + Send + 'static,
 {
     type Error = SendStreamError;
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        if let Some(ref mut data) = self.writing {
-            while data.has_remaining() {
+        loop {
+            if let Some(data) = self.writing.take() {
                 if let Some(mut stream) = self.stream.take() {
-                    let chunk = data.chunk().to_owned(); // FIXME - avoid copy
                     self.write_fut.set(async move {
-                        let ret = stream.write(&chunk).await;
-                        (stream, ret)
+                        let chunk = data.chunk();
+                        let ret = stream.write(chunk).await;
+                        (stream, ret, data)
                     });
                 }
-
-                let (stream, res) = ready!(self.write_fut.poll(cx));
-                self.stream = Some(stream);
-                match res {
-                    Ok(cnt) => data.advance(cnt),
-                    Err(err) => {
-                        return Poll::Ready(Err(SendStreamError::Write(err)));
-                    }
+            }
+            let (stream, res, mut data2) = ready!(self.write_fut.poll(cx));
+            self.stream = Some(stream);
+            match res {
+                Ok(cnt) => data2.advance(cnt),
+                Err(err) => {
+                    self.writing = Some(data2);
+                    return Poll::Ready(Err(SendStreamError::Write(err)));
                 }
+            };
+            if !data2.has_remaining() {
+                break;
+            } else {
+                self.writing = Some(data2);
+                continue;
             }
         }
         self.writing = None;
@@ -637,7 +649,8 @@ where
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), Self::Error> {
-        if self.writing.is_some() {
+        // writing is moved into the write_fut, so stream should be present
+        if self.writing.is_some() || self.stream.is_none() {
             return Err(Self::Error::NotReady);
         }
         self.writing = Some(data.into());
@@ -658,7 +671,7 @@ where
 
 impl<B> quic::SendStreamUnframed<B> for SendStream<B>
 where
-    B: Buf,
+    B: Buf + Send + 'static,
 {
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn poll_send<D: Buf>(
