@@ -1316,8 +1316,10 @@ async fn request_invalid_data_frame_length_too_large() {
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-7.1
         //= type=test
-        //# In particular, redundant length
-        //# encodings MUST be verified to be self-consistent; see Section 10.8.
+        //# A frame payload that contains additional bytes
+        //# after the identified fields or a frame payload that terminates before
+        //# the end of the identified fields MUST be treated as a connection
+        //# error of type H3_FRAME_ERROR.
         VarInt::from(5u32).encode(&mut buf);
         buf.put_slice(b"fada");
 
@@ -1339,8 +1341,10 @@ async fn request_invalid_data_frame_length_too_short() {
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-7.1
         //= type=test
-        //# In particular, redundant length
-        //# encodings MUST be verified to be self-consistent; see Section 10.8.
+        //# A frame payload that contains additional bytes
+        //# after the identified fields or a frame payload that terminates before
+        //# the end of the identified fields MUST be treated as a connection
+        //# error of type H3_FRAME_ERROR.
         VarInt::from(3u32).encode(&mut buf);
         buf.put_slice(b"fada");
     })
