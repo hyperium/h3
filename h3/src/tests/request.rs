@@ -1,14 +1,9 @@
-use std::{
-    task::{Context, Poll},
-    time::Duration,
-};
+use std::time::Duration;
 
 use assert_matches::assert_matches;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use futures::FutureExt;
 use futures_util::future;
 use http::{request, HeaderMap, Request, Response, StatusCode};
-use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::{
     client,
@@ -1464,36 +1459,44 @@ where
         tokio::join!(client, driver)
     };
 
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+
     let server_fut = async {
         let conn = server.next().await;
         let mut incoming = server::Connection::new(conn).await.unwrap();
         let (_, mut stream) = incoming
             .accept()
-            .await
-            .expect("msg")
+            .await?
             .expect("request stream end unexpected");
 
-        let server_driver = async {
-            // it is necessary to accept further streams from the connection in order to close it when an error is encontered
-            incoming.accept().await?;
-            Result::<(), Error>::Ok(())
-        };
+        let _ = sender.send(incoming);
 
-        let server_stream = async {
-            while stream.recv_data().await?.is_some() {}
-            stream.recv_trailers().await?;
-            Result::<(), Error>::Ok(())
-        };
-
-        tokio::join!(server_driver, server_stream)
+        while stream.recv_data().await?.is_some() {}
+        stream.recv_trailers().await?;
+        Result::<(), Error>::Ok(())
     };
 
-    let (
-        (server_result_driver, server_result_stream),
-        (client_result_stream, client_result_driver),
-    ) = tokio::join!(server_fut, client_fut);
+    let server_driver = async move {
+        // it is necessary to accept further streams from the connection in order to close it when an error is encountered
 
-    check(server_result_driver);
+        let mut incoming = match receiver.await {
+            Ok(incoming) => incoming,
+            Err(_) => return None,
+        };
+
+        match incoming.accept().await {
+            Ok(_) => (),
+            Err(err) => return Some(Err(err.into())),
+        };
+        Some(Result::<(), Error>::Ok(()))
+    };
+
+    let (server_result_stream, (client_result_stream, client_result_driver), server_result_driver) =
+        tokio::join!(server_fut, client_fut, server_driver);
+
+    if let Some(server_result_driver) = server_result_driver {
+        check(server_result_driver);
+    };
     check(server_result_stream);
     check(client_result_stream);
     check(client_result_driver);
