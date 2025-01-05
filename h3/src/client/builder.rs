@@ -111,21 +111,26 @@ impl Builder {
 
         let conn_waker = Some(future::poll_fn(|cx| Poll::Ready(cx.waker().clone())).await);
 
+        let inner = ConnectionInner::new(quic, conn_state.clone(), self.config).await?;
+
+        let send_request = SendRequest {
+            open,
+            conn_state,
+            conn_waker,
+            max_field_section_size: self.config.settings.max_field_section_size,
+            sender_count: Arc::new(AtomicUsize::new(1)),
+            send_grease_frame: self.config.send_grease,
+            _buf: PhantomData,
+            error_sender: inner.error_sender.clone(),
+        };
+
         Ok((
             Connection {
-                inner: ConnectionInner::new(quic, conn_state.clone(), self.config).await?,
+                inner,
                 sent_closing: None,
                 recv_closing: None,
             },
-            SendRequest {
-                open,
-                conn_state,
-                conn_waker,
-                max_field_section_size: self.config.settings.max_field_section_size,
-                sender_count: Arc::new(AtomicUsize::new(1)),
-                send_grease_frame: self.config.send_grease,
-                _buf: PhantomData,
-            },
+            send_request,
         ))
     }
 }

@@ -1,9 +1,14 @@
-use std::time::Duration;
+use std::{
+    task::{Context, Poll},
+    time::Duration,
+};
 
 use assert_matches::assert_matches;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use futures::FutureExt;
 use futures_util::future;
 use http::{request, HeaderMap, Request, Response, StatusCode};
+use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::{
     client,
@@ -1429,6 +1434,11 @@ where
 
     let client_fut = async {
         let connection = pair.client_inner().await;
+
+        let (mut driver, _send) = client::new(h3_quinn::Connection::new(connection.clone()))
+            .await
+            .unwrap();
+
         let (mut req_send, mut req_recv) = connection.open_bi().await.unwrap();
 
         let client = async {
@@ -1447,12 +1457,7 @@ where
         };
 
         let driver = async {
-            let (mut driver, _send) = client::new(h3_quinn::Connection::new(connection))
-                .await
-                .unwrap();
-
             future::poll_fn(|cx| driver.poll_close(cx)).await?;
-
             Result::<(), Error>::Ok(())
         };
 
@@ -1464,19 +1469,32 @@ where
         let mut incoming = server::Connection::new(conn).await.unwrap();
         let (_, mut stream) = incoming
             .accept()
-            .await?
+            .await
+            .expect("msg")
             .expect("request stream end unexpected");
 
-        while stream.recv_data().await?.is_some() {}
+        let server_driver = async {
+            // it is necessary to accept further streams from the connection in order to close it when an error is encontered
+            incoming.accept().await?;
+            Result::<(), Error>::Ok(())
+        };
 
-        stream.recv_trailers().await?;
+        let server_stream = async {
+            while stream.recv_data().await?.is_some() {}
+            stream.recv_trailers().await?;
+            Result::<(), Error>::Ok(())
+        };
 
-        Result::<(), Error>::Ok(())
+        tokio::join!(server_driver, server_stream)
     };
 
-    let (r1, (r2, r3)) = tokio::join!(server_fut, client_fut);
+    let (
+        (server_result_driver, server_result_stream),
+        (client_result_stream, client_result_driver),
+    ) = tokio::join!(server_fut, client_fut);
 
-    check(r1);
-    check(r2);
-    check(r3);
+    check(server_result_driver);
+    check(server_result_stream);
+    check(client_result_stream);
+    check(client_result_driver);
 }

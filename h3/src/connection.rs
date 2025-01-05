@@ -10,6 +10,7 @@ use futures_util::{future, ready};
 use http::HeaderMap;
 use stream::WriteBuf;
 
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 #[cfg(feature = "tracing")]
 use tracing::{instrument, warn};
 
@@ -144,6 +145,8 @@ where
     // step of the grease sending poll fn
     grease_step: GreaseStatus<C::SendStream, B>,
     pub config: Config,
+    error_getter: UnboundedReceiver<(Code, &'static str)>,
+    pub(crate) error_sender: UnboundedSender<(Code, &'static str)>,
 }
 
 enum GreaseStatus<S, B>
@@ -250,6 +253,8 @@ where
             future::poll_fn(|cx| conn.poll_open_send(cx)).await,
         );
 
+        let (sender, receiver) = unbounded_channel();
+
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
         //= type=implication
         //# The
@@ -273,6 +278,8 @@ where
             send_grease_stream_flag: config.send_grease,
             // start at first step
             grease_step: GreaseStatus::NotStarted(PhantomData),
+            error_getter: receiver,
+            error_sender: sender,
         };
         conn_inner.send_control_stream_headers().await?;
 
@@ -418,12 +425,31 @@ where
         Ok(())
     }
 
+    /// function which checks if there is something in the error channel
+    /// and closes the connection if there is
+    /// it returns the error if there is one
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    fn poll_check_stream_errors(&mut self, cx: &mut Context<'_>) -> Result<(), Error> {
+        // check if there is an error in the error channel
+        // wake up the connection if there is an error
+
+        let x = self.error_getter.poll_recv(cx);
+        match x {
+            Poll::Ready(Some((code, cause))) => Err(self.close(code, cause)),
+            Poll::Ready(None) => Ok(()),
+            Poll::Pending => Ok(()),
+        }
+    }
+
     /// Waits for the control stream to be received and reads subsequent frames.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<Frame<PayloadLen>, Error>> {
         if let Some(ref e) = self.shared.read("poll_accept_request").error {
             return Poll::Ready(Err(e.clone()));
         }
+
+        // check if a connection error occurred on a stream
+        self.poll_check_stream_errors(cx)?;
 
         let recv = {
             // TODO
@@ -705,6 +731,7 @@ pub struct RequestStream<S, B> {
     pub(super) conn_state: SharedStateRef,
     pub(super) max_field_section_size: u64,
     send_grease_frame: bool,
+    error_sender: UnboundedSender<(Code, &'static str)>,
 }
 
 impl<S, B> RequestStream<S, B> {
@@ -714,6 +741,7 @@ impl<S, B> RequestStream<S, B> {
         max_field_section_size: u64,
         conn_state: SharedStateRef,
         grease: bool,
+        error_sender: UnboundedSender<(Code, &'static str)>,
     ) -> Self {
         Self {
             stream,
@@ -721,6 +749,7 @@ impl<S, B> RequestStream<S, B> {
             max_field_section_size,
             trailers: None,
             send_grease_frame: grease,
+            error_sender,
         }
     }
 }
@@ -822,7 +851,15 @@ where
                 //# The MAX_PUSH_ID frame is always sent on the control stream.  Receipt
                 //# of a MAX_PUSH_ID frame on any other stream MUST be treated as a
                 //# connection error of type H3_FRAME_UNEXPECTED.
-                Some(_) => return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED.into())),
+                Some(_) => {
+                    // try closing the connection by sending the error to the connection
+                    // this error does not need to be handled. When the buffer is full, a other stream has closed the connection
+                    // when the receiver is dropped, the connection is closed
+                    let _ = self
+                        .error_sender
+                        .send((Code::H3_FRAME_UNEXPECTED, "received unexpected frame"));
+                    return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED.into()));
+                }
                 None => return Poll::Ready(Ok(None)),
             }
         };
@@ -836,6 +873,12 @@ where
                 Poll::Ready(trailing_frame) => {
                     if trailing_frame.is_some() {
                         // if it's not unknown or reserved, fail.
+                        // try closing the connection by sending the error to the connection
+                        // this error does not need to be handled. When the buffer is full, a other stream has closed the connection
+                        // when the receiver is dropped, the connection is closed
+                        let _ = self
+                            .error_sender
+                            .send((Code::H3_FRAME_UNEXPECTED, "received unexpected frame"));
                         return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED.into()));
                     }
                 }
@@ -963,6 +1006,7 @@ where
                 conn_state: self.conn_state.clone(),
                 max_field_section_size: 0,
                 send_grease_frame: self.send_grease_frame,
+                error_sender: self.error_sender.clone(),
             },
             RequestStream {
                 stream: recv,
@@ -970,6 +1014,7 @@ where
                 conn_state: self.conn_state,
                 max_field_section_size: self.max_field_section_size,
                 send_grease_frame: self.send_grease_frame,
+                error_sender: self.error_sender,
             },
         )
     }

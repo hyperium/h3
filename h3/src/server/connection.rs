@@ -227,6 +227,7 @@ where
                 self.max_field_section_size,
                 self.inner.shared.clone(),
                 self.inner.send_grease_frame,
+                self.inner.error_sender.clone(),
             ),
         };
 
