@@ -760,7 +760,7 @@ impl<S, B> ConnectionState for RequestStream<S, B> {
     }
 }
 
-impl <S, B> RequestStream<S, B> {
+impl<S, B> RequestStream<S, B> {
     /// Close the connection with an error
     //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn close(&self, code: Code, reason: &'static str) -> Error {
@@ -774,7 +774,7 @@ where
     S: quic::RecvStream,
 {
     /// Receive some of the request body.
-  //  #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    //  #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_recv_data(
         &mut self,
         cx: &mut Context<'_>,
@@ -782,8 +782,11 @@ where
         if !self.stream.has_data() {
             let frame = ready!(self.stream.poll_next(cx)).map_err(|error| {
                 let error: Error = error.into();
-                let code = error.try_get_code().expect("errors from the stream should have a code");
-                self.close(code, "test")
+                if let Some(code) = error.try_get_code() {
+                    self.close(code, "test")
+                } else {
+                    error
+                }
             })?;
 
             match frame {
