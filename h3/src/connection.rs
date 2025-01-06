@@ -818,14 +818,23 @@ where
                 //# The MAX_PUSH_ID frame is always sent on the control stream.  Receipt
                 //# of a MAX_PUSH_ID frame on any other stream MUST be treated as a
                 //# connection error of type H3_FRAME_UNEXPECTED.
-                Some(_) => return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED.into())),
+                Some(_) => {
+                    return Poll::Ready(Err(
+                        self.close(Code::H3_FRAME_UNEXPECTED, "received unexpected frame")
+                    ))
+                }
                 None => return Poll::Ready(Ok(None)),
             }
         }
 
-        self.stream
-            .poll_data(cx)
-            .map_err(|e| self.maybe_conn_err(e))
+        self.stream.poll_data(cx).map_err(|error| {
+            let error: Error = error.into();
+            if let Some(code) = error.try_get_code() {
+                self.close(code, "test")
+            } else {
+                error
+            }
+        })
     }
 
     /// Poll receive trailers.
@@ -838,7 +847,14 @@ where
             encoded
         } else {
             let frame = futures_util::ready!(self.stream.poll_next(cx))
-                .map_err(|e| self.maybe_conn_err(e))?;
+                .map_err(|error| {
+                    let error: Error = error.into();
+                    if let Some(code) = error.try_get_code() {
+                        self.close(code, "test")
+                    } else {
+                        error
+                    }
+                })?;
             match frame {
                 Some(Frame::Headers(encoded)) => encoded,
 
@@ -881,7 +897,14 @@ where
             match self
                 .stream
                 .poll_next(cx)
-                .map_err(|e| self.maybe_conn_err(e))?
+                .map_err(|error| {
+                    let error: Error = error.into();
+                    if let Some(code) = error.try_get_code() {
+                        self.close(code, "test")
+                    } else {
+                        error
+                    }
+                })?
             {
                 Poll::Ready(trailing_frame) => {
                     if trailing_frame.is_some() {

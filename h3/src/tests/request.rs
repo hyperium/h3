@@ -1434,13 +1434,13 @@ where
     let client_fut = async {
         let connection = pair.client_inner().await;
 
-        let (mut driver, _send) = client::new(h3_quinn::Connection::new(connection.clone()))
+        let (mut driver, send) = client::new(h3_quinn::Connection::new(connection.clone()))
             .await
             .unwrap();
 
         let (mut req_send, mut req_recv) = connection.open_bi().await.unwrap();
 
-        let client = async {
+        let client = async move {
             let mut buf = BytesMut::new();
             request(&mut buf);
             req_send.write_all(&buf[..]).await.unwrap();
@@ -1451,6 +1451,9 @@ where
                 .await
                 .map_err(Into::<h3_quinn::ReadError>::into)
                 .map_err(Into::<Error>::into)?;
+
+            // drop the SendRequest to let driver know there will be no more requests
+            drop(send);
 
             Result::<(), Error>::Ok(())
         };
@@ -1499,9 +1502,17 @@ where
         tokio::join!(server_fut, client_fut, server_driver);
 
     if let Some(server_result_driver) = server_result_driver {
+        // server_driver future is only needed if the first accept call returns a stream and further accept is needed
+        // to drive the connection
         check(server_result_driver);
     };
     check(server_result_stream);
-    check(client_result_stream);
+
+    if client_result_stream.is_err() {
+        // we have no influence wether the quinn returns the connection error to the stream api
+        // but if it returns an error it needs to be the expected one
+        check(client_result_stream);
+    }
+
     check(client_result_driver);
 }
