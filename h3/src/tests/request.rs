@@ -1446,6 +1446,9 @@ where
             req_send.write_all(&buf[..]).await.unwrap();
             req_send.finish().unwrap();
 
+            // wait to give the server time to return the error before dropping send
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
             req_recv
                 .read(&mut buf)
                 .await

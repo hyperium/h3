@@ -846,15 +846,14 @@ where
         let mut trailers = if let Some(encoded) = self.trailers.take() {
             encoded
         } else {
-            let frame = futures_util::ready!(self.stream.poll_next(cx))
-                .map_err(|error| {
-                    let error: Error = error.into();
-                    if let Some(code) = error.try_get_code() {
-                        self.close(code, "test")
-                    } else {
-                        error
-                    }
-                })?;
+            let frame = futures_util::ready!(self.stream.poll_next(cx)).map_err(|error| {
+                let error: Error = error.into();
+                if let Some(code) = error.try_get_code() {
+                    self.close(code, "test")
+                } else {
+                    error
+                }
+            })?;
             match frame {
                 Some(Frame::Headers(encoded)) => encoded,
 
@@ -894,18 +893,14 @@ where
         };
         if !self.stream.is_eos() {
             // Get the trailing frame
-            match self
-                .stream
-                .poll_next(cx)
-                .map_err(|error| {
-                    let error: Error = error.into();
-                    if let Some(code) = error.try_get_code() {
-                        self.close(code, "test")
-                    } else {
-                        error
-                    }
-                })?
-            {
+            match self.stream.poll_next(cx).map_err(|error| {
+                let error: Error = error.into();
+                if let Some(code) = error.try_get_code() {
+                    self.close(code, "test")
+                } else {
+                    error
+                }
+            })? {
                 Poll::Ready(trailing_frame) => {
                     if trailing_frame.is_some() {
                         // if it's not unknown or reserved, fail.
