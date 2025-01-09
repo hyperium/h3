@@ -1,35 +1,85 @@
+//! This is the public facing error types for the h3 crate
+
+use std::sync::Arc;
+
+use crate::quic;
+
+use super::codes::NewCode;
 
 /// This enum represents wether the error occurred on the local or remote side of the connection
-#[derive(Debug, Clone, Hash)]
-enum ErrorSource {
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub enum ConnectionError {
     /// The error occurred on the local side of the connection
-    Local,
-    /// The error occurred on the remote side of the connection
-    Remote,
+    #[non_exhaustive]
+    Local {
+        /// The error
+        error: LocalError,
+    },
+    /// Error returned by the quic layer
+    /// I might be an quic error or the remote h3 connection closed the connection with an error
+    #[non_exhaustive]
+    Remote(Arc<dyn quic::Error>),
+    /// Timeout occurred
+    #[non_exhaustive]
+    Timeout,
 }
 
-/// This enum determines if the error affects the connection or the stream
-/// 
-/// The end goal is to make all stream errors from the spec potential connection errors if users of h3 decide to treat them as such
+/// This enum represents a local error
 #[derive(Debug, Clone, Hash)]
-enum ErrorScope {
-    /// The error affects the connection
-    Connection,
-    /// The error affects the stream
-    Stream,
+#[non_exhaustive]
+pub enum LocalError {
+    #[non_exhaustive]
+    /// The application closed the connection
+    Application {
+        /// The error code
+        code: NewCode,
+        /// The error reason
+        reason: &'static str,
+    },
+    #[non_exhaustive]
+    /// The connection is closing
+    Closing,
 }
 
-/// This error type represents an internal error type, which is used 
-/// to represent errors, which have not yet affected the connection or stream state
-/// 
-/// This error type is generated from the error types of h3s submodules or by the modules itself.
-#[derive(Debug, Clone, Hash)]
-struct InternalError {
-    /// The error scope
-    scope: ErrorScope,
-    /// The error code
-    code: Code,
-    /// The error message
-    message: &'static str,
+/// This enum represents a stream error
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub enum StreamError {
+    /// The error occurred on the stream
+    #[non_exhaustive]
+    StreamError {
+        /// The error code
+        code: NewCode,
+        /// The error reason
+        reason: &'static str,
+    },
+    /// The error occurred on the connection
+    #[non_exhaustive]
+    ConnectionError(ConnectionError),
 }
 
+impl std::fmt::Display for ConnectionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConnectionError::Local { error } => write!(f, "Local error: {:?}", error),
+            ConnectionError::Remote(err) => write!(f, "Remote error: {:?}", err),
+            ConnectionError::Timeout => write!(f, "Timeout"),
+        }
+    }
+}
+
+impl std::error::Error for ConnectionError {}
+
+impl std::fmt::Display for StreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StreamError::StreamError { code, reason } => {
+                write!(f, "Stream error: {:?} - {}", code, reason)
+            }
+            StreamError::ConnectionError(err) => write!(f, "Connection error: {}", err),
+        }
+    }
+}
+
+impl std::error::Error for StreamError {}

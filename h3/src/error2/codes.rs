@@ -4,11 +4,11 @@ use std::fmt;
 
 /// An HTTP/3 "application error code".
 #[derive(PartialEq, Eq, Hash, Clone, Copy)]
-pub struct Code {
+pub struct NewCode {
     code: u64,
 }
 
-impl Code {
+impl NewCode {
     /// Numerical error code
     ///
     /// See <https://www.rfc-editor.org/rfc/rfc9114.html#errors>
@@ -18,7 +18,7 @@ impl Code {
     }
 }
 
-impl PartialEq<u64> for Code {
+impl PartialEq<u64> for NewCode {
     fn eq(&self, other: &u64) -> bool {
         *other == self.code
     }
@@ -33,14 +33,14 @@ macro_rules! codes {
             ($num:expr, $name:ident);
         )+
     ) => {
-        impl Code {
+        impl NewCode {
         $(
             $(#[$docs])*
-            pub const $name: Code = Code{code: $num};
+            pub const $name: NewCode = NewCode{code: $num};
         )+
         }
 
-        impl fmt::Debug for Code {
+        impl fmt::Debug for NewCode {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 match self.code {
                 $(
@@ -133,8 +133,8 @@ codes! {
     (0x202, QPACK_DECODER_STREAM_ERROR);
 }
 
-impl From<Code> for u64 {
-    fn from(code: Code) -> u64 {
+impl From<NewCode> for u64 {
+    fn from(code: NewCode) -> u64 {
         code.code
     }
 }

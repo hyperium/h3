@@ -112,7 +112,6 @@ impl Builder {
         let conn_waker = Some(future::poll_fn(|cx| Poll::Ready(cx.waker().clone())).await);
 
         let inner = ConnectionInner::new(quic, conn_state.clone(), self.config).await?;
-
         let send_request = SendRequest {
             open,
             conn_state,
