@@ -11,7 +11,6 @@ pub(crate) trait CloseConnection: ConnectionState2 {
         &mut self,
         internal_error: InternalRequestStreamError,
     ) -> ConnectionError {
-        
         //self.maybe_conn_error(error)
         todo!()
     }

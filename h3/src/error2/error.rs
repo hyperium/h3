@@ -87,7 +87,10 @@ impl std::fmt::Display for ServerStreamError {
                 write!(f, "Stream error: {:?} - {}", code, reason)
             }
             ServerStreamError::ConnectionError(err) => write!(f, "Connection error: {}", err),
-            ServerStreamError::HeaderTooBig { actual_size, max_size } => write!(
+            ServerStreamError::HeaderTooBig {
+                actual_size,
+                max_size,
+            } => write!(
                 f,
                 "Header too big: actual size: {}, max size: {}",
                 actual_size, max_size
@@ -101,7 +104,9 @@ impl std::error::Error for ServerStreamError {}
 impl From<StreamError> for ServerStreamError {
     fn from(err: StreamError) -> Self {
         match err {
-            StreamError::StreamError { code, reason } => ServerStreamError::StreamError { code, reason },
+            StreamError::StreamError { code, reason } => {
+                ServerStreamError::StreamError { code, reason }
+            }
             StreamError::ConnectionError(err) => ServerStreamError::ConnectionError(err),
         }
     }

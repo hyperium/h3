@@ -111,35 +111,35 @@ where
     pub async fn accept(
         &mut self,
     ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
-            // Accept the incoming stream
-            let mut stream = match poll_fn(|cx| self.poll_accept_request_stream(cx)).await {
-                Ok(Some(s)) => FrameStream::new(BufRecvStream::new(s)),
-                Ok(None) => {
-                    // We always send a last GoAway frame to the client, so it knows which was the last
-                    // non-rejected request.
-                    self.shutdown(0).await?;
-                    return Ok(None);
-                }
-                Err(err) => {
-                    match err.inner.kind {
-                        crate::error::Kind::Closed => return Ok(None),
-                        crate::error::Kind::Application {
-                            code,
-                            reason,
-                            level: ErrorLevel::ConnectionError,
-                        } => return Err(self.inner.close(code, reason.unwrap_or_default())),
-                        _ => return Err(err),
-                    };
-                }
-            };
-
-            let frame = poll_fn(|cx| stream.poll_next(cx)).await;
-            let req = self.accept_with_frame(stream, frame)?;
-            if let Some(req) = req {
-                Ok(Some(req.resolve().await?))
-            } else {
-                Ok(None)
+        // Accept the incoming stream
+        let mut stream = match poll_fn(|cx| self.poll_accept_request_stream(cx)).await {
+            Ok(Some(s)) => FrameStream::new(BufRecvStream::new(s)),
+            Ok(None) => {
+                // We always send a last GoAway frame to the client, so it knows which was the last
+                // non-rejected request.
+                self.shutdown(0).await?;
+                return Ok(None);
             }
+            Err(err) => {
+                match err.inner.kind {
+                    crate::error::Kind::Closed => return Ok(None),
+                    crate::error::Kind::Application {
+                        code,
+                        reason,
+                        level: ErrorLevel::ConnectionError,
+                    } => return Err(self.inner.close(code, reason.unwrap_or_default())),
+                    _ => return Err(err),
+                };
+            }
+        };
+
+        let frame = poll_fn(|cx| stream.poll_next(cx)).await;
+        let req = self.accept_with_frame(stream, frame)?;
+        if let Some(req) = req {
+            Ok(Some(req.resolve().await?))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Accepts a http request where the first frame has already been read and decoded.

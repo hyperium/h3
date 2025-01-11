@@ -31,7 +31,10 @@ pub trait ConnectionState2 {
     fn shared_state(&self) -> &SharedState2;
     /// Get the Error
     fn maybe_conn_error(&self, error: ConnectionError) -> ConnectionError {
-        self.shared_state().connection_error.get_or_init(|| error).clone()
+        self.shared_state()
+            .connection_error
+            .get_or_init(|| error)
+            .clone()
     }
     fn get_conn_error(&self) -> Option<ConnectionError> {
         self.shared_state().connection_error.get().cloned()
@@ -42,11 +45,15 @@ pub trait ConnectionState2 {
     }
     /// Set the connection to closing
     fn set_closing(&self) {
-        self.shared_state().closing.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.shared_state()
+            .closing
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
     /// Check if the connection is closing
     fn is_closing(&self) -> bool {
-        self.shared_state().closing.load(std::sync::atomic::Ordering::Relaxed)
+        self.shared_state()
+            .closing
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
     /// Set the settings
     fn set_settings(&self, settings: Settings) {
