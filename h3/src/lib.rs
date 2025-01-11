@@ -15,6 +15,8 @@ pub use error::Error;
 
 mod buf;
 
+mod shared_state;
+
 pub mod error2;
 
 #[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
