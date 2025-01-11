@@ -59,6 +59,54 @@ pub enum StreamError {
     ConnectionError(ConnectionError),
 }
 
+/// This enum represents a stream error
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub enum ServerStreamError {
+    /// The error occurred on the stream
+    #[non_exhaustive]
+    StreamError {
+        /// The error code
+        code: NewCode,
+        /// The error reason
+        reason: &'static str,
+    },
+    /// The error occurred on the connection
+    #[non_exhaustive]
+    ConnectionError(ConnectionError),
+    #[non_exhaustive]
+    /// The received header block is too big
+    /// The Request has been answered with a 431 Request Header Fields Too Large
+    HeaderTooBig { actual_size: u64, max_size: u64 },
+}
+
+impl std::fmt::Display for ServerStreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ServerStreamError::StreamError { code, reason } => {
+                write!(f, "Stream error: {:?} - {}", code, reason)
+            }
+            ServerStreamError::ConnectionError(err) => write!(f, "Connection error: {}", err),
+            ServerStreamError::HeaderTooBig { actual_size, max_size } => write!(
+                f,
+                "Header too big: actual size: {}, max size: {}",
+                actual_size, max_size
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ServerStreamError {}
+
+impl From<StreamError> for ServerStreamError {
+    fn from(err: StreamError) -> Self {
+        match err {
+            StreamError::StreamError { code, reason } => ServerStreamError::StreamError { code, reason },
+            StreamError::ConnectionError(err) => ServerStreamError::ConnectionError(err),
+        }
+    }
+}
+
 impl std::fmt::Display for ConnectionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

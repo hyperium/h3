@@ -15,10 +15,27 @@ pub enum ErrorScope {
 /// to represent errors, which have not yet affected the connection or stream state
 ///
 /// This error type is generated from the error types of h3s submodules or by the modules itself.
+/// 
+/// This error type is used in functions which handle a http3 request stream
 #[derive(Debug, Clone, Hash)]
-pub struct InternalError {
+pub struct InternalRequestStreamError {
     /// The error scope
     scope: ErrorScope,
+    /// The error code
+    code: Code,
+    /// The error message
+    message: &'static str,
+}
+
+
+/// This error type represents an internal error type, which is used
+/// to represent errors, which have not yet affected the connection state
+/// 
+/// This error type is generated from the error types of h3s submodules or by the modules itself.
+/// 
+/// This error type is used in functions which handle a http3 connection state 
+#[derive(Debug, Clone, Hash)]
+pub struct InternalConnectionError {
     /// The error code
     code: Code,
     /// The error message
