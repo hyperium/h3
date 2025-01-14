@@ -207,6 +207,13 @@ where
         self.inner.send_data(buf).await
     }
 
+    /// Stop a stream with an error code
+    ///
+    /// The code can be [`Code::H3_NO_ERROR`].
+    pub fn stop_stream(&mut self, error_code: Code) {
+        self.inner.stop_stream(error_code);
+    }
+
     /// Send a set of trailers to end the request.
     ///
     /// [`RequestStream::finish()`] must be called to finalize a request.
