@@ -1316,8 +1316,10 @@ async fn request_invalid_data_frame_length_too_large() {
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-7.1
         //= type=test
-        //# In particular, redundant length
-        //# encodings MUST be verified to be self-consistent; see Section 10.8.
+        //# A frame payload that contains additional bytes
+        //# after the identified fields or a frame payload that terminates before
+        //# the end of the identified fields MUST be treated as a connection
+        //# error of type H3_FRAME_ERROR.
         VarInt::from(5u32).encode(&mut buf);
         buf.put_slice(b"fada");
 
@@ -1339,8 +1341,10 @@ async fn request_invalid_data_frame_length_too_short() {
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-7.1
         //= type=test
-        //# In particular, redundant length
-        //# encodings MUST be verified to be self-consistent; see Section 10.8.
+        //# A frame payload that contains additional bytes
+        //# after the identified fields or a frame payload that terminates before
+        //# the end of the identified fields MUST be treated as a connection
+        //# error of type H3_FRAME_ERROR.
         VarInt::from(3u32).encode(&mut buf);
         buf.put_slice(b"fada");
     })
@@ -1429,31 +1433,43 @@ where
 
     let client_fut = async {
         let connection = pair.client_inner().await;
-        let (mut req_send, mut req_recv) = connection.open_bi().await.unwrap();
 
-        let mut buf = BytesMut::new();
-        request(&mut buf);
-        req_send.write_all(&buf[..]).await.unwrap();
-        req_send.finish().unwrap();
-
-        let res = req_recv
-            .read(&mut buf)
-            .await
-            .map_err(Into::<h3_quinn::ReadError>::into)
-            .map_err(Into::<Error>::into)
-            .map(|_| ());
-        check(res);
-
-        let (mut driver, _send) = client::new(h3_quinn::Connection::new(connection))
+        let (mut driver, send) = client::new(h3_quinn::Connection::new(connection.clone()))
             .await
             .unwrap();
 
-        let res = future::poll_fn(|cx| driver.poll_close(cx))
-            .await
-            .map_err(Into::<Error>::into)
-            .map(|_| ());
-        check(res);
+        let (mut req_send, mut req_recv) = connection.open_bi().await.unwrap();
+
+        let client = async move {
+            let mut buf = BytesMut::new();
+            request(&mut buf);
+            req_send.write_all(&buf[..]).await.unwrap();
+            req_send.finish().unwrap();
+
+            // wait to give the server time to return the error before dropping send
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            req_recv
+                .read(&mut buf)
+                .await
+                .map_err(Into::<h3_quinn::ReadError>::into)
+                .map_err(Into::<Error>::into)?;
+
+            // drop the SendRequest to let driver know there will be no more requests
+            drop(send);
+
+            Result::<(), Error>::Ok(())
+        };
+
+        let driver = async {
+            future::poll_fn(|cx| driver.poll_close(cx)).await?;
+            Result::<(), Error>::Ok(())
+        };
+
+        tokio::join!(client, driver)
     };
+
+    let (sender, receiver) = tokio::sync::oneshot::channel();
 
     let server_fut = async {
         let conn = server.next().await;
@@ -1462,11 +1478,44 @@ where
             .accept()
             .await?
             .expect("request stream end unexpected");
+
+        let _ = sender.send(incoming);
+
         while stream.recv_data().await?.is_some() {}
         stream.recv_trailers().await?;
         Result::<(), Error>::Ok(())
     };
 
-    tokio::select! { res = server_fut => check(res)
-    , _ = client_fut => panic!("client resolved first") };
+    let server_driver = async move {
+        // it is necessary to accept further streams from the connection in order to close it when an error is encountered
+
+        let mut incoming = match receiver.await {
+            Ok(incoming) => incoming,
+            Err(_) => return None,
+        };
+
+        match incoming.accept().await {
+            Ok(_) => (),
+            Err(err) => return Some(Err(err.into())),
+        };
+        Some(Result::<(), Error>::Ok(()))
+    };
+
+    let (server_result_stream, (client_result_stream, client_result_driver), server_result_driver) =
+        tokio::join!(server_fut, client_fut, server_driver);
+
+    if let Some(server_result_driver) = server_result_driver {
+        // server_driver future is only needed if the first accept call returns a stream and further accept is needed
+        // to drive the connection
+        check(server_result_driver);
+    };
+    check(server_result_stream);
+
+    if client_result_stream.is_err() {
+        // we have no influence wether the quinn returns the connection error to the stream api
+        // but if it returns an error it needs to be the expected one
+        check(client_result_stream);
+    }
+
+    check(client_result_driver);
 }

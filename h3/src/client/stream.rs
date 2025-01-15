@@ -150,7 +150,7 @@ where
     // TODO what if called before recv_response ?
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
-        self.inner.recv_data().await
+        future::poll_fn(|cx| self.poll_recv_data(cx)).await
     }
 
     /// Receive request body

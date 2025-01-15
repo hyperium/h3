@@ -10,6 +10,7 @@ use bytes::{Buf, BytesMut};
 use futures_util::future;
 use http::request;
 
+use tokio::sync::mpsc::UnboundedSender;
 #[cfg(feature = "tracing")]
 use tracing::{info, instrument, trace};
 
@@ -115,6 +116,7 @@ where
     pub(super) conn_waker: Option<Waker>,
     pub(super) _buf: PhantomData<fn(B)>,
     pub(super) send_grease_frame: bool,
+    pub(super) error_sender: UnboundedSender<(Code, &'static str)>,
 }
 
 impl<T, B> SendRequest<T, B>
@@ -188,6 +190,7 @@ where
                 self.max_field_section_size,
                 self.conn_state.clone(),
                 self.send_grease_frame,
+                self.error_sender.clone(),
             ),
         };
         // send the grease frame only once
@@ -223,6 +226,7 @@ where
             conn_waker: self.conn_waker.clone(),
             _buf: PhantomData,
             send_grease_frame: self.send_grease_frame,
+            error_sender: self.error_sender.clone(),
         }
     }
 }
