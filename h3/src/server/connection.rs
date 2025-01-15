@@ -30,12 +30,10 @@ use crate::{
     stream::BufRecvStream,
 };
 
-use crate::server::request::ResolveRequest;
-
 #[cfg(feature = "tracing")]
 use tracing::{instrument, trace, warn};
 
-use super::stream::RequestStream;
+use super::request::RequestResolver;
 
 /// Server connection driver
 ///
@@ -108,11 +106,9 @@ where
     /// The [`http::Request`] is the received request from the client.
     /// The [`RequestStream`] can be used to send the response.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn accept(
-        &mut self,
-    ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
+    pub async fn accept(&mut self) -> Result<Option<RequestResolver<C, B>>, Error> {
         // Accept the incoming stream
-        let mut stream = match poll_fn(|cx| self.poll_accept_request_stream(cx)).await {
+        let stream = match poll_fn(|cx| self.poll_accept_request_stream(cx)).await {
             Ok(Some(s)) => FrameStream::new(BufRecvStream::new(s)),
             Ok(None) => {
                 // We always send a last GoAway frame to the client, so it knows which was the last
@@ -133,148 +129,19 @@ where
             }
         };
 
-        let frame = poll_fn(|cx| stream.poll_next(cx)).await;
-        let req = self.accept_with_frame(stream, frame)?;
-        if let Some(req) = req {
-            Ok(Some(req.resolve().await?))
-        } else {
-            Ok(None)
-        }
-    }
+        let resolver = Ok(Some(RequestResolver {
+            frame_stream: stream,
+            error_sender: self.inner.error_sender.clone(),
+            request_end_send: self.request_end_send.clone(),
+            send_grease_frame: self.inner.send_grease_frame,
+            max_field_section_size: self.max_field_section_size,
+            shared: self.inner.shared.clone(),
+        }));
 
-    /// Accepts a http request where the first frame has already been read and decoded.
-    ///
-    /// This is needed as a bidirectional stream may be read as part of incoming webtransport
-    /// bi-streams. If it turns out that the stream is *not* a `WEBTRANSPORT_STREAM` the request
-    /// may still want to be handled and passed to the user.
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn accept_with_frame(
-        &mut self,
-        mut stream: FrameStream<C::BidiStream, B>,
-        frame: Result<Option<Frame<PayloadLen>>, FrameStreamError>,
-    ) -> Result<Option<ResolveRequest<C, B>>, Error> {
-        let mut encoded = match frame {
-            Ok(Some(Frame::Headers(h))) => h,
+        // send the grease frame only once
+        self.inner.send_grease_frame = false;
 
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
-            //# If a client-initiated
-            //# stream terminates without enough of the HTTP message to provide a
-            //# complete response, the server SHOULD abort its response stream with
-            //# the error code H3_REQUEST_INCOMPLETE.
-            Ok(None) => {
-                return Err(self.inner.close(
-                    Code::H3_REQUEST_INCOMPLETE,
-                    "request stream closed before headers",
-                ));
-            }
-
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
-            //# Receipt of an invalid sequence of frames MUST be treated as a
-            //# connection error of type H3_FRAME_UNEXPECTED.
-
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.5
-            //# A server MUST treat the
-            //# receipt of a PUSH_PROMISE frame as a connection error of type
-            //# H3_FRAME_UNEXPECTED.
-            Ok(Some(_)) => {
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
-                //# Receipt of an invalid sequence of frames MUST be treated as a
-                //# connection error of type H3_FRAME_UNEXPECTED.
-                // Close if the first frame is not a header frame
-                return Err(self.inner.close(
-                    Code::H3_FRAME_UNEXPECTED,
-                    "first request frame is not headers",
-                ));
-            }
-            Err(e) => {
-                let err: Error = e.into();
-                if err.is_closed() {
-                    return Ok(None);
-                }
-                match err.inner.kind {
-                    crate::error::Kind::Closed => return Ok(None),
-                    crate::error::Kind::Application {
-                        code,
-                        reason,
-                        level: ErrorLevel::ConnectionError,
-                    } => {
-                        return Err(self.inner.close(
-                            code,
-                            reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
-                        ))
-                    }
-                    crate::error::Kind::Application {
-                        code,
-                        reason: _,
-                        level: ErrorLevel::StreamError,
-                    } => {
-                        stream.reset(code.into());
-                        return Err(err);
-                    }
-                    _ => return Err(err),
-                };
-            }
-        };
-
-        let mut request_stream = RequestStream {
-            request_end: Arc::new(RequestEnd {
-                request_end: self.request_end_send.clone(),
-                stream_id: stream.send_id(),
-            }),
-            inner: connection::RequestStream::new(
-                stream,
-                self.max_field_section_size,
-                self.inner.shared.clone(),
-                self.inner.send_grease_frame,
-                self.inner.error_sender.clone(),
-            ),
-        };
-
-        let decoded = match qpack::decode_stateless(&mut encoded, self.max_field_section_size) {
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
-            //# An HTTP/3 implementation MAY impose a limit on the maximum size of
-            //# the message header it will accept on an individual HTTP message.
-            Err(qpack::DecoderError::HeaderTooLong(cancel_size)) => Err(cancel_size),
-            Ok(decoded) => {
-                // send the grease frame only once
-                self.inner.send_grease_frame = false;
-                Ok(decoded)
-            }
-            Err(e) => {
-                let err: Error = e.into();
-                if err.is_closed() {
-                    return Ok(None);
-                }
-                match err.inner.kind {
-                    crate::error::Kind::Closed => return Ok(None),
-                    crate::error::Kind::Application {
-                        code,
-                        reason,
-                        level: ErrorLevel::ConnectionError,
-                    } => {
-                        return Err(self.inner.close(
-                            code,
-                            reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
-                        ))
-                    }
-                    crate::error::Kind::Application {
-                        code,
-                        reason: _,
-                        level: ErrorLevel::StreamError,
-                    } => {
-                        request_stream.stop_stream(code);
-                        return Err(err);
-                    }
-                    _ => return Err(err),
-                };
-            }
-        };
-
-        Ok(Some(ResolveRequest::new(
-            request_stream,
-            decoded,
-            self.max_field_section_size,
-        )))
+        resolver
     }
 
     /// Initiate a graceful shutdown, accepting `max_request` potentially still in-flight

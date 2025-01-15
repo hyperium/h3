@@ -77,7 +77,12 @@ pub enum ServerStreamError {
     #[non_exhaustive]
     /// The received header block is too big
     /// The Request has been answered with a 431 Request Header Fields Too Large
-    HeaderTooBig { actual_size: u64, max_size: u64 },
+    HeaderTooBig {
+        /// The actual size of the header block
+        actual_size: u64,
+        /// The maximum size of the header block
+        max_size: u64,
+    },
 }
 
 impl std::fmt::Display for ServerStreamError {
