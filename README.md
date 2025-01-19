@@ -38,8 +38,10 @@ Get more information about this tool in the [contributing][] document.
 * Runtime independent (h3 does not spawn tasks and works with any runtime)
 * Supported QUIC implementations to date are
   [Quinn](https://github.com/quinn-rs/quinn) ([h3-quinn](./h3-quinn/))
-  and [s2n-quic](https://github.com/aws/s2n-quic)
+  , [s2n-quic](https://github.com/aws/s2n-quic)
   ([s2n-quic-h3](https://github.com/aws/s2n-quic/tree/main/quic/s2n-quic-h3))
+  and [MsQuic](https://github.com/microsoft/msquic)
+  ([h3-msquic-async](https://github.com/masa-koz/msquic-async-rs/tree/main/h3-msquic-async))
 
 ## Overview
 
@@ -129,10 +131,11 @@ As mentioned, the goal of this library is to be generic over a QUIC implementati
 
 - [`h3-quinn`](./h3-quinn/): in this same repository.
 - [`s2n-quic-h3`](https://github.com/aws/s2n-quic/tree/main/quic/s2n-quic-h3)
+- [`h3-msquic-async`](https://github.com/masa-koz/msquic-async-rs/tree/main/h3-msquic-async)
 
 ## Interoperability
 
-This crate as well as the quic implementations are tested ([quinn](https://github.com/quinn-rs/quinn-interop), [s2n-quic](https://github.com/aws/s2n-quic/tree/main/scripts/interop)) for interoperability and performance in the [quic-interop-runner](https://github.com/marten-seemann/quic-interop-runner).
+This crate as well as the quic implementations are tested ([quinn](https://github.com/quinn-rs/quinn-interop), [s2n-quic](https://github.com/aws/s2n-quic/tree/main/scripts/interop), [MsQuic](https://github.com/microsoft/msquic/tree/main/src/tools/interop)) for interoperability and performance in the [quic-interop-runner](https://github.com/marten-seemann/quic-interop-runner).
 You can see the results at (https://interop.seemann.io/).
 
 ## License
