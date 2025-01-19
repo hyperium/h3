@@ -10,7 +10,7 @@ use tracing::instrument;
 use crate::{
     connection::{self, ConnectionState, SharedStateRef},
     error::{Code, ErrorLevel},
-    frame::{self, FrameStream, FrameStreamError},
+    frame::{FrameStream, FrameStreamError},
     proto::{
         frame::{Frame, PayloadLen},
         headers::Header,

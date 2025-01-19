@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use assert_matches::assert_matches;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use futures::stream;
 use futures_util::future;
 use http::{request, HeaderMap, Request, Response, StatusCode};
 
@@ -17,6 +18,7 @@ use crate::{
         varint::VarInt,
     },
     qpack, server,
+    tests::get_stream_blocking,
 };
 
 use super::h3_quinn;
@@ -54,7 +56,9 @@ async fn get() {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
-        let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        let (_request, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
         request_stream
             .send_response(
                 Response::builder()
@@ -112,7 +116,9 @@ async fn get_with_trailers_unknown_content_type() {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
-        let (_, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        let (_, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
         request_stream
             .send_response(
                 Response::builder()
@@ -175,7 +181,9 @@ async fn get_with_trailers_known_content_type() {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
-        let (_, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        let (_, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
         request_stream
             .send_response(
                 Response::builder()
@@ -234,7 +242,9 @@ async fn post() {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
-        let (_, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        let (_, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
         request_stream
             .send_response(
                 Response::builder()
@@ -354,7 +364,9 @@ async fn header_too_big_response_from_server_trailers() {
             .await
             .unwrap();
 
-        let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        let (_request, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
         let _ = request_stream
             .recv_data()
             .await
@@ -504,7 +516,9 @@ async fn header_too_big_client_error_trailer() {
             .await
             .unwrap();
 
-        let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        let (_request, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
         let _ = request_stream
             .recv_data()
             .await
@@ -568,7 +582,9 @@ async fn header_too_big_discard_from_client() {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
-        let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        let (_request, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
         request_stream
             .send_response(
                 Response::builder()
@@ -650,7 +666,9 @@ async fn header_too_big_discard_from_client_trailers() {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
-        let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        let (_request, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
 
         request_stream
             .send_response(
@@ -708,7 +726,9 @@ async fn header_too_big_server_error() {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
-        let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        let (_request, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
         //= type=test
@@ -776,7 +796,9 @@ async fn header_too_big_server_error_trailers() {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
-        let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        let (_request, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
         request_stream
             .send_response(
                 Response::builder()
@@ -897,7 +919,9 @@ async fn get_timeout_client_recv_data() {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
-        let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        let (_request, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
         request_stream
             .send_response(
                 Response::builder()
@@ -967,7 +991,9 @@ async fn post_timeout_server_recv_data() {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
-        let (_, mut req_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        let (_, mut req_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
         assert_matches!(
             req_stream.recv_data().await.map(|_| ()).unwrap_err().kind(),
             Kind::Timeout
@@ -1474,10 +1500,15 @@ where
     let server_fut = async {
         let conn = server.next().await;
         let mut incoming = server::Connection::new(conn).await.unwrap();
-        let (_, mut stream) = incoming
+        let request_resolver = incoming
             .accept()
             .await?
             .expect("request stream end unexpected");
+
+        let (_, mut stream) = request_resolver
+            .resolve_request()
+            .await?
+            .expect("request end unexpected");
 
         let _ = sender.send(incoming);
 

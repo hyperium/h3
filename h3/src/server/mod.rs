@@ -59,3 +59,4 @@ pub use builder::builder;
 pub use builder::Builder;
 pub use connection::Connection;
 pub use stream::RequestStream;
+pub use request::RequestResolver;
