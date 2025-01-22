@@ -1,8 +1,7 @@
-use std::time::Duration;
+use std::{hint::black_box, time::Duration};
 
 use assert_matches::assert_matches;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use futures::stream;
 use futures_util::future;
 use http::{request, HeaderMap, Request, Response, StatusCode};
 
@@ -1487,11 +1486,14 @@ where
             // wait to give the server time to return the error before dropping send
             tokio::time::sleep(Duration::from_millis(100)).await;
 
-            req_recv
+            while let Some(i) = req_recv
                 .read(&mut buf)
                 .await
                 .map_err(Into::<h3_quinn::ReadError>::into)
-                .map_err(Into::<Error>::into)?;
+                .map_err(Into::<Error>::into)?
+            {
+                black_box(i);
+            }
 
             // drop the SendRequest to let driver know there will be no more requests
             drop(send);
@@ -1507,51 +1509,44 @@ where
         tokio::join!(client, driver)
     };
 
-    let (sender, receiver) = tokio::sync::oneshot::channel();
-
     let server_fut = async {
         let conn = server.next().await;
         let mut incoming = server::Connection::new(conn).await.unwrap();
         let request_resolver = incoming
             .accept()
-            .await?
+            .await
+            .unwrap()
             .expect("request stream end unexpected");
 
-        let (_, mut stream) = request_resolver
-            .resolve_request()
-            .await?
-            .expect("request end unexpected");
+        //  let _ = sender.send(incoming);
 
-        let _ = sender.send(incoming);
-
-        while stream.recv_data().await?.is_some() {}
-        stream.recv_trailers().await?;
-        Result::<(), Error>::Ok(())
-    };
-
-    let server_driver = async move {
-        // it is necessary to accept further streams from the connection in order to close it when an error is encountered
-
-        let mut incoming = match receiver.await {
-            Ok(incoming) => incoming,
-            Err(_) => return None,
+        let driver = async move {
+            match incoming.accept().await {
+                Ok(_) => (),
+                Err(err) => return Err(err.into()),
+            };
+            Result::<(), Error>::Ok(())
         };
 
-        match incoming.accept().await {
-            Ok(_) => (),
-            Err(err) => return Some(Err(err.into())),
+        let stream = async {
+            let (_, mut stream) = request_resolver
+                .resolve_request()
+                .await?
+                .expect("request end unexpected");
+
+            while stream.recv_data().await?.is_some() {}
+            stream.recv_trailers().await?;
+            Result::<(), Error>::Ok(())
         };
-        Some(Result::<(), Error>::Ok(()))
+        tokio::join!(driver, stream)
     };
 
-    let (server_result_stream, (client_result_stream, client_result_driver), server_result_driver) =
-        tokio::join!(server_fut, client_fut, server_driver);
+    let (
+        (server_result_driver, server_result_stream),
+        (client_result_stream, client_result_driver),
+    ) = tokio::join!(server_fut, client_fut);
 
-    if let Some(server_result_driver) = server_result_driver {
-        // server_driver future is only needed if the first accept call returns a stream and further accept is needed
-        // to drive the connection
-        check(server_result_driver);
-    };
+    check(server_result_driver);
     check(server_result_stream);
 
     if client_result_stream.is_err() {
