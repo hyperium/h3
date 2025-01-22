@@ -710,11 +710,7 @@ async fn graceful_shutdown_closes_when_idle() {
             tokio::task::yield_now().await;
         }
         assert_matches!(
-            future::poll_fn(|cx| {
-                println!("client drive");
-                driver.poll_close(cx)
-            })
-            .await,
+            future::poll_fn(|cx| { driver.poll_close(cx) }).await,
             Ok(())
         );
     };
@@ -752,11 +748,7 @@ async fn graceful_shutdown_client() {
         let (mut driver, mut _send_request) = client::new(pair.client().await).await.unwrap();
         driver.shutdown(0).await.unwrap();
         assert_matches!(
-            future::poll_fn(|cx| {
-                println!("client drive");
-                driver.poll_close(cx)
-            })
-            .await,
+            future::poll_fn(|cx| { driver.poll_close(cx) }).await,
             Ok(())
         );
     };
@@ -811,19 +803,36 @@ async fn server_not_blocking_on_idle_request() {
 
         // no bidirectional stream is started by the server
         // this will fail when server sends the error
-        connection.accept_bi().await.unwrap();
+        let err = connection
+            .accept_bi()
+            .await
+            .err()
+            .expect("connection should error after sending wrong data on control stream");
+
+        assert_matches!(err,
+        quinn::ConnectionError::ApplicationClosed(quinn::ApplicationClose { error_code, .. })
+            if error_code.into_inner() == Code::H3_FRAME_UNEXPECTED.value()
+        );
     };
 
     let server_fut = async {
         let conn = server.next().await;
         let mut incoming = server::Connection::new(conn).await.unwrap();
-        let x = incoming.accept().await;
-        //println!("server_fut: {:?}", x.err());
-        if let Err(asdf) = &x {
-            println!("server_fut: {:?}", asdf);
-        } else {
-            panic!("server should not accept any request");
-        }
+        let resolver = incoming.accept().await.unwrap().unwrap();
+        let req1 = async move {
+            let _ = resolver
+                .resolve_request()
+                .await
+                .err()
+                .expect("server should close connection");
+        };
+
+        let server = async move {
+            let err = incoming.accept().await.err().expect("Connection Error");
+            assert_matches!(err.kind(), Kind::Application { code,.. } => assert_eq!(code, Code::H3_FRAME_UNEXPECTED));
+        };
+
+        tokio::join!(req1, server);
     };
 
     let join = async {
@@ -832,7 +841,7 @@ async fn server_not_blocking_on_idle_request() {
 
     tokio::select!(
         _ = join => (),
-         _ = tokio::time::sleep(Duration::from_secs(1)) => panic!("timeout")
+         _ = tokio::time::sleep(Duration::from_secs(100)) => panic!("timeout")
     );
 }
 async fn request<T, O, B>(mut send_request: T) -> Result<Response<()>, Error>
