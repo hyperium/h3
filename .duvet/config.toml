@@ -1,0 +1,16 @@
+'$schema' = "https://awslabs.github.io/duvet/config/v0.4.0.json"
+
+[[source]]
+pattern = "h3/**/*.rs"
+
+[[specification]]
+source = "https://www.rfc-editor.org/rfc/rfc9114"
+
+[report.html]
+enabled = true
+issue-link = "https://github.com/hyperium/h3/issues"
+blob-link = "https://github.com/hyperium/h3/blob/${{ SHA || GITHUB_SHA || 'master' }}"
+
+# Enable snapshots to prevent requirement coverage regressions
+[report.snapshot]
+enabled = true
