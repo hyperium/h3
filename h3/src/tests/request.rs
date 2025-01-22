@@ -306,7 +306,15 @@ async fn header_too_big_response_from_server() {
             .await
             .unwrap();
 
-        let err_kind = incoming_req.accept().await.map(|_| ()).unwrap_err().kind();
+        let resolver = incoming_req.accept().await.unwrap().unwrap();
+
+        let err_kind = resolver
+            .resolve_request()
+            .await
+            .err()
+            .expect("should return an error")
+            .kind();
+
         assert_matches!(
             err_kind,
             Kind::HeaderTooBig {
@@ -315,7 +323,9 @@ async fn header_too_big_response_from_server() {
                 ..
             }
         );
-        let _ = incoming_req.accept().await;
+
+        // connection will end without an error
+        assert!(incoming_req.accept().await.unwrap().is_none());
     };
 
     tokio::join!(server_fut, client_fut);
