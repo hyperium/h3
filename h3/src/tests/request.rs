@@ -396,16 +396,10 @@ async fn header_too_big_client_error() {
     let client_fut = async {
         let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
         let drive_fut = async {
-            let err = future::poll_fn(|cx| driver.poll_close(cx))
+            let _ = future::poll_fn(|cx| driver.poll_close(cx))
                 .await
-                .unwrap_err();
-            match err.kind() {
-                // The client never sends a data on the request stream
-                Kind::Application { code, .. } => {
-                    assert_eq!(code, Code::H3_REQUEST_INCOMPLETE)
-                }
-                _ => panic!("unexpected error: {:?}", err),
-            }
+                .expect("connection does not error, as it is only a stream level error");
+            // Todo: test with configuration for connection level errors when such a configuration is available
         };
         let req_fut = async {
             // pretend client already received server's settings
@@ -443,7 +437,15 @@ async fn header_too_big_client_error() {
             .await
             .unwrap();
 
-        let _ = incoming_req.accept().await;
+        let incoming = incoming_req.accept().await.unwrap().unwrap();
+
+        // client does not send any data, so the server will not receive any data, resulting in a H3_REQUEST_INCOMPLETE
+        assert_matches!(
+            incoming.resolve_request().await.err().expect("should return an error").kind(),
+            Kind::Application { code, .. } => {
+                assert_eq!(code, Code::H3_REQUEST_INCOMPLETE)
+            }
+        );
     };
 
     tokio::join!(server_fut, client_fut);
