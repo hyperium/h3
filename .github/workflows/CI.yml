@@ -185,5 +185,4 @@ jobs:
       - name: Generate compliance report
         uses: ./.github/actions/compliance
         with:
-          extract-script: ${{ github.workspace }}/ci/compliance/extract.sh
           report-script: ${{ github.workspace }}/ci/compliance/report.sh
