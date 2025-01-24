@@ -2,9 +2,6 @@ name: 'Spec compliance report'
 description: 'Generate compliance report and publish on Github pages'
 
 inputs:
-  extract-script:
-    description: 'Path to script that extracts compliance requirements'
-    required: true
   report-script:
     description: 'Path to script that generates a compliance report'
     required: true
@@ -43,9 +40,9 @@ runs:
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
 
         if git ls-remote --exit-code --heads origin gh-pages; then
-          cp -r .github ci h3 target
+          cp -r .duvet .github ci h3 target
           git switch gh-pages
-          cp -r target/.github target/ci target/h3 .
+          cp -r target/.duvet target/.github target/ci target/h3 .
         else
           git checkout --orphan gh-pages
           git reset
@@ -55,7 +52,6 @@ runs:
       working-directory: ${{ inputs.h3-dir }}
       shell: bash
       run: |
-        ${{ inputs.extract-script }}
         ${{ inputs.report-script }}
 
     # commit only when there are changes
@@ -63,6 +59,7 @@ runs:
       working-directory: ${{ inputs.h3-dir }}
       shell: bash
       run: |
+        cp .duvet/reports/* ci/compliance/
         git add ci/compliance/*.html
         git diff --staged --quiet || \
         git commit -m "${{ github.triggering_actor }}-${SHA}-${{ github.job }}#${{ github.run_number }}"
