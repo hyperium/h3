@@ -26,6 +26,7 @@ use crate::{
     },
     qpack,
     quic::{self, SendStream},
+    shared_state::{ConnectionState2, SharedState2},
     stream::{self, AcceptRecvStream, AcceptedRecvStream, BufRecvStream, UniStreamHeader},
     webtransport::SessionId,
 };
@@ -106,6 +107,7 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
+    pub(super) shared2: Arc<SharedState2>,
     pub(super) shared: SharedStateRef,
     /// TODO: breaking encapsulation just to see if we can get this to work, will fix before merging
     pub conn: C,
@@ -147,6 +149,16 @@ where
     pub config: Config,
     error_getter: UnboundedReceiver<(Code, &'static str)>,
     pub(crate) error_sender: UnboundedSender<(Code, &'static str)>,
+}
+
+impl<B, C> ConnectionState2 for ConnectionInner<C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    fn shared_state(&self) -> &SharedState2 {
+        &self.shared2
+    }
 }
 
 enum GreaseStatus<S, B>
@@ -240,7 +252,7 @@ where
 
     /// Initiates the connection and opens a control stream
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn new(mut conn: C, shared: SharedStateRef, config: Config) -> Result<Self, Error> {
+    pub async fn new(mut conn: C, shared2: Arc<SharedState2>, config: Config) -> Result<Self, Error> {
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
         //# Endpoints SHOULD create the HTTP control stream as well as the
         //# unidirectional streams required by mandatory extensions (such as the
@@ -261,7 +273,8 @@ where
         //# sender MUST NOT close the control stream, and the receiver MUST NOT
         //# request that the sender close the control stream.
         let mut conn_inner = Self {
-            shared,
+            shared2,
+            shared: todo!(),
             conn,
             control_send: control_send.map_err(Error::transport_err)?,
             control_recv: None,

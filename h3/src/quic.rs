@@ -3,12 +3,83 @@
 //! This module includes traits and types meant to allow being generic over any
 //! QUIC implementation.
 
+use std::fmt::Display;
 use std::task::{self, Poll};
 
 use bytes::Buf;
 
 pub use crate::proto::stream::{InvalidStreamId, StreamId};
 pub use crate::stream::WriteBuf;
+
+
+/// Error type to communicate that the quic connection was closed
+///
+/// This is used by to implement the quic abstraction traits
+#[derive(Debug, Clone)]
+pub enum ConnectionErrorIncoming {
+    /// Error from the http3 layer
+    ApplicationClose {
+        /// http3 error code
+        error_code: u64,
+    },
+    /// Quic connection timeout
+    Timeout,
+    /// Quic error
+    ConnectionClosed {
+        /// quic error code
+        error_code: u64,
+    },
+}
+
+/// Error type to communicate that the stream was closed
+///
+/// This is used by to implement the quic abstraction traits
+#[derive(Debug, Clone)]
+pub enum StreamErrorIncoming {
+    /// Stream is closed because the whole connection is closed
+    ConnectionErrorIncoming {
+        /// Connection error
+        connection_error: ConnectionErrorIncoming,
+    },
+    /// Stream was closed by the peer
+    StreamReset {
+        /// Error code sent by the peer
+        error_code: u64,
+    },
+}
+
+impl std::error::Error for StreamErrorIncoming {}
+
+impl Display for StreamErrorIncoming {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // display enum with fields
+        match self {
+            StreamErrorIncoming::ConnectionErrorIncoming { connection_error } => {
+                write!(f, "ConnectionError: {}", connection_error)
+            }
+            StreamErrorIncoming::StreamReset { error_code } => {
+                write!(f, "StreamClosed: {}", error_code)
+            }
+        }
+    }
+}
+
+impl Display for ConnectionErrorIncoming {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // display enum with fields
+        match self {
+            ConnectionErrorIncoming::ApplicationClose { error_code } => {
+                write!(f, "ApplicationClose: {}", error_code)
+            }
+            ConnectionErrorIncoming::Timeout => write!(f, "Timeout"),
+            ConnectionErrorIncoming::ConnectionClosed { error_code } => {
+                write!(f, "ConnectionClosed: {}", error_code)
+            }
+        }
+    }
+}
+
+impl std::error::Error for ConnectionErrorIncoming {}
 
 // Unresolved questions:
 //

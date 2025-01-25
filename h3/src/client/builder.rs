@@ -14,6 +14,7 @@ use crate::{
     connection::{ConnectionInner, SharedStateRef},
     error::Error,
     quic::{self},
+    shared_state::SharedState2,
 };
 
 use super::connection::{Connection, SendRequest};
@@ -107,14 +108,15 @@ impl Builder {
         B: Buf,
     {
         let open = quic.opener();
-        let conn_state = SharedStateRef::default();
+        let conn_state = Arc::new(SharedState2::default());
 
         let conn_waker = Some(future::poll_fn(|cx| Poll::Ready(cx.waker().clone())).await);
 
         let inner = ConnectionInner::new(quic, conn_state.clone(), self.config).await?;
         let send_request = SendRequest {
             open,
-            conn_state,
+            conn_state: todo!(),
+            conn_state2: conn_state,
             conn_waker,
             max_field_section_size: self.config.settings.max_field_section_size,
             sender_count: Arc::new(AtomicUsize::new(1)),

@@ -1,5 +1,7 @@
 use crate::error::Code;
 
+use super::codes::NewCode;
+
 /// This enum determines if the error affects the connection or the stream
 ///
 /// The end goal is to make all stream errors from the spec potential connection errors if users of h3 decide to treat them as such
@@ -20,11 +22,11 @@ pub enum ErrorScope {
 #[derive(Debug, Clone, Hash)]
 pub struct InternalRequestStreamError {
     /// The error scope
-    scope: ErrorScope,
+    pub(crate) scope: ErrorScope,
     /// The error code
-    code: Code,
+    pub(crate) code: NewCode,
     /// The error message
-    message: &'static str,
+    pub(crate) message: &'static str,
 }
 
 /// This error type represents an internal error type, which is used
@@ -36,7 +38,7 @@ pub struct InternalRequestStreamError {
 #[derive(Debug, Clone, Hash)]
 pub struct InternalConnectionError {
     /// The error code
-    code: Code,
+    pub(super) code: NewCode,
     /// The error message
-    message: &'static str,
+    pub(super) message: &'static str,
 }

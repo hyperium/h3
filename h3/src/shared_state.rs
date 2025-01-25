@@ -4,7 +4,7 @@ use std::sync::{atomic::AtomicBool, Arc, OnceLock};
 
 use crate::{config::Settings, error2::ConnectionError};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 /// This struct represents the shared state of the h3 connection and the stream structs
 pub(crate) struct SharedState2 {
     /// The settings, sent by the peer
@@ -12,7 +12,7 @@ pub(crate) struct SharedState2 {
     /// The connection error
     connection_error: OnceLock<ConnectionError>,
     /// The connection is closing
-    closing: Arc<AtomicBool>,
+    closing: AtomicBool,
 }
 
 impl Default for SharedState2 {
@@ -20,7 +20,7 @@ impl Default for SharedState2 {
         Self {
             settings: OnceLock::new(),
             connection_error: OnceLock::new(),
-            closing: Arc::new(AtomicBool::new(false)),
+            closing: AtomicBool::new(false),
         }
     }
 }
@@ -29,15 +29,13 @@ impl Default for SharedState2 {
 pub trait ConnectionState2 {
     /// Get the shared state
     fn shared_state(&self) -> &SharedState2;
-    /// Get the Error
-    fn maybe_conn_error(&self, error: ConnectionError) -> ConnectionError {
-        self.shared_state()
-            .connection_error
-            .get_or_init(|| error)
-            .clone()
-    }
+    /// Get the connection error
     fn get_conn_error(&self) -> Option<ConnectionError> {
         self.shared_state().connection_error.get().cloned()
+    }
+    /// Set the connection error
+    fn set_conn_error(&self, error: ConnectionError) {
+        self.shared_state().connection_error.set(error);
     }
     /// Get the settings
     fn settings(&self) -> Option<&Settings> {

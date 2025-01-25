@@ -21,6 +21,7 @@ use crate::{
     proto::{frame::Frame, headers::Header, push::PushId},
     qpack,
     quic::{self, StreamId},
+    shared_state::SharedState2,
     stream::{self, BufRecvStream},
 };
 
@@ -110,6 +111,7 @@ where
 {
     pub(super) open: T,
     pub(super) conn_state: SharedStateRef,
+    pub(super) conn_state2: Arc<SharedState2>,
     pub(super) max_field_section_size: u64, // maximum size for a header we receive
     // counts instances of SendRequest to close the connection when the last is dropped.
     pub(super) sender_count: Arc<AtomicUsize>,
@@ -219,6 +221,7 @@ where
             .fetch_add(1, std::sync::atomic::Ordering::Release);
 
         Self {
+            conn_state2: self.conn_state2.clone(),
             open: self.open.clone(),
             conn_state: self.conn_state.clone(),
             max_field_section_size: self.max_field_section_size,

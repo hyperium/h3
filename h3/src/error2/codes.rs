@@ -138,3 +138,9 @@ impl From<NewCode> for u64 {
         code.code
     }
 }
+
+impl From<u64> for NewCode {
+    fn from(code: u64) -> NewCode {
+        NewCode { code }
+    }
+}
