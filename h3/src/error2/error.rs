@@ -19,7 +19,7 @@ pub enum ConnectionError {
     /// Error returned by the quic layer
     /// I might be an quic error or the remote h3 connection closed the connection with an error
     #[non_exhaustive]
-    Remote(ConnectionErrorIncoming),
+    Remote(ConnectionErrorIncoming), // TODO: create custom user facing remote error
     /// Timeout occurred
     #[non_exhaustive]
     Timeout,
@@ -80,28 +80,6 @@ pub enum StreamError {
     /// The error occurred on the connection
     #[non_exhaustive]
     ConnectionError(ConnectionError),
-}
-
-impl From<StreamErrorIncoming> for StreamError {
-    fn from(err: StreamErrorIncoming) -> Self {
-        match err {
-            StreamErrorIncoming::ConnectionErrorIncoming { connection_error } => {
-                StreamError::ConnectionError(connection_error.into())
-            }
-            StreamErrorIncoming::StreamReset { error_code } => StreamError::RemoteReset {
-                code: error_code.into(),
-            },
-        }
-    }
-}
-
-impl From<ConnectionErrorIncoming> for ConnectionError {
-    fn from(value: ConnectionErrorIncoming) -> Self {
-        return match value {
-            ConnectionErrorIncoming::Timeout => ConnectionError::Timeout,
-            error => ConnectionError::Remote(error),
-        };
-    }
 }
 
 /// This enum represents a stream error

@@ -15,20 +15,12 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tracing::{instrument, warn};
 
 use crate::{
-    config::{Config, Settings},
-    error::{Code, Error},
-    frame::FrameStream,
-    proto::{
+    config::{Config, Settings}, error::{Code, Error}, error2::traits::CloseConnection, frame::FrameStream, proto::{
         frame::{self, Frame, PayloadLen},
         headers::Header,
         stream::StreamType,
         varint::VarInt,
-    },
-    qpack,
-    quic::{self, SendStream},
-    shared_state::{ConnectionState2, SharedState2},
-    stream::{self, AcceptRecvStream, AcceptedRecvStream, BufRecvStream, UniStreamHeader},
-    webtransport::SessionId,
+    }, qpack, quic::{self, SendStream}, shared_state::{ConnectionState2, SharedState2}, stream::{self, AcceptRecvStream, AcceptedRecvStream, BufRecvStream, UniStreamHeader}, webtransport::SessionId
 };
 
 #[doc(hidden)]
@@ -176,6 +168,16 @@ where
     DataSent(S),
     /// Grease stream is finished
     Finished,
+}
+
+impl<B, C> CloseConnection for ConnectionInner<C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    fn close_connection<T: AsRef<str>>(&mut self, code: &crate::error2::NewCode, reason: T) -> () {
+        self.conn.close(*code, reason.as_ref().as_bytes());
+    }
 }
 
 impl<B, C> ConnectionInner<C, B>
@@ -621,16 +623,6 @@ where
             }
             Ok(())
         }
-    }
-
-    /// Closes a Connection with code and reason.
-    /// It returns an [`Error`] which can be returned.
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn close<T: AsRef<str>>(&mut self, code: Code, reason: T) -> Error {
-        self.shared.write("connection close err").error =
-            Some(code.with_reason(reason.as_ref(), crate::error::ErrorLevel::ConnectionError));
-        self.conn.close(code, reason.as_ref().as_bytes());
-        code.with_reason(reason.as_ref(), crate::error::ErrorLevel::ConnectionError)
     }
 
     // start grease stream and send data

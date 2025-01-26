@@ -19,7 +19,7 @@ use crate::{
         stream::StreamType,
         varint::VarInt,
     },
-    quic::{self, BidiStream, RecvStream, SendStream, SendStreamUnframed},
+    quic::{self, BidiStream, RecvStream, SendStream, SendStreamUnframed, StreamErrorIncoming},
     webtransport::SessionId,
     Error,
 };
@@ -422,7 +422,7 @@ impl<B, S: RecvStream> BufRecvStream<S, B> {
     /// Reads more data into the buffer, returning the number of bytes read.
     ///
     /// Returns `true` if the end of the stream is reached.
-    pub fn poll_read(&mut self, cx: &mut Context<'_>) -> Poll<Result<bool, S::Error>> {
+    pub fn poll_read(&mut self, cx: &mut Context<'_>) -> Poll<Result<bool, StreamErrorIncoming>> {
         let data = ready!(self.stream.poll_data(cx))?;
 
         if let Some(mut data) = data {
@@ -465,12 +465,10 @@ impl<B, S: RecvStream> BufRecvStream<S, B> {
 impl<S: RecvStream, B> RecvStream for BufRecvStream<S, B> {
     type Buf = Bytes;
 
-    type Error = S::Error;
-
     fn poll_data(
         &mut self,
         cx: &mut std::task::Context<'_>,
-    ) -> Poll<Result<Option<Self::Buf>, Self::Error>> {
+    ) -> Poll<Result<Option<Self::Buf>, StreamErrorIncoming>> {
         // There is data buffered, return that immediately
         if let Some(chunk) = self.buf.take_first_chunk() {
             return Poll::Ready(Ok(Some(chunk)));
@@ -498,9 +496,8 @@ where
     B: Buf,
     S: SendStream<B>,
 {
-    type Error = S::Error;
 
-    fn poll_finish(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_finish(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), StreamErrorIncoming>> {
         self.stream.poll_finish(cx)
     }
 
@@ -512,11 +509,11 @@ where
         self.stream.send_id()
     }
 
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), StreamErrorIncoming>> {
         self.stream.poll_ready(cx)
     }
 
-    fn send_data<T: Into<WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error> {
+    fn send_data<T: Into<WriteBuf<B>>>(&mut self, data: T) -> Result<(), StreamErrorIncoming> {
         self.stream.send_data(data)
     }
 }
@@ -531,7 +528,7 @@ where
         &mut self,
         cx: &mut std::task::Context<'_>,
         buf: &mut D,
-    ) -> Poll<Result<usize, Self::Error>> {
+    ) -> Poll<Result<usize, StreamErrorIncoming>> {
         self.stream.poll_send(cx, buf)
     }
 }
@@ -565,11 +562,12 @@ where
     }
 }
 
+
+/*
 impl<S, B> futures_util::io::AsyncRead for BufRecvStream<S, B>
 where
     B: Buf,
     S: RecvStream,
-    S::Error: Into<std::io::Error>,
 {
     fn poll_read(
         mut self: Pin<&mut Self>,
@@ -605,7 +603,6 @@ impl<S, B> tokio::io::AsyncRead for BufRecvStream<S, B>
 where
     B: Buf,
     S: RecvStream,
-    S::Error: Into<std::io::Error>,
 {
     fn poll_read(
         mut self: Pin<&mut Self>,
@@ -640,7 +637,6 @@ impl<S, B> futures_util::io::AsyncWrite for BufRecvStream<S, B>
 where
     B: Buf,
     S: SendStreamUnframed<B>,
-    S::Error: Into<std::io::Error>,
 {
     fn poll_write(
         mut self: Pin<&mut Self>,
@@ -665,7 +661,6 @@ impl<S, B> tokio::io::AsyncWrite for BufRecvStream<S, B>
 where
     B: Buf,
     S: SendStreamUnframed<B>,
-    S::Error: Into<std::io::Error>,
 {
     fn poll_write(
         mut self: Pin<&mut Self>,
@@ -685,6 +680,8 @@ where
         p.poll_finish(cx).map_err(Into::into)
     }
 }
+
+*/
 
 #[cfg(test)]
 mod tests {
