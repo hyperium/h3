@@ -21,7 +21,7 @@ pub(crate) trait CloseConnection: ConnectionState2 {
         &mut self,
         internal_error: InternalConnectionError,
     ) -> ConnectionError {
-        return if let Some(error) = self.get_conn_error() {
+        return if let Err(error) = self.get_conn_error() {
             error
         } else {
             let error = ConnectionError::Local {
@@ -38,7 +38,7 @@ pub(crate) trait CloseConnection: ConnectionState2 {
         match error {
             ConnectionErrorIncoming::Timeout => ConnectionError::Timeout,
             ConnectionErrorIncoming::InternalError(reason) => {
-                if let Some(other_error) = self.get_conn_error() {
+                if let Err(other_error) = self.get_conn_error() {
                     return other_error;
                 }
                 let local_error = LocalError::Application {
@@ -60,7 +60,7 @@ pub(crate) trait CloseConnection: ConnectionState2 {
 
 pub(crate) trait CloseStream: CloseConnection {
     fn handle_stream_error(&mut self, internal_error: InternalRequestStreamError) -> StreamError {
-        return if let Some(error) = self.get_conn_error() {
+        return if let Err(error) = self.get_conn_error() {
             // If the connection is already in an error state, return the error
             StreamError::ConnectionError(error)
         } else {

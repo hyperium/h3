@@ -42,3 +42,18 @@ pub struct InternalConnectionError {
     /// The error message
     pub(super) message: &'static str,
 }
+
+
+impl InternalConnectionError {
+    /// Create a new internal connection error
+    pub fn new(code: NewCode, message: &'static str) -> Self {
+        Self { code, message }
+    }
+}
+
+impl InternalRequestStreamError {
+    /// Create a new internal request stream error
+    pub fn new(scope: ErrorScope, code: NewCode, message: &'static str) -> Self {
+        Self { scope, code, message }
+    }
+}

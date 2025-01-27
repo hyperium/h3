@@ -12,6 +12,7 @@ use tokio::io::ReadBuf;
 use crate::{
     buf::BufList,
     error::{Code, ErrorLevel},
+    error2::ConnectionError,
     frame::FrameStream,
     proto::{
         coding::{Decode as _, Encode},
@@ -318,24 +319,24 @@ where
         })
     }
 
-    pub fn poll_type(&mut self, cx: &mut Context) -> Poll<Result<(), Error>> {
+    // New helper function to poll the next VarInt from self.stream
+    fn poll_next_varint(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<VarInt, ConnectionError>> {
         loop {
-            // Return if all identification data is met
-            match self.ty {
-                Some(StreamType::PUSH | StreamType::WEBTRANSPORT_UNI) => {
-                    if self.id.is_some() {
-                        return Poll::Ready(Ok(()));
-                    }
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
+            //# A receiver MUST tolerate unidirectional streams being
+            //# closed or reset prior to the reception of the unidirectional stream
+            //# header.
+            match ready!(self.stream.poll_read(cx)) {
+                Ok(false) => (),
+                Ok(true) => todo!("ignore it"),
+                Err(StreamErrorIncoming::ConnectionErrorIncoming { connection_error }) => {
+                    // return Poll::Ready(Err(connection_error))
+                    return todo!("handle connection error");
                 }
-                Some(_) => return Poll::Ready(Ok(())),
-                None => (),
-            };
-
-            if ready!(self.stream.poll_read(cx))? {
-                return Poll::Ready(Err(Code::H3_STREAM_CREATION_ERROR.with_reason(
-                    "Stream closed before type received",
-                    ErrorLevel::ConnectionError,
-                )));
+                Err(StreamErrorIncoming::StreamReset { error_code }) => todo!("ignore it"),
             };
 
             let mut buf = self.stream.buf_mut();
@@ -344,35 +345,37 @@ where
             }
 
             if let Some(expected) = self.expected {
-                // Poll for more data
                 if buf.remaining() < expected {
                     continue;
                 }
             } else {
                 continue;
             }
-
-            // Parse ty and then id
-            if self.ty.is_none() {
-                // Parse StreamType
-                self.ty = Some(StreamType::decode(&mut buf).map_err(|_| {
-                    Code::H3_INTERNAL_ERROR.with_reason(
-                        "Unexpected end parsing stream type",
-                        ErrorLevel::ConnectionError,
-                    )
-                })?);
-                // Get the next VarInt for PUSH_ID on the next iteration
-                self.expected = None;
-            } else {
-                // Parse PUSH_ID
-                self.id = Some(VarInt::decode(&mut buf).map_err(|_| {
-                    Code::H3_INTERNAL_ERROR.with_reason(
-                        "Unexpected end parsing push or session id",
-                        ErrorLevel::ConnectionError,
-                    )
-                })?);
-            }
+            return Poll::Ready(Ok(VarInt::decode(&mut buf).map_err(|_| {
+                Code::H3_INTERNAL_ERROR
+                    .with_reason("Unexpected end parsing varint", ErrorLevel::ConnectionError)
+            })?));
         }
+    }
+
+    pub fn poll_type(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), ConnectionError>> {
+        // If we haven't parsed the stream type yet
+        if self.ty.is_none() {
+            let var = ready!(self.poll_next_varint(cx))?;
+            let ty = StreamType::from_value(var.0);
+            self.ty = Some(ty);
+        }
+
+        // If the type requires a second VarInt (PUSH or WEBTRANSPORT_UNI)
+        if matches!(
+            self.ty,
+            Some(StreamType::PUSH | StreamType::WEBTRANSPORT_UNI)
+        ) && self.id.is_none()
+        {
+            self.id = Some(ready!(self.poll_next_varint(cx))?);
+        }
+
+        Poll::Ready(Ok(()))
     }
 }
 
@@ -496,8 +499,10 @@ where
     B: Buf,
     S: SendStream<B>,
 {
-
-    fn poll_finish(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), StreamErrorIncoming>> {
+    fn poll_finish(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), StreamErrorIncoming>> {
         self.stream.poll_finish(cx)
     }
 
@@ -509,7 +514,10 @@ where
         self.stream.send_id()
     }
 
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), StreamErrorIncoming>> {
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), StreamErrorIncoming>> {
         self.stream.poll_ready(cx)
     }
 
@@ -561,7 +569,6 @@ where
         )
     }
 }
-
 
 /*
 impl<S, B> futures_util::io::AsyncRead for BufRecvStream<S, B>

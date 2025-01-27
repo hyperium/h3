@@ -1,6 +1,6 @@
 //! This module represents the shared state of the h3 connection
 
-use std::sync::{atomic::AtomicBool, Arc, OnceLock};
+use std::sync::{atomic::AtomicBool, OnceLock};
 
 use crate::{config::Settings, error2::ConnectionError};
 
@@ -29,9 +29,15 @@ impl Default for SharedState2 {
 pub trait ConnectionState2 {
     /// Get the shared state
     fn shared_state(&self) -> &SharedState2;
-    /// Get the connection error
-    fn get_conn_error(&self) -> Option<ConnectionError> {
-        self.shared_state().connection_error.get().cloned()
+    /// Get the connection error if the connection is in error state because of another task
+    ///
+    /// Return the error as an Err variant if it is set in order to allow using ? in the calling function
+    fn get_conn_error(&self) -> Result<(), ConnectionError> {
+        if let Some(err) = self.shared_state().connection_error.get() {
+            Err(err.clone())
+        } else {
+            Ok(())
+        }
     }
     /// Set the connection error
     fn set_conn_error(&self, error: ConnectionError) {

@@ -132,7 +132,7 @@ pub trait Connection<B: Buf>: OpenStreams<B> {
     fn poll_accept_recv(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::RecvStream>, ConnectionErrorIncoming>>;
+    ) -> Poll<Result<Self::RecvStream, ConnectionErrorIncoming>>;
 
     /// Accept an incoming bidirectional stream
     ///
@@ -140,7 +140,7 @@ pub trait Connection<B: Buf>: OpenStreams<B> {
     fn poll_accept_bidi(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::BidiStream>, ConnectionErrorIncoming>>;
+    ) -> Poll<Result<Self::BidiStream, ConnectionErrorIncoming>>;
 
     /// Get an object to open outgoing streams.
     fn opener(&self) -> Self::OpenStreams;

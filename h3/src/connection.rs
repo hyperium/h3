@@ -15,12 +15,23 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tracing::{instrument, warn};
 
 use crate::{
-    config::{Config, Settings}, error::{Code, Error}, error2::traits::CloseConnection, frame::FrameStream, proto::{
+    config::{Config, Settings},
+    error::{Code, Error},
+    error2::{
+        internal_error::InternalConnectionError, traits::CloseConnection, ConnectionError, NewCode,
+    },
+    frame::FrameStream,
+    proto::{
         frame::{self, Frame, PayloadLen},
         headers::Header,
         stream::StreamType,
         varint::VarInt,
-    }, qpack, quic::{self, SendStream}, shared_state::{ConnectionState2, SharedState2}, stream::{self, AcceptRecvStream, AcceptedRecvStream, BufRecvStream, UniStreamHeader}, webtransport::SessionId
+    },
+    qpack,
+    quic::{self, SendStream},
+    shared_state::{ConnectionState2, SharedState2},
+    stream::{self, AcceptRecvStream, AcceptedRecvStream, BufRecvStream, UniStreamHeader},
+    webtransport::SessionId,
 };
 
 #[doc(hidden)]
@@ -254,7 +265,11 @@ where
 
     /// Initiates the connection and opens a control stream
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn new(mut conn: C, shared2: Arc<SharedState2>, config: Config) -> Result<Self, Error> {
+    pub async fn new(
+        mut conn: C,
+        shared2: Arc<SharedState2>,
+        config: Config,
+    ) -> Result<Self, Error> {
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
         //# Endpoints SHOULD create the HTTP control stream as well as the
         //# unidirectional streams required by mandatory extensions (such as the
@@ -331,45 +346,38 @@ where
     }
 
     #[allow(missing_docs)]
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_accept_bi(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<C::BidiStream>, Error>> {
-        {
-            let state = self.shared.read("poll_accept_request");
-            if let Some(ref e) = state.error {
-                return Poll::Ready(Err(e.clone()));
-            }
-        }
+    ) -> Poll<Result<C::BidiStream, ConnectionError>> {
+        self.get_conn_error()?;
 
         // Accept the request by accepting the next bidirectional stream
         // .into().into() converts the impl QuicError into crate::error::Error.
         // The `?` operator doesn't work here for some reason.
-        self.conn.poll_accept_bidi(cx).map_err(|e| e.into().into())
+        self.conn
+            .poll_accept_bidi(cx)
+            .map_err(|e| self.handle_quic_connection_error(e))
     }
 
     /// Polls incoming streams
     ///
     /// Accepted streams which are not control, decoder, or encoder streams are buffer in `accepted_recv_streams`
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn poll_accept_recv(&mut self, cx: &mut Context<'_>) -> Result<(), Error> {
-        if let Some(ref e) = self.shared.read("poll_accept_request").error {
-            return Err(e.clone());
-        }
+    pub fn poll_accept_recv(&mut self, cx: &mut Context<'_>) -> Result<(), ConnectionError> {
+        self.get_conn_error()?;
 
         // Get all currently pending streams
         loop {
-            match self.conn.poll_accept_recv(cx)? {
-                Poll::Ready(Some(stream)) => self
+            match self
+                .conn
+                .poll_accept_recv(cx)
+                .map_err(|e| self.handle_quic_connection_error(e))?
+            {
+                Poll::Ready(stream) => self
                     .pending_recv_streams
                     .push(AcceptRecvStream::new(stream)),
-                Poll::Ready(None) => {
-                    return Err(Code::H3_GENERAL_PROTOCOL_ERROR.with_reason(
-                        "Connection closed unexpected",
-                        crate::error::ErrorLevel::ConnectionError,
-                    ))
-                }
                 Poll::Pending => break,
             }
         }
