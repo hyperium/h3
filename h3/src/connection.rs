@@ -28,7 +28,7 @@ use crate::{
         varint::VarInt,
     },
     qpack,
-    quic::{self, SendStream},
+    quic::{self, RecvStream, SendStream},
     shared_state::{ConnectionState2, SharedState2},
     stream::{self, AcceptRecvStream, AcceptedRecvStream, BufRecvStream, UniStreamHeader},
     webtransport::SessionId,
@@ -141,7 +141,7 @@ where
     /// implementation to choose what stream or datagram to discard.
     accepted_streams: AcceptedStreams<C, B>,
 
-    pending_recv_streams: Vec<AcceptRecvStream<C::RecvStream, B>>,
+    pending_recv_streams: Vec<Option<AcceptRecvStream<C::RecvStream, B>>>,
 
     got_peer_settings: bool,
     pub send_grease_frame: bool,
@@ -377,56 +377,61 @@ where
             {
                 Poll::Ready(stream) => self
                     .pending_recv_streams
-                    .push(AcceptRecvStream::new(stream)),
+                    .push(Some(AcceptRecvStream::new(stream))),
                 Poll::Pending => break,
             }
         }
 
-        let mut resolved = vec![];
+        for stream in self.pending_recv_streams.iter_mut().filter(|s| s.is_some()) {
+            let resolved = match stream.as_mut().expect("this cannot be None").poll_type(cx) {
+                Poll::Ready(Err(stream::PollTypeError::IncomingError(e))) => {
+                    return Err(self.handle_quic_connection_error(e));
+                }
+                Poll::Ready(Err(stream::PollTypeError::InternalError(e))) => {
+                    return Err(self.handle_connection_error(e));
+                }
+                Poll::Ready(Err(stream::PollTypeError::EndOfStream)) =>
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
+                //# A receiver MUST tolerate unidirectional streams being
+                //# closed or reset prior to the reception of the unidirectional stream
+                //# header.
+                {
+                    // remove the stream if it was closed before the header was received
+                    let _ = stream.take();
+                    continue;
+                }
+                Poll::Ready(Ok(())) => stream.take().expect("this cannot be None"),
+                Poll::Pending => continue,
+            };
 
-        for (index, pending) in self.pending_recv_streams.iter_mut().enumerate() {
-            match pending.poll_type(cx)? {
-                Poll::Ready(()) => resolved.push(index),
-                Poll::Pending => (),
-            }
-        }
-
-        for (removed, index) in resolved.into_iter().enumerate() {
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
-            //= type=implication
-            //# As certain stream types can affect connection state, a recipient
-            //# SHOULD NOT discard data from incoming unidirectional streams prior to
-            //# reading the stream type.
-            let stream = self
-                .pending_recv_streams
-                .remove(index - removed)
-                .into_stream()?;
-
-            match stream {
+            match resolved.into_stream() {
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
                 //# Only one control stream per peer is permitted;
                 //# receipt of a second stream claiming to be a control stream MUST be
                 //# treated as a connection error of type H3_STREAM_CREATION_ERROR.
                 AcceptedRecvStream::Control(s) => {
                     if self.control_recv.is_some() {
-                        return Err(
-                            self.close(Code::H3_STREAM_CREATION_ERROR, "got two control streams")
-                        );
+                        return Err(self.handle_connection_error(InternalConnectionError::new(
+                            NewCode::H3_STREAM_CREATION_ERROR,
+                            "got two control streams",
+                        )));
                     }
                     self.control_recv = Some(s);
                 }
                 enc @ AcceptedRecvStream::Encoder(_) => {
                     if let Some(_prev) = self.encoder_recv.replace(enc) {
-                        return Err(
-                            self.close(Code::H3_STREAM_CREATION_ERROR, "got two encoder streams")
-                        );
+                        return Err(self.handle_connection_error(InternalConnectionError::new(
+                            NewCode::H3_STREAM_CREATION_ERROR,
+                            "got two encoder streams",
+                        )));
                     }
                 }
                 dec @ AcceptedRecvStream::Decoder(_) => {
                     if let Some(_prev) = self.decoder_recv.replace(dec) {
-                        return Err(
-                            self.close(Code::H3_STREAM_CREATION_ERROR, "got two decoder streams")
-                        );
+                        return Err(self.handle_connection_error(InternalConnectionError::new(
+                            NewCode::H3_STREAM_CREATION_ERROR,
+                            "got two decoder streams",
+                        )));
                     }
                 }
                 AcceptedRecvStream::WebTransportUni(id, s)
@@ -441,9 +446,31 @@ where
                 //= type=implication
                 //# Endpoints MUST NOT consider these streams to have any meaning upon
                 //# receipt.
+                AcceptedRecvStream::Unknown(mut stream) => {
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
+                    //# Recipients of unknown stream types MUST
+                    //# either abort reading of the stream or discard incoming data without
+                    //# further processing.
+
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
+                    //# If reading is aborted, the recipient SHOULD use
+                    //# the H3_STREAM_CREATION_ERROR error code or a reserved error code
+                    //# (Section 8.1).
+
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
+                    //= type=implication
+                    //# The recipient MUST NOT consider unknown stream types
+                    //# to be a connection error of any kind.
+
+                    stream.stop_sending(NewCode::H3_STREAM_CREATION_ERROR.value());
+                }
+                // TODO: Push streams
                 _ => (),
-            }
+            };
         }
+
+        // Remove all None values
+        self.pending_recv_streams.retain(|s| s.is_some());
 
         Ok(())
     }

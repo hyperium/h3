@@ -12,7 +12,7 @@ use tokio::io::ReadBuf;
 use crate::{
     buf::BufList,
     error::{Code, ErrorLevel},
-    error2::ConnectionError,
+    error2::{internal_error::InternalConnectionError, ConnectionError, NewCode},
     frame::FrameStream,
     proto::{
         coding::{Decode as _, Encode},
@@ -20,7 +20,10 @@ use crate::{
         stream::StreamType,
         varint::VarInt,
     },
-    quic::{self, BidiStream, RecvStream, SendStream, SendStreamUnframed, StreamErrorIncoming},
+    quic::{
+        self, BidiStream, ConnectionErrorIncoming, RecvStream, SendStream, SendStreamUnframed,
+        StreamErrorIncoming,
+    },
     webtransport::SessionId,
     Error,
 };
@@ -258,7 +261,7 @@ where
     Encoder(BufRecvStream<S, B>),
     Decoder(BufRecvStream<S, B>),
     WebTransportUni(SessionId, BufRecvStream<S, B>),
-    Reserved,
+    Unknown(BufRecvStream<S, B>),
 }
 
 /// Resolves an incoming streams type as well as `PUSH_ID`s and `SESSION_ID`s
@@ -284,8 +287,8 @@ where
         }
     }
 
-    pub fn into_stream(self) -> Result<AcceptedRecvStream<S, B>, Error> {
-        Ok(match self.ty.expect("Stream type not resolved yet") {
+    pub fn into_stream(self) -> AcceptedRecvStream<S, B> {
+        match self.ty.expect("Stream type not resolved yet") {
             StreamType::CONTROL => AcceptedRecvStream::Control(FrameStream::new(self.stream)),
             StreamType::PUSH => AcceptedRecvStream::Push(FrameStream::new(self.stream)),
             StreamType::ENCODER => AcceptedRecvStream::Encoder(self.stream),
@@ -294,49 +297,35 @@ where
                 SessionId::from_varint(self.id.expect("Session ID not resolved yet")),
                 self.stream,
             ),
-            t if t.value() > 0x21 && (t.value() - 0x21) % 0x1f == 0 => AcceptedRecvStream::Reserved,
-
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
-            //# Recipients of unknown stream types MUST
-            //# either abort reading of the stream or discard incoming data without
-            //# further processing.
-
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
-            //# If reading is aborted, the recipient SHOULD use
-            //# the H3_STREAM_CREATION_ERROR error code or a reserved error code
-            //# (Section 8.1).
-
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
-            //= type=implication
-            //# The recipient MUST NOT consider unknown stream types
-            //# to be a connection error of any kind.
-            t => {
-                return Err(Code::H3_STREAM_CREATION_ERROR.with_reason(
-                    format!("unknown stream type 0x{:x}", t.value()),
-                    crate::error::ErrorLevel::ConnectionError,
-                ))
-            }
-        })
+            _ => AcceptedRecvStream::Unknown(self.stream),
+        }
     }
 
     // New helper function to poll the next VarInt from self.stream
     fn poll_next_varint(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<VarInt, ConnectionError>> {
+    ) -> Poll<Result<(VarInt, Option<StreamEnd>), PollTypeError>> {
+        // Flag if the stream was reset or finished by the peer
+        let mut stream_stopped = None;
+
         loop {
+            if stream_stopped.is_some() {
+                return Poll::Ready(Err(PollTypeError::EndOfStream));
+            }
             //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
             //# A receiver MUST tolerate unidirectional streams being
             //# closed or reset prior to the reception of the unidirectional stream
             //# header.
-            match ready!(self.stream.poll_read(cx)) {
-                Ok(false) => (),
-                Ok(true) => todo!("ignore it"),
+            stream_stopped = match ready!(self.stream.poll_read(cx)) {
+                Ok(false) => None,
+                Ok(true) => Some(StreamEnd::EndOfStream),
                 Err(StreamErrorIncoming::ConnectionErrorIncoming { connection_error }) => {
-                    // return Poll::Ready(Err(connection_error))
-                    return todo!("handle connection error");
+                    return Poll::Ready(Err(PollTypeError::IncomingError(connection_error)));
                 }
-                Err(StreamErrorIncoming::StreamReset { error_code }) => todo!("ignore it"),
+                Err(StreamErrorIncoming::StreamReset { error_code }) => {
+                    Some(StreamEnd::Reset(error_code))
+                }
             };
 
             let mut buf = self.stream.buf_mut();
@@ -351,17 +340,25 @@ where
             } else {
                 continue;
             }
-            return Poll::Ready(Ok(VarInt::decode(&mut buf).map_err(|_| {
-                Code::H3_INTERNAL_ERROR
-                    .with_reason("Unexpected end parsing varint", ErrorLevel::ConnectionError)
-            })?));
+
+            let reult = VarInt::decode(&mut buf).map_err(|_| {
+                PollTypeError::InternalError(InternalConnectionError::new(
+                    NewCode::H3_INTERNAL_ERROR,
+                    "Unexpected end parsing varint",
+                ))
+            })?;
+
+            return Poll::Ready(Ok((reult, stream_stopped)));
         }
     }
 
-    pub fn poll_type(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), ConnectionError>> {
+    pub fn poll_type(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), PollTypeError>> {
         // If we haven't parsed the stream type yet
         if self.ty.is_none() {
-            let var = ready!(self.poll_next_varint(cx))?;
+            // TODO create a test for the StreamEnd Option
+            // If the stream ended or reset directly after the type was received
+            // can we poll data again?
+            let (var, _) = ready!(self.poll_next_varint(cx))?;
             let ty = StreamType::from_value(var.0);
             self.ty = Some(ty);
         }
@@ -372,11 +369,25 @@ where
             Some(StreamType::PUSH | StreamType::WEBTRANSPORT_UNI)
         ) && self.id.is_none()
         {
-            self.id = Some(ready!(self.poll_next_varint(cx))?);
+            let (var, _) = ready!(self.poll_next_varint(cx))?;
+            self.id = Some(var);
         }
 
         Poll::Ready(Ok(()))
     }
+}
+
+enum StreamEnd {
+    EndOfStream,
+    Reset(u64),
+}
+
+pub(super) enum PollTypeError {
+    IncomingError(ConnectionErrorIncoming),
+    InternalError(InternalConnectionError),
+    // Stream stopped with eos or reset.
+    // No Code is received
+    EndOfStream,
 }
 
 pin_project! {
