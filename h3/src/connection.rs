@@ -346,7 +346,7 @@ where
     }
 
     #[allow(missing_docs)]
-    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_accept_bi(
         &mut self,
         cx: &mut Context<'_>,
@@ -495,7 +495,7 @@ where
     }
 
     /// Waits for the control stream to be received and reads subsequent frames.
-    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_control(
         &mut self,
         cx: &mut Context<'_>,
@@ -657,7 +657,7 @@ where
         &mut self,
         recv_closing: &mut Option<T>,
         id: VarInt,
-    ) -> Result<(), Error>
+    ) -> Result<(), ConnectionError>
     where
         T: From<VarInt> + Copy,
         VarInt: From<T>,
@@ -678,13 +678,12 @@ where
                     //= https://www.rfc-editor.org/rfc/rfc9114#section-5.2
                     //# Receiving a GOAWAY containing a larger identifier than previously
                     //# received MUST be treated as a connection error of type H3_ID_ERROR.
-                    return Err(self.close(
-                        Code::H3_ID_ERROR,
-                        format!(
-                            "received a GoAway({}) greater than the former one ({})",
-                            id, prev_id
-                        ),
-                    ));
+                    return Err(self.handle_connection_error(InternalConnectionError::new(
+                        NewCode::H3_ID_ERROR,
+                        // TODO: put the id in the message
+                        //received a GoAway({}) greater than the former one ({})",
+                        "received a GoAway greater than the former one",
+                    )));
                 }
             }
             *recv_closing = Some(id.into());
@@ -843,7 +842,7 @@ impl<S, B> ConnectionState for RequestStream<S, B> {
 
 impl<S, B> RequestStream<S, B> {
     /// Close the connection with an error
-    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn close(&self, code: Code, reason: &'static str) -> Error {
         let _ = self.error_sender.send((code, reason));
         self.maybe_conn_err(code)
