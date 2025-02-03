@@ -6,8 +6,6 @@ use crate::{frame, proto, qpack, quic};
 
 /// Cause of an error thrown by our own h3 layer
 type Cause = Box<dyn std::error::Error + Send + Sync>;
-/// Error thrown by the underlying QUIC impl
-pub(crate) type TransportError = Box<dyn quic::Error>;
 
 /// A general error that can occur when handling the HTTP/3 protocol.
 #[derive(Clone)]

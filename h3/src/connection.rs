@@ -20,7 +20,7 @@ use crate::{
     error2::{
         internal_error::InternalConnectionError, traits::CloseConnection, ConnectionError, NewCode,
     },
-    frame::FrameStream,
+    frame::{FrameStream, FrameStreamError},
     proto::{
         frame::{self, Frame, PayloadLen},
         headers::Header,
@@ -28,7 +28,7 @@ use crate::{
         varint::VarInt,
     },
     qpack,
-    quic::{self, RecvStream, SendStream},
+    quic::{self, RecvStream, SendStream, StreamErrorIncoming},
     shared_state::{ConnectionState2, SharedState2},
     stream::{self, AcceptRecvStream, AcceptedRecvStream, BufRecvStream, UniStreamHeader},
     webtransport::SessionId,
@@ -150,8 +150,8 @@ where
     // step of the grease sending poll fn
     grease_step: GreaseStatus<C::SendStream, B>,
     pub config: Config,
-    error_getter: UnboundedReceiver<(Code, &'static str)>,
-    pub(crate) error_sender: UnboundedSender<(Code, &'static str)>,
+    error_getter: UnboundedReceiver<(NewCode, &'static str)>,
+    pub(crate) error_sender: UnboundedSender<(NewCode, &'static str)>,
 }
 
 impl<B, C> ConnectionState2 for ConnectionInner<C, B>
@@ -479,27 +479,32 @@ where
     /// and closes the connection if there is
     /// it returns the error if there is one
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    fn poll_check_stream_errors(&mut self, cx: &mut Context<'_>) -> Result<(), Error> {
+    fn poll_check_stream_errors(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Result<(), InternalConnectionError> {
         // check if there is an error in the error channel
         // wake up the connection if there is an error
 
         let x = self.error_getter.poll_recv(cx);
         match x {
-            Poll::Ready(Some((code, cause))) => Err(self.close(code, cause)),
+            Poll::Ready(Some((code, cause))) => Err(InternalConnectionError::new(code, cause)),
             Poll::Ready(None) => Ok(()),
             Poll::Pending => Ok(()),
         }
     }
 
     /// Waits for the control stream to be received and reads subsequent frames.
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<Frame<PayloadLen>, Error>> {
-        if let Some(ref e) = self.shared.read("poll_accept_request").error {
-            return Poll::Ready(Err(e.clone()));
-        }
+    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub fn poll_control(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<Frame<PayloadLen>>, ConnectionError>> {
+        self.get_conn_error()?;
 
         // check if a connection error occurred on a stream
-        self.poll_check_stream_errors(cx)?;
+        self.poll_check_stream_errors(cx)
+            .map_err(|e| self.handle_connection_error(e))?;
 
         let recv = {
             // TODO
@@ -512,109 +517,139 @@ where
             }
         };
 
-        let recvd = ready!(recv.poll_next(cx))?;
-
-        let res = match recvd {
+        let res = match ready!(recv.poll_next(cx)) {
+            Err(FrameStreamError::Quic(StreamErrorIncoming::ConnectionErrorIncoming {
+                connection_error,
+            })) => return Poll::Ready(Err(self.handle_quic_connection_error(connection_error))),
+            Err(FrameStreamError::Quic(StreamErrorIncoming::StreamReset { error_code: _ })) =>
             //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
             //# If either control
             //# stream is closed at any point, this MUST be treated as a connection
             //# error of type H3_CLOSED_CRITICAL_STREAM.
-            None => Err(self.close(Code::H3_CLOSED_CRITICAL_STREAM, "control stream closed")),
-            Some(frame) => {
-                match frame {
-                    Frame::Settings(settings) if !self.got_peer_settings => {
-                        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
-                        //= type=TODO
-                        //# A receiver MAY treat the presence of duplicate
-                        //# setting identifiers as a connection error of type H3_SETTINGS_ERROR.
 
-                        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
-                        //= type=TODO
-                        //# Setting identifiers that were defined in [HTTP/2] where there is no
-                        //# corresponding HTTP/3 setting have also been reserved
-                        //# (Section 11.2.2).  These reserved settings MUST NOT be sent, and
-                        //# their receipt MUST be treated as a connection error of type
-                        //# H3_SETTINGS_ERROR.
+            // TODO: Add Test, that reset also triggers this
+            {
+                return Poll::Ready(Err(self.handle_connection_error(
+                    InternalConnectionError::new(
+                        NewCode::H3_CLOSED_CRITICAL_STREAM,
+                        "control stream was reset",
+                    ),
+                )))
+            }
+            Err(FrameStreamError::UnexpectedEnd) =>
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.1
+            //# When a stream terminates cleanly, if the last frame on the stream was
+            //# truncated, this MUST be treated as a connection error of type
+            //# H3_FRAME_ERROR.
+            {
+                return Poll::Ready(Err(self.handle_connection_error(
+                    InternalConnectionError::new(
+                        NewCode::H3_FRAME_ERROR,
+                        "received incomplete frame",
+                    ),
+                )))
+            }
+            Err(FrameStreamError::Proto(frame_error)) => {
+                match InternalConnectionError::frame_error_is_connection_error(frame_error) {
+                    Some(e) => return Poll::Ready(Err(self.handle_connection_error(e))),
+                    // The frame does not correspond to a connection error ignore it
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
+                    //# Endpoints MUST
+                    //# NOT consider these frames to have any meaning upon receipt.
+                    None => (),
+                };
+                // TODO: Can we return None or do we need to return Poll::Pending?
+                None
+            }
+            Ok(None) =>
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
+            //# If either control
+            //# stream is closed at any point, this MUST be treated as a connection
+            //# error of type H3_CLOSED_CRITICAL_STREAM.
+            {
+                return Poll::Ready(Err(self.handle_connection_error(
+                    InternalConnectionError::new(
+                        NewCode::H3_CLOSED_CRITICAL_STREAM,
+                        "control stream was closed",
+                    ),
+                )))
+            }
+            Ok(Some(Frame::Settings(settings))) => {
+                if !self.got_peer_settings {
+                    // Received settings frame
 
-                        self.got_peer_settings = true;
+                    self.got_peer_settings = true;
+                    self.set_settings((&settings).into());
 
-                        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
-                        //= type=implication
-                        //# An implementation MUST ignore any parameter with an identifier it
-                        //# does not understand.
-
-                        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
-                        //= type=implication
-                        //# Endpoints MUST NOT consider such settings to have
-                        //# any meaning upon receipt.
-                        let mut shared = self.shared.write("connection settings write");
-                        shared.peer_config = (&settings).into();
-
-                        Ok(Frame::Settings(settings))
-                    }
-                    f @ Frame::Goaway(_) => Ok(f),
-                    f @ Frame::CancelPush(_) | f @ Frame::MaxPushId(_) => {
-                        if self.got_peer_settings {
-                            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
-                            //= type=TODO
-                            //# If a CANCEL_PUSH frame is received that
-                            //# references a push ID greater than currently allowed on the
-                            //# connection, this MUST be treated as a connection error of type
-                            //# H3_ID_ERROR.
-
-                            Ok(f)
-                        } else {
-                            //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
-                            //# If the first frame of the control stream is any other frame
-                            //# type, this MUST be treated as a connection error of type
-                            //# H3_MISSING_SETTINGS.
-                            Err(self.close(
-                                Code::H3_MISSING_SETTINGS,
-                                format!("received {:?} before settings on control stream", f),
-                            ))
-                        }
-                    }
-
-                    //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
-                    //# Receipt of an invalid sequence of frames MUST be treated as a
-                    //# connection error of type H3_FRAME_UNEXPECTED.
-
-                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.1
-                    //= type=implication
-                    //# DATA frames MUST be associated with an HTTP request or response.
-
-                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.1
-                    //# If
-                    //# a DATA frame is received on a control stream, the recipient MUST
-                    //# respond with a connection error of type H3_FRAME_UNEXPECTED.
-
-                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.2
-                    //# If a HEADERS frame is received on a control stream, the recipient
-                    //# MUST respond with a connection error of type H3_FRAME_UNEXPECTED.
-
+                    Some(Frame::Settings(settings))
+                } else {
                     //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
                     //# If an endpoint receives a second SETTINGS
                     //# frame on the control stream, the endpoint MUST respond with a
                     //# connection error of type H3_FRAME_UNEXPECTED.
-                    frame => Err(self.close(
-                        Code::H3_FRAME_UNEXPECTED,
-                        format!("on control stream: {:?}", frame),
-                    )),
+                    return Poll::Ready(Err(self.handle_connection_error(
+                        InternalConnectionError::new(
+                            NewCode::H3_FRAME_UNEXPECTED,
+                            "second settings frame received",
+                        ),
+                    )));
                 }
+            }
+            _ if !self.got_peer_settings => {
+                // We received a frame before the settings frame
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
+                //# If the first frame of the control stream is any other frame
+                //# type, this MUST be treated as a connection error of type
+                //# H3_MISSING_SETTINGS.
+                return Poll::Ready(Err(self.handle_connection_error(
+                    InternalConnectionError::new(
+                        NewCode::H3_MISSING_SETTINGS,
+                        // TODO: put frame type in message
+                        "received frame before settings",
+                    ),
+                )));
+            }
+            Ok(Some(
+                frame @ Frame::Goaway(_)
+                | frame @ Frame::CancelPush(_)
+                | frame @ Frame::MaxPushId(_),
+            )) => {
+                // handle these frames in client/server imples
+                Some(frame)
+            }
+            _ => {
+                // All other frames are not allowed on the control stream
+                // Unknown frames are not covered by the Frame enum so they should error in the FrameStreamError::Proto variant
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.1
+                //= type=implication
+                //# DATA frames MUST be associated with an HTTP request or response.
+
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.1
+                //# If
+                //# a DATA frame is received on a control stream, the recipient MUST
+                //# respond with a connection error of type H3_FRAME_UNEXPECTED.
+
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.2
+                //# If a HEADERS frame is received on a control stream, the recipient
+                //# MUST respond with a connection error of type H3_FRAME_UNEXPECTED.
+                return Poll::Ready(Err(self.handle_connection_error(
+                    InternalConnectionError::new(
+                        NewCode::H3_FRAME_UNEXPECTED,
+                        // TODO: put frame type in message
+                        "received unexpected frame on control stream",
+                    ),
+                )));
             }
         };
 
         if self.send_grease_stream_flag {
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
-            //= type=implication
-            //# Frame types of the format 0x1f * N + 0x21 for non-negative integer
-            //# values of N are reserved to exercise the requirement that unknown
-            //# types be ignored (Section 9).  These frames have no semantics, and
-            //# they MAY be sent on any stream where frames are allowed to be sent.
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
+            //# They MAY also be
+            //# sent on connections where no data is currently being transferred.
             ready!(self.poll_grease_stream(cx));
         }
 
-        Poll::Ready(res)
+        Poll::Ready(Ok(res))
     }
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
@@ -730,10 +765,16 @@ where
         };
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
+        //= type=implication
         //# When sending a reserved stream type,
         //# the implementation MAY either terminate the stream cleanly or reset
         //# it.
         if let GreaseStatus::DataSent(stream) = &mut self.grease_step {
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3
+            //= type=exception
+            //# When resetting the stream, either the H3_NO_ERROR error code or
+            //# a reserved error code (Section 8.1) SHOULD be used.
+            // We terminate the stream cleanly so no H3_NO_ERROR is needed
             match stream.poll_finish(cx) {
                 Poll::Ready(Ok(_)) => (),
                 Poll::Pending => return Poll::Pending,
@@ -1044,6 +1085,12 @@ where
     pub async fn finish(&mut self) -> Result<(), Error> {
         if self.send_grease_frame {
             // send a grease frame once per Connection
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
+            //= type=implication
+            //# Frame types of the format 0x1f * N + 0x21 for non-negative integer
+            //# values of N are reserved to exercise the requirement that unknown
+            //# types be ignored (Section 9).  These frames have no semantics, and
+            //# they MAY be sent on any stream where frames are allowed to be sent.
             stream::write(&mut self.stream, Frame::Grease)
                 .await
                 .map_err(|e| self.maybe_conn_err(e))?;

@@ -10,7 +10,6 @@ use crate::quic::StreamErrorIncoming;
 use crate::stream::{BufRecvStream, WriteBuf};
 use crate::{
     buf::BufList,
-    error::TransportError,
     proto::{
         frame::{self, Frame, PayloadLen},
         stream::StreamId,
@@ -139,7 +138,7 @@ where
             return Poll::Ready(Ok(true));
         }
         match self.stream.poll_read(cx) {
-            Poll::Ready(Err(e)) => Poll::Ready(Err(FrameStreamError::Quic(e.into()))),
+            Poll::Ready(Err(e)) => Poll::Ready(Err(FrameStreamError::Quic(e))),
             Poll::Pending => Poll::Pending,
             Poll::Ready(Ok(eos)) => Poll::Ready(Ok(eos)),
         }
@@ -254,7 +253,7 @@ impl FrameDecoder {
 #[derive(Debug)]
 pub enum FrameStreamError {
     Proto(frame::FrameError),
-    Quic(TransportError),
+    Quic(StreamErrorIncoming),
     UnexpectedEnd,
 }
 

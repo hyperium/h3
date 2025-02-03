@@ -1,4 +1,4 @@
-use crate::error::Code;
+use crate::proto::{self, frame::FrameError};
 
 use super::codes::NewCode;
 
@@ -43,17 +43,50 @@ pub struct InternalConnectionError {
     pub(super) message: &'static str,
 }
 
-
 impl InternalConnectionError {
     /// Create a new internal connection error
     pub fn new(code: NewCode, message: &'static str) -> Self {
         Self { code, message }
+    }
+
+    /// Creates a new internal connection error from a frame error
+    pub fn frame_error_is_connection_error(value: FrameError) -> Option<Self> {
+        Some(InternalConnectionError::new(
+            match value {
+                proto::frame::FrameError::InvalidStreamId(_)
+                | proto::frame::FrameError::InvalidPushId(_) => NewCode::H3_ID_ERROR,
+                proto::frame::FrameError::Settings(_) => NewCode::H3_SETTINGS_ERROR,
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
+                //# These frame
+                //# types MUST NOT be sent, and their receipt MUST be treated as a
+                //# connection error of type H3_FRAME_UNEXPECTED.
+                proto::frame::FrameError::UnsupportedFrame(_) => NewCode::H3_FRAME_UNEXPECTED,
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
+                //# Endpoints MUST
+                //# NOT consider these frames to have any meaning upon receipt.
+                proto::frame::FrameError::UnknownFrame(_) => return None,
+
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.1
+                //# A frame payload that contains additional bytes
+                //# after the identified fields or a frame payload that terminates before
+                //# the end of the identified fields MUST be treated as a connection
+                //# error of type H3_FRAME_ERROR.
+                proto::frame::FrameError::Incomplete(_)
+                | proto::frame::FrameError::InvalidFrameValue
+                | proto::frame::FrameError::Malformed => NewCode::H3_FRAME_ERROR,
+            },
+            "",
+        ))
     }
 }
 
 impl InternalRequestStreamError {
     /// Create a new internal request stream error
     pub fn new(scope: ErrorScope, code: NewCode, message: &'static str) -> Self {
-        Self { scope, code, message }
+        Self {
+            scope,
+            code,
+            message,
+        }
     }
 }
