@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{hint::black_box, time::Duration};
 
 use assert_matches::assert_matches;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -17,6 +17,7 @@ use crate::{
         varint::VarInt,
     },
     qpack, server,
+    tests::get_stream_blocking,
 };
 
 use super::h3_quinn;
@@ -54,7 +55,9 @@ async fn get() {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
-        let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        let (_request, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
         request_stream
             .send_response(
                 Response::builder()
@@ -112,7 +115,9 @@ async fn get_with_trailers_unknown_content_type() {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
-        let (_, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        let (_, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
         request_stream
             .send_response(
                 Response::builder()
@@ -175,7 +180,9 @@ async fn get_with_trailers_known_content_type() {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
-        let (_, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        let (_, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
         request_stream
             .send_response(
                 Response::builder()
@@ -234,7 +241,9 @@ async fn post() {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
-        let (_, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        let (_, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
         request_stream
             .send_response(
                 Response::builder()
@@ -296,7 +305,15 @@ async fn header_too_big_response_from_server() {
             .await
             .unwrap();
 
-        let err_kind = incoming_req.accept().await.map(|_| ()).unwrap_err().kind();
+        let resolver = incoming_req.accept().await.unwrap().unwrap();
+
+        let err_kind = resolver
+            .resolve_request()
+            .await
+            .err()
+            .expect("should return an error")
+            .kind();
+
         assert_matches!(
             err_kind,
             Kind::HeaderTooBig {
@@ -305,7 +322,9 @@ async fn header_too_big_response_from_server() {
                 ..
             }
         );
-        let _ = incoming_req.accept().await;
+
+        // connection will end without an error
+        assert!(incoming_req.accept().await.unwrap().is_none());
     };
 
     tokio::join!(server_fut, client_fut);
@@ -354,7 +373,9 @@ async fn header_too_big_response_from_server_trailers() {
             .await
             .unwrap();
 
-        let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        let (_request, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
         let _ = request_stream
             .recv_data()
             .await
@@ -384,16 +405,10 @@ async fn header_too_big_client_error() {
     let client_fut = async {
         let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
         let drive_fut = async {
-            let err = future::poll_fn(|cx| driver.poll_close(cx))
+            let _ = future::poll_fn(|cx| driver.poll_close(cx))
                 .await
-                .unwrap_err();
-            match err.kind() {
-                // The client never sends a data on the request stream
-                Kind::Application { code, .. } => {
-                    assert_eq!(code, Code::H3_REQUEST_INCOMPLETE)
-                }
-                _ => panic!("unexpected error: {:?}", err),
-            }
+                .expect("connection does not error, as it is only a stream level error");
+            // Todo: test with configuration for connection level errors when such a configuration is available
         };
         let req_fut = async {
             // pretend client already received server's settings
@@ -431,7 +446,15 @@ async fn header_too_big_client_error() {
             .await
             .unwrap();
 
-        let _ = incoming_req.accept().await;
+        let incoming = incoming_req.accept().await.unwrap().unwrap();
+
+        // client does not send any data, so the server will not receive any data, resulting in a H3_REQUEST_INCOMPLETE
+        assert_matches!(
+            incoming.resolve_request().await.err().expect("should return an error").kind(),
+            Kind::Application { code, .. } => {
+                assert_eq!(code, Code::H3_REQUEST_INCOMPLETE)
+            }
+        );
     };
 
     tokio::join!(server_fut, client_fut);
@@ -504,7 +527,9 @@ async fn header_too_big_client_error_trailer() {
             .await
             .unwrap();
 
-        let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        let (_request, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
         let _ = request_stream
             .recv_data()
             .await
@@ -568,7 +593,9 @@ async fn header_too_big_discard_from_client() {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
-        let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        let (_request, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
         request_stream
             .send_response(
                 Response::builder()
@@ -650,7 +677,9 @@ async fn header_too_big_discard_from_client_trailers() {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
-        let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        let (_request, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
 
         request_stream
             .send_response(
@@ -708,7 +737,9 @@ async fn header_too_big_server_error() {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
-        let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        let (_request, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
         //= type=test
@@ -776,7 +807,9 @@ async fn header_too_big_server_error_trailers() {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
-        let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        let (_request, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
         request_stream
             .send_response(
                 Response::builder()
@@ -897,7 +930,9 @@ async fn get_timeout_client_recv_data() {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
-        let (_request, mut request_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        let (_request, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
         request_stream
             .send_response(
                 Response::builder()
@@ -967,7 +1002,9 @@ async fn post_timeout_server_recv_data() {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
-        let (_, mut req_stream) = incoming_req.accept().await.expect("accept").unwrap();
+        let (_, mut req_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
         assert_matches!(
             req_stream.recv_data().await.map(|_| ()).unwrap_err().kind(),
             Kind::Timeout
@@ -1316,8 +1353,10 @@ async fn request_invalid_data_frame_length_too_large() {
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-7.1
         //= type=test
-        //# In particular, redundant length
-        //# encodings MUST be verified to be self-consistent; see Section 10.8.
+        //# A frame payload that contains additional bytes
+        //# after the identified fields or a frame payload that terminates before
+        //# the end of the identified fields MUST be treated as a connection
+        //# error of type H3_FRAME_ERROR.
         VarInt::from(5u32).encode(&mut buf);
         buf.put_slice(b"fada");
 
@@ -1339,8 +1378,10 @@ async fn request_invalid_data_frame_length_too_short() {
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-7.1
         //= type=test
-        //# In particular, redundant length
-        //# encodings MUST be verified to be self-consistent; see Section 10.8.
+        //# A frame payload that contains additional bytes
+        //# after the identified fields or a frame payload that terminates before
+        //# the end of the identified fields MUST be treated as a connection
+        //# error of type H3_FRAME_ERROR.
         VarInt::from(3u32).encode(&mut buf);
         buf.put_slice(b"fada");
     })
@@ -1429,44 +1470,90 @@ where
 
     let client_fut = async {
         let connection = pair.client_inner().await;
-        let (mut req_send, mut req_recv) = connection.open_bi().await.unwrap();
 
-        let mut buf = BytesMut::new();
-        request(&mut buf);
-        req_send.write_all(&buf[..]).await.unwrap();
-        req_send.finish().unwrap();
-
-        let res = req_recv
-            .read(&mut buf)
-            .await
-            .map_err(Into::<h3_quinn::ReadError>::into)
-            .map_err(Into::<Error>::into)
-            .map(|_| ());
-        check(res);
-
-        let (mut driver, _send) = client::new(h3_quinn::Connection::new(connection))
+        let (mut driver, send) = client::new(h3_quinn::Connection::new(connection.clone()))
             .await
             .unwrap();
 
-        let res = future::poll_fn(|cx| driver.poll_close(cx))
-            .await
-            .map_err(Into::<Error>::into)
-            .map(|_| ());
-        check(res);
+        let (mut req_send, mut req_recv) = connection.open_bi().await.unwrap();
+
+        let client = async move {
+            let mut buf = BytesMut::new();
+            request(&mut buf);
+            req_send.write_all(&buf[..]).await.unwrap();
+            req_send.finish().unwrap();
+
+            // wait to give the server time to return the error before dropping send
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            while let Some(i) = req_recv
+                .read(&mut buf)
+                .await
+                .map_err(Into::<h3_quinn::ReadError>::into)
+                .map_err(Into::<Error>::into)?
+            {
+                black_box(i);
+            }
+
+            // drop the SendRequest to let driver know there will be no more requests
+            drop(send);
+
+            Result::<(), Error>::Ok(())
+        };
+
+        let driver = async {
+            future::poll_fn(|cx| driver.poll_close(cx)).await?;
+            Result::<(), Error>::Ok(())
+        };
+
+        tokio::join!(client, driver)
     };
 
     let server_fut = async {
         let conn = server.next().await;
         let mut incoming = server::Connection::new(conn).await.unwrap();
-        let (_, mut stream) = incoming
+        let request_resolver = incoming
             .accept()
-            .await?
+            .await
+            .unwrap()
             .expect("request stream end unexpected");
-        while stream.recv_data().await?.is_some() {}
-        stream.recv_trailers().await?;
-        Result::<(), Error>::Ok(())
+
+        //  let _ = sender.send(incoming);
+
+        let driver = async move {
+            match incoming.accept().await {
+                Ok(_) => (),
+                Err(err) => return Err(err.into()),
+            };
+            Result::<(), Error>::Ok(())
+        };
+
+        let stream = async {
+            let (_, mut stream) = request_resolver
+                .resolve_request()
+                .await?
+                .expect("request end unexpected");
+
+            while stream.recv_data().await?.is_some() {}
+            stream.recv_trailers().await?;
+            Result::<(), Error>::Ok(())
+        };
+        tokio::join!(driver, stream)
     };
 
-    tokio::select! { res = server_fut => check(res)
-    , _ = client_fut => panic!("client resolved first") };
+    let (
+        (server_result_driver, server_result_stream),
+        (client_result_stream, client_result_driver),
+    ) = tokio::join!(server_fut, client_fut);
+
+    check(server_result_driver);
+    check(server_result_stream);
+
+    if client_result_stream.is_err() {
+        // we have no influence wether the quinn returns the connection error to the stream api
+        // but if it returns an error it needs to be the expected one
+        check(client_result_stream);
+    }
+
+    check(client_result_driver);
 }

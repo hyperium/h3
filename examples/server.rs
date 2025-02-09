@@ -1,13 +1,13 @@
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 
 use bytes::{Bytes, BytesMut};
-use http::{Request, StatusCode};
+use http::StatusCode;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use structopt::StructOpt;
 use tokio::{fs::File, io::AsyncReadExt};
 use tracing::{error, info, trace_span};
 
-use h3::{error::ErrorLevel, quic::BidiStream, server::RequestStream};
+use h3::{error::ErrorLevel, server::RequestResolver};
 use h3_quinn::quinn::{self, crypto::rustls::QuicServerConfig};
 
 #[derive(StructOpt, Debug)]
@@ -118,13 +118,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     loop {
                         match h3_conn.accept().await {
-                            Ok(Some((req, stream))) => {
-                                info!("new request: {:#?}", req);
-
+                            Ok(Some(resolver)) => {
                                 let root = root.clone();
 
                                 tokio::spawn(async {
-                                    if let Err(e) = handle_request(req, stream, root).await {
+                                    if let Err(e) = handle_request(resolver, root).await {
                                         error!("handling request failed: {}", e);
                                     }
                                 });
@@ -159,14 +157,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn handle_request<T>(
-    req: Request<()>,
-    mut stream: RequestStream<T, Bytes>,
+async fn handle_request<C>(
+    resolver: RequestResolver<C, Bytes>,
     serve_root: Arc<Option<PathBuf>>,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
-    T: BidiStream<Bytes>,
+    C: h3::quic::Connection<Bytes>,
 {
+    let (req, mut stream) = if let Some((req, stream)) = resolver.resolve_request().await? {
+        info!("received request: {:?}", req);
+        (req, stream)
+    } else {
+        info!("no request to resolve");
+        return Ok(());
+    };
+
     let (status, to_serve) = match serve_root.as_deref() {
         None => (StatusCode::OK, None),
         Some(_) if req.uri().path().contains("..") => (StatusCode::NOT_FOUND, None),

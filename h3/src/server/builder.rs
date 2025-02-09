@@ -21,7 +21,7 @@
 //! }
 //! ```
 
-use std::{collections::HashSet, result::Result};
+use std::{collections::HashSet, result::Result, sync::Arc};
 
 use bytes::Buf;
 
@@ -32,6 +32,7 @@ use crate::{
     connection::{ConnectionInner, SharedStateRef},
     error::Error,
     quic::{self},
+    shared_state::SharedState2,
 };
 
 use super::connection::Connection;
@@ -129,7 +130,8 @@ impl Builder {
     {
         let (sender, receiver) = mpsc::unbounded_channel();
         Ok(Connection {
-            inner: ConnectionInner::new(conn, SharedStateRef::default(), self.config).await?,
+            inner: ConnectionInner::new(conn, Arc::new(SharedState2::default()), self.config)
+                .await?,
             max_field_section_size: self.config.settings.max_field_section_size,
             request_end_send: sender,
             request_end_recv: receiver,

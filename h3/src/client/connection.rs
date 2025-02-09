@@ -10,6 +10,7 @@ use bytes::{Buf, BytesMut};
 use futures_util::future;
 use http::request;
 
+use tokio::sync::mpsc::UnboundedSender;
 #[cfg(feature = "tracing")]
 use tracing::{info, instrument, trace};
 
@@ -20,6 +21,7 @@ use crate::{
     proto::{frame::Frame, headers::Header, push::PushId},
     qpack,
     quic::{self, StreamId},
+    shared_state::SharedState2,
     stream::{self, BufRecvStream},
 };
 
@@ -109,12 +111,14 @@ where
 {
     pub(super) open: T,
     pub(super) conn_state: SharedStateRef,
+    pub(super) conn_state2: Arc<SharedState2>,
     pub(super) max_field_section_size: u64, // maximum size for a header we receive
     // counts instances of SendRequest to close the connection when the last is dropped.
     pub(super) sender_count: Arc<AtomicUsize>,
     pub(super) conn_waker: Option<Waker>,
     pub(super) _buf: PhantomData<fn(B)>,
     pub(super) send_grease_frame: bool,
+    pub(super) error_sender: UnboundedSender<(Code, &'static str)>,
 }
 
 impl<T, B> SendRequest<T, B>
@@ -188,6 +192,7 @@ where
                 self.max_field_section_size,
                 self.conn_state.clone(),
                 self.send_grease_frame,
+                self.error_sender.clone(),
             ),
         };
         // send the grease frame only once
@@ -216,6 +221,7 @@ where
             .fetch_add(1, std::sync::atomic::Ordering::Release);
 
         Self {
+            conn_state2: self.conn_state2.clone(),
             open: self.open.clone(),
             conn_state: self.conn_state.clone(),
             max_field_section_size: self.max_field_section_size,
@@ -223,6 +229,7 @@ where
             conn_waker: self.conn_waker.clone(),
             _buf: PhantomData,
             send_grease_frame: self.send_grease_frame,
+            error_sender: self.error_sender.clone(),
         }
     }
 }
