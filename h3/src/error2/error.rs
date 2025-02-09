@@ -4,7 +4,10 @@ use std::sync::Arc;
 
 use crate::quic::{self, ConnectionErrorIncoming, StreamErrorIncoming};
 
-use super::{codes::NewCode, internal_error::{InternalConnectionError, InternalRequestStreamError}};
+use super::{
+    codes::NewCode,
+    internal_error::{InternalConnectionError, InternalRequestStreamError},
+};
 
 /// This enum represents wether the error occurred on the local or remote side of the connection
 #[derive(Debug, Clone)]

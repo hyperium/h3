@@ -1,18 +1,15 @@
 use std::{
     marker::PhantomData,
-    pin::Pin,
     task::{Context, Poll},
 };
 
 use bytes::{Buf, BufMut, Bytes};
 use futures_util::{future, ready};
 use pin_project_lite::pin_project;
-use tokio::io::ReadBuf;
 
 use crate::{
     buf::BufList,
-    error::{Code, ErrorLevel},
-    error2::{internal_error::InternalConnectionError, ConnectionError, NewCode},
+    error2::{internal_error::InternalConnectionError, NewCode},
     frame::FrameStream,
     proto::{
         coding::{Decode as _, Encode},
@@ -25,12 +22,11 @@ use crate::{
         StreamErrorIncoming,
     },
     webtransport::SessionId,
-    Error,
 };
 
 #[inline]
 /// Transmits data by encoding in wire format.
-pub(crate) async fn write<S, D, B>(stream: &mut S, data: D) -> Result<(), Error>
+pub(crate) async fn write<S, D, B>(stream: &mut S, data: D) -> Result<(), StreamErrorIncoming>
 where
     S: SendStream<B>,
     D: Into<WriteBuf<B>>,

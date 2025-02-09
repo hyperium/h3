@@ -1,4 +1,4 @@
-use crate::proto::{self, frame::FrameError};
+use crate::frame::FrameProtocolError;
 
 use super::codes::NewCode;
 
@@ -48,36 +48,41 @@ impl InternalConnectionError {
     pub fn new(code: NewCode, message: &'static str) -> Self {
         Self { code, message }
     }
-
-    /// Creates a new internal connection error from a frame error
-    pub fn frame_error_is_connection_error(value: FrameError) -> Option<Self> {
-        Some(InternalConnectionError::new(
+        /// Creates a new internal connection error from a frame error
+        pub fn got_frame_error(value: FrameProtocolError) -> Self {
             match value {
-                proto::frame::FrameError::InvalidStreamId(_)
-                | proto::frame::FrameError::InvalidPushId(_) => NewCode::H3_ID_ERROR,
-                proto::frame::FrameError::Settings(_) => NewCode::H3_SETTINGS_ERROR,
+                FrameProtocolError::InvalidStreamId(_) | FrameProtocolError::InvalidPushId(_) => InternalConnectionError {
+
+                    // TODO: Add error message
+                    code: NewCode::H3_ID_ERROR,
+                    message: "",
+                },
+                FrameProtocolError::Settings(_) => InternalConnectionError {
+                    // TODO: Add error message
+                    // TODO: Check spec which error code to return when a bad settings frame arrives on a stream which is not allowed to have settings
+                    //       At the moment, because the Frame is parsed bevor the stream type is checked, the H3_SETTINGS_ERROR is returned
+                        code: NewCode::H3_SETTINGS_ERROR,
+                        message: "",
+                },
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
                 //# These frame
                 //# types MUST NOT be sent, and their receipt MUST be treated as a
                 //# connection error of type H3_FRAME_UNEXPECTED.
-                proto::frame::FrameError::UnsupportedFrame(_) => NewCode::H3_FRAME_UNEXPECTED,
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
-                //# Endpoints MUST
-                //# NOT consider these frames to have any meaning upon receipt.
-                proto::frame::FrameError::UnknownFrame(_) => return None,
-
+                FrameProtocolError::ForbiddenFrame(_) => InternalConnectionError {
+                        code: NewCode::H3_FRAME_UNEXPECTED,
+                        message: "received a forbidden frame",
+                },
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-7.1
                 //# A frame payload that contains additional bytes
                 //# after the identified fields or a frame payload that terminates before
                 //# the end of the identified fields MUST be treated as a connection
                 //# error of type H3_FRAME_ERROR.
-                proto::frame::FrameError::Incomplete(_)
-                | proto::frame::FrameError::InvalidFrameValue
-                | proto::frame::FrameError::Malformed => NewCode::H3_FRAME_ERROR,
-            },
-            "",
-        ))
-    }
+                FrameProtocolError::InvalidFrameValue | FrameProtocolError::Malformed => InternalConnectionError {
+                    code: NewCode::H3_FRAME_ERROR,
+                    message: "frame payload that contains additional bytes after the identified fields or a frame payload that terminates before the end of the identified fields",
+                },        
+            }
+        }    
 }
 
 impl InternalRequestStreamError {

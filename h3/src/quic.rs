@@ -77,9 +77,13 @@ impl Display for ConnectionErrorIncoming {
             ConnectionErrorIncoming::Timeout => write!(f, "Timeout"),
             ConnectionErrorIncoming::ConnectionClosed { error_code } => {
                 write!(f, "ConnectionClosed: {}", error_code)
-            },
+            }
             ConnectionErrorIncoming::InternalError(error) => {
-                write!(f, "InternalError in the quic trait implementation: {}", error)
+                write!(
+                    f,
+                    "InternalError in the quic trait implementation: {}",
+                    error
+                )
             }
         }
     }
@@ -105,7 +109,6 @@ impl<'a, E: Error + 'a> From<E> for Box<dyn Error + 'a> {
         Box::new(err)
     }
 }
-
 
 impl Into<Box<dyn Error>> for StreamErrorIncoming {
     fn into(self) -> Box<dyn Error> {
@@ -171,7 +174,6 @@ pub trait OpenStreams<B: Buf> {
 
 /// A trait describing the "send" actions of a QUIC stream.
 pub trait SendStream<B: Buf> {
-
     /// Polls if the stream can send more data.
     fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), StreamErrorIncoming>>;
 

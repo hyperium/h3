@@ -1,10 +1,11 @@
 //! Defines error traits
 
+use bytes::Buf;
 use tokio::sync::oneshot::error;
 
 use crate::{
     config::Config,
-    quic::{ConnectionErrorIncoming, StreamErrorIncoming},
+    quic::{self, ConnectionErrorIncoming, StreamErrorIncoming},
     shared_state::ConnectionState2,
 };
 
@@ -102,4 +103,42 @@ pub(crate) trait CloseStream: CloseConnection {
     }
 
     fn close_stream<T: AsRef<str>>(&mut self, code: &NewCode, reason: T) -> ();
+}
+
+pub(crate) trait CloseRawQuicConnection<B: Buf>: quic::Connection<B> {
+    // Should only be used when there is no h3 connection created
+    fn handle_quic_error_raw(&mut self, error: ConnectionErrorIncoming) -> ConnectionError {
+        match error {
+            ConnectionErrorIncoming::Timeout => ConnectionError::Timeout,
+            ConnectionErrorIncoming::InternalError(reason) => {
+                let local_error = LocalError::Application {
+                    code: NewCode::H3_INTERNAL_ERROR,
+                    reason: reason,
+                };
+                self.close(NewCode::H3_INTERNAL_ERROR, reason.as_bytes());
+                let conn_error = ConnectionError::Local { error: local_error };
+                conn_error
+            }
+            _ => ConnectionError::Remote(error),
+        }
+    }
+
+    // Should only be used when there is no h3 connection created
+    fn close_raw_connection_with_h3_error(
+        &mut self,
+        internal_error: InternalConnectionError,
+    ) -> ConnectionError {
+        let error = ConnectionError::Local {
+            error: (&internal_error).into(),
+        };
+        self.close(internal_error.code, internal_error.message.as_bytes());
+        error
+    }
+}
+
+impl<T, B> CloseRawQuicConnection<B> for T
+where
+    T: quic::Connection<B>,
+    B: Buf,
+{
 }

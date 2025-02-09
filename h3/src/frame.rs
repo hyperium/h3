@@ -5,8 +5,9 @@ use bytes::Buf;
 #[cfg(feature = "tracing")]
 use tracing::trace;
 
-use crate::error2::NewCode;
-use crate::quic::StreamErrorIncoming;
+use crate::proto::frame::SettingsError;
+use crate::proto::push::InvalidPushId;
+use crate::quic::{InvalidStreamId, StreamErrorIncoming};
 use crate::stream::{BufRecvStream, WriteBuf};
 use crate::{
     buf::BufList,
@@ -45,6 +46,9 @@ impl<S, B> FrameStream<S, B>
 where
     S: RecvStream,
 {
+    /// Polls the stream for the next frame header
+    ///
+    /// When a frame header is received use `poll_data` to retrieve the frame's data.
     pub fn poll_next(
         &mut self,
         cx: &mut Context<'_>,
@@ -228,6 +232,9 @@ impl FrameDecoder {
 
             match decoded {
                 Err(frame::FrameError::UnknownFrame(_ty)) => {
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
+                    //# Endpoints MUST
+                    //# NOT consider these frames to have any meaning upon receipt.
                     #[cfg(feature = "tracing")]
                     trace!("ignore unknown frame type {:#x}", _ty);
 
@@ -239,11 +246,37 @@ impl FrameDecoder {
                     self.expected = Some(min);
                     return Ok(None);
                 }
-                Err(e) => return Err(e.into()),
                 Ok(frame) => {
                     src.advance(pos);
                     self.expected = None;
                     return Ok(Some(frame));
+                }
+                // -------------- Map the error Values --------------
+                Err(frame::FrameError::InvalidStreamId(e)) => {
+                    return Err(FrameStreamError::Proto(
+                        FrameProtocolError::InvalidStreamId(e),
+                    ));
+                }
+                Err(frame::FrameError::InvalidPushId(e)) => {
+                    return Err(FrameStreamError::Proto(FrameProtocolError::InvalidPushId(
+                        e,
+                    )));
+                }
+                Err(frame::FrameError::Settings(e)) => {
+                    return Err(FrameStreamError::Proto(FrameProtocolError::Settings(e)));
+                }
+                Err(frame::FrameError::UnsupportedFrame(ty)) => {
+                    return Err(FrameStreamError::Proto(FrameProtocolError::ForbiddenFrame(
+                        ty,
+                    )));
+                }
+                Err(frame::FrameError::InvalidFrameValue) => {
+                    return Err(FrameStreamError::Proto(
+                        FrameProtocolError::InvalidFrameValue,
+                    ));
+                }
+                Err(frame::FrameError::Malformed) => {
+                    return Err(FrameStreamError::Proto(FrameProtocolError::Malformed));
                 }
             }
         }
@@ -251,16 +284,22 @@ impl FrameDecoder {
 }
 
 #[derive(Debug)]
+/// Errors that can occur while decoding frames
 pub enum FrameStreamError {
-    Proto(frame::FrameError),
+    Proto(FrameProtocolError),
     Quic(StreamErrorIncoming),
     UnexpectedEnd,
 }
 
-impl From<frame::FrameError> for FrameStreamError {
-    fn from(err: frame::FrameError) -> Self {
-        FrameStreamError::Proto(err)
-    }
+#[derive(Debug, PartialEq)]
+/// Protocol specific errors that can occur while decoding frames in a stream
+pub enum FrameProtocolError {
+    Malformed,
+    ForbiddenFrame(u64), // Known (http2) frames that should generate an error
+    InvalidFrameValue,
+    Settings(SettingsError),
+    InvalidStreamId(InvalidStreamId),
+    InvalidPushId(InvalidPushId),
 }
 
 #[cfg(test)]

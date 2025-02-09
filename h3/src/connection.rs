@@ -18,11 +18,12 @@ use crate::{
     config::{Config, Settings},
     error::{Code, Error},
     error2::{
-        internal_error::InternalConnectionError, traits::CloseConnection, ConnectionError, NewCode,
+        internal_error::InternalConnectionError, traits::CloseConnection,
+        traits::CloseRawQuicConnection, ConnectionError, NewCode, StreamError,
     },
     frame::{FrameStream, FrameStreamError},
     proto::{
-        frame::{self, Frame, PayloadLen},
+        frame::{self, Frame, PayloadLen, SettingsError},
         headers::Header,
         stream::StreamType,
         varint::VarInt,
@@ -197,15 +198,21 @@ where
     B: Buf,
 {
     /// Sends the settings and initializes the control streams
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn send_control_stream_headers(&mut self) -> Result<(), Error> {
+    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub async fn send_control_stream_headers(&mut self) -> Result<(), ConnectionError> {
         #[cfg(test)]
         if !self.config.send_settings {
             return Ok(());
         }
 
-        let settings = frame::Settings::try_from(self.config)
-            .map_err(|e| Code::H3_INTERNAL_ERROR.with_cause(e))?;
+        let settings = frame::Settings::try_from(self.config).map_err(|_err| {
+            // TODO: converting a config to settings should never fail
+            //       it should be impossible to construct a config which cannot be represented as settings
+            self.handle_connection_error(InternalConnectionError::new(
+                NewCode::H3_INTERNAL_ERROR,
+                "error when creating settings frame",
+            ))
+        })?;
 
         #[cfg(feature = "tracing")]
         tracing::debug!("Sending server settings: {:#x?}", settings);
@@ -260,7 +267,21 @@ where
         self.decoder_send = decoder_send;
         self.encoder_send = encoder_send;
 
-        control
+        match control {
+            Ok(control) => Ok(control),
+            Err(StreamErrorIncoming::ConnectionErrorIncoming { connection_error }) => {
+                Err(self.handle_quic_connection_error(connection_error))
+            }
+            Err(StreamErrorIncoming::StreamReset { error_code: _ }) => Err(self
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
+                //# If either control
+                //# stream is closed at any point, this MUST be treated as a connection
+                //# error of type H3_CLOSED_CRITICAL_STREAM.
+                .handle_connection_error(InternalConnectionError::new(
+                    NewCode::H3_CLOSED_CRITICAL_STREAM,
+                    "control stream was requested to stop sending",
+                ))),
+        }
     }
 
     /// Initiates the connection and opens a control stream
@@ -269,7 +290,7 @@ where
         mut conn: C,
         shared2: Arc<SharedState2>,
         config: Config,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, ConnectionError> {
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
         //# Endpoints SHOULD create the HTTP control stream as well as the
         //# unidirectional streams required by mandatory extensions (such as the
@@ -284,6 +305,25 @@ where
 
         let (sender, receiver) = unbounded_channel();
 
+        let control_send = match control_send {
+            Err(StreamErrorIncoming::ConnectionErrorIncoming { connection_error }) => {
+                return Err(conn.handle_quic_error_raw(connection_error));
+            }
+            Err(StreamErrorIncoming::StreamReset { error_code: _ }) => {
+                return Err(
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
+                    //# If either control
+                    //# stream is closed at any point, this MUST be treated as a connection
+                    //# error of type H3_CLOSED_CRITICAL_STREAM.
+                    conn.close_raw_connection_with_h3_error(InternalConnectionError::new(
+                        NewCode::H3_CLOSED_CRITICAL_STREAM,
+                        "control stream was requested to stop sending",
+                    )),
+                );
+            }
+            Ok(control_send) => control_send,
+        };
+
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
         //= type=implication
         //# The
@@ -293,7 +333,7 @@ where
             shared2,
             shared: todo!(),
             conn,
-            control_send: control_send.map_err(Error::transport_err)?,
+            control_send: control_send,
             control_recv: None,
             decoder_recv: None,
             encoder_recv: None,
@@ -322,7 +362,7 @@ where
         &mut self,
         sent_closing: &mut Option<T>,
         max_id: T,
-    ) -> Result<(), Error>
+    ) -> Result<(), ConnectionError>
     where
         T: From<VarInt> + PartialOrd<T> + Copy,
         VarInt: From<T>,
@@ -342,7 +382,21 @@ where
         //# (Section 5.2) so that both endpoints can reliably determine whether
         //# previously sent frames have been processed and gracefully complete or
         //# terminate any necessary remaining tasks.
-        stream::write(&mut self.control_send, Frame::Goaway(max_id.into())).await
+        match stream::write(&mut self.control_send, Frame::Goaway(max_id.into())).await {
+            Ok(()) => Ok(()),
+            Err(StreamErrorIncoming::ConnectionErrorIncoming { connection_error }) => {
+                Err(self.handle_quic_connection_error(connection_error))
+            }
+            Err(StreamErrorIncoming::StreamReset { error_code: _ }) => Err(self
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
+                //# If either control
+                //# stream is closed at any point, this MUST be treated as a connection
+                //# error of type H3_CLOSED_CRITICAL_STREAM.
+                .handle_connection_error(InternalConnectionError::new(
+                    NewCode::H3_CLOSED_CRITICAL_STREAM,
+                    "control stream was requested to stop sending",
+                ))),
+        }
     }
 
     #[allow(missing_docs)]
@@ -550,16 +604,9 @@ where
                 )))
             }
             Err(FrameStreamError::Proto(frame_error)) => {
-                match InternalConnectionError::frame_error_is_connection_error(frame_error) {
-                    Some(e) => return Poll::Ready(Err(self.handle_connection_error(e))),
-                    // The frame does not correspond to a connection error ignore it
-                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
-                    //# Endpoints MUST
-                    //# NOT consider these frames to have any meaning upon receipt.
-                    None => (),
-                };
-                // TODO: Can we return None or do we need to return Poll::Pending?
-                None
+                return Poll::Ready(Err(self.handle_connection_error(
+                    InternalConnectionError::got_frame_error(frame_error),
+                )))
             }
             Ok(None) =>
             //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
@@ -858,16 +905,21 @@ where
     pub fn poll_recv_data(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<impl Buf>, Error>> {
+    ) -> Poll<Result<Option<impl Buf>, StreamError>> {
         if !self.stream.has_data() {
-            let frame = ready!(self.stream.poll_next(cx)).map_err(|error| {
+            let frame = match ready!(self.stream.poll_next(cx)) {
+                Ok(_) => todo!(),
+                Err(_) => todo!(),
+            };
+
+            /*{
                 let error: Error = error.into();
                 if let Some(code) = error.try_get_code() {
                     self.close(code, "test")
                 } else {
                     error
                 }
-            })?;
+            })?;*/
 
             match frame {
                 Some(Frame::Data { .. }) => (),

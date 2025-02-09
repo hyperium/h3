@@ -17,5 +17,5 @@ pub(crate) mod internal_error;
 
 mod error;
 
-pub use error::{ConnectionError, LocalError, ServerStreamError, StreamError};
 pub use codes::NewCode;
+pub use error::{ClientStreamError, ConnectionError, LocalError, ServerStreamError, StreamError};
