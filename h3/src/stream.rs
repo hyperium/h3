@@ -340,7 +340,7 @@ where
             let reult = VarInt::decode(&mut buf).map_err(|_| {
                 PollTypeError::InternalError(InternalConnectionError::new(
                     NewCode::H3_INTERNAL_ERROR,
-                    "Unexpected end parsing varint",
+                    "Unexpected end parsing varint".to_string(),
                 ))
             })?;
 

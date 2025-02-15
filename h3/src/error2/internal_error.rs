@@ -26,7 +26,7 @@ pub struct InternalRequestStreamError {
     /// The error code
     pub(crate) code: NewCode,
     /// The error message
-    pub(crate) message: &'static str,
+    pub(crate) message: String,
 }
 
 /// This error type represents an internal error type, which is used
@@ -40,37 +40,38 @@ pub struct InternalConnectionError {
     /// The error code
     pub(super) code: NewCode,
     /// The error message
-    pub(super) message: &'static str,
+    pub(super) message: String,
 }
 
 impl InternalConnectionError {
     /// Create a new internal connection error
-    pub fn new(code: NewCode, message: &'static str) -> Self {
+    pub fn new(code: NewCode, message: String) -> Self {
         Self { code, message }
     }
         /// Creates a new internal connection error from a frame error
         pub fn got_frame_error(value: FrameProtocolError) -> Self {
             match value {
-                FrameProtocolError::InvalidStreamId(_) | FrameProtocolError::InvalidPushId(_) => InternalConnectionError {
-
-                    // TODO: Add error message
+                FrameProtocolError::InvalidStreamId(id) => InternalConnectionError {
                     code: NewCode::H3_ID_ERROR,
-                    message: "",
+                    message: format!("invalid stream id: {}", id),
                 },
-                FrameProtocolError::Settings(_) => InternalConnectionError {
-                    // TODO: Add error message
+                FrameProtocolError::InvalidPushId(id) => InternalConnectionError {
+                    code: NewCode::H3_ID_ERROR,
+                    message: format!("invalid push id: {}", id),
+                },
+                FrameProtocolError::Settings(error) => InternalConnectionError {
                     // TODO: Check spec which error code to return when a bad settings frame arrives on a stream which is not allowed to have settings
                     //       At the moment, because the Frame is parsed bevor the stream type is checked, the H3_SETTINGS_ERROR is returned
                         code: NewCode::H3_SETTINGS_ERROR,
-                        message: "",
+                        message: error.to_string(),
                 },
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
                 //# These frame
                 //# types MUST NOT be sent, and their receipt MUST be treated as a
                 //# connection error of type H3_FRAME_UNEXPECTED.
-                FrameProtocolError::ForbiddenFrame(_) => InternalConnectionError {
+                FrameProtocolError::ForbiddenFrame(number) => InternalConnectionError {
                         code: NewCode::H3_FRAME_UNEXPECTED,
-                        message: "received a forbidden frame",
+                        message: format!("received a forbidden frame with number {}", number),
                 },
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-7.1
                 //# A frame payload that contains additional bytes
@@ -79,7 +80,7 @@ impl InternalConnectionError {
                 //# error of type H3_FRAME_ERROR.
                 FrameProtocolError::InvalidFrameValue | FrameProtocolError::Malformed => InternalConnectionError {
                     code: NewCode::H3_FRAME_ERROR,
-                    message: "frame payload that contains additional bytes after the identified fields or a frame payload that terminates before the end of the identified fields",
+                    message: "frame payload that contains additional bytes after the identified fields or a frame payload that terminates before the end of the identified fields".to_string(),
                 },        
             }
         }    
@@ -87,7 +88,7 @@ impl InternalConnectionError {
 
 impl InternalRequestStreamError {
     /// Create a new internal request stream error
-    pub fn new(scope: ErrorScope, code: NewCode, message: &'static str) -> Self {
+    pub fn new(scope: ErrorScope, code: NewCode, message: String) -> Self {
         Self {
             scope,
             code,

@@ -38,15 +38,15 @@ pub enum LocalError {
         /// The error code
         code: NewCode,
         /// The error reason
-        reason: &'static str,
+        reason: String,
     },
     #[non_exhaustive]
     /// The connection is closing
     Closing,
 }
 
-impl From<&InternalConnectionError> for LocalError {
-    fn from(err: &InternalConnectionError) -> Self {
+impl From<InternalConnectionError> for LocalError {
+    fn from(err: InternalConnectionError) -> Self {
         LocalError::Application {
             code: err.code,
             reason: err.message,
@@ -54,8 +54,8 @@ impl From<&InternalConnectionError> for LocalError {
     }
 }
 
-impl From<&InternalRequestStreamError> for LocalError {
-    fn from(err: &InternalRequestStreamError) -> Self {
+impl From<InternalRequestStreamError> for LocalError {
+    fn from(err: InternalRequestStreamError) -> Self {
         LocalError::Application {
             code: err.code,
             reason: err.message,
@@ -73,7 +73,7 @@ pub enum StreamError {
         /// The error code
         code: NewCode,
         /// The error reason
-        reason: &'static str,
+        reason: String,
     },
     /// Stream was Reset by the peer
     RemoteReset {

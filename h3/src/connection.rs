@@ -1,5 +1,6 @@
 use std::{
     convert::TryFrom,
+    fmt::format,
     marker::PhantomData,
     sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
     task::{Context, Poll},
@@ -18,8 +19,9 @@ use crate::{
     config::{Config, Settings},
     error::{Code, Error},
     error2::{
-        internal_error::InternalConnectionError, traits::CloseConnection,
-        traits::CloseRawQuicConnection, ConnectionError, NewCode, StreamError,
+        internal_error::InternalConnectionError,
+        traits::{CloseConnection, CloseRawQuicConnection, CloseStream},
+        ConnectionError, NewCode, StreamError,
     },
     frame::{FrameStream, FrameStreamError},
     proto::{
@@ -151,8 +153,8 @@ where
     // step of the grease sending poll fn
     grease_step: GreaseStatus<C::SendStream, B>,
     pub config: Config,
-    error_getter: UnboundedReceiver<(NewCode, &'static str)>,
-    pub(crate) error_sender: UnboundedSender<(NewCode, &'static str)>,
+    error_getter: UnboundedReceiver<(NewCode, String)>,
+    pub(crate) error_sender: UnboundedSender<(NewCode, String)>,
 }
 
 impl<B, C> ConnectionState2 for ConnectionInner<C, B>
@@ -187,8 +189,8 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    fn close_connection<T: AsRef<str>>(&mut self, code: &crate::error2::NewCode, reason: T) -> () {
-        self.conn.close(*code, reason.as_ref().as_bytes());
+    fn close_connection(&mut self, code: crate::error2::NewCode, reason: String) -> () {
+        self.conn.close(code, reason.as_bytes());
     }
 }
 
@@ -210,7 +212,7 @@ where
             //       it should be impossible to construct a config which cannot be represented as settings
             self.handle_connection_error(InternalConnectionError::new(
                 NewCode::H3_INTERNAL_ERROR,
-                "error when creating settings frame",
+                "error when creating settings frame".to_string(),
             ))
         })?;
 
@@ -272,14 +274,17 @@ where
             Err(StreamErrorIncoming::ConnectionErrorIncoming { connection_error }) => {
                 Err(self.handle_quic_connection_error(connection_error))
             }
-            Err(StreamErrorIncoming::StreamReset { error_code: _ }) => Err(self
+            Err(StreamErrorIncoming::StreamReset { error_code: err }) => Err(self
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
                 //# If either control
                 //# stream is closed at any point, this MUST be treated as a connection
                 //# error of type H3_CLOSED_CRITICAL_STREAM.
                 .handle_connection_error(InternalConnectionError::new(
                     NewCode::H3_CLOSED_CRITICAL_STREAM,
-                    "control stream was requested to stop sending",
+                    format!(
+                        "control stream was requested to stop sending with error code {}",
+                        err
+                    ),
                 ))),
         }
     }
@@ -309,7 +314,7 @@ where
             Err(StreamErrorIncoming::ConnectionErrorIncoming { connection_error }) => {
                 return Err(conn.handle_quic_error_raw(connection_error));
             }
-            Err(StreamErrorIncoming::StreamReset { error_code: _ }) => {
+            Err(StreamErrorIncoming::StreamReset { error_code: err }) => {
                 return Err(
                     //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
                     //# If either control
@@ -317,7 +322,10 @@ where
                     //# error of type H3_CLOSED_CRITICAL_STREAM.
                     conn.close_raw_connection_with_h3_error(InternalConnectionError::new(
                         NewCode::H3_CLOSED_CRITICAL_STREAM,
-                        "control stream was requested to stop sending",
+                        format!(
+                            "control stream was requested to stop sending with error code {}",
+                            err,
+                        ),
                     )),
                 );
             }
@@ -387,14 +395,17 @@ where
             Err(StreamErrorIncoming::ConnectionErrorIncoming { connection_error }) => {
                 Err(self.handle_quic_connection_error(connection_error))
             }
-            Err(StreamErrorIncoming::StreamReset { error_code: _ }) => Err(self
+            Err(StreamErrorIncoming::StreamReset { error_code: err }) => Err(self
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
                 //# If either control
                 //# stream is closed at any point, this MUST be treated as a connection
                 //# error of type H3_CLOSED_CRITICAL_STREAM.
                 .handle_connection_error(InternalConnectionError::new(
                     NewCode::H3_CLOSED_CRITICAL_STREAM,
-                    "control stream was requested to stop sending",
+                    format!(
+                        "control stream was requested to stop sending with error code {}",
+                        err
+                    ),
                 ))),
         }
     }
@@ -467,7 +478,7 @@ where
                     if self.control_recv.is_some() {
                         return Err(self.handle_connection_error(InternalConnectionError::new(
                             NewCode::H3_STREAM_CREATION_ERROR,
-                            "got two control streams",
+                            "got two control streams".to_string(),
                         )));
                     }
                     self.control_recv = Some(s);
@@ -476,7 +487,7 @@ where
                     if let Some(_prev) = self.encoder_recv.replace(enc) {
                         return Err(self.handle_connection_error(InternalConnectionError::new(
                             NewCode::H3_STREAM_CREATION_ERROR,
-                            "got two encoder streams",
+                            "got two encoder streams".to_string(),
                         )));
                     }
                 }
@@ -484,7 +495,7 @@ where
                     if let Some(_prev) = self.decoder_recv.replace(dec) {
                         return Err(self.handle_connection_error(InternalConnectionError::new(
                             NewCode::H3_STREAM_CREATION_ERROR,
-                            "got two decoder streams",
+                            "got two decoder streams".to_string(),
                         )));
                     }
                 }
@@ -575,18 +586,17 @@ where
             Err(FrameStreamError::Quic(StreamErrorIncoming::ConnectionErrorIncoming {
                 connection_error,
             })) => return Poll::Ready(Err(self.handle_quic_connection_error(connection_error))),
-            Err(FrameStreamError::Quic(StreamErrorIncoming::StreamReset { error_code: _ })) =>
+            Err(FrameStreamError::Quic(StreamErrorIncoming::StreamReset { error_code: err })) =>
             //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
             //# If either control
             //# stream is closed at any point, this MUST be treated as a connection
             //# error of type H3_CLOSED_CRITICAL_STREAM.
-
             // TODO: Add Test, that reset also triggers this
             {
                 return Poll::Ready(Err(self.handle_connection_error(
                     InternalConnectionError::new(
                         NewCode::H3_CLOSED_CRITICAL_STREAM,
-                        "control stream was reset",
+                        format!("control stream was reset with error code {}", err),
                     ),
                 )))
             }
@@ -599,7 +609,7 @@ where
                 return Poll::Ready(Err(self.handle_connection_error(
                     InternalConnectionError::new(
                         NewCode::H3_FRAME_ERROR,
-                        "received incomplete frame",
+                        "received incomplete frame".to_string(),
                     ),
                 )))
             }
@@ -617,7 +627,7 @@ where
                 return Poll::Ready(Err(self.handle_connection_error(
                     InternalConnectionError::new(
                         NewCode::H3_CLOSED_CRITICAL_STREAM,
-                        "control stream was closed",
+                        "control stream was closed".to_string(),
                     ),
                 )))
             }
@@ -637,12 +647,12 @@ where
                     return Poll::Ready(Err(self.handle_connection_error(
                         InternalConnectionError::new(
                             NewCode::H3_FRAME_UNEXPECTED,
-                            "second settings frame received",
+                            "second settings frame received".to_string(),
                         ),
                     )));
                 }
             }
-            _ if !self.got_peer_settings => {
+            Ok(Some(frame)) if !self.got_peer_settings => {
                 // We received a frame before the settings frame
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
                 //# If the first frame of the control stream is any other frame
@@ -652,7 +662,7 @@ where
                     InternalConnectionError::new(
                         NewCode::H3_MISSING_SETTINGS,
                         // TODO: put frame type in message
-                        "received frame before settings",
+                        format!("received frame {:?} before settings", frame),
                     ),
                 )));
             }
@@ -664,9 +674,9 @@ where
                 // handle these frames in client/server imples
                 Some(frame)
             }
-            _ => {
+            Ok(Some(frame)) => {
                 // All other frames are not allowed on the control stream
-                // Unknown frames are not covered by the Frame enum so they should error in the FrameStreamError::Proto variant
+                // Unknown frames are not covered by the Frame enum and poll_next will just ignore them
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.1
                 //= type=implication
                 //# DATA frames MUST be associated with an HTTP request or response.
@@ -683,7 +693,7 @@ where
                     InternalConnectionError::new(
                         NewCode::H3_FRAME_UNEXPECTED,
                         // TODO: put frame type in message
-                        "received unexpected frame on control stream",
+                        format!("received unexpected frame {:?} on control stream", frame),
                     ),
                 )));
             }
@@ -727,9 +737,10 @@ where
                     //# received MUST be treated as a connection error of type H3_ID_ERROR.
                     return Err(self.handle_connection_error(InternalConnectionError::new(
                         NewCode::H3_ID_ERROR,
-                        // TODO: put the id in the message
-                        //received a GoAway({}) greater than the former one ({})",
-                        "received a GoAway greater than the former one",
+                        format!(
+                            "received a GoAway ({}) greater than the former one ({})",
+                            id, prev_id
+                        ),
                     )));
                 }
             }
@@ -855,10 +866,10 @@ where
 pub struct RequestStream<S, B> {
     pub(super) stream: FrameStream<S, B>,
     pub(super) trailers: Option<Bytes>,
-    pub(super) conn_state: SharedStateRef,
+    pub(super) conn_state: Arc<SharedState2>,
     pub(super) max_field_section_size: u64,
     send_grease_frame: bool,
-    error_sender: UnboundedSender<(Code, &'static str)>,
+    error_sender: UnboundedSender<(NewCode, String)>,
 }
 
 impl<S, B> RequestStream<S, B> {
@@ -866,9 +877,9 @@ impl<S, B> RequestStream<S, B> {
     pub fn new(
         stream: FrameStream<S, B>,
         max_field_section_size: u64,
-        conn_state: SharedStateRef,
+        conn_state: Arc<SharedState2>,
         grease: bool,
-        error_sender: UnboundedSender<(Code, &'static str)>,
+        error_sender: UnboundedSender<(NewCode, String)>,
     ) -> Self {
         Self {
             stream,
@@ -881,20 +892,19 @@ impl<S, B> RequestStream<S, B> {
     }
 }
 
-impl<S, B> ConnectionState for RequestStream<S, B> {
-    fn shared_state(&self) -> &SharedStateRef {
+impl<S, B> ConnectionState2 for RequestStream<S, B> {
+    fn shared_state(&self) -> &SharedState2 {
         &self.conn_state
     }
 }
 
-impl<S, B> RequestStream<S, B> {
-    /// Close the connection with an error
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn close(&self, code: Code, reason: &'static str) -> Error {
-        let _ = self.error_sender.send((code, reason));
-        self.maybe_conn_err(code)
+impl<S, B> CloseConnection for RequestStream<S, B> {
+    fn close_connection(&mut self, code: crate::error2::NewCode, reason: String) -> () {
+        self.error_sender.send((code, reason)).ok();
     }
 }
+
+impl<S, B> CloseStream for RequestStream<S, B> {}
 
 impl<S, B> RequestStream<S, B>
 where
@@ -908,8 +918,8 @@ where
     ) -> Poll<Result<Option<impl Buf>, StreamError>> {
         if !self.stream.has_data() {
             let frame = match ready!(self.stream.poll_next(cx)) {
+                Err(FrameStreamError::Quic(error)) => self.handle_quic_stream_error(error),
                 Ok(_) => todo!(),
-                Err(_) => todo!(),
             };
 
             /*{

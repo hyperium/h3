@@ -30,7 +30,7 @@ pub enum ConnectionErrorIncoming {
     },
     /// This variant can be used to signal, that an internal error occurred within the trait implementations
     /// h3 will close the connection with H3_INTERNAL_ERROR
-    InternalError(&'static str),
+    InternalError(String),
 }
 
 /// Error type to communicate that the stream was closed

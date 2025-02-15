@@ -8,16 +8,10 @@ use tokio::sync::mpsc::UnboundedSender;
 use tracing::instrument;
 
 use crate::{
-    connection::{self, ConnectionState, SharedStateRef},
-    error::{Code, ErrorLevel},
-    frame::{FrameStream, FrameStreamError},
-    proto::{
+    connection::{self, ConnectionState, SharedStateRef}, error::{Code, ErrorLevel}, error2::NewCode, frame::{FrameStream, FrameStreamError}, proto::{
         frame::{Frame, PayloadLen},
         headers::Header,
-    },
-    qpack,
-    quic::{self, SendStream, StreamId},
-    Error,
+    }, qpack, quic::{self, SendStream, StreamId}, Error
 };
 
 use super::{connection::RequestEnd, stream::RequestStream};
@@ -30,7 +24,7 @@ where
     B: Buf,
 {
     pub(super) frame_stream: FrameStream<C::BidiStream, B>,
-    pub(super) error_sender: UnboundedSender<(Code, &'static str)>,
+    pub(super) error_sender: UnboundedSender<(NewCode, String)>,
     pub(super) request_end_send: UnboundedSender<StreamId>,
     pub(super) send_grease_frame: bool,
     pub(super) max_field_section_size: u64,
@@ -95,8 +89,8 @@ where
                 // Close if the first frame is not a header frame
 
                 let _ = self.error_sender.send((
-                    Code::H3_FRAME_UNEXPECTED,
-                    "first request frame is not headers",
+                    NewCode::H3_FRAME_UNEXPECTED,
+                    "first request frame is not headers".to_string(),
                 ));
 
                 return Err(Code::H3_FRAME_UNEXPECTED.with_reason(

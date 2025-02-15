@@ -17,6 +17,7 @@ use tracing::{info, instrument, trace};
 use crate::{
     connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
     error::{Code, Error, ErrorLevel},
+    error2::NewCode,
     frame::FrameStream,
     proto::{frame::Frame, headers::Header, push::PushId},
     qpack,
@@ -118,7 +119,7 @@ where
     pub(super) conn_waker: Option<Waker>,
     pub(super) _buf: PhantomData<fn(B)>,
     pub(super) send_grease_frame: bool,
-    pub(super) error_sender: UnboundedSender<(Code, &'static str)>,
+    pub(super) error_sender: UnboundedSender<(NewCode, &'static str)>,
 }
 
 impl<T, B> SendRequest<T, B>
