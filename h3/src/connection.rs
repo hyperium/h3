@@ -906,155 +906,155 @@ impl<S, B> CloseConnection for RequestStream<S, B> {
 
 impl<S, B> CloseStream for RequestStream<S, B> {}
 
+impl<S, B> RequestStream<S, B> {
+    /// Handles FrameStreamErrors when they occur on a stream.
+    fn handle_frame_stream_error(&mut self, error: FrameStreamError) -> StreamError {
+        match error {
+            FrameStreamError::Quic(error) => self.handle_quic_stream_error(error),
+            FrameStreamError::Proto(frame_error) => self.handle_connection_error_on_stream(
+                InternalConnectionError::got_frame_error(frame_error).into(),
+            ),
+            FrameStreamError::UnexpectedEnd => {
+                self.handle_connection_error_on_stream(InternalConnectionError::new(
+                    NewCode::H3_FRAME_ERROR,
+                    "received incomplete frame".to_string(),
+                ))
+            }
+        }
+    }
+}
+
 impl<S, B> RequestStream<S, B>
 where
     S: quic::RecvStream,
 {
     /// Receive some of the request body.
-    //  #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_recv_data(
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<impl Buf>, StreamError>> {
         if !self.stream.has_data() {
-            let frame = match ready!(self.stream.poll_next(cx)) {
-                Err(FrameStreamError::Quic(error)) => self.handle_quic_stream_error(error),
-                Ok(_) => todo!(),
-            };
-
-            /*{
-                let error: Error = error.into();
-                if let Some(code) = error.try_get_code() {
-                    self.close(code, "test")
-                } else {
-                    error
+            match ready!(self.stream.poll_next(cx)) {
+                Err(frame_stream_error) => {
+                    return Poll::Ready(Err(self.handle_frame_stream_error(frame_stream_error)))
                 }
-            })?;*/
-
-            match frame {
-                Some(Frame::Data { .. }) => (),
-                Some(Frame::Headers(encoded)) => {
+                Ok(None) => return Poll::Ready(Ok(None)),
+                Ok(Some(Frame::Headers(encoded))) => {
                     self.trailers = Some(encoded);
+                    // Received trailers, no more data expected
                     return Poll::Ready(Ok(None));
                 }
+                Ok(Some(Frame::Data { .. })) => (),
+                Ok(Some(other_frame)) => {
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+                    //# Receipt of an invalid sequence of frames MUST be treated as a
+                    //# connection error of type H3_FRAME_UNEXPECTED.
 
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
-                //# Receipt of an invalid sequence of frames MUST be treated as a
-                //# connection error of type H3_FRAME_UNEXPECTED.
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
+                    //# Receiving a
+                    //# CANCEL_PUSH frame on a stream other than the control stream MUST be
+                    //# treated as a connection error of type H3_FRAME_UNEXPECTED.
 
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
-                //# Receiving a
-                //# CANCEL_PUSH frame on a stream other than the control stream MUST be
-                //# treated as a connection error of type H3_FRAME_UNEXPECTED.
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
+                    //# If an endpoint receives a SETTINGS frame on a different
+                    //# stream, the endpoint MUST respond with a connection error of type
+                    //# H3_FRAME_UNEXPECTED.
 
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
-                //# If an endpoint receives a SETTINGS frame on a different
-                //# stream, the endpoint MUST respond with a connection error of type
-                //# H3_FRAME_UNEXPECTED.
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.6
+                    //# A client MUST treat a GOAWAY frame on a stream other than
+                    //# the control stream as a connection error of type H3_FRAME_UNEXPECTED.
 
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.6
-                //# A client MUST treat a GOAWAY frame on a stream other than
-                //# the control stream as a connection error of type H3_FRAME_UNEXPECTED.
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.7
+                    //# The MAX_PUSH_ID frame is always sent on the control stream.  Receipt
+                    //# of a MAX_PUSH_ID frame on any other stream MUST be treated as a
+                    //# connection error of type H3_FRAME_UNEXPECTED.
 
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.7
-                //# The MAX_PUSH_ID frame is always sent on the control stream.  Receipt
-                //# of a MAX_PUSH_ID frame on any other stream MUST be treated as a
-                //# connection error of type H3_FRAME_UNEXPECTED.
-                Some(_) => {
-                    return Poll::Ready(Err(
-                        self.close(Code::H3_FRAME_UNEXPECTED, "received unexpected frame")
-                    ))
+                    return Poll::Ready(Err(self.handle_connection_error_on_stream(
+                        InternalConnectionError::new(
+                            NewCode::H3_FRAME_UNEXPECTED,
+                            format!("unexpected frame: {:?}", other_frame),
+                        ),
+                    )));
                 }
-                None => return Poll::Ready(Ok(None)),
-            }
+            };
         }
 
-        self.stream.poll_data(cx).map_err(|error| {
-            let error: Error = error.into();
-            if let Some(code) = error.try_get_code() {
-                self.close(code, "test")
-            } else {
-                error
-            }
-        })
+        self.stream
+            .poll_data(cx)
+            .map_err(|error| self.handle_frame_stream_error(error))
     }
 
     /// Poll receive trailers.
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_recv_trailers(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<HeaderMap>, Error>> {
+    ) -> Poll<Result<Option<HeaderMap>, StreamError>> {
         let mut trailers = if let Some(encoded) = self.trailers.take() {
             encoded
         } else {
-            let frame = futures_util::ready!(self.stream.poll_next(cx)).map_err(|error| {
-                let error: Error = error.into();
-                if let Some(code) = error.try_get_code() {
-                    self.close(code, "test")
-                } else {
-                    error
+            match ready!(self.stream.poll_next(cx)) {
+                Err(frame_stream_error) => {
+                    return Poll::Ready(Err(self.handle_frame_stream_error(frame_stream_error)))
                 }
-            })?;
-            match frame {
-                Some(Frame::Headers(encoded)) => encoded,
+                Ok(None) => return Poll::Ready(Ok(None)),
+                Ok(Some(other_frame)) => {
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+                    //# Receipt of an invalid sequence of frames MUST be treated as a
+                    //# connection error of type H3_FRAME_UNEXPECTED.
 
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
-                //# Receipt of an invalid sequence of frames MUST be treated as a
-                //# connection error of type H3_FRAME_UNEXPECTED.
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
+                    //# Receiving a
+                    //# CANCEL_PUSH frame on a stream other than the control stream MUST be
+                    //# treated as a connection error of type H3_FRAME_UNEXPECTED.
 
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
-                //# Receiving a
-                //# CANCEL_PUSH frame on a stream other than the control stream MUST be
-                //# treated as a connection error of type H3_FRAME_UNEXPECTED.
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
+                    //# If an endpoint receives a SETTINGS frame on a different
+                    //# stream, the endpoint MUST respond with a connection error of type
+                    //# H3_FRAME_UNEXPECTED.
 
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
-                //# If an endpoint receives a SETTINGS frame on a different
-                //# stream, the endpoint MUST respond with a connection error of type
-                //# H3_FRAME_UNEXPECTED.
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.6
+                    //# A client MUST treat a GOAWAY frame on a stream other than
+                    //# the control stream as a connection error of type H3_FRAME_UNEXPECTED.
 
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.6
-                //# A client MUST treat a GOAWAY frame on a stream other than
-                //# the control stream as a connection error of type H3_FRAME_UNEXPECTED.
-
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.7
-                //# The MAX_PUSH_ID frame is always sent on the control stream.  Receipt
-                //# of a MAX_PUSH_ID frame on any other stream MUST be treated as a
-                //# connection error of type H3_FRAME_UNEXPECTED.
-                Some(_) => {
-                    // try closing the connection by sending the error to the connection
-                    // this error does not need to be handled. When the buffer is full, a other stream has closed the connection
-                    // when the receiver is dropped, the connection is closed
-                    let _ = self
-                        .error_sender
-                        .send((Code::H3_FRAME_UNEXPECTED, "received unexpected frame"));
-                    return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED.into()));
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.7
+                    //# The MAX_PUSH_ID frame is always sent on the control stream.  Receipt
+                    //# of a MAX_PUSH_ID frame on any other stream MUST be treated as a
+                    //# connection error of type H3_FRAME_UNEXPECTED.
+                    return Poll::Ready(Err(self.handle_connection_error_on_stream(
+                        InternalConnectionError::new(
+                            NewCode::H3_FRAME_UNEXPECTED,
+                            format!("unexpected frame: {:?}", other_frame),
+                        ),
+                    )));
                 }
-                None => return Poll::Ready(Ok(None)),
+                Ok(Some(Frame::Headers(encoded))) => encoded,
             }
         };
+
         if !self.stream.is_eos() {
-            // Get the trailing frame
-            match self.stream.poll_next(cx).map_err(|error| {
-                let error: Error = error.into();
-                if let Some(code) = error.try_get_code() {
-                    self.close(code, "test")
-                } else {
-                    error
+            // Get the trailing frame. After trailers no known frame is allowed.
+            // But there still can be unknown frames.
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+            //# Receipt of an invalid sequence of frames MUST be treated as a
+            //# connection error of type H3_FRAME_UNEXPECTED.
+
+            match self.stream.poll_next(cx) {
+                Poll::Ready(Err(frame_stream_error)) => {
+                    return Poll::Ready(Err(self.handle_frame_stream_error(frame_stream_error)))
                 }
-            })? {
-                Poll::Ready(trailing_frame) => {
-                    if trailing_frame.is_some() {
-                        // if it's not unknown or reserved, fail.
-                        // try closing the connection by sending the error to the connection
-                        // this error does not need to be handled. When the buffer is full, a other stream has closed the connection
-                        // when the receiver is dropped, the connection is closed
-                        let _ = self
-                            .error_sender
-                            .send((Code::H3_FRAME_UNEXPECTED, "received unexpected frame"));
-                        return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED.into()));
-                    }
+                Poll::Ready(Ok(Some(trailing_frame))) => {
+                    // Received a known frame after trailers -> fail.
+                    return Poll::Ready(Err(self.handle_connection_error_on_stream(
+                        InternalConnectionError::new(
+                            NewCode::H3_FRAME_UNEXPECTED,
+                            format!("unexpected frame: {:?}", trailing_frame),
+                        ),
+                    )));
                 }
+                // Stream is finished no problematic frames received
+                Poll::Ready(Ok(None)) => (),
                 Poll::Pending => {
                     // save the trailers and try again.
                     self.trailers = Some(trailers);

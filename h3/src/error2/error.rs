@@ -4,10 +4,7 @@ use std::sync::Arc;
 
 use crate::quic::{self, ConnectionErrorIncoming, StreamErrorIncoming};
 
-use super::{
-    codes::NewCode,
-    internal_error::{InternalConnectionError, InternalRequestStreamError},
-};
+use super::{codes::NewCode, internal_error::InternalConnectionError};
 
 /// This enum represents wether the error occurred on the local or remote side of the connection
 #[derive(Debug, Clone)]
@@ -22,7 +19,7 @@ pub enum ConnectionError {
     /// Error returned by the quic layer
     /// I might be an quic error or the remote h3 connection closed the connection with an error
     #[non_exhaustive]
-    Remote(ConnectionErrorIncoming), // TODO: create custom user facing remote error
+    Remote(ConnectionErrorIncoming),
     /// Timeout occurred
     #[non_exhaustive]
     Timeout,
@@ -47,15 +44,6 @@ pub enum LocalError {
 
 impl From<InternalConnectionError> for LocalError {
     fn from(err: InternalConnectionError) -> Self {
-        LocalError::Application {
-            code: err.code,
-            reason: err.message,
-        }
-    }
-}
-
-impl From<InternalRequestStreamError> for LocalError {
-    fn from(err: InternalRequestStreamError) -> Self {
         LocalError::Application {
             code: err.code,
             reason: err.message,

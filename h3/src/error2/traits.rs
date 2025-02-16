@@ -9,7 +9,7 @@ use crate::{
 
 use super::{
     codes::NewCode,
-    internal_error::{ ErrorScope, InternalConnectionError, InternalRequestStreamError},
+    internal_error::{ ErrorScope, InternalConnectionError},
     ConnectionError, LocalError, StreamError,
 };
 
@@ -57,43 +57,16 @@ pub(crate) trait CloseConnection: ConnectionState2 {
     fn close_connection(&mut self, code: NewCode, reason: String) -> ();
 }
 
+
+
 pub(crate) trait CloseStream: CloseConnection {
-    fn handle_stream_error<F>(
+    fn handle_connection_error_on_stream(
         &mut self,
-        internal_error: InternalRequestStreamError,
-        close_stream: F,
+        internal_error: InternalConnectionError,
     ) -> StreamError
-    where
-        F: FnOnce(NewCode, String) -> (),
     {
-        return if let Err(error) = self.get_conn_error() {
-            // If the connection is already in an error state, return the error
-            StreamError::ConnectionError(error)
-        } else {
-            match internal_error.scope {
-                ErrorScope::Connection => {
-                    // If the error affects the connection, close the connection
-                    let conn_error = ConnectionError::Local {
-                        error: internal_error.clone().into(),
-                    };
-
-                    self.set_conn_error(conn_error.clone());
-                    let error = StreamError::ConnectionError(conn_error);
-                    self.close_connection(internal_error.code, internal_error.message);
-                    error
-                }
-                ErrorScope::Stream => {
-                    // If the error affects the stream, close the stream
-                    close_stream(internal_error.code, internal_error.clone().message);
-
-                    let error = StreamError::StreamError {
-                        code: internal_error.code,
-                        reason: internal_error.message,
-                    };
-                    error
-                }
-            }
-        };
+        let error = self.handle_connection_error(internal_error);
+        StreamError::ConnectionError(error)
     }
 
     fn handle_quic_stream_error(&mut self, error: StreamErrorIncoming) -> StreamError {

@@ -14,22 +14,6 @@ pub enum ErrorScope {
 }
 
 /// This error type represents an internal error type, which is used
-/// to represent errors, which have not yet affected the connection or stream state
-///
-/// This error type is generated from the error types of h3s submodules or by the modules itself.
-///
-/// This error type is used in functions which handle a http3 request stream
-#[derive(Debug, Clone, Hash)]
-pub struct InternalRequestStreamError {
-    /// The error scope
-    pub(crate) scope: ErrorScope,
-    /// The error code
-    pub(crate) code: NewCode,
-    /// The error message
-    pub(crate) message: String,
-}
-
-/// This error type represents an internal error type, which is used
 /// to represent errors, which have not yet affected the connection state
 ///
 /// This error type is generated from the error types of h3s submodules or by the modules itself.
@@ -61,7 +45,8 @@ impl InternalConnectionError {
                 },
                 FrameProtocolError::Settings(error) => InternalConnectionError {
                     // TODO: Check spec which error code to return when a bad settings frame arrives on a stream which is not allowed to have settings
-                    //       At the moment, because the Frame is parsed bevor the stream type is checked, the H3_SETTINGS_ERROR is returned
+                    //       At the moment, because the Frame is parsed before the stream type is checked, the H3_SETTINGS_ERROR is returned.
+                    //       Same for the InvalidStreamId and InvalidPushId
                         code: NewCode::H3_SETTINGS_ERROR,
                         message: error.to_string(),
                 },
@@ -84,15 +69,4 @@ impl InternalConnectionError {
                 },        
             }
         }    
-}
-
-impl InternalRequestStreamError {
-    /// Create a new internal request stream error
-    pub fn new(scope: ErrorScope, code: NewCode, message: String) -> Self {
-        Self {
-            scope,
-            code,
-            message,
-        }
-    }
 }
