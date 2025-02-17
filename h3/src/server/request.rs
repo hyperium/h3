@@ -8,11 +8,22 @@ use tokio::sync::mpsc::UnboundedSender;
 use tracing::instrument;
 
 use crate::{
-    connection::{self, ConnectionState, SharedStateRef}, error::{Code, ErrorLevel}, error2::NewCode, frame::{FrameStream, FrameStreamError}, proto::{
+    connection::{self},
+    error2::{
+        internal_error::InternalConnectionError,
+        traits::{CloseConnection, CloseStream, HandleFrameStreamErrorOnRequestStream},
+        NewCode, StreamError,
+    },
+    frame::{FrameStream, FrameStreamError},
+    proto::{
         frame::{Frame, PayloadLen},
         headers::Header,
-    }, qpack, quic::{self, SendStream, StreamId}, Error
+    },
+    qpack,
+    quic::{self, SendStream, StreamId},
+    shared_state::{ConnectionState2, SharedState2},
 };
+
 
 use super::{connection::RequestEnd, stream::RequestStream};
 
@@ -28,7 +39,34 @@ where
     pub(super) request_end_send: UnboundedSender<StreamId>,
     pub(super) send_grease_frame: bool,
     pub(super) max_field_section_size: u64,
-    pub(super) shared: SharedStateRef,
+    pub(super) shared: Arc<SharedState2>,
+}
+
+impl<C, B> ConnectionState2 for RequestResolver<C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    fn shared_state(&self) -> &SharedState2 {
+        &self.shared
+    }
+}
+
+impl<C, B> CloseConnection for RequestResolver<C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    fn close_connection(&mut self, code: NewCode, reason: String) -> () {
+        let _ = self.error_sender.send((code, reason));
+    }
+}
+
+impl<C, B> CloseStream for RequestResolver<C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
 }
 
 impl<C, B> RequestResolver<C, B>
@@ -40,7 +78,7 @@ where
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn resolve_request(
         mut self,
-    ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
+    ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, StreamError> {
         let frame = std::future::poll_fn(|cx| self.frame_stream.poll_next(cx)).await;
         let req = self.accept_with_frame(frame)?;
         if let Some(req) = req {
@@ -55,11 +93,11 @@ where
     /// This is needed as a bidirectional stream may be read as part of incoming webtransport
     /// bi-streams. If it turns out that the stream is *not* a `WEBTRANSPORT_STREAM` the request
     /// may still want to be handled and passed to the user.
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn accept_with_frame(
         mut self,
         frame: Result<Option<Frame<PayloadLen>>, FrameStreamError>,
-    ) -> Result<Option<ResolvedRequest<C, B>>, Error> {
+    ) -> Result<Option<ResolvedRequest<C, B>>, StreamError> {
         let mut encoded = match frame {
             Ok(Some(Frame::Headers(h))) => h,
 
@@ -69,9 +107,11 @@ where
             //# complete response, the server SHOULD abort its response stream with
             //# the error code H3_REQUEST_INCOMPLETE.
             Ok(None) => {
-                self.frame_stream.reset(Code::H3_REQUEST_INCOMPLETE.into());
-                return Err(Code::H3_REQUEST_INCOMPLETE
-                    .with_reason("stream terminated without headers", ErrorLevel::StreamError));
+                self.frame_stream.reset(NewCode::H3_REQUEST_INCOMPLETE);
+                return Err(StreamError::StreamError {
+                    code: NewCode::H3_REQUEST_INCOMPLETE,
+                    reason: "stream terminated without headers".to_string(),
+                });
             }
 
             //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
@@ -87,46 +127,15 @@ where
                 //# Receipt of an invalid sequence of frames MUST be treated as a
                 //# connection error of type H3_FRAME_UNEXPECTED.
                 // Close if the first frame is not a header frame
-
-                let _ = self.error_sender.send((
-                    NewCode::H3_FRAME_UNEXPECTED,
-                    "first request frame is not headers".to_string(),
-                ));
-
-                return Err(Code::H3_FRAME_UNEXPECTED.with_reason(
-                    "first request frame is not headers",
-                    ErrorLevel::ConnectionError,
-                ));
+                return Err(
+                    self.handle_connection_error_on_stream(InternalConnectionError::new(
+                        NewCode::H3_FRAME_UNEXPECTED,
+                        "first request frame is not headers".to_string(),
+                    )),
+                );
             }
             Err(e) => {
-                let err: Error = e.into();
-                if err.is_closed() {
-                    return Ok(None);
-                }
-                match err.inner.kind {
-                    crate::error::Kind::Closed => return Ok(None),
-                    crate::error::Kind::Application {
-                        code,
-                        reason,
-                        level: ErrorLevel::ConnectionError,
-                    } => {
-                        // TODO: give the provided reason
-                        let _ = self
-                            .error_sender
-                            .send((code, "error reading first request frame"));
-
-                        return Err(code.with_reason("", ErrorLevel::ConnectionError));
-                    }
-                    crate::error::Kind::Application {
-                        code,
-                        reason: _,
-                        level: ErrorLevel::StreamError,
-                    } => {
-                        self.frame_stream.reset(code.into());
-                        return Err(err);
-                    }
-                    _ => return Err(err),
-                };
+                return self.handle_frame_stream_error_on_request_stream(e);
             }
         };
 
@@ -151,33 +160,7 @@ where
             Err(qpack::DecoderError::HeaderTooLong(cancel_size)) => Err(cancel_size),
             Ok(decoded) => Ok(decoded),
             Err(e) => {
-                let err: Error = e.into();
-                if err.is_closed() {
-                    return Ok(None);
-                }
-                match err.inner.kind {
-                    crate::error::Kind::Closed => return Ok(None),
-                    crate::error::Kind::Application {
-                        code,
-                        reason,
-                        level: ErrorLevel::ConnectionError,
-                    } => {
-                        let _ = self
-                            .error_sender
-                            .send((code, "error decoding first request frame"));
-
-                        return Err(code.with_reason("", ErrorLevel::ConnectionError));
-                    }
-                    crate::error::Kind::Application {
-                        code,
-                        reason: _,
-                        level: ErrorLevel::StreamError,
-                    } => {
-                        request_stream.stop_stream(code);
-                        return Err(err);
-                    }
-                    _ => return Err(err),
-                };
+                return Err(todo!("figure out qpack errors"));
             }
         };
 
@@ -218,10 +201,10 @@ where
     }
 
     /// Finishes the resolution of the request
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn resolve(
         mut self,
-    ) -> Result<(Request<()>, RequestStream<C::BidiStream, B>), Error> {
+    ) -> Result<(Request<()>, RequestStream<C::BidiStream, B>), StreamError> {
         let fields = match self.decoded {
             Ok(v) => v.fields,
             Err(cancel_size) => {
@@ -235,39 +218,40 @@ where
                     )
                     .await?;
 
-                return Err(Error::header_too_big(
-                    cancel_size,
-                    self.max_field_section_size,
-                ));
+                return Err(StreamError::HeaderTooBig {
+                    actual_size: cancel_size,
+                    max_size: self.max_field_section_size,
+                });
             }
         };
 
         // Parse the request headers
-        let (method, uri, protocol, headers) = match Header::try_from(fields) {
+        let result = match Header::try_from(fields) {
             Ok(header) => match header.into_request_parts() {
-                Ok(parts) => parts,
-                Err(err) => {
-                    //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1.2
-                    //# Malformed requests or responses that are
-                    //# detected MUST be treated as a stream error of type H3_MESSAGE_ERROR.
-                    let error: Error = err.into();
-                    self.request_stream
-                        .stop_stream(error.try_get_code().unwrap_or(Code::H3_MESSAGE_ERROR));
-                    return Err(error);
-                }
+                Ok(parts) => Ok(parts),
+                Err(err) => Err(err),
             },
+            Err(err) => Err(err),
+        };
+        let (method, uri, protocol, headers) = match result {
+            Ok(parts) => parts,
             Err(err) => {
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1.2
                 //# Malformed requests or responses that are
                 //# detected MUST be treated as a stream error of type H3_MESSAGE_ERROR.
-                let error: Error = err.into();
-                self.request_stream
-                    .stop_stream(error.try_get_code().unwrap_or(Code::H3_MESSAGE_ERROR));
-                return Err(error);
+                let error_code = NewCode::H3_MESSAGE_ERROR;
+                self.request_stream.stop_stream(error_code);
+                self.request_stream.stop_sending(error_code);
+
+                return Err(StreamError::StreamError {
+                    code: error_code,
+                    reason: format!("Malformed request with error: {}", err),
+                });
             }
         };
 
         //  request_stream.stop_stream(Code::H3_MESSAGE_ERROR).await;
+
         let mut req = http::Request::new(());
         *req.method_mut() = method;
         *req.uri_mut() = uri;
@@ -277,22 +261,9 @@ where
             req.extensions_mut().insert(protocol);
         }
         *req.version_mut() = http::Version::HTTP_3;
-        // send the grease frame only once
-        // self.inner.send_grease_frame = false;
-
         #[cfg(feature = "tracing")]
         tracing::trace!("replying with: {:?}", req);
 
         Ok((req, self.request_stream))
-    }
-}
-
-impl<C, B> ConnectionState for RequestResolver<C, B>
-where
-    C: quic::Connection<B>,
-    B: Buf,
-{
-    fn shared_state(&self) -> &SharedStateRef {
-        &self.shared
     }
 }

@@ -3,9 +3,13 @@
 use bytes::Buf;
 
 use crate::{
-    connection::{ConnectionState, SharedStateRef},
+    error2::{
+        traits::{CloseConnection, CloseStream},
+        NewCode, StreamError,
+    },
+    proto::varint::VarInt,
     quic::{self},
-    Error,
+    shared_state::{ConnectionState2, SharedState2},
 };
 
 use super::connection::RequestEnd;
@@ -24,7 +28,6 @@ use http::{response, HeaderMap, Response};
 use quic::StreamId;
 
 use crate::{
-    error::Code,
     proto::{frame::Frame, headers::Header},
     qpack,
     quic::SendStream as _,
@@ -50,11 +53,19 @@ impl<S, B> AsMut<crate::connection::RequestStream<S, B>> for RequestStream<S, B>
     }
 }
 
-impl<S, B> ConnectionState for RequestStream<S, B> {
-    fn shared_state(&self) -> &SharedStateRef {
-        &self.inner.conn_state
+impl<S, B> ConnectionState2 for RequestStream<S, B> {
+    fn shared_state(&self) -> &SharedState2 {
+        &self.shared
     }
 }
+
+impl<C, B> CloseConnection for RequestStream<C, B> {
+    fn close_connection(&mut self, code: NewCode, reason: String) -> () {
+        let _ = self.error_sender.send((code, reason));
+    }
+}
+
+impl<S, B> CloseStream for RequestStream<S, B> {}
 
 impl<S, B> RequestStream<S, B>
 where
@@ -63,7 +74,7 @@ where
 {
     /// Receive data sent from the client
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
+    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, StreamError> {
         future::poll_fn(|cx| self.poll_recv_data(cx)).await
     }
 
@@ -72,13 +83,13 @@ where
     pub fn poll_recv_data(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<impl Buf>, Error>> {
+    ) -> Poll<Result<Option<impl Buf>, StreamError>> {
         self.inner.poll_recv_data(cx)
     }
 
     /// Receive an optional set of trailers for the request
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
+    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, StreamError> {
         future::poll_fn(|cx| self.poll_recv_trailers(cx)).await
     }
 
@@ -87,13 +98,13 @@ where
     pub fn poll_recv_trailers(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<HeaderMap>, Error>> {
+    ) -> Poll<Result<Option<HeaderMap>, StreamError>> {
         self.inner.poll_recv_trailers(cx)
     }
 
     /// Tell the peer to stop sending into the underlying QUIC stream
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn stop_sending(&mut self, error_code: crate::error::Code) {
+    pub fn stop_sending(&mut self, error_code: NewCode) {
         self.inner.stream.stop_sending(error_code)
     }
 
@@ -112,7 +123,7 @@ where
     ///
     /// This should be called before trying to send any data with
     /// [`RequestStream::send_data`].
-    pub async fn send_response(&mut self, resp: Response<()>) -> Result<(), Error> {
+    pub async fn send_response(&mut self, resp: Response<()>) -> Result<(), StreamError> {
         let (parts, _) = resp.into_parts();
         let response::Parts {
             status, headers, ..
@@ -120,14 +131,14 @@ where
         let headers = Header::response(status, headers);
 
         let mut block = BytesMut::new();
-        let mem_size = qpack::encode_stateless(&mut block, headers)?;
+        let mem_size = qpack::encode_stateless(&mut block, headers)
+            .map_err(|_e| todo!("figure out qpack errors"))?;
 
-        let max_mem_size = self
-            .inner
-            .conn_state
-            .read("send_response")
-            .peer_config
-            .max_field_section_size;
+        let max_mem_size = if let Some(settings) = self.inner.settings() {
+            settings.max_field_section_size
+        } else {
+            VarInt::MAX.0
+        };
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
         //# An implementation that
@@ -135,39 +146,42 @@ where
         //# that exceeds the indicated size, as the peer will likely refuse to
         //# process it.
         if mem_size > max_mem_size {
-            return Err(Error::header_too_big(mem_size, max_mem_size));
+            return Err(StreamError::HeaderTooBig {
+                actual_size: mem_size,
+                max_size: max_mem_size,
+            });
         }
 
         stream::write(&mut self.inner.stream, Frame::Headers(block.freeze()))
             .await
-            .map_err(|e| self.maybe_conn_err(e))?;
+            .map_err(|e| self.handle_quic_stream_error(e))?;
 
         Ok(())
     }
 
     /// Send some data on the response body.
-    pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
+    pub async fn send_data(&mut self, buf: B) -> Result<(), StreamError> {
         self.inner.send_data(buf).await
     }
 
     /// Stop a stream with an error code
     ///
     /// The code can be [`Code::H3_NO_ERROR`].
-    pub fn stop_stream(&mut self, error_code: Code) {
+    pub fn stop_stream(&mut self, error_code: NewCode) {
         self.inner.stop_stream(error_code);
     }
 
     /// Send a set of trailers to end the response.
     ///
     /// [`RequestStream::finish`] must be called to finalize a request.
-    pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
+    pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), StreamError> {
         self.inner.send_trailers(trailers).await
     }
 
     /// End the response without trailers.
     ///
     /// [`RequestStream::finish`] must be called to finalize a request.
-    pub async fn finish(&mut self) -> Result<(), Error> {
+    pub async fn finish(&mut self) -> Result<(), StreamError> {
         self.inner.finish().await
     }
 

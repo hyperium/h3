@@ -1,8 +1,6 @@
 //! This is the public facing error types for the h3 crate
 
-use std::sync::Arc;
-
-use crate::quic::{self, ConnectionErrorIncoming, StreamErrorIncoming};
+use crate::quic::ConnectionErrorIncoming;
 
 use super::{codes::NewCode, internal_error::InternalConnectionError};
 

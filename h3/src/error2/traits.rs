@@ -3,14 +3,14 @@
 use bytes::Buf;
 
 use crate::{
+    frame::FrameStreamError,
     quic::{self, ConnectionErrorIncoming, StreamErrorIncoming},
     shared_state::ConnectionState2,
 };
 
 use super::{
-    codes::NewCode,
-    internal_error::{ ErrorScope, InternalConnectionError},
-    ConnectionError, LocalError, StreamError,
+    codes::NewCode, internal_error::InternalConnectionError, ConnectionError, LocalError,
+    StreamError,
 };
 
 /// This trait is implemented for all types which can close the connection
@@ -57,14 +57,11 @@ pub(crate) trait CloseConnection: ConnectionState2 {
     fn close_connection(&mut self, code: NewCode, reason: String) -> ();
 }
 
-
-
 pub(crate) trait CloseStream: CloseConnection {
     fn handle_connection_error_on_stream(
         &mut self,
         internal_error: InternalConnectionError,
-    ) -> StreamError
-    {
+    ) -> StreamError {
         let error = self.handle_connection_error(internal_error);
         StreamError::ConnectionError(error)
     }
@@ -117,4 +114,34 @@ where
     T: quic::Connection<B>,
     B: Buf,
 {
+}
+
+pub(crate) trait HandleFrameStreamErrorOnRequestStream {
+    fn handle_frame_stream_error_on_request_stream(
+        &mut self,
+        error: FrameStreamError,
+    ) -> StreamError;
+}
+
+impl<T> HandleFrameStreamErrorOnRequestStream for T
+where
+    T: CloseStream,
+{
+    fn handle_frame_stream_error_on_request_stream(
+        &mut self,
+        error: FrameStreamError,
+    ) -> StreamError {
+        match error {
+            FrameStreamError::Quic(error) => self.handle_quic_stream_error(error),
+            FrameStreamError::Proto(frame_error) => self.handle_connection_error_on_stream(
+                InternalConnectionError::got_frame_error(frame_error).into(),
+            ),
+            FrameStreamError::UnexpectedEnd => {
+                self.handle_connection_error_on_stream(InternalConnectionError::new(
+                    NewCode::H3_FRAME_ERROR,
+                    "received incomplete frame".to_string(),
+                ))
+            }
+        }
+    }
 }

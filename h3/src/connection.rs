@@ -18,7 +18,10 @@ use crate::{
     config::Config,
     error2::{
         internal_error::InternalConnectionError,
-        traits::{CloseConnection, CloseRawQuicConnection, CloseStream},
+        traits::{
+            CloseConnection, CloseRawQuicConnection, CloseStream,
+            HandleFrameStreamErrorOnRequestStream,
+        },
         ConnectionError, NewCode, StreamError,
     },
     frame::{FrameStream, FrameStreamError},
@@ -854,24 +857,6 @@ impl<S, B> CloseConnection for RequestStream<S, B> {
 
 impl<S, B> CloseStream for RequestStream<S, B> {}
 
-impl<S, B> RequestStream<S, B> {
-    /// Handles FrameStreamErrors when they occur on a stream.
-    fn handle_frame_stream_error(&mut self, error: FrameStreamError) -> StreamError {
-        match error {
-            FrameStreamError::Quic(error) => self.handle_quic_stream_error(error),
-            FrameStreamError::Proto(frame_error) => self.handle_connection_error_on_stream(
-                InternalConnectionError::got_frame_error(frame_error).into(),
-            ),
-            FrameStreamError::UnexpectedEnd => {
-                self.handle_connection_error_on_stream(InternalConnectionError::new(
-                    NewCode::H3_FRAME_ERROR,
-                    "received incomplete frame".to_string(),
-                ))
-            }
-        }
-    }
-}
-
 impl<S, B> RequestStream<S, B>
 where
     S: quic::RecvStream,
@@ -885,7 +870,9 @@ where
         if !self.stream.has_data() {
             match ready!(self.stream.poll_next(cx)) {
                 Err(frame_stream_error) => {
-                    return Poll::Ready(Err(self.handle_frame_stream_error(frame_stream_error)))
+                    return Poll::Ready(Err(
+                        self.handle_frame_stream_error_on_request_stream(frame_stream_error)
+                    ))
                 }
                 Ok(None) => return Poll::Ready(Ok(None)),
                 Ok(Some(Frame::Headers(encoded))) => {
@@ -930,7 +917,7 @@ where
 
         self.stream
             .poll_data(cx)
-            .map_err(|error| self.handle_frame_stream_error(error))
+            .map_err(|error| self.handle_frame_stream_error_on_request_stream(error))
     }
 
     /// Poll receive trailers.

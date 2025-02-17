@@ -7,26 +7,26 @@ use std::{
     future::poll_fn,
     option::Option,
     result::Result,
-    sync::Arc,
     task::{ready, Context, Poll},
 };
 
 use bytes::Buf;
-use http::Request;
 use quic::RecvStream;
 use quic::StreamId;
 use tokio::sync::mpsc;
 
 use crate::{
-    connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
-    error::{Code, Error, ErrorLevel},
-    frame::{FrameStream, FrameStreamError},
+    connection::ConnectionInner,
+    error2::{
+        internal_error::InternalConnectionError, traits::CloseConnection, ConnectionError, NewCode,
+    },
+    frame::FrameStream,
     proto::{
         frame::{Frame, PayloadLen},
         push::PushId,
     },
-    qpack,
     quic::{self, SendStream as _},
+    shared_state::{ConnectionState2, SharedState2},
     stream::BufRecvStream,
 };
 
@@ -63,13 +63,23 @@ where
     pub(super) last_accepted_stream: Option<StreamId>,
 }
 
-impl<C, B> ConnectionState for Connection<C, B>
+impl<C, B> ConnectionState2 for Connection<C, B>
 where
     C: quic::Connection<B>,
     B: Buf,
 {
-    fn shared_state(&self) -> &SharedStateRef {
-        &self.inner.shared
+    fn shared_state(&self) -> &SharedState2 {
+        &self.inner.shared2
+    }
+}
+
+impl<C, B> CloseConnection for Connection<C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    fn close_connection(&mut self, code: NewCode, reason: String) -> () {
+        self.inner.close_connection(code, reason);
     }
 }
 
@@ -84,14 +94,8 @@ where
     /// with different settings.
     /// Provide a Connection which implements [`quic::Connection`].
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn new(conn: C) -> Result<Self, Error> {
+    pub async fn new(conn: C) -> Result<Self, ConnectionError> {
         super::builder::builder().build(conn).await
-    }
-
-    /// Closes the connection with a code and a reason.
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn close<T: AsRef<str>>(&mut self, code: Code, reason: T) -> Error {
-        self.inner.close(code, reason)
     }
 }
 
@@ -106,26 +110,15 @@ where
     /// The [`http::Request`] is the received request from the client.
     /// The [`RequestStream`] can be used to send the response.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn accept(&mut self) -> Result<Option<RequestResolver<C, B>>, Error> {
+    pub async fn accept(&mut self) -> Result<Option<RequestResolver<C, B>>, ConnectionError> {
         // Accept the incoming stream
-        let stream = match poll_fn(|cx| self.poll_accept_request_stream(cx)).await {
-            Ok(Some(s)) => FrameStream::new(BufRecvStream::new(s)),
-            Ok(None) => {
+        let stream = match poll_fn(|cx| self.poll_accept_request_stream(cx)).await? {
+            Some(s) => FrameStream::new(BufRecvStream::new(s)),
+            None => {
                 // We always send a last GoAway frame to the client, so it knows which was the last
                 // non-rejected request.
                 self.shutdown(0).await?;
                 return Ok(None);
-            }
-            Err(err) => {
-                match err.inner.kind {
-                    crate::error::Kind::Closed => return Ok(None),
-                    crate::error::Kind::Application {
-                        code,
-                        reason,
-                        level: ErrorLevel::ConnectionError,
-                    } => return Err(self.inner.close(code, reason.unwrap_or_default())),
-                    _ => return Err(err),
-                };
             }
         };
 
@@ -135,7 +128,7 @@ where
             request_end_send: self.request_end_send.clone(),
             send_grease_frame: self.inner.send_grease_frame,
             max_field_section_size: self.max_field_section_size,
-            shared: self.inner.shared.clone(),
+            shared: self.inner.shared2.clone(),
         }));
 
         // send the grease frame only once
@@ -148,7 +141,7 @@ where
     ///
     /// See [connection shutdown](https://www.rfc-editor.org/rfc/rfc9114.html#connection-shutdown) for more information.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn shutdown(&mut self, max_requests: usize) -> Result<(), Error> {
+    pub async fn shutdown(&mut self, max_requests: usize) -> Result<(), ConnectionError> {
         let max_id = self
             .last_accepted_stream
             .map(|id| id + max_requests)
@@ -165,13 +158,13 @@ where
     pub fn poll_accept_request_stream(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<C::BidiStream>, Error>> {
+    ) -> Poll<Result<Option<C::BidiStream>, ConnectionError>> {
         let _ = self.poll_control(cx)?;
         let _ = self.poll_requests_completion(cx);
         loop {
             let conn = self.inner.poll_accept_bi(cx)?;
             return match conn {
-                Poll::Ready(None) | Poll::Pending => {
+                Poll::Pending => {
                     let done = if conn.is_pending() {
                         self.recv_closing.is_some() && self.poll_requests_completion(cx).is_ready()
                     } else {
@@ -186,14 +179,14 @@ where
                         Poll::Pending
                     }
                 }
-                Poll::Ready(Some(mut s)) => {
+                Poll::Ready(mut s) => {
                     // When the connection is in a graceful shutdown procedure, reject all
                     // incoming requests not belonging to the grace interval. It's possible that
                     // some acceptable request streams arrive after rejected requests.
                     if let Some(max_id) = self.sent_closing {
                         if s.send_id() > max_id {
-                            s.stop_sending(Code::H3_REQUEST_REJECTED.value());
-                            s.reset(Code::H3_REQUEST_REJECTED.value());
+                            s.stop_sending(NewCode::H3_REQUEST_REJECTED.value());
+                            s.reset(NewCode::H3_REQUEST_REJECTED.value());
                             if self.poll_requests_completion(cx).is_ready() {
                                 break Poll::Ready(Ok(None));
                             }
@@ -209,16 +202,19 @@ where
     }
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub(crate) fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+    pub(crate) fn poll_control(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), ConnectionError>> {
         while (self.poll_next_control(cx)?).is_ready() {}
         Poll::Pending
     }
 
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub(crate) fn poll_next_control(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Frame<PayloadLen>, Error>> {
+    ) -> Poll<Result<Frame<PayloadLen>, ConnectionError>> {
         let frame = ready!(self.inner.poll_control(cx))?;
 
         match &frame {
@@ -251,10 +247,12 @@ where
             //# receipt of a PUSH_PROMISE frame as a connection error of type
             //# H3_FRAME_UNEXPECTED.
             frame => {
-                return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED.with_reason(
-                    format!("on server control stream: {:?}", frame),
-                    ErrorLevel::ConnectionError,
-                )))
+                return Poll::Ready(Err(self.handle_connection_error(
+                    InternalConnectionError::new(
+                        NewCode::H3_FRAME_UNEXPECTED,
+                        format!("on server control stream: {:?}", frame),
+                    ),
+                )));
             }
         }
         Poll::Ready(Ok(frame))
@@ -289,9 +287,12 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn drop(&mut self) {
-        self.inner.close(Code::H3_NO_ERROR, "");
+        self.inner.close_connection(
+            NewCode::H3_NO_ERROR,
+            "Connection was closed by the server".to_string(),
+        );
     }
 }
 
