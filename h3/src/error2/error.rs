@@ -71,91 +71,18 @@ pub enum StreamError {
     /// The error occurred on the connection
     #[non_exhaustive]
     ConnectionError(ConnectionError),
-}
-
-/// This enum represents a stream error
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub enum ServerStreamError {
-    /// A Stream error occurred
-    General(StreamError),
-    #[non_exhaustive]
-    /// The received header block is too big
-    /// The Request has been answered with a 431 Request Header Fields Too Large
+    /// Error is used when violating the MAX_FIELD_SECTION_SIZE
+    ///
+    /// This can mean different things depending on the context
+    /// When sending a request, this means, that the request cannot be sent because the header is larger then permitted by the server
+    /// When receiving a request, this means, that the server sent a
+    ///
     HeaderTooBig {
         /// The actual size of the header block
         actual_size: u64,
         /// The maximum size of the header block
         max_size: u64,
     },
-}
-
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-/// This enum represents a stream error
-///
-/// This type will be returned by the client in case of an error on the stream methods
-pub enum ClientStreamError {
-    /// A Stream error occurred
-    General(StreamError),
-    #[non_exhaustive]
-    /// The request cannot be sent because the header block larger then permitted by the server
-    HeaderTooBig {
-        /// The actual size of the header block
-        actual_size: u64,
-        /// The maximum size of the header block
-        max_size: u64,
-    },
-}
-
-impl std::fmt::Display for ClientStreamError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ClientStreamError::General(stream_error) => {
-                write!(f, "Stream error: {}", stream_error)
-            }
-            ClientStreamError::HeaderTooBig {
-                actual_size,
-                max_size,
-            } => write!(
-                f,
-                "Request cannot be sent because the header is lager than permitted by the server: permitted size: {}, max size: {}",
-                actual_size, max_size
-            ),
-        }
-    }
-}
-
-impl std::fmt::Display for ServerStreamError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ServerStreamError::General(stream_error) => {
-                write!(f, "Stream error: {}", stream_error)
-            }
-            ServerStreamError::HeaderTooBig {
-                actual_size,
-                max_size,
-            } => write!(
-                f,
-                "Header too big: actual size: {}, max size: {}",
-                actual_size, max_size
-            ),
-        }
-    }
-}
-
-impl std::error::Error for ServerStreamError {}
-
-impl From<StreamError> for ServerStreamError {
-    fn from(err: StreamError) -> Self {
-        ServerStreamError::General(err)
-    }
-}
-
-impl From<StreamError> for ClientStreamError {
-    fn from(err: StreamError) -> Self {
-        ClientStreamError::General(err)
-    }
 }
 
 impl std::fmt::Display for ConnectionError {
@@ -178,6 +105,14 @@ impl std::fmt::Display for StreamError {
             }
             StreamError::ConnectionError(err) => write!(f, "Connection error: {}", err),
             StreamError::RemoteReset { code } => write!(f, "Remote reset: {:?}", code),
+            StreamError::HeaderTooBig {
+                actual_size,
+                max_size,
+            } => write!(
+                f,
+                "Header too big: actual size: {}, max size: {}",
+                actual_size, max_size
+            ),
         }
     }
 }

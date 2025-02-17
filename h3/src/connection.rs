@@ -1,8 +1,7 @@
 use std::{
     convert::TryFrom,
-    fmt::format,
     marker::PhantomData,
-    sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
+    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -16,8 +15,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tracing::{instrument, warn};
 
 use crate::{
-    config::{Config, Settings},
-    error::{Code, Error},
+    config::Config,
     error2::{
         internal_error::InternalConnectionError,
         traits::{CloseConnection, CloseRawQuicConnection, CloseStream},
@@ -25,7 +23,7 @@ use crate::{
     },
     frame::{FrameStream, FrameStreamError},
     proto::{
-        frame::{self, Frame, PayloadLen, SettingsError},
+        frame::{self, Frame, PayloadLen},
         headers::Header,
         stream::StreamType,
         varint::VarInt,
@@ -36,54 +34,6 @@ use crate::{
     stream::{self, AcceptRecvStream, AcceptedRecvStream, BufRecvStream, UniStreamHeader},
     webtransport::SessionId,
 };
-
-#[doc(hidden)]
-#[non_exhaustive]
-pub struct SharedState {
-    // Peer settings
-    pub peer_config: Settings,
-    // connection-wide error, concerns all RequestStreams and drivers
-    pub error: Option<Error>,
-    // Has a GOAWAY frame been sent or received?
-    pub closing: bool,
-}
-
-#[derive(Clone)]
-#[doc(hidden)]
-pub struct SharedStateRef(Arc<RwLock<SharedState>>);
-
-impl SharedStateRef {
-    pub fn read(&self, panic_msg: &'static str) -> RwLockReadGuard<SharedState> {
-        self.0.read().expect(panic_msg)
-    }
-
-    pub fn write(&self, panic_msg: &'static str) -> RwLockWriteGuard<SharedState> {
-        self.0.write().expect(panic_msg)
-    }
-}
-
-impl Default for SharedStateRef {
-    fn default() -> Self {
-        Self(Arc::new(RwLock::new(SharedState {
-            peer_config: Default::default(),
-            error: None,
-            closing: false,
-        })))
-    }
-}
-
-#[allow(missing_docs)]
-pub trait ConnectionState {
-    fn shared_state(&self) -> &SharedStateRef;
-
-    fn maybe_conn_err<E: Into<Error>>(&self, err: E) -> Error {
-        if let Some(ref e) = self.shared_state().0.read().unwrap().error {
-            e.clone()
-        } else {
-            err.into()
-        }
-    }
-}
 
 #[allow(missing_docs)]
 pub struct AcceptedStreams<C, B>
@@ -114,7 +64,6 @@ where
     B: Buf,
 {
     pub(super) shared2: Arc<SharedState2>,
-    pub(super) shared: SharedStateRef,
     /// TODO: breaking encapsulation just to see if we can get this to work, will fix before merging
     pub conn: C,
     control_send: C::SendStream,
@@ -339,7 +288,6 @@ where
         //# request that the sender close the control stream.
         let mut conn_inner = Self {
             shared2,
-            shared: todo!(),
             conn,
             control_send: control_send,
             control_recv: None,
@@ -382,7 +330,7 @@ where
         }
 
         *sent_closing = Some(max_id);
-        self.shared.write("shutdown").closing = true;
+        self.set_closing();
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-3.3
         //# When either endpoint chooses to close the HTTP/3
@@ -929,7 +877,7 @@ where
     S: quic::RecvStream,
 {
     /// Receive some of the request body.
-    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_recv_data(
         &mut self,
         cx: &mut Context<'_>,
@@ -986,7 +934,7 @@ where
     }
 
     /// Poll receive trailers.
-    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_recv_trailers(
         &mut self,
         cx: &mut Context<'_>,
@@ -1069,21 +1017,22 @@ where
                 //# An HTTP/3 implementation MAY impose a limit on the maximum size of
                 //# the message header it will accept on an individual HTTP message.
                 Err(qpack::DecoderError::HeaderTooLong(cancel_size)) => {
-                    return Poll::Ready(Err(Error::header_too_big(
-                        cancel_size,
-                        self.max_field_section_size,
-                    )))
+                    return Poll::Ready(Err(StreamError::HeaderTooBig {
+                        actual_size: cancel_size,
+                        max_size: self.max_field_section_size,
+                    }));
                 }
                 Ok(decoded) => decoded,
-                Err(e) => return Poll::Ready(Err(e.into())),
+                Err(e) => return Poll::Ready(Err(todo!("figure out qpack"))),
             };
 
-        Poll::Ready(Ok(Some(Header::try_from(fields)?.into_fields())))
+        todo!("figure out qpack");
+        //Poll::Ready(Ok(Some(Header::try_from(fields)?.into_fields())))
     }
 
     #[allow(missing_docs)]
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn stop_sending(&mut self, err_code: Code) {
+    pub fn stop_sending(&mut self, err_code: NewCode) {
         self.stream.stop_sending(err_code);
     }
 }
@@ -1095,30 +1044,33 @@ where
 {
     /// Send some data on the response body.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
+    pub async fn send_data(&mut self, buf: B) -> Result<(), StreamError> {
         let frame = Frame::Data(buf);
 
         stream::write(&mut self.stream, frame)
             .await
-            .map_err(|e| self.maybe_conn_err(e))?;
+            .map_err(|e| self.handle_quic_stream_error(e))?;
         Ok(())
     }
 
     /// Send a set of trailers to end the request.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
+    pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), StreamError> {
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
         //= type=TODO
         //# Characters in field names MUST be
         //# converted to lowercase prior to their encoding.
         let mut block = BytesMut::new();
 
-        let mem_size = qpack::encode_stateless(&mut block, Header::trailer(trailers))?;
-        let max_mem_size = self
-            .conn_state
-            .read("send_trailers shared state read")
-            .peer_config
-            .max_field_section_size;
+        let mem_size = qpack::encode_stateless(&mut block, Header::trailer(trailers))
+            .map_err(|_e| todo!("figure out qpack"))?;
+
+        let max_mem_size = if let Some(settings) = self.settings() {
+            settings.max_field_section_size
+        } else {
+            // We have no peer settings, so we use no limit
+            VarInt::MAX.0
+        };
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
         //# An implementation that
@@ -1126,24 +1078,28 @@ where
         //# that exceeds the indicated size, as the peer will likely refuse to
         //# process it.
         if mem_size > max_mem_size {
-            return Err(Error::header_too_big(mem_size, max_mem_size));
+            return Err(StreamError::HeaderTooBig {
+                actual_size: mem_size,
+                max_size: max_mem_size,
+            });
         }
+
         stream::write(&mut self.stream, Frame::Headers(block.freeze()))
             .await
-            .map_err(|e| self.maybe_conn_err(e))?;
+            .map_err(|e| self.handle_quic_stream_error(e))?;
 
         Ok(())
     }
 
     /// Stops a stream with an error code
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn stop_stream(&mut self, code: Code) {
+    pub fn stop_stream(&mut self, code: NewCode) {
         self.stream.reset(code.into());
     }
 
     #[allow(missing_docs)]
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn finish(&mut self) -> Result<(), Error> {
+    pub async fn finish(&mut self) -> Result<(), StreamError> {
         if self.send_grease_frame {
             // send a grease frame once per Connection
             //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
@@ -1154,13 +1110,13 @@ where
             //# they MAY be sent on any stream where frames are allowed to be sent.
             stream::write(&mut self.stream, Frame::Grease)
                 .await
-                .map_err(|e| self.maybe_conn_err(e))?;
+                .map_err(|e| self.handle_quic_stream_error(e))?;
             self.send_grease_frame = false;
         }
 
         future::poll_fn(|cx| self.stream.poll_finish(cx))
             .await
-            .map_err(|e| self.maybe_conn_err(e))
+            .map_err(|e| self.handle_quic_stream_error(e))
     }
 }
 

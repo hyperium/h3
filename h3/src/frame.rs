@@ -5,6 +5,7 @@ use bytes::Buf;
 #[cfg(feature = "tracing")]
 use tracing::trace;
 
+use crate::error2::NewCode;
 use crate::proto::frame::SettingsError;
 use crate::proto::push::InvalidPushId;
 use crate::quic::{InvalidStreamId, StreamErrorIncoming};
@@ -125,7 +126,7 @@ where
     }
 
     /// Stops the underlying stream with the provided error code
-    pub(crate) fn stop_sending(&mut self, error_code: crate::error::Code) {
+    pub(crate) fn stop_sending(&mut self, error_code: NewCode) {
         self.stream.stop_sending(error_code.into());
     }
 
