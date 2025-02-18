@@ -515,7 +515,7 @@ where
     pub fn poll_control(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<Frame<PayloadLen>>, ConnectionError>> {
+    ) -> Poll<Result<Frame<PayloadLen>, ConnectionError>> {
         self.get_conn_error()?;
 
         // check if a connection error occurred on a stream
@@ -549,7 +549,7 @@ where
                         NewCode::H3_CLOSED_CRITICAL_STREAM,
                         format!("control stream was reset with error code {}", err),
                     ),
-                )))
+                )));
             }
             Err(FrameStreamError::UnexpectedEnd) =>
             //= https://www.rfc-editor.org/rfc/rfc9114#section-7.1
@@ -562,12 +562,12 @@ where
                         NewCode::H3_FRAME_ERROR,
                         "received incomplete frame".to_string(),
                     ),
-                )))
+                )));
             }
             Err(FrameStreamError::Proto(frame_error)) => {
                 return Poll::Ready(Err(self.handle_connection_error(
                     InternalConnectionError::got_frame_error(frame_error),
-                )))
+                )));
             }
             Ok(None) =>
             //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
@@ -580,7 +580,7 @@ where
                         NewCode::H3_CLOSED_CRITICAL_STREAM,
                         "control stream was closed".to_string(),
                     ),
-                )))
+                )));
             }
             Ok(Some(Frame::Settings(settings))) => {
                 if !self.got_peer_settings {
@@ -589,7 +589,7 @@ where
                     self.got_peer_settings = true;
                     self.set_settings((&settings).into());
 
-                    Some(Frame::Settings(settings))
+                    Frame::Settings(settings)
                 } else {
                     //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
                     //# If an endpoint receives a second SETTINGS
@@ -623,7 +623,7 @@ where
                 | frame @ Frame::MaxPushId(_),
             )) => {
                 // handle these frames in client/server imples
-                Some(frame)
+                frame
             }
             Ok(Some(frame)) => {
                 // All other frames are not allowed on the control stream
@@ -696,9 +696,7 @@ where
                 }
             }
             *recv_closing = Some(id.into());
-            if !self.shared.read("connection goaway read").closing {
-                self.shared.write("connection goaway overwrite").closing = true;
-            }
+            self.set_closing();
             Ok(())
         }
     }
@@ -820,7 +818,7 @@ pub struct RequestStream<S, B> {
     pub(super) conn_state: Arc<SharedState2>,
     pub(super) max_field_section_size: u64,
     send_grease_frame: bool,
-    error_sender: UnboundedSender<(NewCode, String)>,
+    pub(super) error_sender: UnboundedSender<(NewCode, String)>,
 }
 
 impl<S, B> RequestStream<S, B> {
@@ -921,7 +919,7 @@ where
     }
 
     /// Poll receive trailers.
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_recv_trailers(
         &mut self,
         cx: &mut Context<'_>,
@@ -931,9 +929,12 @@ where
         } else {
             match ready!(self.stream.poll_next(cx)) {
                 Err(frame_stream_error) => {
-                    return Poll::Ready(Err(self.handle_frame_stream_error(frame_stream_error)))
+                    return Poll::Ready(Err(
+                        self.handle_frame_stream_error_on_request_stream(frame_stream_error)
+                    ))
                 }
                 Ok(None) => return Poll::Ready(Ok(None)),
+                Ok(Some(Frame::Headers(encoded))) => encoded,
                 Ok(Some(other_frame)) => {
                     //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
                     //# Receipt of an invalid sequence of frames MUST be treated as a
@@ -964,7 +965,6 @@ where
                         ),
                     )));
                 }
-                Ok(Some(Frame::Headers(encoded))) => encoded,
             }
         };
 
@@ -977,7 +977,9 @@ where
 
             match self.stream.poll_next(cx) {
                 Poll::Ready(Err(frame_stream_error)) => {
-                    return Poll::Ready(Err(self.handle_frame_stream_error(frame_stream_error)))
+                    return Poll::Ready(Err(
+                        self.handle_frame_stream_error_on_request_stream(frame_stream_error)
+                    ))
                 }
                 Poll::Ready(Ok(Some(trailing_frame))) => {
                     // Received a known frame after trailers -> fail.
@@ -1010,7 +1012,7 @@ where
                     }));
                 }
                 Ok(decoded) => decoded,
-                Err(e) => return Poll::Ready(Err(todo!("figure out qpack"))),
+                Err(_e) => return Poll::Ready(Err(todo!("figure out qpack"))),
             };
 
         todo!("figure out qpack");

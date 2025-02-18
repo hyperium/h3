@@ -55,13 +55,13 @@ impl<S, B> AsMut<crate::connection::RequestStream<S, B>> for RequestStream<S, B>
 
 impl<S, B> ConnectionState2 for RequestStream<S, B> {
     fn shared_state(&self) -> &SharedState2 {
-        &self.shared
+        &self.inner.conn_state
     }
 }
 
 impl<C, B> CloseConnection for RequestStream<C, B> {
     fn close_connection(&mut self, code: NewCode, reason: String) -> () {
-        let _ = self.error_sender.send((code, reason));
+        let _ = self.inner.error_sender.send((code, reason));
     }
 }
 

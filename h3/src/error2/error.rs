@@ -23,6 +23,15 @@ pub enum ConnectionError {
     Timeout,
 }
 
+impl ConnectionError {
+    /// Create Error for Connection in Closing state
+    pub(crate) fn closing() -> Self {
+        ConnectionError::Local {
+            error: LocalError::Closing,
+        }
+    }
+}
+
 /// This enum represents a local error
 #[derive(Debug, Clone, Hash)]
 #[non_exhaustive]

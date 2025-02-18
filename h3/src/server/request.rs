@@ -107,7 +107,7 @@ where
             //# complete response, the server SHOULD abort its response stream with
             //# the error code H3_REQUEST_INCOMPLETE.
             Ok(None) => {
-                self.frame_stream.reset(NewCode::H3_REQUEST_INCOMPLETE);
+                self.frame_stream.reset(NewCode::H3_REQUEST_INCOMPLETE.value());
                 return Err(StreamError::StreamError {
                     code: NewCode::H3_REQUEST_INCOMPLETE,
                     reason: "stream terminated without headers".to_string(),
@@ -135,7 +135,7 @@ where
                 );
             }
             Err(e) => {
-                return self.handle_frame_stream_error_on_request_stream(e);
+                return Err(self.handle_frame_stream_error_on_request_stream(e));
             }
         };
 
