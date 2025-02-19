@@ -3,8 +3,8 @@
 
 use bytes::Buf;
 use h3::{
+    error2::StreamError,
     quic::{self, StreamId},
-    Error,
 };
 
 use crate::server::ReadDatagram;
@@ -15,7 +15,7 @@ where
     C: quic::Connection<B>,
 {
     /// Sends a datagram
-    fn send_datagram(&mut self, stream_id: StreamId, data: B) -> Result<(), Error>;
+    fn send_datagram(&mut self, stream_id: StreamId, data: B) -> Result<(), StreamError>;
     /// Reads an incoming datagram
     fn read_datagram(&mut self) -> ReadDatagram<C, B>;
 }

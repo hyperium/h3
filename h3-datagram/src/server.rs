@@ -10,7 +10,6 @@ use bytes::Buf;
 use h3::{
     quic::{self, StreamId},
     server::Connection,
-    Error,
 };
 use pin_project_lite::pin_project;
 

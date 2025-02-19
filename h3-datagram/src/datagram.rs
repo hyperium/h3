@@ -1,5 +1,5 @@
 use bytes::{Buf, Bytes};
-use h3::{error::Code, proto::varint::VarInt, quic::StreamId, Error};
+use h3::{proto::varint::VarInt, quic::StreamId};
 
 /// HTTP datagram frames
 /// See: <https://www.rfc-editor.org/rfc/rfc9297#section-2.1>

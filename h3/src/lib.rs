@@ -5,13 +5,13 @@
 pub mod client;
 
 mod config;
-pub mod error;
+//pub mod error;
 pub mod ext;
 pub mod quic;
 
 pub mod server;
 
-pub use error::Error;
+//pub use error::Error;
 
 mod buf;
 
