@@ -160,7 +160,6 @@ where
 {
     type RecvStream = RecvStream;
     type OpenStreams = OpenStreams;
-    type AcceptError = ConnectionError;
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn poll_accept_bidi(
@@ -204,7 +203,6 @@ where
 {
     type SendStream = SendStream<B>;
     type BidiStream = BidiStream<B>;
-    type OpenError = ConnectionError;
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn poll_open_bidi(
@@ -303,7 +301,6 @@ where
 {
     type SendStream = SendStream<B>;
     type BidiStream = BidiStream<B>;
-    type OpenError = ConnectionError;
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn poll_open_bidi(
@@ -384,7 +381,6 @@ where
 
 impl<B: Buf> quic::RecvStream for BidiStream<B> {
     type Buf = Bytes;
-    type Error = ReadError;
 
     fn poll_data(
         &mut self,
@@ -406,8 +402,6 @@ impl<B> quic::SendStream<B> for BidiStream<B>
 where
     B: Buf,
 {
-    type Error = SendStreamError;
-
     fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.send.poll_ready(cx)
     }
@@ -469,7 +463,6 @@ impl RecvStream {
 
 impl quic::RecvStream for RecvStream {
     type Buf = Bytes;
-    type Error = ReadError;
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn poll_data(
@@ -593,8 +586,6 @@ impl<B> quic::SendStream<B> for SendStream<B>
 where
     B: Buf,
 {
-    type Error = SendStreamError;
-
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         if let Some(ref mut data) = self.writing {

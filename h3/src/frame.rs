@@ -603,7 +603,7 @@ mod tests {
         fn poll_data(
             &mut self,
             _: &mut Context<'_>,
-        ) -> Poll<Result<Option<Self::Buf>, Self::Error>> {
+        ) -> Poll<Result<Option<Self::Buf>, StreamErrorIncoming>> {
             Poll::Ready(Ok(self.chunks.pop_front()))
         }
 
