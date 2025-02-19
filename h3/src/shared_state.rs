@@ -25,6 +25,12 @@ impl Default for SharedState2 {
     }
 }
 
+impl ConnectionState2 for SharedState2 {
+    fn shared_state(&self) -> &SharedState2 {
+        self
+    }
+}
+
 /// This trait can be implemented for all types which have a shared state
 pub trait ConnectionState2 {
     /// Get the shared state

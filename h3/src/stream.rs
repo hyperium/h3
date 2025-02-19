@@ -322,6 +322,7 @@ where
                 Err(StreamErrorIncoming::StreamReset { error_code }) => {
                     Some(StreamEnd::Reset(error_code))
                 }
+                
             };
 
             let mut buf = self.stream.buf_mut();

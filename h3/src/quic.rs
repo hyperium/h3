@@ -4,6 +4,7 @@
 //! QUIC implementation.
 
 use std::fmt::Display;
+use std::sync::Arc;
 use std::task::{self, Poll};
 
 use bytes::Buf;
@@ -31,6 +32,8 @@ pub enum ConnectionErrorIncoming {
     /// This variant can be used to signal, that an internal error occurred within the trait implementations
     /// h3 will close the connection with H3_INTERNAL_ERROR
     InternalError(String),
+    /// A unknown error occurred (not relevant to h3)
+    Undefined(Arc<dyn std::error::Error + Send + Sync>),
 }
 
 /// Error type to communicate that the stream was closed
@@ -49,6 +52,8 @@ pub enum StreamErrorIncoming {
         /// Error code sent by the peer
         error_code: u64,
     },
+    /// A unknown error occurred (not relevant to h3)
+    Unknown(Arc<dyn std::error::Error + Send + Sync>),
 }
 
 impl std::error::Error for StreamErrorIncoming {}
@@ -63,6 +68,7 @@ impl Display for StreamErrorIncoming {
             StreamErrorIncoming::StreamReset { error_code } => {
                 write!(f, "StreamClosed: {}", error_code)
             }
+            StreamErrorIncoming::Unknown(error) => write!(f, "Error undefined by h3: {}", error),
         }
     }
 }
@@ -84,6 +90,9 @@ impl Display for ConnectionErrorIncoming {
                     "InternalError in the quic trait implementation: {}",
                     error
                 )
+            }
+            ConnectionErrorIncoming::Undefined(error) => {
+                write!(f, "Error undefined by h3: {}", error)
             }
         }
     }

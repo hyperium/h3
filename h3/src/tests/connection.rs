@@ -4,17 +4,16 @@
 use std::{borrow::BorrowMut, time::Duration};
 
 use assert_matches::assert_matches;
-use bytes::{buf, Buf, Bytes, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 use futures_util::future;
 use http::{Request, Response, StatusCode};
 use tokio::sync::oneshot::{self};
 
 use crate::client::SendRequest;
+use crate::error2::{ConnectionError, LocalError, NewCode, StreamError};
 use crate::tests::get_stream_blocking;
-use crate::{client, server};
+use crate::{client, server, ConnectionState2};
 use crate::{
-    connection::ConnectionState,
-    error::{Code, Error, Kind},
     proto::{
         coding::Encode as _,
         frame::{Frame, Settings},
@@ -92,7 +91,15 @@ async fn server_drop_close() {
                 .await
                 .unwrap();
             let response = request_stream.recv_response().await;
-            assert_matches!(response.unwrap_err().kind(), Kind::Closed);
+            assert_matches!(
+                response.unwrap_err(),
+                StreamError::ConnectionError(ConnectionError::Local {
+                    error: LocalError::Application {
+                        code: NewCode::H3_NO_ERROR,
+                        ..
+                    }
+                })
+            );
         };
 
         let drive_fut = async {
@@ -202,16 +209,10 @@ async fn settings_exchange_client() {
         let (mut conn, client) = client::new(pair.client().await).await.expect("client init");
         let settings_change = async {
             for _ in 0..10 {
-                if client
-                    .shared_state()
-                    .read("client")
-                    .peer_config
-                    .max_field_section_size
-                    == 12
-                {
-                    return;
+                match client.settings() {
+                    Some(settings) if settings.max_field_section_size == 12 => return,
+                    _ => tokio::time::sleep(Duration::from_millis(2)).await,
                 }
-                tokio::time::sleep(Duration::from_millis(2)).await;
             }
             panic!("peer's max_field_section_size didn't change");
         };
@@ -265,20 +266,15 @@ async fn settings_exchange_server() {
         let conn = server.next().await;
         let mut incoming = server::Connection::new(conn).await.unwrap();
 
-        let state = incoming.shared_state().clone();
+        let state = incoming.inner.shared2.clone();
         let accept = async { incoming.accept().await.unwrap() };
 
         let settings_change = async {
             for _ in 0..10 {
-                if state
-                    .read("setting_change")
-                    .peer_config
-                    .max_field_section_size
-                    == 12
-                {
-                    return;
+                match state.settings() {
+                    Some(settings) if settings.max_field_section_size == 12 => return,
+                    _ => tokio::time::sleep(Duration::from_millis(2)).await,
                 }
-                tokio::time::sleep(Duration::from_millis(2)).await;
             }
             panic!("peer's max_field_section_size didn't change");
         };
