@@ -6,7 +6,7 @@ use crate::{config::Settings, error2::ConnectionError};
 
 #[derive(Debug)]
 /// This struct represents the shared state of the h3 connection and the stream structs
-pub(crate) struct SharedState2 {
+pub struct SharedState2 {
     /// The settings, sent by the peer
     settings: OnceLock<Settings>,
     /// The connection error

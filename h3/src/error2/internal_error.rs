@@ -1,3 +1,5 @@
+//! This module contains the internal error type, which is used to represent errors, which have not yet affected the connection state
+
 use crate::frame::FrameProtocolError;
 
 use super::codes::NewCode;

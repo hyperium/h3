@@ -1,5 +1,9 @@
 use bytes::{Buf, Bytes};
-use h3::{proto::varint::VarInt, quic::StreamId};
+use h3::{
+    error2::{internal_error::InternalConnectionError, NewCode},
+    proto::varint::VarInt,
+    quic::StreamId,
+};
 
 /// HTTP datagram frames
 /// See: <https://www.rfc-editor.org/rfc/rfc9297#section-2.1>
@@ -20,13 +24,18 @@ where
             stream_id.into_inner() % 4 == 0,
             "StreamId is not divisible by 4"
         );
+        // TODO: does stream_id need to be devided by 4?
         Self { stream_id, payload }
     }
 
     /// Decodes a datagram frame from the QUIC datagram
-    pub fn decode(mut buf: B) -> Result<Self, Error> {
-        let q_stream_id = VarInt::decode(&mut buf)
-            .map_err(|_| Code::H3_DATAGRAM_ERROR.with_cause("Malformed datagram frame"))?;
+    pub fn decode(mut buf: B) -> Result<Self, InternalConnectionError> {
+        let q_stream_id = VarInt::decode(&mut buf).map_err(|_| {
+            InternalConnectionError::new(
+                NewCode::H3_DATAGRAM_ERROR,
+                "invalid stream id".to_string(),
+            )
+        })?;
 
         //= https://www.rfc-editor.org/rfc/rfc9297#section-2.1
         // Quarter Stream ID: A variable-length integer that contains the value of the client-initiated bidirectional
@@ -36,8 +45,12 @@ where
         // value is 262-1, so the largest legal value of the Quarter Stream ID field is 260-1.
         // Receipt of an HTTP/3 Datagram that includes a larger value MUST be treated as an HTTP/3
         // connection error of type H3_DATAGRAM_ERROR (0x33).
-        let stream_id = StreamId::try_from(u64::from(q_stream_id) * 4)
-            .map_err(|_| Code::H3_DATAGRAM_ERROR.with_cause("Invalid stream id"))?;
+        let stream_id = StreamId::try_from(u64::from(q_stream_id) * 4).map_err(|_| {
+            InternalConnectionError::new(
+                NewCode::H3_DATAGRAM_ERROR,
+                "invalid stream id".to_string(),
+            )
+        })?;
 
         let payload = buf;
 

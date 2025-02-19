@@ -14,7 +14,7 @@ use super::{
 };
 
 /// This trait is implemented for all types which can close the connection
-pub(crate) trait CloseConnection: ConnectionState2 {
+pub trait CloseConnection: ConnectionState2 {
     /// Close the connection
     fn handle_connection_error(
         &mut self,
@@ -54,10 +54,13 @@ pub(crate) trait CloseConnection: ConnectionState2 {
         }
     }
 
+    /// Close the connection
     fn close_connection(&mut self, code: NewCode, reason: String) -> ();
 }
 
-pub(crate) trait CloseStream: CloseConnection {
+/// This trait is implemented for all types which can close a stream
+pub trait CloseStream: CloseConnection {
+    /// Handles a connection error on a stream
     fn handle_connection_error_on_stream(
         &mut self,
         internal_error: InternalConnectionError,
@@ -66,6 +69,7 @@ pub(crate) trait CloseStream: CloseConnection {
         StreamError::ConnectionError(error)
     }
 
+    /// Handles a incoming stream error from the quic layer
     fn handle_quic_stream_error(&mut self, error: StreamErrorIncoming) -> StreamError {
         match error {
             StreamErrorIncoming::ConnectionErrorIncoming { connection_error } => {

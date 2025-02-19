@@ -3,7 +3,7 @@
 
 use bytes::Buf;
 use h3::{
-    error2::StreamError,
+    error2::ConnectionError,
     quic::{self, StreamId},
 };
 
@@ -15,7 +15,7 @@ where
     C: quic::Connection<B>,
 {
     /// Sends a datagram
-    fn send_datagram(&mut self, stream_id: StreamId, data: B) -> Result<(), StreamError>;
+    fn send_datagram(&mut self, stream_id: StreamId, data: B) -> Result<(), ConnectionError>;
     /// Reads an incoming datagram
     fn read_datagram(&mut self) -> ReadDatagram<C, B>;
 }

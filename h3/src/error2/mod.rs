@@ -11,11 +11,20 @@
 //!
 
 mod codes;
+
+#[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
+pub mod traits;
+#[cfg(not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"))]
 pub(crate) mod traits;
 
+
+#[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
+pub mod internal_error;
+#[cfg(not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"))]
 pub(crate) mod internal_error;
 
 mod error;
 
 pub use codes::NewCode;
 pub use error::{ConnectionError, LocalError, StreamError};
+

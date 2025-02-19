@@ -8,6 +8,7 @@ use std::{
 
 use bytes::Buf;
 use h3::{
+    error2::{traits::CloseConnection, ConnectionError},
     quic::{self, StreamId},
     server::Connection,
 };
@@ -16,22 +17,20 @@ use pin_project_lite::pin_project;
 use crate::{
     datagram::Datagram,
     datagram_traits::HandleDatagramsExt,
-    quic_traits::{self, RecvDatagramExt, SendDatagramExt},
+    quic_traits::{RecvDatagramExt, SendDatagramExt},
 };
 
 impl<B, C> HandleDatagramsExt<C, B> for Connection<C, B>
 where
     B: Buf,
     C: quic::Connection<B> + SendDatagramExt<B> + RecvDatagramExt,
-    <C as quic_traits::RecvDatagramExt>::Error: h3::quic::Error + 'static,
-    <C as quic_traits::SendDatagramExt<B>>::Error: h3::quic::Error + 'static,
 {
     /// Sends a datagram
-    fn send_datagram(&mut self, stream_id: StreamId, data: B) -> Result<(), Error> {
+    fn send_datagram(&mut self, stream_id: StreamId, data: B) -> Result<(), ConnectionError> {
         self.inner
             .conn
-            .send_datagram(Datagram::new(stream_id, data))?;
-        Ok(())
+            .send_datagram(Datagram::new(stream_id, data))
+            .map_err(|e| self.handle_quic_connection_error(e))
     }
 
     /// Reads an incoming datagram
@@ -58,14 +57,17 @@ pin_project! {
 impl<'a, C, B> Future for ReadDatagram<'a, C, B>
 where
     C: quic::Connection<B> + RecvDatagramExt,
-    <C as quic_traits::RecvDatagramExt>::Error: h3::quic::Error + 'static,
     B: Buf,
 {
-    type Output = Result<Option<Datagram<C::Buf>>, Error>;
+    type Output = Result<Option<Datagram<C::Buf>>, ConnectionError>;
 
     fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match ready!(self.conn.inner.conn.poll_accept_datagram(cx))? {
-            Some(v) => Poll::Ready(Ok(Some(Datagram::decode(v)?))),
+        match ready!(self.conn.inner.conn.poll_accept_datagram(cx))
+            .map_err(|e| self.conn.handle_quic_connection_error(e))?
+        {
+            Some(v) => Poll::Ready(Ok(Some(
+                Datagram::decode(v).map_err(|e| self.conn.handle_connection_error(e))?,
+            ))),
             None => Poll::Ready(Ok(None)),
         }
     }
