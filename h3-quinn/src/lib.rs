@@ -4,7 +4,7 @@
 #![deny(missing_docs)]
 
 use std::{
-    convert::TryInto,
+    convert::{self, TryInto},
     fmt::{self, Display},
     future::Future,
     pin::Pin,
@@ -20,11 +20,12 @@ use futures::{
     Stream, StreamExt,
 };
 
+use h3_datagram::quic_traits::SendDatagramErrorIncoming;
 #[cfg(feature = "datagram")]
 use h3_datagram::{datagram::Datagram, quic_traits};
 
 pub use quinn::{self, AcceptBi, AcceptUni, Endpoint, OpenBi, OpenUni, VarInt, WriteError};
-use quinn::{ApplicationClose, ClosedStream, ReadDatagram, ReadError};
+use quinn::{ApplicationClose, ClosedStream, ReadDatagram, ReadError, SendDatagramError};
 
 use h3::{
     error2::NewCode,
@@ -66,58 +67,6 @@ impl Connection {
             datagrams: Box::pin(stream::unfold(conn, |conn| async {
                 Some((conn.read_datagram().await, conn))
             })),
-        }
-    }
-}
-
-/// Types of errors when sending a datagram.
-#[derive(Debug)]
-pub enum SendDatagramError {
-    /// Datagrams are not supported by the peer
-    UnsupportedByPeer,
-    /// Datagrams are locally disabled
-    Disabled,
-    /// The datagram was too large to be sent.
-    TooLarge,
-    /// Network error
-    ConnectionLost(Box<dyn Error>),
-}
-
-impl fmt::Display for SendDatagramError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SendDatagramError::UnsupportedByPeer => write!(f, "datagrams not supported by peer"),
-            SendDatagramError::Disabled => write!(f, "datagram support disabled"),
-            SendDatagramError::TooLarge => write!(f, "datagram too large"),
-            SendDatagramError::ConnectionLost(_) => write!(f, "connection lost"),
-        }
-    }
-}
-
-impl std::error::Error for SendDatagramError {}
-
-impl Error for SendDatagramError {
-    fn is_timeout(&self) -> bool {
-        false
-    }
-
-    fn err_code(&self) -> Option<u64> {
-        match self {
-            Self::ConnectionLost(err) => err.err_code(),
-            _ => None,
-        }
-    }
-}
-
-impl From<quinn::SendDatagramError> for SendDatagramError {
-    fn from(value: quinn::SendDatagramError) -> Self {
-        match value {
-            quinn::SendDatagramError::UnsupportedByPeer => Self::UnsupportedByPeer,
-            quinn::SendDatagramError::Disabled => Self::Disabled,
-            quinn::SendDatagramError::TooLarge => Self::TooLarge,
-            quinn::SendDatagramError::ConnectionLost(err) => {
-                Self::ConnectionLost(ConnectionError::from(err).into())
-            }
         }
     }
 }
@@ -165,7 +114,7 @@ where
     }
 }
 
-fn convert_connection_error(e: quinn::ConnectionError) -> ConnectionErrorIncoming {
+fn convert_connection_error(e: quinn::ConnectionError) -> h3::quic::ConnectionErrorIncoming {
     match e {
         quinn::ConnectionError::TransportError(error) => {
             ConnectionErrorIncoming::Undefined(Arc::new(error))
@@ -254,13 +203,27 @@ where
     B: Buf,
 {
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    fn send_datagram(&mut self, data: Datagram<B>) -> Result<(), SendDatagramError> {
+    fn send_datagram(&mut self, data: Datagram<B>) -> Result<(), SendDatagramErrorIncoming> {
         // TODO investigate static buffer from known max datagram size
         let mut buf = BytesMut::new();
         data.encode(&mut buf);
-        self.conn.send_datagram(buf.freeze())?;
-
+        self.conn
+            .send_datagram(buf.freeze())
+            .map_err(|e| convert_send_datagram_error(e))?;
         Ok(())
+    }
+}
+
+fn convert_send_datagram_error(error: SendDatagramError) -> SendDatagramErrorIncoming {
+    match error {
+        SendDatagramError::UnsupportedByPeer | SendDatagramError::Disabled => {
+            SendDatagramErrorIncoming::NotAvailable
+        }
+        SendDatagramError::TooLarge => SendDatagramErrorIncoming::TooLarge,
+        SendDatagramError::ConnectionLost(e) => {
+            //SendDatagramErrorIncoming::ConnectionError(convert_connection_error(e))
+            todo!("convert SendDatagramError::ConnectionLost")
+        }
     }
 }
 
@@ -273,10 +236,10 @@ impl quic_traits::RecvDatagramExt for Connection {
     fn poll_accept_datagram(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::Buf>, Self::Error>> {
+    ) -> Poll<Result<Option<Self::Buf>, ConnectionErrorIncoming>> {
         match ready!(self.datagrams.poll_next_unpin(cx)) {
             Some(Ok(x)) => Poll::Ready(Ok(Some(x))),
-            Some(Err(e)) => Poll::Ready(Err(e.into())),
+            Some(Err(e)) => Poll::Ready(Err(convert_connection_error(e))),
             None => Poll::Ready(Ok(None)),
         }
     }
@@ -524,6 +487,22 @@ fn convert_read_error_to_stream_error(error: ReadError) -> StreamErrorIncoming {
     }
 }
 
+fn convert_write_error_to_stream_error(error: quinn::WriteError) -> StreamErrorIncoming {
+    match error {
+        quinn::WriteError::Stopped(var_int) => StreamErrorIncoming::StreamReset {
+            error_code: var_int.into_inner(),
+        },
+        quinn::WriteError::ConnectionLost(connection_error) => {
+            StreamErrorIncoming::ConnectionErrorIncoming {
+                connection_error: convert_connection_error(connection_error),
+            }
+        }
+        error @ quinn::WriteError::ClosedStream | error @ quinn::WriteError::ZeroRttRejected => {
+            StreamErrorIncoming::Unknown(Arc::new(error))
+        }
+    }
+}
+
 /// Quinn-backed send stream
 ///
 /// Implements a [`quic::SendStream`] backed by a [`quinn::SendStream`].
@@ -554,7 +533,7 @@ where
     B: Buf,
 {
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), StreamErrorIncoming>> {
         if let Some(ref mut data) = self.writing {
             while data.has_remaining() {
                 if let Some(mut stream) = self.stream.take() {
@@ -570,7 +549,7 @@ where
                 match res {
                     Ok(cnt) => data.advance(cnt),
                     Err(err) => {
-                        return Poll::Ready(Err(SendStreamError::Write(err)));
+                        return Poll::Ready(Err(convert_write_error_to_stream_error(err)));
                     }
                 }
             }
@@ -580,8 +559,17 @@ where
     }
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    fn poll_finish(&mut self, _cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(self.stream.as_mut().unwrap().finish().map_err(|e| e.into()))
+    fn poll_finish(
+        &mut self,
+        _cx: &mut task::Context<'_>,
+    ) -> Poll<Result<(), StreamErrorIncoming>> {
+        Poll::Ready(
+            self.stream
+                .as_mut()
+                .unwrap()
+                .finish()
+                .map_err(|e| StreamErrorIncoming::Unknown(Arc::new(e))),
+        )
     }
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
@@ -594,9 +582,18 @@ where
     }
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), Self::Error> {
+    fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), StreamErrorIncoming> {
         if self.writing.is_some() {
-            return Err(Self::Error::NotReady);
+            // This can only happen if the traits are misused by h3 itself
+            // If this happens log an error and close the connection with H3_INTERNAL_ERROR
+
+            #[cfg(feature = "tracing")]
+            tracing::error!("send_data called while send stream is not ready");
+            return Err(StreamErrorIncoming::ConnectionErrorIncoming {
+                connection_error: ConnectionErrorIncoming::InternalError(
+                    "internal error in the http stack".to_string(),
+                ),
+            });
         }
         self.writing = Some(data.into());
         Ok(())
@@ -623,7 +620,7 @@ where
         &mut self,
         cx: &mut task::Context<'_>,
         buf: &mut D,
-    ) -> Poll<Result<usize, Self::Error>> {
+    ) -> Poll<Result<usize, StreamErrorIncoming>> {
         if self.writing.is_some() {
             // This signifies a bug in implementation
             panic!("poll_send called while send stream is not ready")
@@ -631,7 +628,7 @@ where
 
         let s = Pin::new(self.stream.as_mut().unwrap());
 
-        let res = ready!(futures::io::AsyncWrite::poll_write(s, cx, buf.chunk()));
+        let res = ready!(s.poll_write(cx, buf.chunk()));
         match res {
             Ok(written) => {
                 buf.advance(written);
@@ -645,87 +642,9 @@ where
                 // This is why we have to unpack the error from io::Error instead of having it
                 // returned directly. This should not panic as long as quinn's AsyncWrite impl
                 // doesn't change.
-                let err = err
-                    .into_inner()
-                    .expect("write stream returned an empty error")
-                    .downcast::<WriteError>()
-                    .expect("write stream returned an error which type is not WriteError");
 
-                Poll::Ready(Err(SendStreamError::Write(*err)))
+                Poll::Ready(Err(convert_write_error_to_stream_error(err)))
             }
         }
-    }
-}
-
-/// The error type for [`SendStream`]
-///
-/// Wraps errors that can happen writing to or polling a send stream.
-#[derive(Debug)]
-pub enum SendStreamError {
-    /// Errors when writing, wrapping a [`quinn::WriteError`]
-    Write(WriteError),
-    /// Error when the stream is not ready, because it is still sending
-    /// data from a previous call
-    NotReady,
-    /// Error when the stream is closed
-    StreamClosed(ClosedStream),
-}
-
-impl From<SendStreamError> for std::io::Error {
-    fn from(value: SendStreamError) -> Self {
-        match value {
-            SendStreamError::Write(err) => err.into(),
-            SendStreamError::NotReady => {
-                std::io::Error::new(std::io::ErrorKind::Other, "send stream is not ready")
-            }
-            SendStreamError::StreamClosed(err) => err.into(),
-        }
-    }
-}
-
-impl std::error::Error for SendStreamError {}
-
-impl Display for SendStreamError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl From<WriteError> for SendStreamError {
-    fn from(e: WriteError) -> Self {
-        Self::Write(e)
-    }
-}
-
-impl From<ClosedStream> for SendStreamError {
-    fn from(value: ClosedStream) -> Self {
-        Self::StreamClosed(value)
-    }
-}
-
-impl Error for SendStreamError {
-    fn is_timeout(&self) -> bool {
-        matches!(
-            self,
-            Self::Write(quinn::WriteError::ConnectionLost(
-                quinn::ConnectionError::TimedOut
-            ))
-        )
-    }
-
-    fn err_code(&self) -> Option<u64> {
-        match self {
-            Self::Write(quinn::WriteError::Stopped(error_code)) => Some(error_code.into_inner()),
-            Self::Write(quinn::WriteError::ConnectionLost(
-                quinn::ConnectionError::ApplicationClosed(ApplicationClose { error_code, .. }),
-            )) => Some(error_code.into_inner()),
-            _ => None,
-        }
-    }
-}
-
-impl From<SendStreamError> for Arc<dyn Error> {
-    fn from(e: SendStreamError) -> Self {
-        Arc::new(e)
     }
 }

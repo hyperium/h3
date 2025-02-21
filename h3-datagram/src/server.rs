@@ -16,8 +16,8 @@ use pin_project_lite::pin_project;
 
 use crate::{
     datagram::Datagram,
-    datagram_traits::HandleDatagramsExt,
-    quic_traits::{RecvDatagramExt, SendDatagramExt},
+    datagram_traits::{HandleDatagramsExt, SendDatagramError},
+    quic_traits::{RecvDatagramExt, SendDatagramErrorIncoming, SendDatagramExt},
 };
 
 impl<B, C> HandleDatagramsExt<C, B> for Connection<C, B>
@@ -26,11 +26,11 @@ where
     C: quic::Connection<B> + SendDatagramExt<B> + RecvDatagramExt,
 {
     /// Sends a datagram
-    fn send_datagram(&mut self, stream_id: StreamId, data: B) -> Result<(), ConnectionError> {
+    fn send_datagram(&mut self, stream_id: StreamId, data: B) -> Result<(), SendDatagramError> {
         self.inner
             .conn
             .send_datagram(Datagram::new(stream_id, data))
-            .map_err(|e| self.handle_quic_connection_error(e))
+            .map_err(|e| self.handle_send_datagram_error(e))
     }
 
     /// Reads an incoming datagram

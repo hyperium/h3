@@ -7,6 +7,10 @@ edition = "2021"
 #h3 = { path = "../h3" }
 bytes = "1.4"
 pin-project-lite = { version = "0.2", default-features = false }
+tracing = { version = "0.1.40", optional = true }
+
+[features]
+tracing = ["dep:tracing"]
 
 [dependencies.h3]
 version = "0.0.6"
