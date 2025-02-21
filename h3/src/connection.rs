@@ -238,6 +238,12 @@ where
                         err
                     ),
                 ))),
+            Err(StreamErrorIncoming::Unknown(error)) => {
+                Err(self.handle_connection_error(InternalConnectionError::new(
+                    NewCode::H3_CLOSED_CRITICAL_STREAM,
+                    format!("an error occurred on the control stream {}", error),
+                )))
+            }
         }
     }
 
@@ -278,6 +284,14 @@ where
                             "control stream was requested to stop sending with error code {}",
                             err,
                         ),
+                    )),
+                );
+            }
+            Err(StreamErrorIncoming::Unknown(error)) => {
+                return Err(
+                    conn.close_raw_connection_with_h3_error(InternalConnectionError::new(
+                        NewCode::H3_CLOSED_CRITICAL_STREAM,
+                        format!("an error occurred on the control stream {}", error),
                     )),
                 );
             }
@@ -358,6 +372,12 @@ where
                         err
                     ),
                 ))),
+            Err(StreamErrorIncoming::Unknown(error)) => {
+                Err(self.handle_connection_error(InternalConnectionError::new(
+                    NewCode::H3_CLOSED_CRITICAL_STREAM,
+                    format!("an error occurred on the control stream {}", error),
+                )))
+            }
         }
     }
 
@@ -548,6 +568,14 @@ where
                     InternalConnectionError::new(
                         NewCode::H3_CLOSED_CRITICAL_STREAM,
                         format!("control stream was reset with error code {}", err),
+                    ),
+                )));
+            }
+            Err(FrameStreamError::Quic(StreamErrorIncoming::Unknown(error))) => {
+                return Poll::Ready(Err(self.handle_connection_error(
+                    InternalConnectionError::new(
+                        NewCode::H3_CLOSED_CRITICAL_STREAM,
+                        format!("an error occurred on the control stream {}", error),
                     ),
                 )));
             }

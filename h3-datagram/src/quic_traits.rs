@@ -16,7 +16,7 @@ use crate::datagram::Datagram;
 /// See: <https://www.rfc-editor.org/rfc/rfc9297>
 pub trait SendDatagramExt<B: Buf> {
     /// Send a datagram
-    fn send_datagram(&mut self, data: Datagram<B>) -> Result<(), ConnectionErrorIncoming>;
+    fn send_datagram(&mut self, data: Datagram<B>) -> Result<(), SendDatagramErrorIncoming>;
 }
 
 /// Extends the `Connection` trait for receiving datagrams
@@ -31,4 +31,17 @@ pub trait RecvDatagramExt {
         &mut self,
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Option<Self::Buf>, ConnectionErrorIncoming>>;
+}
+
+/// Types of errors when sending a datagram.
+#[derive(Debug)]
+pub enum SendDatagramErrorIncoming {
+    /// The peer is not accepting datagrams
+    ///
+    /// This can be because the peer does not support it or disabled it or any other reason.
+    NotAvailable,
+    /// The datagram is too large to send
+    TooLarge,
+    /// Connection error
+    ConnectionError(ConnectionErrorIncoming),
 }

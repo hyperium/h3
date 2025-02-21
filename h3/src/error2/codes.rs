@@ -1,6 +1,6 @@
 //! HTTP/3 error codes.
 
-use std::fmt;
+use std::fmt::{self};
 
 /// An HTTP/3 "application error code".
 #[derive(PartialEq, Eq, Hash, Clone, Copy)]
@@ -50,7 +50,20 @@ macro_rules! codes {
                 }
             }
         }
+
+        impl fmt::Display for NewCode{
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                match self.code {
+                $(
+                    $num => f.write_str(stringify!($name)),
+                )+
+                    other => write!(f, "{:#x}", other),
+                }
+            }
+        }
     }
+
+
 }
 
 codes! {

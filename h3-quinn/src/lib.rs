@@ -518,11 +518,9 @@ fn convert_read_error_to_stream_error(error: ReadError) -> StreamErrorIncoming {
                 connection_error: convert_connection_error(connection_error),
             }
         }
-        ReadError::ClosedStream => todo!(),
+        error @ ReadError::ClosedStream => StreamErrorIncoming::Unknown(Arc::new(error)),
         ReadError::IllegalOrderedRead => panic!("h3-quinn only performs ordered reads"),
-        ReadError::ZeroRttRejected => {
-            todo!("What to do with ZeroRttRejected? Kill the connection? Or Support it in h3?")
-        }
+        error @ ReadError::ZeroRttRejected => StreamErrorIncoming::Unknown(Arc::new(error)),
     }
 }
 

@@ -1,5 +1,7 @@
 //! This is the public facing error types for the h3 crate
 
+use std::sync::Arc;
+
 use crate::quic::ConnectionErrorIncoming;
 
 use super::{codes::NewCode, internal_error::InternalConnectionError};
@@ -90,6 +92,8 @@ pub enum StreamError {
         /// The maximum size of the header block
         max_size: u64,
     },
+    /// Undefined error propagated by the quic layer
+    Undefined(Arc<dyn std::error::Error + Send + Sync>),
 }
 
 impl std::fmt::Display for ConnectionError {
@@ -111,7 +115,7 @@ impl std::fmt::Display for StreamError {
                 write!(f, "Stream error: {:?} - {}", code, reason)
             }
             StreamError::ConnectionError(err) => write!(f, "Connection error: {}", err),
-            StreamError::RemoteReset { code } => write!(f, "Remote reset: {:?}", code),
+            StreamError::RemoteReset { code } => write!(f, "Remote reset: {}", code),
             StreamError::HeaderTooBig {
                 actual_size,
                 max_size,
@@ -120,6 +124,7 @@ impl std::fmt::Display for StreamError {
                 "Header too big: actual size: {}, max size: {}",
                 actual_size, max_size
             ),
+            StreamError::Undefined(err) => write!(f, "Undefined error: {}", err),
         }
     }
 }

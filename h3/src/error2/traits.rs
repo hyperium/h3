@@ -78,6 +78,9 @@ pub trait CloseStream: CloseConnection {
             StreamErrorIncoming::StreamReset { error_code } => StreamError::RemoteReset {
                 code: NewCode::from(error_code),
             },
+            StreamErrorIncoming::Unknown(custom_quic_impl_error) => {
+                StreamError::Undefined(custom_quic_impl_error)
+            }
         }
     }
 }

@@ -53,6 +53,9 @@ pub enum StreamErrorIncoming {
         error_code: u64,
     },
     /// A unknown error occurred (not relevant to h3)
+    /// 
+    /// H3 will handle this exactly like a StreamReset 
+    /// like closing the connection with an error if http3 forbids a stream end for example with the control stream
     Unknown(Arc<dyn std::error::Error + Send + Sync>),
 }
 

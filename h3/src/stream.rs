@@ -322,7 +322,12 @@ where
                 Err(StreamErrorIncoming::StreamReset { error_code }) => {
                     Some(StreamEnd::Reset(error_code))
                 }
-                
+                Err(StreamErrorIncoming::Unknown(err)) => {
+                    #[cfg(feature = "tracing")]
+                    tracing::error!("Unknown error when reading stream {}", err);
+
+                    Some(StreamEnd::Other)
+                }
             };
 
             let mut buf = self.stream.buf_mut();
@@ -377,6 +382,8 @@ where
 enum StreamEnd {
     EndOfStream,
     Reset(u64),
+    // if the quic layer returns an unknown error
+    Other,
 }
 
 pub(super) enum PollTypeError {
