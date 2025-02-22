@@ -7,7 +7,7 @@ use structopt::StructOpt;
 use tokio::{fs::File, io::AsyncReadExt};
 use tracing::{error, info, trace_span};
 
-use h3::{error::ErrorLevel, server::RequestResolver};
+use h3::server::RequestResolver;
 use h3_quinn::quinn::{self, crypto::rustls::QuicServerConfig};
 
 #[derive(StructOpt, Debug)]
@@ -135,10 +135,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                             Err(err) => {
                                 error!("error on accept {}", err);
-                                match err.get_error_level() {
-                                    ErrorLevel::ConnectionError => break,
-                                    ErrorLevel::StreamError => continue,
-                                }
+                                break;
                             }
                         }
                     }

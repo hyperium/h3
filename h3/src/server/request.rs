@@ -24,7 +24,6 @@ use crate::{
     shared_state::{ConnectionState2, SharedState2},
 };
 
-
 use super::{connection::RequestEnd, stream::RequestStream};
 
 /// Helper struct to await the request headers and return a `Request` object
@@ -107,7 +106,8 @@ where
             //# complete response, the server SHOULD abort its response stream with
             //# the error code H3_REQUEST_INCOMPLETE.
             Ok(None) => {
-                self.frame_stream.reset(NewCode::H3_REQUEST_INCOMPLETE.value());
+                self.frame_stream
+                    .reset(NewCode::H3_REQUEST_INCOMPLETE.value());
                 return Err(StreamError::StreamError {
                     code: NewCode::H3_REQUEST_INCOMPLETE,
                     reason: "stream terminated without headers".to_string(),

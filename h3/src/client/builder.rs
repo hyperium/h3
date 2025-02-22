@@ -10,7 +10,11 @@ use bytes::{Buf, Bytes};
 use futures_util::future;
 
 use crate::{
-    config::Config, connection::ConnectionInner, error2::ConnectionError, quic::{self}, shared_state::SharedState2
+    config::Config,
+    connection::ConnectionInner,
+    error2::ConnectionError,
+    quic::{self},
+    shared_state::SharedState2,
 };
 
 use super::connection::{Connection, SendRequest};
@@ -21,7 +25,9 @@ pub fn builder() -> Builder {
 }
 
 /// Create a new HTTP/3 client with default settings
-pub async fn new<C, O>(conn: C) -> Result<(Connection<C, Bytes>, SendRequest<O, Bytes>), ConnectionError>
+pub async fn new<C, O>(
+    conn: C,
+) -> Result<(Connection<C, Bytes>, SendRequest<O, Bytes>), ConnectionError>
 where
     C: quic::Connection<Bytes, OpenStreams = O>,
     O: quic::OpenStreams<Bytes>,

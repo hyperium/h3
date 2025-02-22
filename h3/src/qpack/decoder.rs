@@ -227,7 +227,9 @@ pub fn decode_stateless<T: Buf>(buf: &mut T, max_size: u64) -> Result<Decoded, D
     while buf.has_remaining() {
         let field = match HeaderBlockField::decode(buf.chunk()[0]) {
             HeaderBlockField::IndexedWithPostBase => return Err(DecoderError::MissingRefs(0)),
-            HeaderBlockField::LiteralWithPostBaseNameRef => return Err(DecoderError::MissingRefs(0)),
+            HeaderBlockField::LiteralWithPostBaseNameRef => {
+                return Err(DecoderError::MissingRefs(0))
+            }
             HeaderBlockField::Indexed => match Indexed::decode(buf)? {
                 Indexed::Static(index) => StaticTable::get(index)?.clone(),
                 Indexed::Dynamic(_) => return Err(DecoderError::MissingRefs(0)),
@@ -416,9 +418,9 @@ mod tests {
         let res = decoder.on_encoder_recv(&mut enc, &mut dec);
         assert_eq!(
             res,
-            Err(DecoderError::DynamicTable(DynamicTableError::BadRelativeIndex(
-                3000
-            )))
+            Err(DecoderError::DynamicTable(
+                DynamicTableError::BadRelativeIndex(3000)
+            ))
         );
 
         assert!(dec.is_empty());
@@ -565,7 +567,10 @@ mod tests {
         HeaderPrefix::new(8, 8, 10, TABLE_SIZE).encode(&mut buf);
 
         let mut read = Cursor::new(&buf);
-        assert_eq!(decoder.decode_header(&mut read), Err(DecoderError::MissingRefs(8)));
+        assert_eq!(
+            decoder.decode_header(&mut read),
+            Err(DecoderError::MissingRefs(8))
+        );
     }
 
     fn field(n: usize) -> HeaderField {

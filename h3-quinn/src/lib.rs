@@ -221,8 +221,32 @@ fn convert_send_datagram_error(error: SendDatagramError) -> SendDatagramErrorInc
             SendDatagramErrorIncoming::NotAvailable
         }
         SendDatagramError::TooLarge => SendDatagramErrorIncoming::TooLarge,
-        SendDatagramError::ConnectionLost(e) => {
-            SendDatagramErrorIncoming::ConnectionError(convert_connection_error(e))
+        SendDatagramError::ConnectionLost(e) => SendDatagramErrorIncoming::ConnectionError(
+            convert_h3_error_to_datagram_error(convert_connection_error(e)),
+        ),
+    }
+}
+
+fn convert_h3_error_to_datagram_error(
+    error: h3::quic::ConnectionErrorIncoming,
+) -> h3_datagram::ConnectionErrorIncoming {
+    match error {
+        ConnectionErrorIncoming::ApplicationClose { error_code } => {
+            h3_datagram::ConnectionErrorIncoming::ApplicationClose {
+                error_code: error_code,
+            }
+        }
+        ConnectionErrorIncoming::Timeout => h3_datagram::ConnectionErrorIncoming::Timeout,
+        ConnectionErrorIncoming::ConnectionClosed { error_code } => {
+            h3_datagram::ConnectionErrorIncoming::ConnectionClosed {
+                error_code: error_code,
+            }
+        }
+        ConnectionErrorIncoming::InternalError(err) => {
+            h3_datagram::ConnectionErrorIncoming::InternalError(err)
+        }
+        ConnectionErrorIncoming::Undefined(error) => {
+            h3_datagram::ConnectionErrorIncoming::Undefined(error)
         }
     }
 }

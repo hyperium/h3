@@ -238,7 +238,9 @@ impl Action {
         let mut buf = Cursor::new(read.chunk());
         let first = buf.chunk()[0];
         let instruction = match DecoderInstruction::decode(first) {
-            DecoderInstruction::Unknown => return Err(EncoderError::UnknownDecoderInstruction(first)),
+            DecoderInstruction::Unknown => {
+                return Err(EncoderError::UnknownDecoderInstruction(first))
+            }
             DecoderInstruction::InsertCountIncrement => InsertCountIncrement::decode(&mut buf)?
                 .map(|x| Action::ReceivedRefIncrement(x.0 as usize)),
             DecoderInstruction::HeaderAck => {
@@ -566,7 +568,9 @@ mod tests {
         let mut cur = Cursor::new(&buf);
         assert_eq!(
             encoder.on_decoder_recv(&mut cur),
-            Err(EncoderError::Insertion(DynamicTableError::UnknownStreamId(2)))
+            Err(EncoderError::Insertion(DynamicTableError::UnknownStreamId(
+                2
+            )))
         );
     }
 
@@ -624,7 +628,9 @@ mod tests {
         let mut cur = Cursor::new(&buf);
         assert_eq!(
             encoder.on_decoder_recv(&mut cur),
-            Err(EncoderError::Insertion(DynamicTableError::UnknownStreamId(4)))
+            Err(EncoderError::Insertion(DynamicTableError::UnknownStreamId(
+                4
+            )))
         );
     }
 

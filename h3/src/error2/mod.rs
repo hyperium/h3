@@ -17,7 +17,6 @@ pub mod traits;
 #[cfg(not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"))]
 pub(crate) mod traits;
 
-
 #[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
 pub mod internal_error;
 #[cfg(not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"))]
@@ -27,4 +26,3 @@ mod error;
 
 pub use codes::NewCode;
 pub use error::{ConnectionError, LocalError, StreamError};
-

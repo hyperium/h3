@@ -4,11 +4,12 @@ use assert_matches::assert_matches;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use futures_util::future;
 use http::{request, HeaderMap, Request, Response, StatusCode};
+use quinn::ApplicationClose;
 
 use crate::{
     client,
     config::Settings,
-    error2::{ConnectionError, NewCode, StreamError},
+    error2::{ConnectionError, LocalError, NewCode, StreamError},
     proto::{
         coding::Encode,
         frame::{self, Frame, FrameType},
@@ -16,7 +17,9 @@ use crate::{
         push::PushId,
         varint::VarInt,
     },
-    qpack, server,
+    qpack,
+    quic::ConnectionErrorIncoming,
+    server,
     tests::get_stream_blocking,
     ConnectionState2,
 };
@@ -1411,49 +1414,31 @@ async fn request_sequence_ok<F>(request: F)
 where
     F: Fn(&mut BytesMut),
 {
-    request_sequence_check(request, |res| assert_matches!(res, Ok(_))).await;
+    request_sequence_check(request, None).await;
 }
 
 async fn request_sequence_unexpected<F>(request: F)
 where
     F: Fn(&mut BytesMut),
 {
-    request_sequence_check(request, |err| {
-        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
-        //= type=test
-        //# Receipt of an invalid sequence of frames MUST be treated as a
-        //# connection error of type H3_FRAME_UNEXPECTED.
-        assert_matches!(
-            err.unwrap_err().kind(),
-            Kind::Application {
-                code: Code::H3_FRAME_UNEXPECTED,
-                ..
-            }
-        )
-    })
-    .await;
+    //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+    //= type=test
+    //# Receipt of an invalid sequence of frames MUST be treated as a
+    //# connection error of type H3_FRAME_UNEXPECTED.
+
+    request_sequence_check(request, Some(NewCode::H3_FRAME_UNEXPECTED)).await;
 }
 
 async fn request_sequence_frame_error<F>(request: F)
 where
     F: Fn(&mut BytesMut),
 {
-    request_sequence_check(request, |err| {
-        assert_matches!(
-            err.unwrap_err().kind(),
-            Kind::Application {
-                code: Code::H3_FRAME_ERROR,
-                ..
-            }
-        )
-    })
-    .await;
+    request_sequence_check(request, Some(NewCode::H3_FRAME_ERROR)).await;
 }
 
-async fn request_sequence_check<F, FC>(request: F, check: FC)
+async fn request_sequence_check<F>(request: F, expected_error_code: Option<NewCode>)
 where
     F: Fn(&mut BytesMut),
-    FC: Fn(Result<(), Error>),
 {
     init_tracing();
     let mut pair = Pair::default();
@@ -1477,24 +1462,27 @@ where
             // wait to give the server time to return the error before dropping send
             tokio::time::sleep(Duration::from_millis(100)).await;
 
-            while let Some(i) = req_recv
-                .read(&mut buf)
-                .await
-                .map_err(Into::<h3_quinn::ReadError>::into)
-                .map_err(Into::<Error>::into)?
-            {
-                black_box(i);
+            loop {
+                match req_recv.read(&mut buf).await {
+                    Ok(Some(i)) => {
+                        black_box(i);
+                    }
+                    Ok(None) => break,
+                    Err(err) => {
+                        return Err(err);
+                    }
+                }
             }
 
             // drop the SendRequest to let driver know there will be no more requests
             drop(send);
 
-            Result::<(), Error>::Ok(())
+            Result::<(), quinn::ReadError>::Ok(())
         };
 
         let driver = async {
             future::poll_fn(|cx| driver.poll_close(cx)).await?;
-            Result::<(), Error>::Ok(())
+            Result::<(), ConnectionError>::Ok(())
         };
 
         tokio::join!(client, driver)
@@ -1516,7 +1504,7 @@ where
                 Ok(_) => (),
                 Err(err) => return Err(err.into()),
             };
-            Result::<(), Error>::Ok(())
+            Result::<(), ConnectionError>::Ok(())
         };
 
         let stream = async {
@@ -1527,7 +1515,7 @@ where
 
             while stream.recv_data().await?.is_some() {}
             stream.recv_trailers().await?;
-            Result::<(), Error>::Ok(())
+            Result::<(), StreamError>::Ok(())
         };
         tokio::join!(driver, stream)
     };
@@ -1537,14 +1525,31 @@ where
         (client_result_stream, client_result_driver),
     ) = tokio::join!(server_fut, client_fut);
 
-    check(server_result_driver);
-    check(server_result_stream);
-
-    if client_result_stream.is_err() {
+    if let Err(err) = client_result_stream {
         // we have no influence wether the quinn returns the connection error to the stream api
         // but if it returns an error it needs to be the expected one
-        check(client_result_stream);
+        assert_matches!(err, quinn::ReadError::ConnectionLost(quinn::ConnectionError::ApplicationClosed(code)) 
+            if code.error_code.into_inner() == expected_error_code.expect("Error returned so a error was expected by the test").value());
     }
 
-    check(client_result_driver);
+    if let Some(err_code) = expected_error_code {
+        let err_value = err_code.value();
+        assert_matches!(
+            server_result_driver,
+            Err(ConnectionError::Local { error: LocalError::Application { code: err, .. } }) if err == err_code
+        );
+        assert_matches!(
+            client_result_driver,
+            Err(ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose { error_code: err } )) if err == err_value
+        );
+        assert_matches!(
+            server_result_stream,
+            Err(StreamError::ConnectionError(ConnectionError::Local { error: LocalError::Application { code: err, .. } })) if err == err_code
+        );
+    } else {
+        // Ok expected
+        assert_matches!(server_result_driver, Ok(_));
+        assert_matches!(client_result_driver, Ok(_));
+        assert_matches!(server_result_stream, Ok(_));
+    }
 }
