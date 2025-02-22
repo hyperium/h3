@@ -7,8 +7,8 @@ use http::{request, HeaderMap, Request, Response, StatusCode};
 
 use crate::{
     client,
-    connection::ConnectionState,
-    error::{Code, Error, Kind},
+    config::Settings,
+    error2::{ConnectionError, NewCode, StreamError},
     proto::{
         coding::Encode,
         frame::{self, Frame, FrameType},
@@ -18,6 +18,7 @@ use crate::{
     },
     qpack, server,
     tests::get_stream_blocking,
+    ConnectionState2,
 };
 
 use super::h3_quinn;
@@ -311,15 +312,13 @@ async fn header_too_big_response_from_server() {
             .resolve_request()
             .await
             .err()
-            .expect("should return an error")
-            .kind();
+            .expect("should return an error");
 
         assert_matches!(
             err_kind,
-            Kind::HeaderTooBig {
+            StreamError::HeaderTooBig {
                 actual_size: 42,
-                max_size: 12,
-                ..
+                max_size: 12
             }
         );
 
@@ -381,10 +380,10 @@ async fn header_too_big_response_from_server_trailers() {
             .await
             .expect("recv data")
             .expect("body");
-        let err_kind = request_stream.recv_trailers().await.unwrap_err().kind();
+        let err_kind = request_stream.recv_trailers().await.unwrap_err();
         assert_matches!(
             err_kind,
-            Kind::HeaderTooBig {
+            StreamError::HeaderTooBig {
                 actual_size: 239,
                 max_size: 207,
                 ..
@@ -412,22 +411,17 @@ async fn header_too_big_client_error() {
         };
         let req_fut = async {
             // pretend client already received server's settings
-            client
-                .shared_state()
-                .write("client")
-                .peer_config
-                .max_field_section_size = 12;
+            let mut settings = Settings::default();
+            settings.max_field_section_size = 12;
+            // Sets the settings if not already received
+            client.set_settings(settings);
 
             let req = Request::get("http://localhost/salut").body(()).unwrap();
-            let err_kind = client
-                .send_request(req)
-                .await
-                .map(|_| ())
-                .unwrap_err()
-                .kind();
+            let err_kind = client.send_request(req).await.map(|_| ()).unwrap_err();
+
             assert_matches!(
                 err_kind,
-                Kind::HeaderTooBig {
+                StreamError::HeaderTooBig {
                     actual_size: 179,
                     max_size: 12,
                     ..
@@ -450,9 +444,13 @@ async fn header_too_big_client_error() {
 
         // client does not send any data, so the server will not receive any data, resulting in a H3_REQUEST_INCOMPLETE
         assert_matches!(
-            incoming.resolve_request().await.err().expect("should return an error").kind(),
-            Kind::Application { code, .. } => {
-                assert_eq!(code, Code::H3_REQUEST_INCOMPLETE)
+            incoming
+                .resolve_request()
+                .await
+                .err()
+                .expect("should return an error"),
+            StreamError::RemoteReset {
+                code: NewCode::H3_REQUEST_INCOMPLETE
             }
         );
     };
@@ -472,17 +470,15 @@ async fn header_too_big_client_error_trailer() {
             let err = future::poll_fn(|cx| driver.poll_close(cx))
                 .await
                 .unwrap_err();
-            match err.kind() {
-                Kind::Timeout => (),
+            match err {
+                ConnectionError::Timeout => (),
                 _ => panic!("unexpected error: {:?}", err),
             }
         };
         let req_fut = async {
-            client
-                .shared_state()
-                .write("client")
-                .peer_config
-                .max_field_section_size = 200;
+            let mut settings = Settings::default();
+            settings.max_field_section_size = 200;
+            client.set_settings(settings);
 
             let mut request_stream = client
                 .send_request(Request::get("http://localhost/salut").body(()).unwrap())
@@ -496,14 +492,11 @@ async fn header_too_big_client_error_trailer() {
             let mut trailers = HeaderMap::new();
             trailers.insert("trailer", "A".repeat(200).parse().unwrap());
 
-            let err_kind = request_stream
-                .send_trailers(trailers)
-                .await
-                .unwrap_err()
-                .kind();
+            let err_kind = request_stream.send_trailers(trailers).await.unwrap_err();
+
             assert_matches!(
                 err_kind,
-                Kind::HeaderTooBig {
+                StreamError::HeaderTooBig {
                     actual_size: 239,
                     max_size: 200,
                     ..
@@ -569,10 +562,10 @@ async fn header_too_big_discard_from_client() {
                 .await
                 .expect("request");
             request_stream.finish().await.expect("client finish");
-            let err_kind = request_stream.recv_response().await.unwrap_err().kind();
+            let err_kind = request_stream.recv_response().await.unwrap_err();
             assert_matches!(
                 err_kind,
-                Kind::HeaderTooBig {
+                StreamError::HeaderTooBig {
                     actual_size: 42,
                     max_size: 12,
                     ..
@@ -616,9 +609,9 @@ async fn header_too_big_discard_from_client() {
             tokio::time::sleep(Duration::from_millis(2)).await;
         }
         assert_matches!(
-            err.as_ref().unwrap().kind(),
-            Kind::Application {
-                code: Code::H3_REQUEST_CANCELLED,
+            err.as_ref().unwrap(),
+            StreamError::RemoteReset {
+                code: NewCode::H3_REQUEST_CANCELLED,
                 ..
             }
         );
@@ -659,10 +652,10 @@ async fn header_too_big_discard_from_client_trailers() {
             request_stream.recv_response().await.expect("recv response");
             request_stream.recv_data().await.expect("recv data");
 
-            let err_kind = request_stream.recv_trailers().await.unwrap_err().kind();
+            let err_kind = request_stream.recv_trailers().await.unwrap_err();
             assert_matches!(
                 err_kind,
-                Kind::HeaderTooBig {
+                StreamError::HeaderTooBig {
                     actual_size: 539,
                     max_size: 200,
                     ..
@@ -749,11 +742,9 @@ async fn header_too_big_server_error() {
         //# process it.
 
         // pretend the server received a smaller max_field_section_size
-        incoming_req
-            .shared_state()
-            .write("server")
-            .peer_config
-            .max_field_section_size = 12;
+        let mut settings = Settings::default();
+        settings.max_field_section_size = 12;
+        incoming_req.set_settings(settings);
 
         let err_kind = request_stream
             .send_response(
@@ -764,12 +755,11 @@ async fn header_too_big_server_error() {
             )
             .await
             .map(|_| ())
-            .unwrap_err()
-            .kind();
+            .unwrap_err();
 
         assert_matches!(
             err_kind,
-            Kind::HeaderTooBig {
+            StreamError::HeaderTooBig {
                 actual_size: 42,
                 max_size: 12,
                 ..
@@ -832,22 +822,17 @@ async fn header_too_big_server_error_trailers() {
         //# process it.
 
         // pretend the server already received client's settings
-        incoming_req
-            .shared_state()
-            .write("write")
-            .peer_config
-            .max_field_section_size = 200;
+        let mut settings = Settings::default();
+        settings.max_field_section_size = 12;
+        incoming_req.set_settings(settings);
 
         let mut trailers = HeaderMap::new();
         trailers.insert("trailer", "value".repeat(100).parse().unwrap());
-        let err_kind = request_stream
-            .send_trailers(trailers)
-            .await
-            .unwrap_err()
-            .kind();
+        let err_kind = request_stream.send_trailers(trailers).await.unwrap_err();
+
         assert_matches!(
             err_kind,
-            Kind::HeaderTooBig {
+            StreamError::HeaderTooBig {
                 actual_size: 539,
                 max_size: 200,
                 ..
@@ -874,12 +859,15 @@ async fn get_timeout_client_recv_response() {
                 .expect("request");
 
             let response = request_stream.recv_response().await;
-            assert_matches!(response.unwrap_err().kind(), Kind::Timeout);
+            assert_matches!(
+                response.unwrap_err(),
+                StreamError::ConnectionError(ConnectionError::Timeout)
+            );
         };
 
         let drive_fut = async move {
             let result = future::poll_fn(|cx| conn.poll_close(cx)).await;
-            assert_matches!(result.unwrap_err().kind(), Kind::Timeout);
+            assert_matches!(result.unwrap_err(), ConnectionError::Timeout);
         };
 
         tokio::join!(drive_fut, request_fut);
@@ -915,12 +903,15 @@ async fn get_timeout_client_recv_data() {
 
             let _ = request_stream.recv_response().await.unwrap();
             let data = request_stream.recv_data().await;
-            assert_matches!(data.map(|_| ()).unwrap_err().kind(), Kind::Timeout);
+            assert_matches!(
+                data.map(|_| ()).unwrap_err(),
+                StreamError::ConnectionError(ConnectionError::Timeout)
+            );
         };
 
         let drive_fut = async move {
             let result = future::poll_fn(|cx| conn.poll_close(cx)).await;
-            assert_matches!(result.unwrap_err().kind(), Kind::Timeout);
+            assert_matches!(result.unwrap_err(), ConnectionError::Timeout);
         };
 
         tokio::join!(drive_fut, request_fut);
@@ -963,7 +954,7 @@ async fn get_timeout_server_accept() {
 
         let drive_fut = async move {
             let result = future::poll_fn(|cx| conn.poll_close(cx)).await;
-            assert_matches!(result.unwrap_err().kind(), Kind::Timeout);
+            assert_matches!(result.unwrap_err(), ConnectionError::Timeout);
         };
 
         tokio::join!(drive_fut, request_fut);
@@ -974,8 +965,8 @@ async fn get_timeout_server_accept() {
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
         assert_matches!(
-            incoming_req.accept().await.map(|_| ()).unwrap_err().kind(),
-            Kind::Timeout
+            incoming_req.accept().await.map(|_| ()).unwrap_err(),
+            ConnectionError::Timeout
         );
     };
 
@@ -1006,8 +997,8 @@ async fn post_timeout_server_recv_data() {
             .await
             .expect("accept");
         assert_matches!(
-            req_stream.recv_data().await.map(|_| ()).unwrap_err().kind(),
-            Kind::Timeout
+            req_stream.recv_data().await.map(|_| ()).unwrap_err(),
+            StreamError::ConnectionError(ConnectionError::Timeout)
         );
     };
 
