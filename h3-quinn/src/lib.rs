@@ -21,6 +21,7 @@ use futures::{
 };
 
 use h3_datagram::quic_traits::SendDatagramErrorIncoming;
+
 #[cfg(feature = "datagram")]
 use h3_datagram::{datagram::Datagram, quic_traits};
 
@@ -221,8 +222,7 @@ fn convert_send_datagram_error(error: SendDatagramError) -> SendDatagramErrorInc
         }
         SendDatagramError::TooLarge => SendDatagramErrorIncoming::TooLarge,
         SendDatagramError::ConnectionLost(e) => {
-            //SendDatagramErrorIncoming::ConnectionError(convert_connection_error(e))
-            todo!("convert SendDatagramError::ConnectionLost")
+            SendDatagramErrorIncoming::ConnectionError(convert_connection_error(e))
         }
     }
 }

@@ -289,15 +289,6 @@ async fn client_error_on_bidi_recv() {
     let mut pair = Pair::default();
     let server = pair.server();
 
-    macro_rules! check_err {
-        ($e:expr) => {
-            assert_matches!(
-                $e.map(|_| ()).unwrap_err().kind(),
-                Kind::Application { reason: Some(reason), code: Code::H3_STREAM_CREATION_ERROR, .. }
-                if *reason == *"client received a bidirectional stream");
-        }
-    }
-
     let client_fut = async {
         let (mut conn, mut send) = client::new(pair.client().await).await.expect("client init");
 
@@ -308,10 +299,22 @@ async fn client_error_on_bidi_recv() {
         //# error of type H3_STREAM_CREATION_ERROR unless such an extension has
         //# been negotiated.
         let driver = future::poll_fn(|cx| conn.poll_close(cx));
-        check_err!(driver.await);
-        check_err!(
-            send.send_request(Request::get("http://no.way").body(()).unwrap())
-                .await
+        assert_matches!(
+            driver.await.unwrap_err(),
+            ConnectionError::Local {
+                error: LocalError::Application {
+                    code: NewCode::H3_STREAM_CREATION_ERROR,
+                    reason: reason_string
+                }
+            } if reason_string.starts_with("client received a bidirectional stream")
+        );
+
+        assert_matches!(send.send_request(Request::get("http://no.way").body(()).unwrap())
+            .await.map(|_| ()).unwrap_err(),
+            StreamError::ConnectionError(
+                ConnectionError::Local { error: LocalError::Application { code: NewCode::H3_STREAM_CREATION_ERROR, reason: reason_string } }
+            )
+            if reason_string.starts_with("client received a bidirectional stream")
         );
     };
 
@@ -325,9 +328,9 @@ async fn client_error_on_bidi_recv() {
                         error_code,
                         ..
                     }),
-                )) if Code::H3_STREAM_CREATION_ERROR == error_code.into_inner() => break,
+                )) if NewCode::H3_STREAM_CREATION_ERROR == error_code.into_inner() => break,
                 Err(e) => panic!("got err: {}", e),
-                Ok(_) => tokio::time::sleep(Duration::from_millis(1)).await,
+                Ok(_) => panic!("no error returned where it should be"),
             }
         }
     };
@@ -363,10 +366,12 @@ async fn two_control_streams() {
         let conn = server.next().await;
         let mut incoming = server::Connection::new(conn).await.unwrap();
         assert_matches!(
-            incoming.accept().await.map(|_| ()).unwrap_err().kind(),
-            Kind::Application {
-                code: Code::H3_STREAM_CREATION_ERROR,
-                ..
+            incoming.accept().await.map(|_| ()).unwrap_err(),
+            ConnectionError::Local {
+                error: LocalError::Application {
+                    code: NewCode::H3_STREAM_CREATION_ERROR,
+                    ..
+                }
             }
         );
     };
@@ -413,7 +418,7 @@ async fn control_close_send_error() {
             }) => error_code.into_inner(),
             e => panic!("unexpected error: {:?}", e),
         };
-        assert_eq!(err_code, Code::H3_CLOSED_CRITICAL_STREAM.value());
+        assert_eq!(err_code, NewCode::H3_CLOSED_CRITICAL_STREAM.value());
     };
 
     let server_fut = async {
@@ -421,14 +426,24 @@ async fn control_close_send_error() {
         let mut incoming = server::Connection::new(conn).await.unwrap();
         // Driver detects that the receiving side of the control stream has been closed
         assert_matches!(
-            incoming.accept().await.map(|_| ()).unwrap_err().kind(),
-            Kind::Application { reason: Some(reason), code: Code::H3_CLOSED_CRITICAL_STREAM, .. }
-            if *reason == *"control stream closed");
+            incoming.accept().await.map(|_| ()).unwrap_err(),
+            ConnectionError::Local {
+                error: LocalError::Application {
+                    code: NewCode::H3_CLOSED_CRITICAL_STREAM,
+                    reason: reason_string
+                }
+            } 
+            if reason_string.starts_with("control stream closed"));
         // Poll it once again returns the previously stored error
         assert_matches!(
-            incoming.accept().await.map(|_| ()).unwrap_err().kind(),
-            Kind::Application { reason: Some(reason), code: Code::H3_CLOSED_CRITICAL_STREAM, .. }
-            if *reason == *"control stream closed");
+            incoming.accept().await.map(|_| ()).unwrap_err(),
+            ConnectionError::Local {
+                error: LocalError::Application {
+                    code: NewCode::H3_CLOSED_CRITICAL_STREAM,
+                    reason: reason_string
+                }
+            } 
+            if reason_string.starts_with("control stream closed"));
     };
 
     tokio::join!(server_fut, client_fut);
@@ -462,10 +477,12 @@ async fn missing_settings() {
         let conn = server.next().await;
         let mut incoming = server::Connection::new(conn).await.unwrap();
         assert_matches!(
-            incoming.accept().await.map(|_| ()).unwrap_err().kind(),
-            Kind::Application {
-                code: Code::H3_MISSING_SETTINGS,
-                ..
+            incoming.accept().await.map(|_| ()).unwrap_err(),
+            ConnectionError::Local {
+                error: LocalError::Application {
+                    code: NewCode::H3_MISSING_SETTINGS,
+                    ..
+                }
             }
         );
     };
@@ -500,10 +517,12 @@ async fn control_stream_frame_unexpected() {
         let conn = server.next().await;
         let mut incoming = server::Connection::new(conn).await.unwrap();
         assert_matches!(
-            incoming.accept().await.map(|_| ()).unwrap_err().kind(),
-            Kind::Application {
-                code: Code::H3_FRAME_UNEXPECTED,
-                ..
+            incoming.accept().await.map(|_| ()).unwrap_err(),
+            ConnectionError::Local {
+                error: LocalError::Application {
+                    code: NewCode::H3_FRAME_UNEXPECTED,
+                    ..
+                }
             }
         );
     };
@@ -528,8 +547,8 @@ async fn timeout_on_control_frame_read() {
         let conn = server.next().await;
         let mut incoming = server::Connection::new(conn).await.unwrap();
         assert_matches!(
-            incoming.accept().await.map(|_| ()).unwrap_err().kind(),
-            Kind::Timeout
+            incoming.accept().await.map(|_| ()).unwrap_err(),
+            ConnectionError::Timeout
         );
     };
 
@@ -558,12 +577,12 @@ async fn goaway_from_server_not_request_id() {
         assert_matches!(
             future::poll_fn(|cx| driver.poll_close(cx))
                 .await
-                .unwrap_err()
-                .kind(),
-            Kind::Application {
-                // The sent in the GoAway frame from the client is not a Request:
-                code: Code::H3_ID_ERROR,
-                ..
+                .unwrap_err(),
+            ConnectionError::Local {
+                error: LocalError::Application {
+                    code: NewCode::H3_ID_ERROR,
+                    ..
+                }
             }
         )
     };
@@ -613,10 +632,9 @@ async fn graceful_shutdown_server_rejects() {
 
         assert_matches!(first, Ok(_));
         assert_matches!(
-            rejected.unwrap_err().kind(),
-            Kind::Application {
-                code: Code::H3_REQUEST_REJECTED,
-                ..
+            rejected.unwrap_err(),
+            StreamError::RemoteReset {
+                code: NewCode::H3_REQUEST_REJECTED
             }
         );
     };
@@ -667,7 +685,12 @@ async fn graceful_shutdown_grace_interval() {
         let (too_late, driver) = tokio::join!(too_late, driver);
         assert_matches!(first, Ok(_));
         assert_matches!(in_flight, Ok(_));
-        assert_matches!(too_late.unwrap_err().kind(), Kind::Closing);
+        assert_matches!(
+            too_late.unwrap_err(),
+            StreamError::ConnectionError(ConnectionError::Local {
+                error: LocalError::Closing,
+            })
+        );
         assert_matches!(driver, Ok(_));
     };
 
@@ -807,7 +830,7 @@ async fn server_not_blocking_on_idle_request() {
 
         assert_matches!(err,
         quinn::ConnectionError::ApplicationClosed(quinn::ApplicationClose { error_code, .. })
-            if error_code.into_inner() == Code::H3_FRAME_UNEXPECTED.value()
+            if error_code.into_inner() == NewCode::H3_FRAME_UNEXPECTED.value()
         );
     };
 
@@ -825,7 +848,15 @@ async fn server_not_blocking_on_idle_request() {
 
         let server = async move {
             let err = incoming.accept().await.err().expect("Connection Error");
-            assert_matches!(err.kind(), Kind::Application { code,.. } => assert_eq!(code, Code::H3_FRAME_UNEXPECTED));
+            assert_matches!(
+                err,
+                ConnectionError::Local {
+                    error: LocalError::Application {
+                        code: NewCode::H3_FRAME_UNEXPECTED,
+                        ..
+                    }
+                }
+            );
         };
 
         tokio::join!(req1, server);
@@ -840,7 +871,7 @@ async fn server_not_blocking_on_idle_request() {
          _ = tokio::time::sleep(Duration::from_secs(100)) => panic!("timeout")
     );
 }
-async fn request<T, O, B>(mut send_request: T) -> Result<Response<()>, Error>
+async fn request<T, O, B>(mut send_request: T) -> Result<Response<()>, StreamError>
 where
     T: BorrowMut<SendRequest<O, B>>,
     O: quic::OpenStreams<B>,
