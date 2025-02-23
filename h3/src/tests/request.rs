@@ -1529,28 +1529,45 @@ where
         // we have no influence wether the quinn returns the connection error to the stream api
         // but if it returns an error it needs to be the expected one
         assert_matches!(err, quinn::ReadError::ConnectionLost(quinn::ConnectionError::ApplicationClosed(code)) 
-            if code.error_code.into_inner() == expected_error_code.expect("Error returned so a error was expected by the test").value());
+            if code.error_code.into_inner() == expected_error_code.expect("If this is a error an error was expected").value());
     }
 
-    if let Some(err_code) = expected_error_code {
-        let err_value = err_code.value();
+    if let Some(expected_error_code) = expected_error_code {
         assert_matches!(
             server_result_driver,
-            Err(ConnectionError::Local { error: LocalError::Application { code: err, .. } }) if err == err_code
+            Err(ConnectionError::Local { error: LocalError::Application { code: err, .. } }) if err == expected_error_code
         );
         assert_matches!(
             client_result_driver,
-            Err(ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose { error_code: err } )) if err == err_value
+            Err(ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose { error_code: err } )) if err == expected_error_code.value()
         );
         assert_matches!(
             server_result_stream,
-            Err(StreamError::ConnectionError(ConnectionError::Local { error: LocalError::Application { code: err, .. } })) if err == err_code
+            Err(StreamError::ConnectionError(ConnectionError::Local { error: LocalError::Application { code: err, .. } })) if err == expected_error_code
         );
     } else {
-        // Ok expected
-        println!("server_result_driver: {}", server_result_driver.clone().err().unwrap());
-        //assert_matches!(server_result_driver, Ok(_));
-        assert_matches!(client_result_driver, Ok(_));
-        assert_matches!(server_result_stream, Ok(_));
+        // No error expected should be H3_NO_ERROR
+        assert_matches!(
+            client_result_driver,
+            Err(ConnectionError::Local {
+                error: LocalError::Application {
+                    code: NewCode::H3_NO_ERROR,
+                    ..
+                },
+            })
+        );
+        assert_matches!(
+            server_result_driver,
+            Err(ConnectionError::Remote(
+                ConnectionErrorIncoming::ApplicationClose {
+                    error_code: err
+                }
+            )) if err == NewCode::H3_NO_ERROR.value()
+        );
+        // Stream closes with no error
+        assert_matches!(
+            server_result_stream,
+            Ok(())
+        );
     }
 }
