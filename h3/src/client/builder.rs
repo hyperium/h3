@@ -11,9 +11,10 @@ use futures_util::future;
 
 use crate::{
     config::Config,
-    connection::{ConnectionInner, SharedStateRef},
-    error::Error,
+    connection::ConnectionInner,
+    error2::ConnectionError,
     quic::{self},
+    shared_state::SharedState2,
 };
 
 use super::connection::{Connection, SendRequest};
@@ -24,7 +25,9 @@ pub fn builder() -> Builder {
 }
 
 /// Create a new HTTP/3 client with default settings
-pub async fn new<C, O>(conn: C) -> Result<(Connection<C, Bytes>, SendRequest<O, Bytes>), Error>
+pub async fn new<C, O>(
+    conn: C,
+) -> Result<(Connection<C, Bytes>, SendRequest<O, Bytes>), ConnectionError>
 where
     C: quic::Connection<Bytes, OpenStreams = O>,
     O: quic::OpenStreams<Bytes>,
@@ -100,32 +103,36 @@ impl Builder {
     pub async fn build<C, O, B>(
         &mut self,
         quic: C,
-    ) -> Result<(Connection<C, B>, SendRequest<O, B>), Error>
+    ) -> Result<(Connection<C, B>, SendRequest<O, B>), ConnectionError>
     where
         C: quic::Connection<B, OpenStreams = O>,
         O: quic::OpenStreams<B>,
         B: Buf,
     {
         let open = quic.opener();
-        let conn_state = SharedStateRef::default();
+        let conn_state = Arc::new(SharedState2::default());
 
         let conn_waker = Some(future::poll_fn(|cx| Poll::Ready(cx.waker().clone())).await);
 
+        let inner = ConnectionInner::new(quic, conn_state.clone(), self.config).await?;
+        let send_request = SendRequest {
+            open,
+            conn_state2: conn_state,
+            conn_waker,
+            max_field_section_size: self.config.settings.max_field_section_size,
+            sender_count: Arc::new(AtomicUsize::new(1)),
+            send_grease_frame: self.config.send_grease,
+            _buf: PhantomData,
+            error_sender: inner.error_sender.clone(),
+        };
+
         Ok((
             Connection {
-                inner: ConnectionInner::new(quic, conn_state.clone(), self.config).await?,
+                inner,
                 sent_closing: None,
                 recv_closing: None,
             },
-            SendRequest {
-                open,
-                conn_state,
-                conn_waker,
-                max_field_section_size: self.config.settings.max_field_section_size,
-                sender_count: Arc::new(AtomicUsize::new(1)),
-                send_grease_frame: self.config.send_grease,
-                _buf: PhantomData,
-            },
+            send_request,
         ))
     }
 }

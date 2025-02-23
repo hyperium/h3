@@ -23,22 +23,22 @@ use super::{
 };
 
 #[derive(Debug, PartialEq)]
-pub enum Error {
+pub enum EncoderError {
     Insertion(DynamicTableError),
     InvalidString(StringError),
     InvalidInteger(IntError),
     UnknownDecoderInstruction(u8),
 }
 
-impl std::error::Error for Error {}
+impl std::error::Error for EncoderError {}
 
-impl std::fmt::Display for Error {
+impl std::fmt::Display for EncoderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::Insertion(e) => write!(f, "dynamic table insertion: {:?}", e),
-            Error::InvalidString(e) => write!(f, "could not parse string: {}", e),
-            Error::InvalidInteger(e) => write!(f, "could not parse integer: {}", e),
-            Error::UnknownDecoderInstruction(e) => {
+            EncoderError::Insertion(e) => write!(f, "dynamic table insertion: {:?}", e),
+            EncoderError::InvalidString(e) => write!(f, "could not parse string: {}", e),
+            EncoderError::InvalidInteger(e) => write!(f, "could not parse integer: {}", e),
+            EncoderError::UnknownDecoderInstruction(e) => {
                 write!(f, "got unkown decoder instruction: {}", e)
             }
         }
@@ -56,7 +56,7 @@ impl Encoder {
         block: &mut W,
         encoder_buf: &mut W,
         fields: T,
-    ) -> Result<usize, Error>
+    ) -> Result<usize, EncoderError>
     where
         W: BufMut,
         T: IntoIterator<Item = H>,
@@ -88,7 +88,7 @@ impl Encoder {
         Ok(required_ref)
     }
 
-    pub fn on_decoder_recv<R: Buf>(&mut self, read: &mut R) -> Result<(), Error> {
+    pub fn on_decoder_recv<R: Buf>(&mut self, read: &mut R) -> Result<(), EncoderError> {
         while let Some(instruction) = Action::parse(read)? {
             match instruction {
                 Action::Untrack(stream_id) => self.table.untrack_block(stream_id)?,
@@ -113,7 +113,7 @@ impl Encoder {
         block: &mut Vec<u8>,
         encoder: &mut W,
         field: &HeaderField,
-    ) -> Result<Option<usize>, Error> {
+    ) -> Result<Option<usize>, EncoderError> {
         if let Some(index) = StaticTable::find(field) {
             Indexed::Static(index).encode(block);
             return Ok(None);
@@ -189,7 +189,7 @@ impl Default for Encoder {
     }
 }
 
-pub fn encode_stateless<W, T, H>(block: &mut W, fields: T) -> Result<u64, Error>
+pub fn encode_stateless<W, T, H>(block: &mut W, fields: T) -> Result<u64, EncoderError>
 where
     W: BufMut,
     T: IntoIterator<Item = H>,
@@ -230,7 +230,7 @@ enum Action {
 }
 
 impl Action {
-    fn parse<R: Buf>(read: &mut R) -> Result<Option<Action>, Error> {
+    fn parse<R: Buf>(read: &mut R) -> Result<Option<Action>, EncoderError> {
         if read.remaining() < 1 {
             return Ok(None);
         }
@@ -238,7 +238,9 @@ impl Action {
         let mut buf = Cursor::new(read.chunk());
         let first = buf.chunk()[0];
         let instruction = match DecoderInstruction::decode(first) {
-            DecoderInstruction::Unknown => return Err(Error::UnknownDecoderInstruction(first)),
+            DecoderInstruction::Unknown => {
+                return Err(EncoderError::UnknownDecoderInstruction(first))
+            }
             DecoderInstruction::InsertCountIncrement => InsertCountIncrement::decode(&mut buf)?
                 .map(|x| Action::ReceivedRefIncrement(x.0 as usize)),
             DecoderInstruction::HeaderAck => {
@@ -262,30 +264,30 @@ pub fn set_dynamic_table_size<W: BufMut>(
     table: &mut DynamicTable,
     encoder: &mut W,
     size: usize,
-) -> Result<(), Error> {
+) -> Result<(), EncoderError> {
     table.set_max_size(size)?;
     DynamicTableSizeUpdate(size).encode(encoder);
     Ok(())
 }
 
-impl From<DynamicTableError> for Error {
+impl From<DynamicTableError> for EncoderError {
     fn from(e: DynamicTableError) -> Self {
-        Error::Insertion(e)
+        EncoderError::Insertion(e)
     }
 }
 
-impl From<StringError> for Error {
+impl From<StringError> for EncoderError {
     fn from(e: StringError) -> Self {
-        Error::InvalidString(e)
+        EncoderError::InvalidString(e)
     }
 }
 
-impl From<ParseError> for Error {
+impl From<ParseError> for EncoderError {
     fn from(e: ParseError) -> Self {
         match e {
-            ParseError::Integer(x) => Error::InvalidInteger(x),
-            ParseError::String(x) => Error::InvalidString(x),
-            ParseError::InvalidPrefix(x) => Error::UnknownDecoderInstruction(x),
+            ParseError::Integer(x) => EncoderError::InvalidInteger(x),
+            ParseError::String(x) => EncoderError::InvalidString(x),
+            ParseError::InvalidPrefix(x) => EncoderError::UnknownDecoderInstruction(x),
             _ => unreachable!(),
         }
     }
@@ -566,7 +568,9 @@ mod tests {
         let mut cur = Cursor::new(&buf);
         assert_eq!(
             encoder.on_decoder_recv(&mut cur),
-            Err(Error::Insertion(DynamicTableError::UnknownStreamId(2)))
+            Err(EncoderError::Insertion(DynamicTableError::UnknownStreamId(
+                2
+            )))
         );
     }
 
@@ -624,7 +628,9 @@ mod tests {
         let mut cur = Cursor::new(&buf);
         assert_eq!(
             encoder.on_decoder_recv(&mut cur),
-            Err(Error::Insertion(DynamicTableError::UnknownStreamId(4)))
+            Err(EncoderError::Insertion(DynamicTableError::UnknownStreamId(
+                4
+            )))
         );
     }
 
