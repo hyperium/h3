@@ -13,7 +13,7 @@ impl NewCode {
     ///
     /// See <https://www.rfc-editor.org/rfc/rfc9114.html#errors>
     /// and <https://www.rfc-editor.org/rfc/rfc9000.html#error-codes>
-    pub fn value(&self) -> u64 {
+    pub const fn value(&self) -> u64 {
         self.code
     }
 }

@@ -1040,11 +1040,14 @@ where
                     }));
                 }
                 Ok(decoded) => decoded,
-                Err(_e) => return Poll::Ready(Err(todo!("figure out qpack"))),
+                Err(_e) => return Poll::Ready(Err(todo!("figure out qpack {}", _e))),
             };
 
-        todo!("figure out qpack");
-        //Poll::Ready(Ok(Some(Header::try_from(fields)?.into_fields())))
+        Poll::Ready(Ok(Some(
+            Header::try_from(fields)
+                .map_err(|e| todo!("Figure out qpack"))?
+                .into_fields(),
+        )))
     }
 
     #[allow(missing_docs)]

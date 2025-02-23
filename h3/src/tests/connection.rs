@@ -11,6 +11,7 @@ use tokio::sync::oneshot::{self};
 
 use crate::client::SendRequest;
 use crate::error2::{ConnectionError, LocalError, NewCode, StreamError};
+use crate::quic::ConnectionErrorIncoming;
 use crate::tests::get_stream_blocking;
 use crate::{client, server, ConnectionState2};
 use crate::{
@@ -91,14 +92,14 @@ async fn server_drop_close() {
                 .await
                 .unwrap();
             let response = request_stream.recv_response().await;
+
             assert_matches!(
                 response.unwrap_err(),
-                StreamError::ConnectionError(ConnectionError::Local {
-                    error: LocalError::Application {
-                        code: NewCode::H3_NO_ERROR,
-                        ..
-                    }
-                })
+                StreamError::ConnectionError(ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{
+                    error_code: code,
+                    ..
+                }))
+                if code == NewCode::H3_NO_ERROR.value()
             );
         };
 

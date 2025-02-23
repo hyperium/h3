@@ -3,19 +3,21 @@
 //! This module includes traits and types meant to allow being generic over any
 //! QUIC implementation.
 
-use std::fmt::Display;
+use core::error;
+use std::fmt::{Debug, Display};
 use std::sync::Arc;
 use std::task::{self, Poll};
 
 use bytes::Buf;
 
+use crate::error2::NewCode;
 pub use crate::proto::stream::{InvalidStreamId, StreamId};
 pub use crate::stream::WriteBuf;
 
 /// Error type to communicate that the quic connection was closed
 ///
 /// This is used by to implement the quic abstraction traits
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum ConnectionErrorIncoming {
     /// Error from the http3 layer
     ApplicationClose {
@@ -34,6 +36,25 @@ pub enum ConnectionErrorIncoming {
     InternalError(String),
     /// A unknown error occurred (not relevant to h3)
     Undefined(Arc<dyn std::error::Error + Send + Sync>),
+}
+
+// Manual Debug implementation to display the right h3 error string for the error code like H3_NO_ERROR instead of a number
+impl Debug for ConnectionErrorIncoming {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ApplicationClose { error_code } => {
+                let error_code = NewCode::from(*error_code);
+                write!(f, "ApplicationClose({})", error_code)
+            }
+            Self::Timeout => write!(f, "Timeout"),
+            Self::ConnectionClosed { error_code } => f
+                .debug_struct("ConnectionClosed")
+                .field("error_code", error_code)
+                .finish(),
+            Self::InternalError(arg0) => f.debug_tuple("InternalError").field(arg0).finish(),
+            Self::Undefined(arg0) => f.debug_tuple("Undefined").field(arg0).finish(),
+        }
+    }
 }
 
 /// Error type to communicate that the stream was closed
@@ -69,6 +90,7 @@ impl Display for StreamErrorIncoming {
                 write!(f, "ConnectionError: {}", connection_error)
             }
             StreamErrorIncoming::StreamReset { error_code } => {
+                let error_code = NewCode::from(*error_code);
                 write!(f, "StreamClosed: {}", error_code)
             }
             StreamErrorIncoming::Unknown(error) => write!(f, "Error undefined by h3: {}", error),
@@ -81,6 +103,7 @@ impl Display for ConnectionErrorIncoming {
         // display enum with fields
         match self {
             ConnectionErrorIncoming::ApplicationClose { error_code } => {
+                let error_code = NewCode::from(*error_code);
                 write!(f, "ApplicationClose: {}", error_code)
             }
             ConnectionErrorIncoming::Timeout => write!(f, "Timeout"),

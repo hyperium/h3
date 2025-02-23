@@ -100,7 +100,7 @@ impl std::fmt::Display for ConnectionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ConnectionError::Local { error } => write!(f, "Local error: {:?}", error),
-            ConnectionError::Remote(err) => write!(f, "Remote error: {:?}", err),
+            ConnectionError::Remote(err) => write!(f, "Remote error: {}", err),
             ConnectionError::Timeout => write!(f, "Timeout"),
         }
     }
