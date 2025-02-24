@@ -96,6 +96,14 @@ impl Builder {
         self
     }
 
+    /// Indicates that the client supports HTTP/3 datagrams
+    ///
+    /// See: <https://www.rfc-editor.org/rfc/rfc9297#section-2.1.1>
+    pub fn enable_datagram(&mut self, enabled: bool) -> &mut Self {
+        self.config.settings.enable_datagram = enabled;
+        self
+    }
+
     /// Create a new HTTP/3 client from a `quic` connection
     pub async fn build<C, O, B>(
         &mut self,
