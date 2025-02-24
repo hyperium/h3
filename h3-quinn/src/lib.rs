@@ -568,13 +568,9 @@ impl Error for ReadError {
 ///
 /// Implements a [`quic::SendStream`] backed by a [`quinn::SendStream`].
 pub struct SendStream<B: Buf> {
-    stream: Option<quinn::SendStream>,
+    stream: quinn::SendStream,
     writing: Option<WriteBuf<B>>,
-    write_fut: WriteFuture,
 }
-
-type WriteFuture =
-    ReusableBoxFuture<'static, (quinn::SendStream, Result<usize, quinn::WriteError>)>;
 
 impl<B> SendStream<B>
 where
@@ -582,9 +578,8 @@ where
 {
     fn new(stream: quinn::SendStream) -> SendStream<B> {
         Self {
-            stream: Some(stream),
+            stream: stream,
             writing: None,
-            write_fut: ReusableBoxFuture::new(async { unreachable!() }),
         }
     }
 }
@@ -599,39 +594,26 @@ where
     fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         if let Some(ref mut data) = self.writing {
             while data.has_remaining() {
-                if let Some(mut stream) = self.stream.take() {
-                    let chunk = data.chunk().to_owned(); // FIXME - avoid copy
-                    self.write_fut.set(async move {
-                        let ret = stream.write(&chunk).await;
-                        (stream, ret)
-                    });
-                }
-
-                let (stream, res) = ready!(self.write_fut.poll(cx));
-                self.stream = Some(stream);
-                match res {
-                    Ok(cnt) => data.advance(cnt),
-                    Err(err) => {
-                        return Poll::Ready(Err(SendStreamError::Write(err)));
-                    }
-                }
+                let stream = Pin::new(&mut self.stream);
+                let written = ready!(stream.poll_write(cx, data.chunk()))
+                    .map_err(|err| SendStreamError::Write(err))?;
+                data.advance(written);
             }
         }
+        // all data is written
         self.writing = None;
         Poll::Ready(Ok(()))
     }
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn poll_finish(&mut self, _cx: &mut task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(self.stream.as_mut().unwrap().finish().map_err(|e| e.into()))
+        Poll::Ready(self.stream.finish().map_err(|e| e.into()))
     }
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn reset(&mut self, reset_code: u64) {
         let _ = self
             .stream
-            .as_mut()
-            .unwrap()
             .reset(VarInt::from_u64(reset_code).unwrap_or(VarInt::MAX));
     }
 
@@ -646,13 +628,7 @@ where
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn send_id(&self) -> StreamId {
-        self.stream
-            .as_ref()
-            .unwrap()
-            .id()
-            .0
-            .try_into()
-            .expect("invalid stream id")
+        self.stream.id().0.try_into().expect("invalid stream id")
     }
 }
 
@@ -671,30 +647,15 @@ where
             panic!("poll_send called while send stream is not ready")
         }
 
-        let s = Pin::new(self.stream.as_mut().unwrap());
+        let s = Pin::new(&mut self.stream);
 
-        let res = ready!(futures::io::AsyncWrite::poll_write(s, cx, buf.chunk()));
+        let res = ready!(s.poll_write(cx, buf.chunk()));
         match res {
             Ok(written) => {
                 buf.advance(written);
                 Poll::Ready(Ok(written))
             }
-            Err(err) => {
-                // We are forced to use AsyncWrite for now because we cannot store
-                // the result of a call to:
-                // quinn::send_stream::write<'a>(&'a mut self, buf: &'a [u8]) -> Result<usize, WriteError>.
-                //
-                // This is why we have to unpack the error from io::Error instead of having it
-                // returned directly. This should not panic as long as quinn's AsyncWrite impl
-                // doesn't change.
-                let err = err
-                    .into_inner()
-                    .expect("write stream returned an empty error")
-                    .downcast::<WriteError>()
-                    .expect("write stream returned an error which type is not WriteError");
-
-                Poll::Ready(Err(SendStreamError::Write(*err)))
-            }
+            Err(err) => Poll::Ready(Err(SendStreamError::Write(err))),
         }
     }
 }
