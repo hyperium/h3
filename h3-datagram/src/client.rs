@@ -1,11 +1,11 @@
-//! server API
+//! client API
 
 use std::marker::PhantomData;
 
 use bytes::Buf;
 use h3::{
+    client::Connection,
     quic::{self, StreamId},
-    server::Connection,
     Error,
 };
 
