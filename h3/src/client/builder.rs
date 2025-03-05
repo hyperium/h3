@@ -110,7 +110,9 @@ impl Builder {
         B: Buf,
     {
         let open = quic.opener();
-        let conn_state = Arc::new(SharedState2::default());
+        let shared = SharedState2::default();
+
+        let conn_state = Arc::new(shared);
 
         let conn_waker = Some(future::poll_fn(|cx| Poll::Ready(cx.waker().clone())).await);
 
@@ -123,7 +125,6 @@ impl Builder {
             sender_count: Arc::new(AtomicUsize::new(1)),
             send_grease_frame: self.config.send_grease,
             _buf: PhantomData,
-            error_sender: inner.error_sender.clone(),
         };
 
         Ok((

@@ -105,8 +105,6 @@ where
     // step of the grease sending poll fn
     grease_step: GreaseStatus<C::SendStream, B>,
     pub config: Config,
-    error_getter: UnboundedReceiver<(NewCode, String)>,
-    pub(crate) error_sender: UnboundedSender<(NewCode, String)>,
 }
 
 impl<B, C> ConnectionState2 for ConnectionInner<C, B>
@@ -266,8 +264,6 @@ where
             future::poll_fn(|cx| conn.poll_open_send(cx)).await,
         );
 
-        let (sender, receiver) = unbounded_channel();
-
         let control_send = match control_send {
             Err(StreamErrorIncoming::ConnectionErrorIncoming { connection_error }) => {
                 return Err(conn.handle_quic_error_raw(connection_error));
@@ -321,8 +317,6 @@ where
             send_grease_stream_flag: config.send_grease,
             // start at first step
             grease_step: GreaseStatus::NotStarted(PhantomData),
-            error_getter: receiver,
-            error_sender: sender,
         };
         conn_inner.send_control_stream_headers().await?;
 
@@ -522,12 +516,7 @@ where
         // check if there is an error in the error channel
         // wake up the connection if there is an error
 
-        let x = self.error_getter.poll_recv(cx);
-        match x {
-            Poll::Ready(Some((code, cause))) => Err(InternalConnectionError::new(code, cause)),
-            Poll::Ready(None) => Ok(()),
-            Poll::Pending => Ok(()),
-        }
+        todo!("check for errors")
     }
 
     /// Waits for the control stream to be received and reads subsequent frames.
@@ -846,7 +835,6 @@ pub struct RequestStream<S, B> {
     pub(super) conn_state: Arc<SharedState2>,
     pub(super) max_field_section_size: u64,
     send_grease_frame: bool,
-    pub(super) error_sender: UnboundedSender<(NewCode, String)>,
 }
 
 impl<S, B> RequestStream<S, B> {
@@ -856,7 +844,6 @@ impl<S, B> RequestStream<S, B> {
         max_field_section_size: u64,
         conn_state: Arc<SharedState2>,
         grease: bool,
-        error_sender: UnboundedSender<(NewCode, String)>,
     ) -> Self {
         Self {
             stream,
@@ -864,7 +851,6 @@ impl<S, B> RequestStream<S, B> {
             max_field_section_size,
             trailers: None,
             send_grease_frame: grease,
-            error_sender,
         }
     }
 }
@@ -872,12 +858,6 @@ impl<S, B> RequestStream<S, B> {
 impl<S, B> ConnectionState2 for RequestStream<S, B> {
     fn shared_state(&self) -> &SharedState2 {
         &self.conn_state
-    }
-}
-
-impl<S, B> CloseConnection for RequestStream<S, B> {
-    fn close_connection(&mut self, code: crate::error2::NewCode, reason: String) -> () {
-        self.error_sender.send((code, reason)).ok();
     }
 }
 
@@ -1161,7 +1141,6 @@ where
                 conn_state: self.conn_state.clone(),
                 max_field_section_size: 0,
                 send_grease_frame: self.send_grease_frame,
-                error_sender: self.error_sender.clone(),
             },
             RequestStream {
                 stream: recv,
@@ -1169,7 +1148,6 @@ where
                 conn_state: self.conn_state,
                 max_field_section_size: self.max_field_section_size,
                 send_grease_frame: self.send_grease_frame,
-                error_sender: self.error_sender,
             },
         )
     }

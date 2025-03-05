@@ -1497,8 +1497,6 @@ where
             .unwrap()
             .expect("request stream end unexpected");
 
-        //  let _ = sender.send(incoming);
-
         let driver = async move {
             match incoming.accept().await {
                 Ok(_) => (),
@@ -1515,6 +1513,7 @@ where
 
             while stream.recv_data().await?.is_some() {}
             stream.recv_trailers().await?;
+
             Result::<(), StreamError>::Ok(())
         };
         tokio::join!(driver, stream)
@@ -1524,6 +1523,7 @@ where
         (server_result_driver, server_result_stream),
         (client_result_stream, client_result_driver),
     ) = tokio::join!(server_fut, client_fut);
+
 
     if let Err(err) = client_result_stream {
         // we have no influence wether the quinn returns the connection error to the stream api

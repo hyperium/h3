@@ -59,12 +59,6 @@ impl<S, B> ConnectionState2 for RequestStream<S, B> {
     }
 }
 
-impl<C, B> CloseConnection for RequestStream<C, B> {
-    fn close_connection(&mut self, code: NewCode, reason: String) -> () {
-        let _ = self.inner.error_sender.send((code, reason));
-    }
-}
-
 impl<S, B> CloseStream for RequestStream<S, B> {}
 
 impl<S, B> RequestStream<S, B>

@@ -34,7 +34,6 @@ where
     B: Buf,
 {
     pub(super) frame_stream: FrameStream<C::BidiStream, B>,
-    pub(super) error_sender: UnboundedSender<(NewCode, String)>,
     pub(super) request_end_send: UnboundedSender<StreamId>,
     pub(super) send_grease_frame: bool,
     pub(super) max_field_section_size: u64,
@@ -48,16 +47,6 @@ where
 {
     fn shared_state(&self) -> &SharedState2 {
         &self.shared
-    }
-}
-
-impl<C, B> CloseConnection for RequestResolver<C, B>
-where
-    C: quic::Connection<B>,
-    B: Buf,
-{
-    fn close_connection(&mut self, code: NewCode, reason: String) -> () {
-        let _ = self.error_sender.send((code, reason));
     }
 }
 
@@ -149,7 +138,6 @@ where
                 self.max_field_section_size,
                 self.shared.clone(),
                 self.send_grease_frame,
-                self.error_sender.clone(),
             ),
         };
 

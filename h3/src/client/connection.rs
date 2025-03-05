@@ -121,7 +121,6 @@ where
     pub(super) conn_waker: Option<Waker>,
     pub(super) _buf: PhantomData<fn(B)>,
     pub(super) send_grease_frame: bool,
-    pub(super) error_sender: UnboundedSender<(NewCode, String)>,
 }
 
 impl<T, B> ConnectionState2 for SendRequest<T, B>
@@ -131,16 +130,6 @@ where
 {
     fn shared_state(&self) -> &SharedState2 {
         &self.conn_state2
-    }
-}
-
-impl<T, B> CloseConnection for SendRequest<T, B>
-where
-    T: quic::OpenStreams<B>,
-    B: Buf,
-{
-    fn close_connection(&mut self, code: NewCode, reason: String) -> () {
-        self.open.close(code, reason.as_bytes());
     }
 }
 
@@ -230,7 +219,6 @@ where
                 self.max_field_section_size,
                 self.conn_state2.clone(),
                 self.send_grease_frame,
-                self.error_sender.clone(),
             ),
         };
         // send the grease frame only once
@@ -256,7 +244,6 @@ where
             conn_waker: self.conn_waker.clone(),
             _buf: PhantomData,
             send_grease_frame: self.send_grease_frame,
-            error_sender: self.error_sender.clone(),
         }
     }
 }

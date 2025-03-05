@@ -1,8 +1,11 @@
 //! This module contains the internal error type, which is used to represent errors, which have not yet affected the connection state
 
-use crate::frame::FrameProtocolError;
+use std::error::Error;
+
+use crate::{frame::FrameProtocolError, quic::ConnectionErrorIncoming};
 
 use super::codes::NewCode;
+use std::fmt::Display;
 
 /// This enum determines if the error affects the connection or the stream
 ///
@@ -24,9 +27,9 @@ pub enum ErrorScope {
 #[derive(Debug, Clone, Hash)]
 pub struct InternalConnectionError {
     /// The error code
-    pub(super) code: NewCode,
+    pub(crate) code: NewCode,
     /// The error message
-    pub(super) message: String,
+    pub(crate) message: String,
 }
 
 impl InternalConnectionError {
@@ -70,5 +73,37 @@ impl InternalConnectionError {
                 message: "frame payload that contains additional bytes after the identified fields or a frame payload that terminates before the end of the identified fields".to_string(),
             },
             }
+    }
+}
+
+/// Error type which combines different internal errors
+#[derive(Debug, Clone)]
+pub enum ErrorOrigin {
+    /// Internal Error
+    Internal(InternalConnectionError),
+    /// Quick layer error
+    Quic(ConnectionErrorIncoming),
+}
+
+impl Display for ErrorOrigin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ErrorOrigin::Internal(error) => write!(f, "Internal Error: {}", error.message),
+            ErrorOrigin::Quic(error) => write!(f, "Quic Error: {:?}", error),
+        }
+    }
+}
+
+impl Error for ErrorOrigin {}
+
+impl From<InternalConnectionError> for ErrorOrigin {
+    fn from(error: InternalConnectionError) -> Self {
+        ErrorOrigin::Internal(error)
+    }
+}
+
+impl From<ConnectionErrorIncoming> for ErrorOrigin {
+    fn from(error: ConnectionErrorIncoming) -> Self {
+        ErrorOrigin::Quic(error)
     }
 }

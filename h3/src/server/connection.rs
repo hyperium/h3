@@ -124,7 +124,6 @@ where
 
         let resolver = Ok(Some(RequestResolver {
             frame_stream: stream,
-            error_sender: self.inner.error_sender.clone(),
             request_end_send: self.request_end_send.clone(),
             send_grease_frame: self.inner.send_grease_frame,
             max_field_section_size: self.max_field_section_size,

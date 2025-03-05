@@ -84,12 +84,6 @@ impl<S, B> ConnectionState2 for RequestStream<S, B> {
     }
 }
 
-impl<S, B> CloseConnection for RequestStream<S, B> {
-    fn close_connection(&mut self, code: crate::error2::NewCode, reason: String) -> () {
-        self.inner.error_sender.send((code, reason)).ok();
-    }
-}
-
 impl<S, B> CloseStream for RequestStream<S, B> {}
 
 impl<S, B> RequestStream<S, B>
