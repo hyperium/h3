@@ -1,18 +1,16 @@
-//! server API
+//! client API
 
 use std::marker::PhantomData;
 
 use bytes::Buf;
 use h3::{
+    client::Connection,
     quic::{self, StreamId},
-    server::Connection,
 };
 
 use crate::{
     datagram::Datagram,
-    datagram_traits::{
-        ReadDatagram, {HandleDatagramsExt, SendDatagramError},
-    },
+    datagram_traits::{HandleDatagramsExt, ReadDatagram, SendDatagramError},
     quic_traits::{RecvDatagramExt, SendDatagramExt},
 };
 
@@ -26,7 +24,8 @@ where
         self.inner
             .conn
             .send_datagram(Datagram::new(stream_id, data))
-            .map_err(|e| self.handle_send_datagram_error(e))
+            .map_err(|e| self.handle_send_datagram_error(e))?;
+        Ok(())
     }
 
     /// Reads an incoming datagram

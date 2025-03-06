@@ -1,14 +1,25 @@
 //! Traits which define the user API for datagrams.
 //! These traits are implemented for the client and server types in the `h3` crate.
 
+use std::{
+    future::Future,
+    marker::PhantomData,
+    task::{ready, Context, Poll},
+};
+
 use bytes::Buf;
 use h3::{
+    connection::ConnectionInner,
     error2::{traits::CloseConnection, ConnectionError},
     quic::{self, StreamId},
     ConnectionState2,
 };
+use pin_project_lite::pin_project;
 
-use crate::{quic_traits::SendDatagramErrorIncoming, server::ReadDatagram};
+use crate::{
+    datagram::Datagram,
+    quic_traits::{RecvDatagramExt, SendDatagramErrorIncoming},
+};
 
 pub trait HandleDatagramsExt<C, B>: ConnectionState2 + CloseConnection
 where
@@ -45,4 +56,35 @@ pub enum SendDatagramError {
     TooLarge,
     /// Connection error
     ConnectionError(ConnectionError),
+}
+
+pin_project! {
+    /// Future for [`Connection::read_datagram`]
+    pub struct ReadDatagram<'a, C, B>
+    where
+            C: quic::Connection<B>,
+            B: Buf,
+        {
+            pub(crate) conn: &'a mut ConnectionInner<C, B>,
+            pub(crate) _marker: PhantomData<B>,
+        }
+}
+
+impl<'a, C, B> Future for ReadDatagram<'a, C, B>
+where
+    C: quic::Connection<B> + RecvDatagramExt,
+    B: Buf,
+{
+    type Output = Result<Option<Datagram<C::Buf>>, ConnectionError>;
+
+    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match ready!(self.conn.conn.poll_accept_datagram(cx))
+            .map_err(|e| self.conn.handle_quic_connection_error(e))?
+        {
+            Some(v) => Poll::Ready(Ok(Some(
+                Datagram::decode(v).map_err(|e| self.conn.handle_connection_error(e))?,
+            ))),
+            None => Poll::Ready(Ok(None)),
+        }
+    }
 }

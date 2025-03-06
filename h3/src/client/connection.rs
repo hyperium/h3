@@ -359,7 +359,8 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    pub(super) inner: ConnectionInner<C, B>,
+    /// TODO: breaking encapsulation for RFC9298.
+    pub inner: ConnectionInner<C, B>,
     // Has a GOAWAY frame been sent? If so, this PushId is the last we are willing to accept.
     pub(super) sent_closing: Option<PushId>,
     // Has a GOAWAY frame been received? If so, this is StreamId the last the remote will accept.
