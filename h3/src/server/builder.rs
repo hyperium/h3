@@ -89,7 +89,7 @@ impl Builder {
     ///
     ///
     /// **Server**:
-    /// Supporting for webtransport also requires setting `enable_connect` `enable_datagram`
+    /// Supporting for webtransport also requires setting `enable_extended_connect` `enable_datagram`
     /// and `max_webtransport_sessions`.
     #[inline]
     pub fn enable_webtransport(&mut self, value: bool) -> &mut Self {
@@ -97,8 +97,8 @@ impl Builder {
         self
     }
 
-    /// Enables the CONNECT protocol
-    pub fn enable_connect(&mut self, value: bool) -> &mut Self {
+    /// Enables the extended CONNECT protocol required for various HTTP/3 extensions.
+    pub fn enable_extended_connect(&mut self, value: bool) -> &mut Self {
         self.config.settings.enable_extended_connect = value;
         self
     }
