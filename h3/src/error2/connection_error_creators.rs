@@ -1,10 +1,11 @@
 //! Defines error traits
 
-use std::task::{ready, Poll};
+use std::task::Poll;
 
 use bytes::Buf;
 
 use crate::{
+    connection::ConnectionInner,
     frame::FrameStreamError,
     quic::{self, ConnectionErrorIncoming, StreamErrorIncoming},
     shared_state::ConnectionState2,
@@ -17,80 +18,90 @@ use super::{
 };
 
 /// This trait is implemented for all types which can close the connection
-pub trait CloseConnection: ConnectionState2 {
-    /// Close the connection
-    fn handle_connection_error(
-        &mut self,
-        internal_error: InternalConnectionError,
-    ) -> ConnectionError {
-        let err = match self.try_set_conn_error(internal_error.clone().into()) {
-            Ok(error) => {
-                // Ok means set by us so we can close the connection
-                self.close_connection(internal_error.code, internal_error.message);
-                error
-            }
-            Err(error) => error,
-        };
-        // err might be a different error so match again
-        match err {
-            ErrorOrigin::Internal(internal_error) => {
-                ConnectionError::Local {
-                    error: LocalError::Application {
-                        code: internal_error.code,
-                        reason: internal_error.message,
-                    },
-                }
-            }
-            ErrorOrigin::Quic(connection_error) => ConnectionError::Remote(connection_error),
+impl<C, B> ConnectionInner<C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    /// Handle errors on the connection, closes the connection if needed
+    ///
+    /// This can be a [`ConnectionErrorIncoming`] or a [`InternalConnectionError`]
+    pub fn handle_connection_error<T: Into<ErrorOrigin>>(&mut self, error: T) -> ConnectionError {
+        if let Some(ref error) = self.handled_connection_error {
+            return error.clone();
         }
+
+        let err = self.set_conn_error(error.into());
+        let err = self.close_if_needed(err);
+        // err might be a different error so match again
+        self.convert_to_connection_error(err)
     }
 
-    /// Handles an incoming connection error from the quic layer
-    fn handle_quic_connection_error(&mut self, error: ConnectionErrorIncoming) -> ConnectionError {
-        /*let err = match error {
-            ConnectionErrorIncoming::Timeout => ConnectionError::Timeout,
-            ConnectionErrorIncoming::InternalError(reason) => ConnectionError::Local {
-                error: LocalError::Application {
-                    code: NewCode::H3_INTERNAL_ERROR,
-                    reason: reason,
-                },
-            },
-            _ => ConnectionError::Remote(error),
-        };
-        let err = match self.try_set_conn_error(error.into()) {
-            Ok(error) => {
-                match error {
-                    ErrorOrigin::Internal(internal_error) => {
-                        ConnectionError::Local {
-                            error: LocalError::Application {
-                                code: internal_error.code,
-                                reason: internal_error.message,
-                            },
-                        }
-                    }
-                    ErrorOrigin::Quic(connection_error) => ConnectionError::Remote(connection_error),
-                }
+    /// Closes the connection if needed
+    /// Check self.handled_connection_error before calling this function
+    fn close_if_needed(&mut self, error: ErrorOrigin) -> ErrorOrigin {
+        match error {
+            ErrorOrigin::Internal(ref internal_error) => {
+                self.close_connection(internal_error.code, internal_error.message.clone())
             }
-            Err(error) => error,
-        };
-        err*/
-        todo!()
+            ErrorOrigin::Quic(ConnectionErrorIncoming::InternalError(ref reason)) => {
+                self.close_connection(NewCode::H3_INTERNAL_ERROR, reason.clone())
+            }
+
+            // All other path do not need to close the connection
+            _ => (),
+        }
+        error
+    }
+
+    /// Converts a [`ErrorOrigin`] into a [`ConnectionError`] and sets self.handled_connection_error
+    ///
+    /// Check close the connection if needed before calling this function
+    fn convert_to_connection_error(&mut self, error: ErrorOrigin) -> ConnectionError {
+        let error = convert_to_connection_error(error);
+        self.handled_connection_error = Some(error.clone());
+        error
     }
 
     /// Polls for the connection error
-    fn poll_connection_error(&mut self, cx: &mut std::task::Context<'_>) -> Poll<ConnectionError> {
-        match ready!(self.poll_conn_error(cx)) {
-            ErrorOrigin::Internal(internal_error) => {
-                Poll::Ready(self.handle_connection_error(internal_error))
-            }
-            ErrorOrigin::Quic(connection_error) => {
-                Poll::Ready(ConnectionError::Remote(connection_error))
-            }
+    ///
+    /// Returns an Result to allow using ? in the calling function
+    pub fn poll_connection_error(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), ConnectionError>> {
+        if let Some(ref error) = self.handled_connection_error {
+            return Poll::Ready(Err(error.clone()));
+        };
+
+        // Check if the connection is in error state
+        if let Some(err) = self.get_conn_error() {
+            let err = self.close_if_needed(err);
+            // err might be a different error so match again
+            return Poll::Ready(Err(self.convert_to_connection_error(err)));
         }
+        self.waker().register(cx.waker());
+        Poll::Pending
     }
 
     /// Close the connection
-    fn close_connection(&mut self, code: NewCode, reason: String) -> ();
+    pub fn close_connection(&mut self, code: NewCode, reason: String) -> () {
+        self.conn.close(code, reason.as_bytes())
+    }
+}
+
+/// Converts a [`ErrorOrigin`] into a [`ConnectionError`] and sets self.handled_connection_error
+fn convert_to_connection_error(error: ErrorOrigin) -> ConnectionError {
+    match error {
+        ErrorOrigin::Internal(internal_error) => ConnectionError::Local {
+            error: LocalError::Application {
+                code: internal_error.code,
+                reason: internal_error.message,
+            },
+        },
+        ErrorOrigin::Quic(ConnectionErrorIncoming::Timeout) => ConnectionError::Timeout,
+        ErrorOrigin::Quic(connection_error) => ConnectionError::Remote(connection_error),
+    }
 }
 
 /// This trait is implemented for all types which can close a stream
@@ -100,16 +111,16 @@ pub trait CloseStream: ConnectionState2 {
         &mut self,
         internal_error: InternalConnectionError,
     ) -> StreamError {
-        /*let error = self.handle_connection_error(internal_error);
-        StreamError::ConnectionError(error)*/
-        todo!()
+        let err = self.set_conn_error_and_wake(internal_error);
+        StreamError::ConnectionError(convert_to_connection_error(err))
     }
 
     /// Handles a incoming stream error from the quic layer
     fn handle_quic_stream_error(&mut self, error: StreamErrorIncoming) -> StreamError {
-        /*match error {
+        match error {
             StreamErrorIncoming::ConnectionErrorIncoming { connection_error } => {
-                StreamError::ConnectionError(self.handle_quic_connection_error(connection_error))
+                let err = self.set_conn_error_and_wake(connection_error);
+                StreamError::ConnectionError(convert_to_connection_error(err))
             }
             StreamErrorIncoming::StreamReset { error_code } => StreamError::RemoteReset {
                 code: NewCode::from(error_code),
@@ -117,8 +128,7 @@ pub trait CloseStream: ConnectionState2 {
             StreamErrorIncoming::Unknown(custom_quic_impl_error) => {
                 StreamError::Undefined(custom_quic_impl_error)
             }
-        }*/
-        todo!()
+        }
     }
 }
 

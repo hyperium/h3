@@ -117,14 +117,6 @@ where
 
 fn convert_connection_error(e: quinn::ConnectionError) -> h3::quic::ConnectionErrorIncoming {
     match e {
-        quinn::ConnectionError::TransportError(error) => {
-            ConnectionErrorIncoming::Undefined(Arc::new(error))
-        }
-        quinn::ConnectionError::ConnectionClosed(connection_close) => {
-            ConnectionErrorIncoming::ConnectionClosed {
-                error_code: connection_close.error_code.into(),
-            }
-        }
         quinn::ConnectionError::ApplicationClosed(application_close) => {
             ConnectionErrorIncoming::ApplicationClose {
                 error_code: application_close.error_code.into(),
@@ -135,7 +127,9 @@ fn convert_connection_error(e: quinn::ConnectionError) -> h3::quic::ConnectionEr
         error @ quinn::ConnectionError::VersionMismatch
         | error @ quinn::ConnectionError::Reset
         | error @ quinn::ConnectionError::LocallyClosed
-        | error @ quinn::ConnectionError::CidsExhausted => {
+        | error @ quinn::ConnectionError::CidsExhausted
+        | error @ quinn::ConnectionError::TransportError(_)
+        | error @ quinn::ConnectionError::ConnectionClosed(_) => {
             ConnectionErrorIncoming::Undefined(Arc::new(error))
         }
     }
@@ -237,11 +231,6 @@ fn convert_h3_error_to_datagram_error(
             }
         }
         ConnectionErrorIncoming::Timeout => h3_datagram::ConnectionErrorIncoming::Timeout,
-        ConnectionErrorIncoming::ConnectionClosed { error_code } => {
-            h3_datagram::ConnectionErrorIncoming::ConnectionClosed {
-                error_code: error_code,
-            }
-        }
         ConnectionErrorIncoming::InternalError(err) => {
             h3_datagram::ConnectionErrorIncoming::InternalError(err)
         }

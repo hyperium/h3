@@ -17,9 +17,7 @@ use tokio::sync::mpsc;
 
 use crate::{
     connection::ConnectionInner,
-    error2::{
-        internal_error::InternalConnectionError, traits::CloseConnection, ConnectionError, NewCode,
-    },
+    error2::{internal_error::InternalConnectionError, ConnectionError, NewCode},
     frame::FrameStream,
     proto::{
         frame::{Frame, PayloadLen},
@@ -70,16 +68,6 @@ where
 {
     fn shared_state(&self) -> &SharedState2 {
         &self.inner.shared2
-    }
-}
-
-impl<C, B> CloseConnection for Connection<C, B>
-where
-    C: quic::Connection<B>,
-    B: Buf,
-{
-    fn close_connection(&mut self, code: NewCode, reason: String) -> () {
-        self.inner.close_connection(code, reason);
     }
 }
 
@@ -246,7 +234,7 @@ where
             //# receipt of a PUSH_PROMISE frame as a connection error of type
             //# H3_FRAME_UNEXPECTED.
             frame => {
-                return Poll::Ready(Err(self.handle_connection_error(
+                return Poll::Ready(Err(self.inner.handle_connection_error(
                     InternalConnectionError::new(
                         NewCode::H3_FRAME_UNEXPECTED,
                         format!("on server control stream: {:?}", frame),

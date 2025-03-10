@@ -3,22 +3,20 @@
 use std::{
     marker::PhantomData,
     sync::{atomic::AtomicUsize, Arc},
-    task::{Context, Poll, Waker},
+    task::{Context, Poll},
 };
 
 use bytes::{Buf, BytesMut};
 use futures_util::future;
 use http::request;
 
-use tokio::sync::mpsc::UnboundedSender;
 #[cfg(feature = "tracing")]
 use tracing::{info, instrument, trace};
 
 use crate::{
     connection::{self, ConnectionInner},
     error2::{
-        internal_error::InternalConnectionError,
-        traits::{CloseConnection, CloseStream},
+        connection_error_creators::CloseStream, internal_error::InternalConnectionError,
         ConnectionError, NewCode, StreamError,
     },
     frame::FrameStream,
@@ -118,7 +116,6 @@ where
     pub(super) max_field_section_size: u64, // maximum size for a header we receive
     // counts instances of SendRequest to close the connection when the last is dropped.
     pub(super) sender_count: Arc<AtomicUsize>,
-    pub(super) conn_waker: Option<Waker>,
     pub(super) _buf: PhantomData<fn(B)>,
     pub(super) send_grease_frame: bool,
 }
@@ -241,7 +238,6 @@ where
             open: self.open.clone(),
             max_field_section_size: self.max_field_section_size,
             sender_count: self.sender_count.clone(),
-            conn_waker: self.conn_waker.clone(),
             _buf: PhantomData,
             send_grease_frame: self.send_grease_frame,
         }
@@ -263,9 +259,6 @@ where
                 NewCode::H3_NO_ERROR,
                 "Connection closed by client".to_string(),
             ));
-            if let Some(w) = Option::take(&mut self.conn_waker) {
-                w.wake()
-            }
         }
     }
 }
@@ -377,16 +370,6 @@ where
     }
 }
 
-impl<C, B> CloseConnection for Connection<C, B>
-where
-    C: quic::Connection<B>,
-    B: Buf,
-{
-    fn close_connection(&mut self, code: NewCode, reason: String) -> () {
-        self.inner.close_connection(code, reason);
-    }
-}
-
 impl<C, B> Connection<C, B>
 where
     C: quic::Connection<B>,
@@ -443,7 +426,7 @@ where
                     //# A client MUST treat receipt of a GOAWAY frame containing a stream ID
                     //# of any other type as a connection error of type H3_ID_ERROR.
                     if !StreamId::from(id).is_request() {
-                        return Poll::Ready(Err(self.handle_connection_error(
+                        return Poll::Ready(Err(self.inner.handle_connection_error(
                             InternalConnectionError::new(
                                 NewCode::H3_ID_ERROR,
                                 format!("non-request StreamId in a GoAway frame: {}", id),
@@ -465,7 +448,7 @@ where
                 //# receipt of a MAX_PUSH_ID frame as a connection error of type
                 //# H3_FRAME_UNEXPECTED.
                 Ok(frame) => {
-                    return Poll::Ready(Err(self.handle_connection_error(
+                    return Poll::Ready(Err(self.inner.handle_connection_error(
                         InternalConnectionError::new(
                             NewCode::H3_FRAME_UNEXPECTED,
                             format!("on client control stream: {:?}", frame),
@@ -484,7 +467,7 @@ where
         //# error of type H3_STREAM_CREATION_ERROR unless such an extension has
         //# been negotiated.
         if self.inner.poll_accept_bi(cx).is_ready() {
-            return Poll::Ready(Err(self.handle_connection_error(
+            return Poll::Ready(Err(self.inner.handle_connection_error(
                 InternalConnectionError::new(
                     NewCode::H3_STREAM_CREATION_ERROR,
                     "client received a server-initiated bidirectional stream".to_string(),

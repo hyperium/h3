@@ -10,18 +10,16 @@ use futures_util::{future, ready};
 use http::HeaderMap;
 use stream::WriteBuf;
 
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 #[cfg(feature = "tracing")]
 use tracing::{instrument, warn};
 
 use crate::{
     config::Config,
     error2::{
-        internal_error::InternalConnectionError,
-        traits::{
-            CloseConnection, CloseRawQuicConnection, CloseStream,
-            HandleFrameStreamErrorOnRequestStream,
+        connection_error_creators::{
+            CloseRawQuicConnection, CloseStream, HandleFrameStreamErrorOnRequestStream,
         },
+        internal_error::InternalConnectionError,
         ConnectionError, NewCode, StreamError,
     },
     frame::{FrameStream, FrameStreamError},
@@ -60,6 +58,17 @@ where
     }
 }
 
+struct QpackStreams<C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    decoder_send: Option<C::SendStream>,
+    decoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
+    encoder_send: Option<C::SendStream>,
+    encoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
+}
+
 #[allow(missing_docs)]
 pub struct ConnectionInner<C, B>
 where
@@ -71,10 +80,7 @@ where
     pub conn: C,
     control_send: C::SendStream,
     control_recv: Option<FrameStream<C::RecvStream, B>>,
-    decoder_send: Option<C::SendStream>,
-    decoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
-    encoder_send: Option<C::SendStream>,
-    encoder_recv: Option<AcceptedRecvStream<C::RecvStream, B>>,
+    qpack_streams: QpackStreams<C, B>,
     /// Buffers incoming uni/recv streams which have yet to be claimed.
     ///
     /// This is opposed to discarding them by returning in `poll_accept_recv`, which may cause them to be missed by something else polling.
@@ -95,10 +101,9 @@ where
     /// number of buffered datagrams is exceeded, a datagram SHALL be dropped. It is up to an
     /// implementation to choose what stream or datagram to discard.
     accepted_streams: AcceptedStreams<C, B>,
-
     pending_recv_streams: Vec<Option<AcceptRecvStream<C::RecvStream, B>>>,
-
     got_peer_settings: bool,
+    pub(crate) handled_connection_error: Option<ConnectionError>,
     pub send_grease_frame: bool,
     // tells if the grease steam should be sent
     send_grease_stream_flag: bool,
@@ -132,16 +137,6 @@ where
     DataSent(S),
     /// Grease stream is finished
     Finished,
-}
-
-impl<B, C> CloseConnection for ConnectionInner<C, B>
-where
-    C: quic::Connection<B>,
-    B: Buf,
-{
-    fn close_connection(&mut self, code: crate::error2::NewCode, reason: String) -> () {
-        self.conn.close(code, reason.as_bytes());
-    }
 }
 
 impl<B, C> ConnectionInner<C, B>
@@ -195,8 +190,8 @@ where
         //# the peer prior to sending the SETTINGS frame; settings MUST be sent
         //# as soon as the transport is ready to send data.
 
-        let mut decoder_send = Option::take(&mut self.decoder_send);
-        let mut encoder_send = Option::take(&mut self.encoder_send);
+        let mut decoder_send = Option::take(&mut self.qpack_streams.decoder_send);
+        let mut encoder_send = Option::take(&mut self.qpack_streams.encoder_send);
 
         let (control, ..) = future::join3(
             stream::write(
@@ -216,13 +211,13 @@ where
         )
         .await;
 
-        self.decoder_send = decoder_send;
-        self.encoder_send = encoder_send;
+        self.qpack_streams.decoder_send = decoder_send;
+        self.qpack_streams.encoder_send = encoder_send;
 
         match control {
             Ok(control) => Ok(control),
             Err(StreamErrorIncoming::ConnectionErrorIncoming { connection_error }) => {
-                Err(self.handle_quic_connection_error(connection_error))
+                Err(self.handle_connection_error(connection_error))
             }
             Err(StreamErrorIncoming::StreamReset { error_code: err }) => Err(self
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
@@ -294,6 +289,13 @@ where
             Ok(control_send) => control_send,
         };
 
+        let qpack_streams = QpackStreams {
+            decoder_send: qpack_decoder.ok(),
+            decoder_recv: None,
+            encoder_send: qpack_encoder.ok(),
+            encoder_recv: None,
+        };
+
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
         //= type=implication
         //# The
@@ -304,15 +306,13 @@ where
             conn,
             control_send: control_send,
             control_recv: None,
-            decoder_recv: None,
-            encoder_recv: None,
+            qpack_streams,
+            handled_connection_error: None,
             pending_recv_streams: Vec::with_capacity(3),
             got_peer_settings: false,
             send_grease_frame: config.send_grease,
             config,
             accepted_streams: Default::default(),
-            decoder_send: qpack_decoder.ok(),
-            encoder_send: qpack_encoder.ok(),
             // send grease stream if configured
             send_grease_stream_flag: config.send_grease,
             // start at first step
@@ -352,7 +352,7 @@ where
         match stream::write(&mut self.control_send, Frame::Goaway(max_id.into())).await {
             Ok(()) => Ok(()),
             Err(StreamErrorIncoming::ConnectionErrorIncoming { connection_error }) => {
-                Err(self.handle_quic_connection_error(connection_error))
+                Err(self.handle_connection_error(connection_error))
             }
             Err(StreamErrorIncoming::StreamReset { error_code: err }) => Err(self
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
@@ -381,14 +381,14 @@ where
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Result<C::BidiStream, ConnectionError>> {
-        self.get_conn_error()?;
+        let _ = self.poll_connection_error(cx)?;
 
         // Accept the request by accepting the next bidirectional stream
         // .into().into() converts the impl QuicError into crate::error::Error.
         // The `?` operator doesn't work here for some reason.
         self.conn
             .poll_accept_bidi(cx)
-            .map_err(|e| self.handle_quic_connection_error(e))
+            .map_err(|e| self.handle_connection_error(e))
     }
 
     /// Polls incoming streams
@@ -396,14 +396,14 @@ where
     /// Accepted streams which are not control, decoder, or encoder streams are buffer in `accepted_recv_streams`
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_accept_recv(&mut self, cx: &mut Context<'_>) -> Result<(), ConnectionError> {
-        self.get_conn_error()?;
+        let _ = self.poll_connection_error(cx)?;
 
         // Get all currently pending streams
         loop {
             match self
                 .conn
                 .poll_accept_recv(cx)
-                .map_err(|e| self.handle_quic_connection_error(e))?
+                .map_err(|e| self.handle_connection_error(e))?
             {
                 Poll::Ready(stream) => self
                     .pending_recv_streams
@@ -415,7 +415,7 @@ where
         for stream in self.pending_recv_streams.iter_mut().filter(|s| s.is_some()) {
             let resolved = match stream.as_mut().expect("this cannot be None").poll_type(cx) {
                 Poll::Ready(Err(stream::PollTypeError::IncomingError(e))) => {
-                    return Err(self.handle_quic_connection_error(e));
+                    return Err(self.handle_connection_error(e));
                 }
                 Poll::Ready(Err(stream::PollTypeError::InternalError(e))) => {
                     return Err(self.handle_connection_error(e));
@@ -449,7 +449,7 @@ where
                     self.control_recv = Some(s);
                 }
                 enc @ AcceptedRecvStream::Encoder(_) => {
-                    if let Some(_prev) = self.encoder_recv.replace(enc) {
+                    if let Some(_prev) = self.qpack_streams.encoder_recv.replace(enc) {
                         return Err(self.handle_connection_error(InternalConnectionError::new(
                             NewCode::H3_STREAM_CREATION_ERROR,
                             "got two encoder streams".to_string(),
@@ -457,7 +457,7 @@ where
                     }
                 }
                 dec @ AcceptedRecvStream::Decoder(_) => {
-                    if let Some(_prev) = self.decoder_recv.replace(dec) {
+                    if let Some(_prev) = self.qpack_streams.decoder_recv.replace(dec) {
                         return Err(self.handle_connection_error(InternalConnectionError::new(
                             NewCode::H3_STREAM_CREATION_ERROR,
                             "got two decoder streams".to_string(),
@@ -505,31 +505,14 @@ where
         Ok(())
     }
 
-    /// function which checks if there is something in the error channel
-    /// and closes the connection if there is
-    /// it returns the error if there is one
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    fn poll_check_stream_errors(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Result<(), InternalConnectionError> {
-        // check if there is an error in the error channel
-        // wake up the connection if there is an error
-
-        todo!("check for errors")
-    }
-
     /// Waits for the control stream to be received and reads subsequent frames.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_control(
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Frame<PayloadLen>, ConnectionError>> {
-        self.get_conn_error()?;
-
         // check if a connection error occurred on a stream
-        self.poll_check_stream_errors(cx)
-            .map_err(|e| self.handle_connection_error(e))?;
+        let _ = self.poll_connection_error(cx)?;
 
         let recv = {
             // TODO
@@ -545,7 +528,7 @@ where
         let res = match ready!(recv.poll_next(cx)) {
             Err(FrameStreamError::Quic(StreamErrorIncoming::ConnectionErrorIncoming {
                 connection_error,
-            })) => return Poll::Ready(Err(self.handle_quic_connection_error(connection_error))),
+            })) => return Poll::Ready(Err(self.handle_connection_error(connection_error))),
             Err(FrameStreamError::Quic(StreamErrorIncoming::StreamReset { error_code: err })) =>
             //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
             //# If either control

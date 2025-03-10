@@ -3,7 +3,6 @@
 //! This module includes traits and types meant to allow being generic over any
 //! QUIC implementation.
 
-use core::error;
 use std::fmt::{Debug, Display};
 use std::sync::Arc;
 use std::task::{self, Poll};
@@ -26,15 +25,12 @@ pub enum ConnectionErrorIncoming {
     },
     /// Quic connection timeout
     Timeout,
-    /// Quic error
-    ConnectionClosed {
-        /// quic error code
-        error_code: u64,
-    },
     /// This variant can be used to signal, that an internal error occurred within the trait implementations
     /// h3 will close the connection with H3_INTERNAL_ERROR
     InternalError(String),
     /// A unknown error occurred (not relevant to h3)
+    ///
+    /// For example when the quic implementation errors because of a protocol violation
     Undefined(Arc<dyn std::error::Error + Send + Sync>),
 }
 
@@ -47,10 +43,6 @@ impl Debug for ConnectionErrorIncoming {
                 write!(f, "ApplicationClose({})", error_code)
             }
             Self::Timeout => write!(f, "Timeout"),
-            Self::ConnectionClosed { error_code } => f
-                .debug_struct("ConnectionClosed")
-                .field("error_code", error_code)
-                .finish(),
             Self::InternalError(arg0) => f.debug_tuple("InternalError").field(arg0).finish(),
             Self::Undefined(arg0) => f.debug_tuple("Undefined").field(arg0).finish(),
         }
@@ -107,9 +99,6 @@ impl Display for ConnectionErrorIncoming {
                 write!(f, "ApplicationClose: {}", error_code)
             }
             ConnectionErrorIncoming::Timeout => write!(f, "Timeout"),
-            ConnectionErrorIncoming::ConnectionClosed { error_code } => {
-                write!(f, "ConnectionClosed: {}", error_code)
-            }
             ConnectionErrorIncoming::InternalError(error) => {
                 write!(
                     f,

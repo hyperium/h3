@@ -8,8 +8,8 @@ use tracing::instrument;
 use crate::{
     connection::{self},
     error2::{
+        connection_error_creators::{CloseStream, HandleFrameStreamErrorOnRequestStream},
         internal_error::InternalConnectionError,
-        traits::{CloseConnection, CloseStream, HandleFrameStreamErrorOnRequestStream},
         NewCode, StreamError,
     },
     proto::{frame::Frame, headers::Header},

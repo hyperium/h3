@@ -10,8 +10,8 @@ use tracing::instrument;
 use crate::{
     connection::{self},
     error2::{
+        connection_error_creators::{CloseStream, HandleFrameStreamErrorOnRequestStream},
         internal_error::InternalConnectionError,
-        traits::{CloseConnection, CloseStream, HandleFrameStreamErrorOnRequestStream},
         NewCode, StreamError,
     },
     frame::{FrameStream, FrameStreamError},
@@ -128,7 +128,7 @@ where
             }
         };
 
-        let mut request_stream = RequestStream {
+        let request_stream = RequestStream {
             request_end: Arc::new(RequestEnd {
                 request_end: self.request_end_send.clone(),
                 stream_id: self.frame_stream.send_id(),

@@ -10,7 +10,7 @@ use std::{
 use bytes::Buf;
 use h3::{
     connection::ConnectionInner,
-    error2::{traits::CloseConnection, ConnectionError},
+    error2::ConnectionError,
     quic::{self, StreamId},
     ConnectionState2,
 };
@@ -21,7 +21,7 @@ use crate::{
     quic_traits::{RecvDatagramExt, SendDatagramErrorIncoming},
 };
 
-pub trait HandleDatagramsExt<C, B>: ConnectionState2 + CloseConnection
+pub trait HandleDatagramsExt<C, B>: ConnectionState2
 where
     B: Buf,
     C: quic::Connection<B>,
@@ -39,7 +39,8 @@ where
             SendDatagramErrorIncoming::NotAvailable => SendDatagramError::NotAvailable,
             SendDatagramErrorIncoming::TooLarge => SendDatagramError::TooLarge,
             SendDatagramErrorIncoming::ConnectionError(e) => {
-                SendDatagramError::ConnectionError(self.handle_quic_connection_error(e))
+                todo!()
+                //SendDatagramError::ConnectionError(self..handle_quic_connection_error(e))
             }
         }
     }
@@ -79,7 +80,7 @@ where
 
     fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match ready!(self.conn.conn.poll_accept_datagram(cx))
-            .map_err(|e| self.conn.handle_quic_connection_error(e))?
+            .map_err(|e| self.conn.handle_connection_error(e))?
         {
             Some(v) => Poll::Ready(Ok(Some(
                 Datagram::decode(v).map_err(|e| self.conn.handle_connection_error(e))?,

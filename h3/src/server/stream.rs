@@ -3,10 +3,7 @@
 use bytes::Buf;
 
 use crate::{
-    error2::{
-        traits::{CloseConnection, CloseStream},
-        NewCode, StreamError,
-    },
+    error2::{connection_error_creators::CloseStream, NewCode, StreamError},
     proto::varint::VarInt,
     quic::{self},
     shared_state::{ConnectionState2, SharedState2},

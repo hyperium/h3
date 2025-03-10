@@ -132,8 +132,7 @@ impl Builder {
         let shared = SharedState2::default();
 
         Ok(Connection {
-            inner: ConnectionInner::new(conn, Arc::new(shared), self.config)
-                .await?,
+            inner: ConnectionInner::new(conn, Arc::new(shared), self.config).await?,
             max_field_section_size: self.config.settings.max_field_section_size,
             request_end_send: sender,
             request_end_recv: receiver,

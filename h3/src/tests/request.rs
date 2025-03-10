@@ -4,7 +4,6 @@ use assert_matches::assert_matches;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use futures_util::future;
 use http::{request, HeaderMap, Request, Response, StatusCode};
-use quinn::ApplicationClose;
 
 use crate::{
     client,
@@ -1524,7 +1523,6 @@ where
         (client_result_stream, client_result_driver),
     ) = tokio::join!(server_fut, client_fut);
 
-
     if let Err(err) = client_result_stream {
         // we have no influence wether the quinn returns the connection error to the stream api
         // but if it returns an error it needs to be the expected one
@@ -1565,9 +1563,6 @@ where
             )) if err == NewCode::H3_NO_ERROR.value()
         );
         // Stream closes with no error
-        assert_matches!(
-            server_result_stream,
-            Ok(())
-        );
+        assert_matches!(server_result_stream, Ok(()));
     }
 }

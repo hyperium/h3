@@ -13,9 +13,9 @@
 mod codes;
 
 #[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
-pub mod traits;
+pub mod connection_error_creators;
 #[cfg(not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"))]
-pub(crate) mod traits;
+pub(crate) mod connection_error_creators;
 
 #[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
 pub mod internal_error;
