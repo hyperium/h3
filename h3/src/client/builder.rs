@@ -104,6 +104,12 @@ impl Builder {
         self
     }
 
+    /// Enables the extended CONNECT protocol required for various HTTP/3 extensions.
+    pub fn enable_connect(&mut self, value: bool) -> &mut Self {
+        self.config.settings.enable_extended_connect = value;
+        self
+    }
+
     /// Create a new HTTP/3 client from a `quic` connection
     pub async fn build<C, O, B>(
         &mut self,
