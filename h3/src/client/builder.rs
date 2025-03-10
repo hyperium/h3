@@ -105,7 +105,7 @@ impl Builder {
     }
 
     /// Enables the extended CONNECT protocol required for various HTTP/3 extensions.
-    pub fn enable_connect(&mut self, value: bool) -> &mut Self {
+    pub fn enable_extended_connect(&mut self, value: bool) -> &mut Self {
         self.config.settings.enable_extended_connect = value;
         self
     }

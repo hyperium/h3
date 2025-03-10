@@ -118,7 +118,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     info!("new http3 established");
                     let h3_conn = h3::server::builder()
                         .enable_webtransport(true)
-                        .enable_connect(true)
+                        .enable_extended_connect(true)
                         .enable_datagram(true)
                         .max_webtransport_sessions(1)
                         .send_grease(true)
