@@ -9,6 +9,6 @@ bytes = "1.4"
 pin-project-lite = { version = "0.2", default-features = false }
 
 [dependencies.h3]
-version = "0.0.6"
+version = "0.0.7"
 path = "../h3"
 features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes"]
