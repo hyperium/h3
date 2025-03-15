@@ -2,6 +2,14 @@
 name = "h3-datagram"
 version = "0.0.1"
 edition = "2021"
+documentation = "https://docs.rs/h3-datagram"
+repository = "https://github.com/hyperium/h3"
+readme = "readme.md"
+description = "rfc9297 extension for the h3 crate"
+keywords = ["http3", "quic", "rfc9297"]
+categories = ["network-programming", "web-programming"]
+license = "MIT"
+
 
 [dependencies]
 #h3 = { path = "../h3" }
@@ -13,6 +21,6 @@ tracing = { version = "0.1.40", optional = true }
 tracing = ["dep:tracing"]
 
 [dependencies.h3]
-version = "0.0.6"
+version = "0.0.7"
 path = "../h3"
 features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes"]
