@@ -9,25 +9,54 @@ use std::{
 
 use bytes::Buf;
 use h3::{
+    connection::ConnectionInner,
+    error2::ConnectionError,
     quic::{self, StreamId},
-    Error,
+    ConnectionState2,
 };
 use pin_project_lite::pin_project;
 
 use crate::{
     datagram::Datagram,
-    quic_traits::{self, RecvDatagramExt},
+    quic_traits::{RecvDatagramExt, SendDatagramErrorIncoming},
 };
 
-pub trait HandleDatagramsExt<C, B>
+pub trait HandleDatagramsExt<C, B>: ConnectionState2
 where
     B: Buf,
     C: quic::Connection<B>,
 {
     /// Sends a datagram
-    fn send_datagram(&mut self, stream_id: StreamId, data: B) -> Result<(), Error>;
+    fn send_datagram(&mut self, stream_id: StreamId, data: B) -> Result<(), SendDatagramError>;
     /// Reads an incoming datagram
     fn read_datagram(&mut self) -> ReadDatagram<C, B>;
+
+    fn handle_send_datagram_error(
+        &mut self,
+        error: SendDatagramErrorIncoming,
+    ) -> SendDatagramError {
+        match error {
+            SendDatagramErrorIncoming::NotAvailable => SendDatagramError::NotAvailable,
+            SendDatagramErrorIncoming::TooLarge => SendDatagramError::TooLarge,
+            SendDatagramErrorIncoming::ConnectionError(e) => {
+                todo!()
+                //SendDatagramError::ConnectionError(self..handle_quic_connection_error(e))
+            }
+        }
+    }
+}
+
+/// Types of errors when sending a datagram.
+#[derive(Debug)]
+pub enum SendDatagramError {
+    /// The peer is not accepting datagrams on the quic layer
+    ///
+    /// This can be because the peer does not support it or disabled it or any other reason.
+    NotAvailable,
+    /// The datagram is too large to send
+    TooLarge,
+    /// Connection error
+    ConnectionError(ConnectionError),
 }
 
 pin_project! {
@@ -37,7 +66,7 @@ pin_project! {
             C: quic::Connection<B>,
             B: Buf,
         {
-            pub(crate) conn: &'a mut C,
+            pub(crate) conn: &'a mut ConnectionInner<C, B>,
             pub(crate) _marker: PhantomData<B>,
         }
 }
@@ -45,14 +74,17 @@ pin_project! {
 impl<'a, C, B> Future for ReadDatagram<'a, C, B>
 where
     C: quic::Connection<B> + RecvDatagramExt,
-    <C as quic_traits::RecvDatagramExt>::Error: h3::quic::Error + 'static,
     B: Buf,
 {
-    type Output = Result<Option<Datagram<C::Buf>>, Error>;
+    type Output = Result<Option<Datagram<C::Buf>>, ConnectionError>;
 
     fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match ready!(self.conn.poll_accept_datagram(cx))? {
-            Some(v) => Poll::Ready(Ok(Some(Datagram::decode(v)?))),
+        match ready!(self.conn.conn.poll_accept_datagram(cx))
+            .map_err(|e| self.conn.handle_connection_error(e))?
+        {
+            Some(v) => Poll::Ready(Ok(Some(
+                Datagram::decode(v).map_err(|e| self.conn.handle_connection_error(e))?,
+            ))),
             None => Poll::Ready(Ok(None)),
         }
     }

@@ -3,7 +3,7 @@
 use std::{
     marker::PhantomData,
     sync::{atomic::AtomicUsize, Arc},
-    task::{Context, Poll, Waker},
+    task::{Context, Poll},
 };
 
 use bytes::{Buf, BytesMut};
@@ -14,12 +14,16 @@ use http::request;
 use tracing::{info, instrument, trace};
 
 use crate::{
-    connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
-    error::{Code, Error, ErrorLevel},
+    connection::{self, ConnectionInner},
+    error2::{
+        connection_error_creators::CloseStream, internal_error::InternalConnectionError,
+        ConnectionError, NewCode, StreamError,
+    },
     frame::FrameStream,
-    proto::{frame::Frame, headers::Header, push::PushId},
+    proto::{frame::Frame, headers::Header, push::PushId, varint::VarInt},
     qpack,
     quic::{self, StreamId},
+    shared_state::{ConnectionState2, SharedState2},
     stream::{self, BufRecvStream},
 };
 
@@ -108,13 +112,29 @@ where
     B: Buf,
 {
     pub(super) open: T,
-    pub(super) conn_state: SharedStateRef,
+    pub(super) conn_state2: Arc<SharedState2>,
     pub(super) max_field_section_size: u64, // maximum size for a header we receive
     // counts instances of SendRequest to close the connection when the last is dropped.
     pub(super) sender_count: Arc<AtomicUsize>,
-    pub(super) conn_waker: Option<Waker>,
     pub(super) _buf: PhantomData<fn(B)>,
     pub(super) send_grease_frame: bool,
+}
+
+impl<T, B> ConnectionState2 for SendRequest<T, B>
+where
+    T: quic::OpenStreams<B>,
+    B: Buf,
+{
+    fn shared_state(&self) -> &SharedState2 {
+        &self.conn_state2
+    }
+}
+
+impl<T, B> CloseStream for SendRequest<T, B>
+where
+    T: quic::OpenStreams<B>,
+    B: Buf,
+{
 }
 
 impl<T, B> SendRequest<T, B>
@@ -123,18 +143,21 @@ where
     B: Buf,
 {
     /// Send an HTTP/3 request to the server
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn send_request(
         &mut self,
         req: http::Request<()>,
-    ) -> Result<RequestStream<T::BidiStream, B>, Error> {
-        let (peer_max_field_section_size, closing) = {
-            let state = self.conn_state.read("send request lock state");
-            (state.peer_config.max_field_section_size, state.closing)
+    ) -> Result<RequestStream<T::BidiStream, B>, StreamError> {
+        let peer_max_field_section_size = if let Some(settings) = self.settings() {
+            settings.max_field_section_size
+        } else {
+            VarInt::MAX.0
         };
 
+        let closing = self.is_closing();
+
         if closing {
-            return Err(Error::closing());
+            return Err(StreamError::ConnectionError(ConnectionError::closing()));
         }
 
         let (parts, _) = req.into_parts();
@@ -145,7 +168,8 @@ where
             extensions,
             ..
         } = parts;
-        let headers = Header::request(method, uri, headers, extensions)?;
+        let headers = Header::request(method, uri, headers, extensions)
+            .map_err(|_e| todo!("figure out how to error when request is not sent"))?;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
         //= type=implication
@@ -153,7 +177,7 @@ where
         //# client MUST send only a single request on a given stream.
         let mut stream = future::poll_fn(|cx| self.open.poll_open_bidi(cx))
             .await
-            .map_err(|e| self.maybe_conn_err(e))?;
+            .map_err(|e| self.handle_quic_stream_error(e))?;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
         //= type=TODO
@@ -167,7 +191,8 @@ where
         //# more cookie-pairs, before compression.
 
         let mut block = BytesMut::new();
-        let mem_size = qpack::encode_stateless(&mut block, headers)?;
+        let mem_size = qpack::encode_stateless(&mut block, headers)
+            .map_err(|_e| todo!("figure out qpack errors"))?;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
         //# An implementation that
@@ -175,34 +200,27 @@ where
         //# that exceeds the indicated size, as the peer will likely refuse to
         //# process it.
         if mem_size > peer_max_field_section_size {
-            return Err(Error::header_too_big(mem_size, peer_max_field_section_size));
+            return Err(StreamError::HeaderTooBig {
+                actual_size: mem_size,
+                max_size: peer_max_field_section_size,
+            });
         }
 
         stream::write(&mut stream, Frame::Headers(block.freeze()))
             .await
-            .map_err(|e| self.maybe_conn_err(e))?;
+            .map_err(|e| self.handle_quic_stream_error(e))?;
 
         let request_stream = RequestStream {
             inner: connection::RequestStream::new(
                 FrameStream::new(BufRecvStream::new(stream)),
                 self.max_field_section_size,
-                self.conn_state.clone(),
+                self.conn_state2.clone(),
                 self.send_grease_frame,
             ),
         };
         // send the grease frame only once
         self.send_grease_frame = false;
         Ok(request_stream)
-    }
-}
-
-impl<T, B> ConnectionState for SendRequest<T, B>
-where
-    T: quic::OpenStreams<B>,
-    B: Buf,
-{
-    fn shared_state(&self) -> &SharedStateRef {
-        &self.conn_state
     }
 }
 
@@ -216,11 +234,10 @@ where
             .fetch_add(1, std::sync::atomic::Ordering::Release);
 
         Self {
+            conn_state2: self.conn_state2.clone(),
             open: self.open.clone(),
-            conn_state: self.conn_state.clone(),
             max_field_section_size: self.max_field_section_size,
             sender_count: self.sender_count.clone(),
-            conn_waker: self.conn_waker.clone(),
             _buf: PhantomData,
             send_grease_frame: self.send_grease_frame,
         }
@@ -238,11 +255,10 @@ where
             .fetch_sub(1, std::sync::atomic::Ordering::AcqRel)
             == 1
         {
-            if let Some(w) = Option::take(&mut self.conn_waker) {
-                w.wake()
-            }
-            self.shared_state().write("SendRequest drop").error = Some(Error::closed());
-            self.open.close(Code::H3_NO_ERROR, b"");
+            self.handle_connection_error_on_stream(InternalConnectionError::new(
+                NewCode::H3_NO_ERROR,
+                "Connection closed by client".to_string(),
+            ));
         }
     }
 }
@@ -344,6 +360,16 @@ where
     pub(super) recv_closing: Option<StreamId>,
 }
 
+impl<C, B> ConnectionState2 for Connection<C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    fn shared_state(&self) -> &SharedState2 {
+        &self.inner.shared2
+    }
+}
+
 impl<C, B> Connection<C, B>
 where
     C: quic::Connection<B>,
@@ -351,20 +377,20 @@ where
 {
     /// Initiate a graceful shutdown, accepting `max_push` potentially in-flight server pushes
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn shutdown(&mut self, _max_push: usize) -> Result<(), Error> {
+    pub async fn shutdown(&mut self, _max_push: usize) -> Result<(), ConnectionError> {
         // TODO: Calculate remaining pushes once server push is implemented.
         self.inner.shutdown(&mut self.sent_closing, PushId(0)).await
     }
 
     /// Wait until the connection is closed
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn wait_idle(&mut self) -> Result<(), Error> {
+    pub async fn wait_idle(&mut self) -> Result<(), ConnectionError> {
         future::poll_fn(|cx| self.poll_close(cx)).await
     }
 
     /// Maintain the connection state until it is closed
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn poll_close(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub fn poll_close(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), ConnectionError>> {
         while let Poll::Ready(result) = self.inner.poll_control(cx) {
             match result {
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.2
@@ -400,9 +426,11 @@ where
                     //# A client MUST treat receipt of a GOAWAY frame containing a stream ID
                     //# of any other type as a connection error of type H3_ID_ERROR.
                     if !StreamId::from(id).is_request() {
-                        return Poll::Ready(Err(Code::H3_ID_ERROR.with_reason(
-                            format!("non-request StreamId in a GoAway frame: {}", id),
-                            ErrorLevel::ConnectionError,
+                        return Poll::Ready(Err(self.inner.handle_connection_error(
+                            InternalConnectionError::new(
+                                NewCode::H3_ID_ERROR,
+                                format!("non-request StreamId in a GoAway frame: {}", id),
+                            ),
                         )));
                     }
                     self.inner.process_goaway(&mut self.recv_closing, id)?;
@@ -420,23 +448,14 @@ where
                 //# receipt of a MAX_PUSH_ID frame as a connection error of type
                 //# H3_FRAME_UNEXPECTED.
                 Ok(frame) => {
-                    return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED.with_reason(
-                        format!("on client control stream: {:?}", frame),
-                        ErrorLevel::ConnectionError,
-                    )))
+                    return Poll::Ready(Err(self.inner.handle_connection_error(
+                        InternalConnectionError::new(
+                            NewCode::H3_FRAME_UNEXPECTED,
+                            format!("on client control stream: {:?}", frame),
+                        ),
+                    )));
                 }
-                Err(e) => {
-                    let connection_error = self.inner.shared.read("poll_close").error.clone();
-                    let connection_error = match connection_error {
-                        Some(e) => e,
-                        None => {
-                            self.inner.shared.write("poll_close error").error = Some(e.clone());
-                            e
-                        }
-                    };
-                    if connection_error.is_closed() {
-                        return Poll::Ready(Ok(()));
-                    }
+                Err(connection_error) => {
                     return Poll::Ready(Err(connection_error));
                 }
             }
@@ -448,9 +467,11 @@ where
         //# error of type H3_STREAM_CREATION_ERROR unless such an extension has
         //# been negotiated.
         if self.inner.poll_accept_bi(cx).is_ready() {
-            return Poll::Ready(Err(self.inner.close(
-                Code::H3_STREAM_CREATION_ERROR,
-                "client received a bidirectional stream",
+            return Poll::Ready(Err(self.inner.handle_connection_error(
+                InternalConnectionError::new(
+                    NewCode::H3_STREAM_CREATION_ERROR,
+                    "client received a server-initiated bidirectional stream".to_string(),
+                ),
             )));
         }
 
