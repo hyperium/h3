@@ -4,7 +4,6 @@
 * Added .id() for client RequestStream
 * move datagram to separate crate
 * Client ability to stop streams with error code
-* avoid copying all data when sending
 * Add extended CONNECT setting for client conn
 
 ### v0.0.6 (2024-07-01)

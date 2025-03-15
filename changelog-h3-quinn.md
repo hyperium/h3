@@ -1,3 +1,7 @@
+### v0.0.8 (2025-03-15)
+* avoid copying data when sending
+* new datagram feature
+
 ### v0.0.7 (2024-07-01)
 * Consolidate quic trait redundancy
 * make types Sync
