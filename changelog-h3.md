@@ -1,3 +1,12 @@
+### v0.0.7 (2025-03-13)
+* Expose poll_recv_trailers APIs
+* Avoiding extra allocation for shared error
+* Added .id() for client RequestStream
+* move datagram to separate crate
+* Client ability to stop streams with error code
+* avoid copying all data when sending
+* Add extended CONNECT setting for client conn
+
 ### v0.0.6 (2024-07-01)
 * Consolidate quic trait redundancy
 * start qpack streams 

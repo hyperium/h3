@@ -15,6 +15,6 @@ tokio = { version = "1.28", default-features = false }
 h3-datagram = { path = "../h3-datagram" }
 
 [dependencies.h3]
-version = "0.0.6"
+version = "0.0.7"
 path = "../h3"
 features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes"]
