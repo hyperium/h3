@@ -157,11 +157,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let (req_res, drive_res) = tokio::join!(request, drive);
-    
-    if let Err(err) =req_res{
+
+    if let Err(err) = req_res {
         error!("request failed: {:?}", err);
     }
-    if let Err(err) = drive_res{
+    if let Err(err) = drive_res {
         error!("request background task failed: {:?}", err);
     }
 
