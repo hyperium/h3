@@ -6,7 +6,11 @@ use crate::quic::ConnectionErrorIncoming;
 
 use super::{codes::NewCode, internal_error::InternalConnectionError};
 
-/// This enum represents wether the error occurred on the local or remote side of the connection
+/// This enum represents the closure of a connection because of an a closed quic connection 
+/// This can be either from this endpoint because of a violation of the protocol or from the remote endpoint
+/// 
+/// When the code [`NewCode::H3_NO_ERROR`] is used bei this peer or the remote peer, the connection is closed without an error
+/// according to the [h3 spec](https://www.rfc-editor.org/rfc/rfc9114.html#name-http-3-error-codes)
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum ConnectionError {

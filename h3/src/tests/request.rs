@@ -406,9 +406,13 @@ async fn header_too_big_client_error() {
     let client_fut = async {
         let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
         let drive_fut = async {
-            let _ = future::poll_fn(|cx| driver.poll_close(cx))
-                .await
-                .expect("connection does not error, as it is only a stream level error");
+            assert_matches!(
+                future::poll_fn(|cx| driver.poll_close(cx)).await,
+                ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{
+                    error_code: code,
+                    ..
+                }) if code == NewCode::H3_NO_ERROR.value()
+            );
             // Todo: test with configuration for connection level errors when such a configuration is available
         };
         let req_fut = async {
@@ -451,9 +455,7 @@ async fn header_too_big_client_error() {
                 .await
                 .err()
                 .expect("should return an error"),
-            StreamError::RemoteReset {
-                code: NewCode::H3_REQUEST_INCOMPLETE
-            }
+            StreamError::StreamError {code:NewCode::H3_REQUEST_INCOMPLETE, reason: _ }
         );
     };
 
@@ -470,8 +472,7 @@ async fn header_too_big_client_error_trailer() {
         let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
         let drive_fut = async {
             let err = future::poll_fn(|cx| driver.poll_close(cx))
-                .await
-                .unwrap_err();
+                .await;
             match err {
                 ConnectionError::Timeout => (),
                 _ => panic!("unexpected error: {:?}", err),
@@ -732,6 +733,11 @@ async fn header_too_big_server_error() {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
 
+        // pretend the server received a smaller max_field_section_size
+        let mut settings = Settings::default();
+        settings.max_field_section_size = 12;
+        incoming_req.set_settings(settings);
+
         let (_request, mut request_stream) = get_stream_blocking(&mut incoming_req)
             .await
             .expect("accept");
@@ -742,11 +748,6 @@ async fn header_too_big_server_error() {
         //# has received this parameter SHOULD NOT send an HTTP message header
         //# that exceeds the indicated size, as the peer will likely refuse to
         //# process it.
-
-        // pretend the server received a smaller max_field_section_size
-        let mut settings = Settings::default();
-        settings.max_field_section_size = 12;
-        incoming_req.set_settings(settings);
 
         let err_kind = request_stream
             .send_response(
@@ -798,6 +799,11 @@ async fn header_too_big_server_error_trailers() {
     let server_fut = async {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
+        
+        // pretend the server already received client's settings
+        let mut settings = Settings::default();
+        settings.max_field_section_size = 42;
+        incoming_req.set_settings(settings);
 
         let (_request, mut request_stream) = get_stream_blocking(&mut incoming_req)
             .await
@@ -823,11 +829,6 @@ async fn header_too_big_server_error_trailers() {
         //# that exceeds the indicated size, as the peer will likely refuse to
         //# process it.
 
-        // pretend the server already received client's settings
-        let mut settings = Settings::default();
-        settings.max_field_section_size = 12;
-        incoming_req.set_settings(settings);
-
         let mut trailers = HeaderMap::new();
         trailers.insert("trailer", "value".repeat(100).parse().unwrap());
         let err_kind = request_stream.send_trailers(trailers).await.unwrap_err();
@@ -836,7 +837,7 @@ async fn header_too_big_server_error_trailers() {
             err_kind,
             StreamError::HeaderTooBig {
                 actual_size: 539,
-                max_size: 200,
+                max_size: 42,
                 ..
             }
         );
@@ -869,7 +870,7 @@ async fn get_timeout_client_recv_response() {
 
         let drive_fut = async move {
             let result = future::poll_fn(|cx| conn.poll_close(cx)).await;
-            assert_matches!(result.unwrap_err(), ConnectionError::Timeout);
+            assert_matches!(result, ConnectionError::Timeout);
         };
 
         tokio::join!(drive_fut, request_fut);
@@ -913,7 +914,7 @@ async fn get_timeout_client_recv_data() {
 
         let drive_fut = async move {
             let result = future::poll_fn(|cx| conn.poll_close(cx)).await;
-            assert_matches!(result.unwrap_err(), ConnectionError::Timeout);
+            assert_matches!(result, ConnectionError::Timeout);
         };
 
         tokio::join!(drive_fut, request_fut);
@@ -956,7 +957,7 @@ async fn get_timeout_server_accept() {
 
         let drive_fut = async move {
             let result = future::poll_fn(|cx| conn.poll_close(cx)).await;
-            assert_matches!(result.unwrap_err(), ConnectionError::Timeout);
+            assert_matches!(result, ConnectionError::Timeout);
         };
 
         tokio::join!(drive_fut, request_fut);
@@ -1480,8 +1481,7 @@ where
         };
 
         let driver = async {
-            future::poll_fn(|cx| driver.poll_close(cx)).await?;
-            Result::<(), ConnectionError>::Ok(())
+            return Result::<(), ConnectionError>::Err(future::poll_fn(|cx| driver.poll_close(cx)).await);
         };
 
         tokio::join!(client, driver)

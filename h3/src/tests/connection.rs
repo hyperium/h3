@@ -35,7 +35,13 @@ async fn connect() {
 
     let client_fut = async {
         let (mut drive, _client) = client::new(pair.client().await).await.expect("client init");
-        future::poll_fn(|cx| drive.poll_close(cx)).await.unwrap();
+        assert_matches!(
+            future::poll_fn(|cx| drive.poll_close(cx)).await,
+            ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{
+                error_code: code,
+                ..
+            }) if code == NewCode::H3_NO_ERROR.value()
+        );
     };
 
     let server_fut = async {
@@ -105,9 +111,12 @@ async fn server_drop_close() {
 
         let drive_fut = async {
             let drive = future::poll_fn(|cx| conn.poll_close(cx)).await;
-            assert_matches!(drive, Ok(()));
+            assert_matches!(drive, ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{
+                error_code: code,
+                ..
+            }) if code == NewCode::H3_NO_ERROR.value());
         };
-        tokio::select! {biased; _ = request_fut => (), _ = drive_fut => () }
+        tokio::join! {request_fut,drive_fut}
     };
     tokio::join!(server_fut, client_fut);
 }
@@ -188,7 +197,10 @@ async fn client_close_only_on_last_sender_drop() {
         drop(send2);
 
         let drive = future::poll_fn(|cx| conn.poll_close(cx)).await;
-        assert_matches!(drive, Ok(()));
+        assert_matches!(drive, ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{
+            error_code: code,
+            ..
+        }) if code == NewCode::H3_NO_ERROR.value());
     };
 
     tokio::join!(server_fut, client_fut);
@@ -219,7 +231,11 @@ async fn settings_exchange_client() {
         };
 
         let drive = async move {
-            future::poll_fn(|cx| conn.poll_close(cx)).await.unwrap();
+            assert_matches!(future::poll_fn(|cx| conn.poll_close(cx)).await,
+            ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{
+                error_code: code,
+                ..
+            }) if code == NewCode::H3_NO_ERROR.value());
         };
 
         tokio::select! { _ = settings_change => (), _ = drive => panic!("driver resolved first") };
@@ -257,7 +273,13 @@ async fn settings_exchange_server() {
             .await
             .expect("client init");
         let drive = async move {
-            future::poll_fn(|cx| conn.poll_close(cx)).await.unwrap();
+            assert_matches!(
+                future::poll_fn(|cx| conn.poll_close(cx)).await,
+                ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{
+                    error_code: code,
+                    ..
+                }) if code == NewCode::H3_NO_ERROR.value()
+            );
         };
 
         drive.await;
@@ -301,7 +323,7 @@ async fn client_error_on_bidi_recv() {
         //# been negotiated.
         let driver = future::poll_fn(|cx| conn.poll_close(cx));
         assert_matches!(
-            driver.await.unwrap_err(),
+            driver.await,
             ConnectionError::Local {
                 error: LocalError::Application {
                     code: NewCode::H3_STREAM_CREATION_ERROR,
@@ -434,7 +456,7 @@ async fn control_close_send_error() {
                     reason: reason_string
                 }
             } 
-            if reason_string.starts_with("control stream closed"));
+            if reason_string.starts_with("control stream was closed"));
         // Poll it once again returns the previously stored error
         assert_matches!(
             incoming.accept().await.map(|_| ()).unwrap_err(),
@@ -444,7 +466,7 @@ async fn control_close_send_error() {
                     reason: reason_string
                 }
             } 
-            if reason_string.starts_with("control stream closed"));
+            if reason_string.starts_with("control stream was closed"));
     };
 
     tokio::join!(server_fut, client_fut);
@@ -576,9 +598,7 @@ async fn goaway_from_server_not_request_id() {
             .unwrap();
 
         assert_matches!(
-            future::poll_fn(|cx| driver.poll_close(cx))
-                .await
-                .unwrap_err(),
+            future::poll_fn(|cx| driver.poll_close(cx)).await,
             ConnectionError::Local {
                 error: LocalError::Application {
                     code: NewCode::H3_ID_ERROR,
@@ -692,7 +712,10 @@ async fn graceful_shutdown_grace_interval() {
                 error: LocalError::Closing,
             })
         );
-        assert_matches!(driver, Ok(_));
+        assert_matches!(driver, ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{
+            error_code: code,
+            ..
+        }) if code == NewCode::H3_NO_ERROR.value());
     };
 
     let server_fut = async {
@@ -731,7 +754,10 @@ async fn graceful_shutdown_closes_when_idle() {
         }
         assert_matches!(
             future::poll_fn(|cx| { driver.poll_close(cx) }).await,
-            Ok(())
+            ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{
+                error_code: code,
+                ..
+            }) if code == NewCode::H3_NO_ERROR.value()
         );
     };
 
@@ -769,7 +795,10 @@ async fn graceful_shutdown_client() {
         driver.shutdown(0).await.unwrap();
         assert_matches!(
             future::poll_fn(|cx| { driver.poll_close(cx) }).await,
-            Ok(())
+            ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{
+                error_code: code,
+                ..
+            }) if code == NewCode::H3_NO_ERROR.value()
         );
     };
 

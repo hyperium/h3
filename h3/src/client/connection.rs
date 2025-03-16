@@ -384,13 +384,13 @@ where
 
     /// Wait until the connection is closed
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn wait_idle(&mut self) -> Result<(), ConnectionError> {
+    pub async fn wait_idle(&mut self) -> ConnectionError {
         future::poll_fn(|cx| self.poll_close(cx)).await
     }
 
     /// Maintain the connection state until it is closed
-    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn poll_close(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), ConnectionError>> {
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub fn poll_close(&mut self, cx: &mut Context<'_>) -> Poll<ConnectionError> {
         while let Poll::Ready(result) = self.inner.poll_control(cx) {
             match result {
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.2
@@ -426,14 +426,16 @@ where
                     //# A client MUST treat receipt of a GOAWAY frame containing a stream ID
                     //# of any other type as a connection error of type H3_ID_ERROR.
                     if !StreamId::from(id).is_request() {
-                        return Poll::Ready(Err(self.inner.handle_connection_error(
+                        return Poll::Ready(self.inner.handle_connection_error(
                             InternalConnectionError::new(
                                 NewCode::H3_ID_ERROR,
                                 format!("non-request StreamId in a GoAway frame: {}", id),
                             ),
-                        )));
+                        ));
                     }
-                    self.inner.process_goaway(&mut self.recv_closing, id)?;
+                    if let Err(err) = self.inner.process_goaway(&mut self.recv_closing, id) {
+                        return Poll::Ready(err);
+                    }
 
                     #[cfg(feature = "tracing")]
                     info!("Server initiated graceful shutdown, last: StreamId({})", id);
@@ -448,15 +450,15 @@ where
                 //# receipt of a MAX_PUSH_ID frame as a connection error of type
                 //# H3_FRAME_UNEXPECTED.
                 Ok(frame) => {
-                    return Poll::Ready(Err(self.inner.handle_connection_error(
+                    return Poll::Ready(self.inner.handle_connection_error(
                         InternalConnectionError::new(
                             NewCode::H3_FRAME_UNEXPECTED,
                             format!("on client control stream: {:?}", frame),
                         ),
-                    )));
+                    ));
                 }
                 Err(connection_error) => {
-                    return Poll::Ready(Err(connection_error));
+                    return Poll::Ready(connection_error);
                 }
             }
         }
@@ -467,12 +469,13 @@ where
         //# error of type H3_STREAM_CREATION_ERROR unless such an extension has
         //# been negotiated.
         if self.inner.poll_accept_bi(cx).is_ready() {
-            return Poll::Ready(Err(self.inner.handle_connection_error(
-                InternalConnectionError::new(
-                    NewCode::H3_STREAM_CREATION_ERROR,
-                    "client received a server-initiated bidirectional stream".to_string(),
-                ),
-            )));
+            return Poll::Ready(
+                self.inner
+                    .handle_connection_error(InternalConnectionError::new(
+                        NewCode::H3_STREAM_CREATION_ERROR,
+                        "client received a server-initiated bidirectional stream".to_string(),
+                    )),
+            );
         }
 
         Poll::Pending

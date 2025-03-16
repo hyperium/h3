@@ -1,6 +1,8 @@
 use std::{path::PathBuf, sync::Arc};
 
 use futures::future;
+use h3::error2::ConnectionError;
+use quinn::ConnectError;
 use rustls::pki_types::CertificateDer;
 use structopt::StructOpt;
 use tokio::io::AsyncWriteExt;
@@ -116,8 +118,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut driver, mut send_request) = h3::client::new(quinn_conn).await?;
 
     let drive = async move {
-        future::poll_fn(|cx| driver.poll_close(cx)).await?;
-        Ok::<(), Box<dyn std::error::Error>>(())
+        return Err::<(), ConnectionError>(future::poll_fn(|cx| driver.poll_close(cx)).await);
     };
 
     // In the following block, we want to take ownership of `send_request`:
