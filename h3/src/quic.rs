@@ -9,7 +9,7 @@ use std::task::{self, Poll};
 
 use bytes::Buf;
 
-use crate::error2::NewCode;
+use crate::error::Code;
 pub use crate::proto::stream::{InvalidStreamId, StreamId};
 pub use crate::stream::WriteBuf;
 
@@ -39,7 +39,7 @@ impl Debug for ConnectionErrorIncoming {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::ApplicationClose { error_code } => {
-                let error_code = NewCode::from(*error_code);
+                let error_code = Code::from(*error_code);
                 write!(f, "ApplicationClose({})", error_code)
             }
             Self::Timeout => write!(f, "Timeout"),
@@ -82,7 +82,7 @@ impl Display for StreamErrorIncoming {
                 write!(f, "ConnectionError: {}", connection_error)
             }
             StreamErrorIncoming::StreamReset { error_code } => {
-                let error_code = NewCode::from(*error_code);
+                let error_code = Code::from(*error_code);
                 write!(f, "StreamClosed: {}", error_code)
             }
             StreamErrorIncoming::Unknown(error) => write!(f, "Error undefined by h3: {}", error),
@@ -95,7 +95,7 @@ impl Display for ConnectionErrorIncoming {
         // display enum with fields
         match self {
             ConnectionErrorIncoming::ApplicationClose { error_code } => {
-                let error_code = NewCode::from(*error_code);
+                let error_code = Code::from(*error_code);
                 write!(f, "ApplicationClose: {}", error_code)
             }
             ConnectionErrorIncoming::Timeout => write!(f, "Timeout"),
@@ -114,37 +114,6 @@ impl Display for ConnectionErrorIncoming {
 }
 
 impl std::error::Error for ConnectionErrorIncoming {}
-
-// Unresolved questions:
-//
-// - Should the `poll_` methods be `Pin<&mut Self>`?
-
-/// Trait that represent an error from the transport layer
-pub trait Error: std::error::Error + Send + Sync {
-    /// Check if the current error is a transport timeout
-    fn is_timeout(&self) -> bool;
-
-    /// Get the QUIC error code from connection close or stream stop
-    fn err_code(&self) -> Option<u64>;
-}
-
-impl<'a, E: Error + 'a> From<E> for Box<dyn Error + 'a> {
-    fn from(err: E) -> Box<dyn Error + 'a> {
-        Box::new(err)
-    }
-}
-
-impl Into<Box<dyn Error>> for StreamErrorIncoming {
-    fn into(self) -> Box<dyn Error> {
-        todo!()
-    }
-}
-
-impl Into<Box<dyn Error>> for ConnectionErrorIncoming {
-    fn into(self) -> Box<dyn Error> {
-        todo!()
-    }
-}
 
 /// Trait representing a QUIC connection.
 pub trait Connection<B: Buf>: OpenStreams<B> {
@@ -193,7 +162,7 @@ pub trait OpenStreams<B: Buf> {
     ) -> Poll<Result<Self::SendStream, StreamErrorIncoming>>;
 
     /// Close the connection immediately
-    fn close(&mut self, code: crate::error2::NewCode, reason: &[u8]);
+    fn close(&mut self, code: crate::error::Code, reason: &[u8]);
 }
 
 /// A trait describing the "send" actions of a QUIC stream.

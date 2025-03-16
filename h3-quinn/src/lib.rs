@@ -4,8 +4,7 @@
 #![deny(missing_docs)]
 
 use std::{
-    convert::{self, TryInto},
-    fmt::{self, Display},
+    convert::TryInto,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -25,12 +24,12 @@ use h3_datagram::quic_traits::SendDatagramErrorIncoming;
 #[cfg(feature = "datagram")]
 use h3_datagram::{datagram::Datagram, quic_traits};
 
-pub use quinn::{self, AcceptBi, AcceptUni, Endpoint, OpenBi, OpenUni, VarInt, WriteError};
-use quinn::{ApplicationClose, ClosedStream, ReadDatagram, ReadError, SendDatagramError};
+pub use quinn::{self, AcceptBi, AcceptUni, Endpoint, OpenBi, OpenUni, VarInt};
+use quinn::{ReadDatagram, ReadError, SendDatagramError};
 
 use h3::{
-    error2::NewCode,
-    quic::{self, ConnectionErrorIncoming, Error, StreamErrorIncoming, StreamId, WriteBuf},
+    error::Code,
+    quic::{self, ConnectionErrorIncoming, StreamErrorIncoming, StreamId, WriteBuf},
 };
 use tokio_util::sync::ReusableBoxFuture;
 
@@ -181,7 +180,7 @@ where
     }
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    fn close(&mut self, code: NewCode, reason: &[u8]) {
+    fn close(&mut self, code: Code, reason: &[u8]) {
         self.conn.close(
             VarInt::from_u64(code.value()).expect("error code VarInt"),
             reason,
@@ -272,7 +271,7 @@ where
     type SendStream = SendStream<B>;
     type BidiStream = BidiStream<B>;
 
-    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn poll_open_bidi(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -294,7 +293,7 @@ where
         }))
     }
 
-    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn poll_open_send(
         &mut self,
         cx: &mut task::Context<'_>,
@@ -314,7 +313,7 @@ where
     }
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    fn close(&mut self, code: NewCode, reason: &[u8]) {
+    fn close(&mut self, code: Code, reason: &[u8]) {
         self.conn.close(
             VarInt::from_u64(code.value()).expect("error code VarInt"),
             reason,

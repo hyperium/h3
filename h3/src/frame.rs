@@ -5,7 +5,7 @@ use bytes::Buf;
 #[cfg(feature = "tracing")]
 use tracing::trace;
 
-use crate::error2::NewCode;
+use crate::error::Code;
 use crate::proto::frame::SettingsError;
 use crate::proto::push::InvalidPushId;
 use crate::quic::{InvalidStreamId, StreamErrorIncoming};
@@ -126,7 +126,7 @@ where
     }
 
     /// Stops the underlying stream with the provided error code
-    pub(crate) fn stop_sending(&mut self, error_code: NewCode) {
+    pub(crate) fn stop_sending(&mut self, error_code: Code) {
         self.stream.stop_sending(error_code.into());
     }
 
@@ -310,12 +310,9 @@ mod tests {
     use assert_matches::assert_matches;
     use bytes::{BufMut, Bytes, BytesMut};
     use futures_util::future::poll_fn;
-    use std::{collections::VecDeque, fmt, sync::Arc};
+    use std::collections::VecDeque;
 
-    use crate::{
-        proto::{coding::Encode, frame::FrameType, varint::VarInt},
-        quic,
-    };
+    use crate::proto::{coding::Encode, frame::FrameType, varint::VarInt};
 
     // Decoder
 
@@ -612,32 +609,6 @@ mod tests {
         }
 
         fn recv_id(&self) -> StreamId {
-            unimplemented!()
-        }
-    }
-
-    #[derive(Debug)]
-    struct FakeError;
-
-    impl quic::Error for FakeError {
-        fn is_timeout(&self) -> bool {
-            unimplemented!()
-        }
-
-        fn err_code(&self) -> Option<u64> {
-            unimplemented!()
-        }
-    }
-
-    impl std::error::Error for FakeError {}
-    impl fmt::Display for FakeError {
-        fn fmt(&self, _: &mut fmt::Formatter<'_>) -> fmt::Result {
-            unimplemented!()
-        }
-    }
-
-    impl From<FakeError> for Arc<dyn quic::Error> {
-        fn from(_: FakeError) -> Self {
             unimplemented!()
         }
     }

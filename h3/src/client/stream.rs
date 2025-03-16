@@ -7,10 +7,10 @@ use tracing::instrument;
 
 use crate::{
     connection::{self},
-    error2::{
+    error::{
         connection_error_creators::{CloseStream, HandleFrameStreamErrorOnRequestStream},
         internal_error::InternalConnectionError,
-        NewCode, StreamError,
+        Code, StreamError,
     },
     proto::{frame::Frame, headers::Header},
     qpack,
@@ -105,7 +105,7 @@ where
                 //# Receipt of an invalid sequence of frames MUST be treated as a
                 //# connection error of type H3_FRAME_UNEXPECTED.
                 self.handle_connection_error_on_stream(InternalConnectionError::new(
-                    NewCode::H3_FRAME_UNEXPECTED,
+                    Code::H3_FRAME_UNEXPECTED,
                     "Stream finished without receiving response headers".to_string(),
                 ))
             })?;
@@ -129,14 +129,21 @@ where
                 //# An HTTP/3 implementation MAY impose a limit on the maximum size of
                 //# the message header it will accept on an individual HTTP message.
                 Err(qpack::DecoderError::HeaderTooLong(cancel_size)) => {
-                    self.inner.stop_sending(NewCode::H3_REQUEST_CANCELLED);
+                    self.inner.stop_sending(Code::H3_REQUEST_CANCELLED);
                     return Err(StreamError::HeaderTooBig {
                         actual_size: cancel_size,
                         max_size: self.inner.max_field_section_size,
                     });
                 }
                 Ok(decoded) => decoded,
-                Err(e) => return Err(todo!("figure out qpack errors")),
+                Err(_e) => {
+                    return Err(
+                        self.handle_connection_error_on_stream(InternalConnectionError {
+                            code: Code::QPACK_DECOMPRESSION_FAILED,
+                            message: "Failed to decode headers".to_string(),
+                        }),
+                    )
+                }
             }
         } else {
             //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
@@ -145,7 +152,7 @@ where
 
             return Err(
                 self.handle_connection_error_on_stream(InternalConnectionError::new(
-                    NewCode::H3_FRAME_UNEXPECTED,
+                    Code::H3_FRAME_UNEXPECTED,
                     "First response frame is not headers".to_string(),
                 )),
             );
@@ -154,9 +161,21 @@ where
         let qpack::Decoded { fields, .. } = decoded;
 
         let (status, headers) = Header::try_from(fields)
-            .map_err(|e| todo!("figure out error"))?
+            .map_err(|_e| {
+                self.inner.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
+                StreamError::StreamError {
+                    code: Code::H3_MESSAGE_ERROR,
+                    reason: "Received Malformad header".to_string(),
+                }
+            })?
             .into_response_parts()
-            .map_err(|e| todo!("figure out error"))?;
+            .map_err(|_e| {
+                self.inner.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
+                StreamError::StreamError {
+                    code: Code::H3_MESSAGE_ERROR,
+                    reason: "Received Malformad header".to_string(),
+                }
+            })?;
         let mut resp = Response::new(());
         *resp.status_mut() = status;
         *resp.headers_mut() = headers;
@@ -195,9 +214,7 @@ where
         let res = self.inner.poll_recv_trailers(cx);
         if let Poll::Ready(Err(e)) = &res {
             if let StreamError::HeaderTooBig { .. } = e {
-                self.inner
-                    .stream
-                    .stop_sending(NewCode::H3_REQUEST_CANCELLED);
+                self.inner.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
             }
         }
         res
@@ -205,7 +222,7 @@ where
 
     /// Tell the peer to stop sending into the underlying QUIC stream
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn stop_sending(&mut self, error_code: NewCode) {
+    pub fn stop_sending(&mut self, error_code: Code) {
         // TODO take by value to prevent any further call as this request is cancelled
         // rename `cancel()` ?
         self.inner.stream.stop_sending(error_code)
@@ -231,7 +248,7 @@ where
     /// Stop a stream with an error code
     ///
     /// The code can be [`Code::H3_NO_ERROR`].
-    pub fn stop_stream(&mut self, error_code: NewCode) {
+    pub fn stop_stream(&mut self, error_code: Code) {
         self.inner.stop_stream(error_code);
     }
 

@@ -9,10 +9,10 @@ use tracing::instrument;
 
 use crate::{
     connection::{self},
-    error2::{
+    error::{
         connection_error_creators::{CloseStream, HandleFrameStreamErrorOnRequestStream},
         internal_error::InternalConnectionError,
-        NewCode, StreamError,
+        Code, StreamError,
     },
     frame::{FrameStream, FrameStreamError},
     proto::{
@@ -91,10 +91,9 @@ where
             //# complete response, the server SHOULD abort its response stream with
             //# the error code H3_REQUEST_INCOMPLETE.
             Ok(None) => {
-                self.frame_stream
-                    .reset(NewCode::H3_REQUEST_INCOMPLETE.value());
+                self.frame_stream.reset(Code::H3_REQUEST_INCOMPLETE.value());
                 return Err(StreamError::StreamError {
-                    code: NewCode::H3_REQUEST_INCOMPLETE,
+                    code: Code::H3_REQUEST_INCOMPLETE,
                     reason: "stream terminated without headers".to_string(),
                 });
             }
@@ -114,13 +113,29 @@ where
                 // Close if the first frame is not a header frame
                 return Err(
                     self.handle_connection_error_on_stream(InternalConnectionError::new(
-                        NewCode::H3_FRAME_UNEXPECTED,
+                        Code::H3_FRAME_UNEXPECTED,
                         "first request frame is not headers".to_string(),
                     )),
                 );
             }
             Err(e) => {
                 return Err(self.handle_frame_stream_error_on_request_stream(e));
+            }
+        };
+
+        let decoded = match qpack::decode_stateless(&mut encoded, self.max_field_section_size) {
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
+            //# An HTTP/3 implementation MAY impose a limit on the maximum size of
+            //# the message header it will accept on an individual HTTP message.
+            Err(qpack::DecoderError::HeaderTooLong(cancel_size)) => Err(cancel_size),
+            Ok(decoded) => Ok(decoded),
+            Err(_e) => {
+                return Err(
+                    self.handle_connection_error_on_stream(InternalConnectionError {
+                        code: Code::QPACK_DECOMPRESSION_FAILED,
+                        message: "Failed to decode headers".to_string(),
+                    }),
+                );
             }
         };
 
@@ -135,17 +150,6 @@ where
                 self.shared.clone(),
                 self.send_grease_frame,
             ),
-        };
-
-        let decoded = match qpack::decode_stateless(&mut encoded, self.max_field_section_size) {
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
-            //# An HTTP/3 implementation MAY impose a limit on the maximum size of
-            //# the message header it will accept on an individual HTTP message.
-            Err(qpack::DecoderError::HeaderTooLong(cancel_size)) => Err(cancel_size),
-            Ok(decoded) => Ok(decoded),
-            Err(e) => {
-                return Err(todo!("figure out qpack errors"));
-            }
         };
 
         Ok(ResolvedRequest::new(
@@ -223,7 +227,7 @@ where
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1.2
                 //# Malformed requests or responses that are
                 //# detected MUST be treated as a stream error of type H3_MESSAGE_ERROR.
-                let error_code = NewCode::H3_MESSAGE_ERROR;
+                let error_code = Code::H3_MESSAGE_ERROR;
                 self.request_stream.stop_stream(error_code);
                 self.request_stream.stop_sending(error_code);
 

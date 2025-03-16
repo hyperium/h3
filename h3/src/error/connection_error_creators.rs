@@ -12,7 +12,7 @@ use crate::{
 };
 
 use super::{
-    codes::NewCode,
+    codes::Code,
     internal_error::{ErrorOrigin, InternalConnectionError},
     ConnectionError, LocalError, StreamError,
 };
@@ -45,7 +45,7 @@ where
                 self.close_connection(internal_error.code, internal_error.message.clone())
             }
             ErrorOrigin::Quic(ConnectionErrorIncoming::InternalError(ref reason)) => {
-                self.close_connection(NewCode::H3_INTERNAL_ERROR, reason.clone())
+                self.close_connection(Code::H3_INTERNAL_ERROR, reason.clone())
             }
 
             // All other path do not need to close the connection
@@ -85,7 +85,7 @@ where
     }
 
     /// Close the connection
-    pub fn close_connection(&mut self, code: NewCode, reason: String) -> () {
+    pub fn close_connection(&mut self, code: Code, reason: String) -> () {
         self.conn.close(code, reason.as_bytes())
     }
 }
@@ -123,7 +123,7 @@ pub trait CloseStream: ConnectionState2 {
                 StreamError::ConnectionError(convert_to_connection_error(err))
             }
             StreamErrorIncoming::StreamReset { error_code } => StreamError::RemoteReset {
-                code: NewCode::from(error_code),
+                code: Code::from(error_code),
             },
             StreamErrorIncoming::Unknown(custom_quic_impl_error) => {
                 StreamError::Undefined(custom_quic_impl_error)
@@ -148,10 +148,10 @@ pub(crate) trait CloseRawQuicConnection<B: Buf>: quic::Connection<B> {
             ConnectionErrorIncoming::Timeout => ConnectionError::Timeout,
             ConnectionErrorIncoming::InternalError(reason) => {
                 let local_error = LocalError::Application {
-                    code: NewCode::H3_INTERNAL_ERROR,
+                    code: Code::H3_INTERNAL_ERROR,
                     reason: reason.to_string(),
                 };
-                self.close(NewCode::H3_INTERNAL_ERROR, reason.as_bytes());
+                self.close(Code::H3_INTERNAL_ERROR, reason.as_bytes());
                 let conn_error = ConnectionError::Local { error: local_error };
                 conn_error
             }
@@ -201,7 +201,7 @@ where
             ),
             FrameStreamError::UnexpectedEnd => {
                 self.handle_connection_error_on_stream(InternalConnectionError::new(
-                    NewCode::H3_FRAME_ERROR,
+                    Code::H3_FRAME_ERROR,
                     "received incomplete frame".to_string(),
                 ))
             }

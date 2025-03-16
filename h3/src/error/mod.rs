@@ -24,5 +24,5 @@ pub(crate) mod internal_error;
 
 mod error;
 
-pub use codes::NewCode;
+pub use codes::Code;
 pub use error::{ConnectionError, LocalError, StreamError};

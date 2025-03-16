@@ -8,7 +8,7 @@ use http::{request, HeaderMap, Request, Response, StatusCode};
 use crate::{
     client,
     config::Settings,
-    error2::{ConnectionError, LocalError, NewCode, StreamError},
+    error::{Code, ConnectionError, LocalError, StreamError},
     proto::{
         coding::Encode,
         frame::{self, Frame, FrameType},
@@ -79,7 +79,7 @@ async fn get() {
         assert_matches!(
             incoming_req.accept().await.err().unwrap(),
             ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{error_code: code, ..})
-            if code == NewCode::H3_NO_ERROR.value()
+            if code == Code::H3_NO_ERROR.value()
         );
     };
 
@@ -149,7 +149,7 @@ async fn get_with_trailers_unknown_content_type() {
         assert_matches!(
             incoming_req.accept().await.err().unwrap(),
             ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{error_code: code, ..})
-            if code == NewCode::H3_NO_ERROR.value()
+            if code == Code::H3_NO_ERROR.value()
         );
     };
 
@@ -219,7 +219,7 @@ async fn get_with_trailers_known_content_type() {
         assert_matches!(
             incoming_req.accept().await.err().unwrap(),
             ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{error_code: code, ..})
-            if code == NewCode::H3_NO_ERROR.value()
+            if code == Code::H3_NO_ERROR.value()
         );
     };
 
@@ -281,7 +281,7 @@ async fn post() {
         assert_matches!(
             incoming_req.accept().await.err().unwrap(),
             ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{error_code: code, ..})
-            if code == NewCode::H3_NO_ERROR.value()
+            if code == Code::H3_NO_ERROR.value()
         );
     };
 
@@ -344,7 +344,7 @@ async fn header_too_big_response_from_server() {
         assert_matches!(
             incoming_req.accept().await.err().unwrap(),
             ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{error_code: code, ..})
-            if code == NewCode::H3_NO_ERROR.value()
+            if code == Code::H3_NO_ERROR.value()
         );
     };
 
@@ -431,7 +431,7 @@ async fn header_too_big_client_error() {
                 ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{
                     error_code: code,
                     ..
-                }) if code == NewCode::H3_NO_ERROR.value()
+                }) if code == Code::H3_NO_ERROR.value()
             );
             // Todo: test with configuration for connection level errors when such a configuration is available
         };
@@ -476,7 +476,7 @@ async fn header_too_big_client_error() {
                 .err()
                 .expect("should return an error"),
             StreamError::StreamError {
-                code: NewCode::H3_REQUEST_INCOMPLETE,
+                code: Code::H3_REQUEST_INCOMPLETE,
                 reason: _
             }
         );
@@ -636,7 +636,7 @@ async fn header_too_big_discard_from_client() {
         assert_matches!(
             err.as_ref().unwrap(),
             StreamError::RemoteReset {
-                code: NewCode::H3_REQUEST_CANCELLED,
+                code: Code::H3_REQUEST_CANCELLED,
                 ..
             }
         );
@@ -1448,17 +1448,17 @@ where
     //# Receipt of an invalid sequence of frames MUST be treated as a
     //# connection error of type H3_FRAME_UNEXPECTED.
 
-    request_sequence_check(request, Some(NewCode::H3_FRAME_UNEXPECTED)).await;
+    request_sequence_check(request, Some(Code::H3_FRAME_UNEXPECTED)).await;
 }
 
 async fn request_sequence_frame_error<F>(request: F)
 where
     F: Fn(&mut BytesMut),
 {
-    request_sequence_check(request, Some(NewCode::H3_FRAME_ERROR)).await;
+    request_sequence_check(request, Some(Code::H3_FRAME_ERROR)).await;
 }
 
-async fn request_sequence_check<F>(request: F, expected_error_code: Option<NewCode>)
+async fn request_sequence_check<F>(request: F, expected_error_code: Option<Code>)
 where
     F: Fn(&mut BytesMut),
 {
@@ -1529,9 +1529,7 @@ where
         };
 
         let stream = async {
-            let (_, mut stream) = request_resolver
-                .resolve_request()
-                .await?;
+            let (_, mut stream) = request_resolver.resolve_request().await?;
 
             while stream.recv_data().await?.is_some() {}
             stream.recv_trailers().await?;
@@ -1572,7 +1570,7 @@ where
             client_result_driver,
             Err(ConnectionError::Local {
                 error: LocalError::Application {
-                    code: NewCode::H3_NO_ERROR,
+                    code: Code::H3_NO_ERROR,
                     ..
                 },
             })
@@ -1583,7 +1581,7 @@ where
                 ConnectionErrorIncoming::ApplicationClose {
                     error_code: err
                 }
-            )) if err == NewCode::H3_NO_ERROR.value()
+            )) if err == Code::H3_NO_ERROR.value()
         );
         // Stream closes with no error
         assert_matches!(server_result_stream, Ok(()));

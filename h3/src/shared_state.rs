@@ -4,7 +4,7 @@ use std::sync::{atomic::AtomicBool, OnceLock};
 
 use futures_util::task::AtomicWaker;
 
-use crate::{config::Settings, error2::internal_error::ErrorOrigin};
+use crate::{config::Settings, error::internal_error::ErrorOrigin};
 
 #[derive(Debug)]
 /// This struct represents the shared state of the h3 connection and the stream structs

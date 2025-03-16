@@ -9,7 +9,7 @@ use pin_project_lite::pin_project;
 
 use crate::{
     buf::BufList,
-    error2::{internal_error::InternalConnectionError, NewCode},
+    error::{internal_error::InternalConnectionError, Code},
     frame::FrameStream,
     proto::{
         coding::{Decode as _, Encode},
@@ -345,7 +345,7 @@ where
 
             let reult = VarInt::decode(&mut buf).map_err(|_| {
                 PollTypeError::InternalError(InternalConnectionError::new(
-                    NewCode::H3_INTERNAL_ERROR,
+                    Code::H3_INTERNAL_ERROR,
                     "Unexpected end parsing varint".to_string(),
                 ))
             })?;

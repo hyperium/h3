@@ -10,7 +10,7 @@ use std::{
 use bytes::Buf;
 use h3::{
     connection::ConnectionInner,
-    error2::ConnectionError,
+    error::ConnectionError,
     quic::{self, StreamId},
     ConnectionState2,
 };

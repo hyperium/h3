@@ -3,7 +3,10 @@
 use bytes::Buf;
 
 use crate::{
-    error2::{connection_error_creators::CloseStream, NewCode, StreamError},
+    error::{
+        connection_error_creators::CloseStream, internal_error::InternalConnectionError, Code,
+        StreamError,
+    },
     proto::varint::VarInt,
     quic::{self},
     shared_state::{ConnectionState2, SharedState2},
@@ -95,7 +98,7 @@ where
 
     /// Tell the peer to stop sending into the underlying QUIC stream
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn stop_sending(&mut self, error_code: NewCode) {
+    pub fn stop_sending(&mut self, error_code: Code) {
         self.inner.stream.stop_sending(error_code)
     }
 
@@ -122,8 +125,12 @@ where
         let headers = Header::response(status, headers);
 
         let mut block = BytesMut::new();
-        let mem_size = qpack::encode_stateless(&mut block, headers)
-            .map_err(|_e| todo!("figure out qpack errors"))?;
+        let mem_size = qpack::encode_stateless(&mut block, headers).map_err(|_e| {
+            self.handle_connection_error_on_stream(InternalConnectionError {
+                code: Code::H3_INTERNAL_ERROR,
+                message: "Failed to encode headers".to_string(),
+            })
+        })?;
 
         let max_mem_size = if let Some(settings) = self.inner.settings() {
             settings.max_field_section_size
@@ -158,7 +165,7 @@ where
     /// Stop a stream with an error code
     ///
     /// The code can be [`Code::H3_NO_ERROR`].
-    pub fn stop_stream(&mut self, error_code: NewCode) {
+    pub fn stop_stream(&mut self, error_code: Code) {
         self.inner.stop_stream(error_code);
     }
 

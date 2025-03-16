@@ -30,7 +30,7 @@ use tokio::sync::mpsc;
 use crate::{
     config::Config,
     connection::ConnectionInner,
-    error2::ConnectionError,
+    error::ConnectionError,
     quic::{self},
     shared_state::SharedState2,
 };

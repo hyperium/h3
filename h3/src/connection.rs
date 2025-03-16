@@ -15,12 +15,12 @@ use tracing::{instrument, warn};
 
 use crate::{
     config::Config,
-    error2::{
+    error::{
         connection_error_creators::{
             CloseRawQuicConnection, CloseStream, HandleFrameStreamErrorOnRequestStream,
         },
         internal_error::InternalConnectionError,
-        ConnectionError, NewCode, StreamError,
+        Code, ConnectionError, StreamError,
     },
     frame::{FrameStream, FrameStreamError},
     proto::{
@@ -145,7 +145,7 @@ where
     B: Buf,
 {
     /// Sends the settings and initializes the control streams
-    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn send_control_stream_headers(&mut self) -> Result<(), ConnectionError> {
         #[cfg(test)]
         if !self.config.send_settings {
@@ -156,7 +156,7 @@ where
             // TODO: converting a config to settings should never fail
             //       it should be impossible to construct a config which cannot be represented as settings
             self.handle_connection_error(InternalConnectionError::new(
-                NewCode::H3_INTERNAL_ERROR,
+                Code::H3_INTERNAL_ERROR,
                 "error when creating settings frame".to_string(),
             ))
         })?;
@@ -225,7 +225,7 @@ where
                 //# stream is closed at any point, this MUST be treated as a connection
                 //# error of type H3_CLOSED_CRITICAL_STREAM.
                 .handle_connection_error(InternalConnectionError::new(
-                    NewCode::H3_CLOSED_CRITICAL_STREAM,
+                    Code::H3_CLOSED_CRITICAL_STREAM,
                     format!(
                         "control stream was requested to stop sending with error code {}",
                         err
@@ -233,7 +233,7 @@ where
                 ))),
             Err(StreamErrorIncoming::Unknown(error)) => {
                 Err(self.handle_connection_error(InternalConnectionError::new(
-                    NewCode::H3_CLOSED_CRITICAL_STREAM,
+                    Code::H3_CLOSED_CRITICAL_STREAM,
                     format!("an error occurred on the control stream {}", error),
                 )))
             }
@@ -270,7 +270,7 @@ where
                     //# stream is closed at any point, this MUST be treated as a connection
                     //# error of type H3_CLOSED_CRITICAL_STREAM.
                     conn.close_raw_connection_with_h3_error(InternalConnectionError::new(
-                        NewCode::H3_CLOSED_CRITICAL_STREAM,
+                        Code::H3_CLOSED_CRITICAL_STREAM,
                         format!(
                             "control stream was requested to stop sending with error code {}",
                             err,
@@ -281,7 +281,7 @@ where
             Err(StreamErrorIncoming::Unknown(error)) => {
                 return Err(
                     conn.close_raw_connection_with_h3_error(InternalConnectionError::new(
-                        NewCode::H3_CLOSED_CRITICAL_STREAM,
+                        Code::H3_CLOSED_CRITICAL_STREAM,
                         format!("an error occurred on the control stream {}", error),
                     )),
                 );
@@ -360,7 +360,7 @@ where
                 //# stream is closed at any point, this MUST be treated as a connection
                 //# error of type H3_CLOSED_CRITICAL_STREAM.
                 .handle_connection_error(InternalConnectionError::new(
-                    NewCode::H3_CLOSED_CRITICAL_STREAM,
+                    Code::H3_CLOSED_CRITICAL_STREAM,
                     format!(
                         "control stream was requested to stop sending with error code {}",
                         err
@@ -368,7 +368,7 @@ where
                 ))),
             Err(StreamErrorIncoming::Unknown(error)) => {
                 Err(self.handle_connection_error(InternalConnectionError::new(
-                    NewCode::H3_CLOSED_CRITICAL_STREAM,
+                    Code::H3_CLOSED_CRITICAL_STREAM,
                     format!("an error occurred on the control stream {}", error),
                 )))
             }
@@ -442,7 +442,7 @@ where
                 AcceptedRecvStream::Control(s) => {
                     if self.control_recv.is_some() {
                         return Err(self.handle_connection_error(InternalConnectionError::new(
-                            NewCode::H3_STREAM_CREATION_ERROR,
+                            Code::H3_STREAM_CREATION_ERROR,
                             "got two control streams".to_string(),
                         )));
                     }
@@ -451,7 +451,7 @@ where
                 enc @ AcceptedRecvStream::Encoder(_) => {
                     if let Some(_prev) = self.qpack_streams.encoder_recv.replace(enc) {
                         return Err(self.handle_connection_error(InternalConnectionError::new(
-                            NewCode::H3_STREAM_CREATION_ERROR,
+                            Code::H3_STREAM_CREATION_ERROR,
                             "got two encoder streams".to_string(),
                         )));
                     }
@@ -459,7 +459,7 @@ where
                 dec @ AcceptedRecvStream::Decoder(_) => {
                     if let Some(_prev) = self.qpack_streams.decoder_recv.replace(dec) {
                         return Err(self.handle_connection_error(InternalConnectionError::new(
-                            NewCode::H3_STREAM_CREATION_ERROR,
+                            Code::H3_STREAM_CREATION_ERROR,
                             "got two decoder streams".to_string(),
                         )));
                     }
@@ -492,7 +492,7 @@ where
                     //# The recipient MUST NOT consider unknown stream types
                     //# to be a connection error of any kind.
 
-                    stream.stop_sending(NewCode::H3_STREAM_CREATION_ERROR.value());
+                    stream.stop_sending(Code::H3_STREAM_CREATION_ERROR.value());
                 }
                 // TODO: Push streams
                 _ => (),
@@ -538,7 +538,7 @@ where
             {
                 return Poll::Ready(Err(self.handle_connection_error(
                     InternalConnectionError::new(
-                        NewCode::H3_CLOSED_CRITICAL_STREAM,
+                        Code::H3_CLOSED_CRITICAL_STREAM,
                         format!("control stream was reset with error code {}", err),
                     ),
                 )));
@@ -546,7 +546,7 @@ where
             Err(FrameStreamError::Quic(StreamErrorIncoming::Unknown(error))) => {
                 return Poll::Ready(Err(self.handle_connection_error(
                     InternalConnectionError::new(
-                        NewCode::H3_CLOSED_CRITICAL_STREAM,
+                        Code::H3_CLOSED_CRITICAL_STREAM,
                         format!("an error occurred on the control stream {}", error),
                     ),
                 )));
@@ -559,7 +559,7 @@ where
             {
                 return Poll::Ready(Err(self.handle_connection_error(
                     InternalConnectionError::new(
-                        NewCode::H3_FRAME_ERROR,
+                        Code::H3_FRAME_ERROR,
                         "received incomplete frame".to_string(),
                     ),
                 )));
@@ -577,7 +577,7 @@ where
             {
                 return Poll::Ready(Err(self.handle_connection_error(
                     InternalConnectionError::new(
-                        NewCode::H3_CLOSED_CRITICAL_STREAM,
+                        Code::H3_CLOSED_CRITICAL_STREAM,
                         "control stream was closed".to_string(),
                     ),
                 )));
@@ -597,7 +597,7 @@ where
                     //# connection error of type H3_FRAME_UNEXPECTED.
                     return Poll::Ready(Err(self.handle_connection_error(
                         InternalConnectionError::new(
-                            NewCode::H3_FRAME_UNEXPECTED,
+                            Code::H3_FRAME_UNEXPECTED,
                             "second settings frame received".to_string(),
                         ),
                     )));
@@ -611,7 +611,7 @@ where
                 //# H3_MISSING_SETTINGS.
                 return Poll::Ready(Err(self.handle_connection_error(
                     InternalConnectionError::new(
-                        NewCode::H3_MISSING_SETTINGS,
+                        Code::H3_MISSING_SETTINGS,
                         // TODO: put frame type in message
                         format!("received frame {:?} before settings", frame),
                     ),
@@ -642,7 +642,7 @@ where
                 //# MUST respond with a connection error of type H3_FRAME_UNEXPECTED.
                 return Poll::Ready(Err(self.handle_connection_error(
                     InternalConnectionError::new(
-                        NewCode::H3_FRAME_UNEXPECTED,
+                        Code::H3_FRAME_UNEXPECTED,
                         // TODO: put frame type in message
                         format!("received unexpected frame {:?} on control stream", frame),
                     ),
@@ -687,7 +687,7 @@ where
                     //# Receiving a GOAWAY containing a larger identifier than previously
                     //# received MUST be treated as a connection error of type H3_ID_ERROR.
                     return Err(self.handle_connection_error(InternalConnectionError::new(
-                        NewCode::H3_ID_ERROR,
+                        Code::H3_ID_ERROR,
                         format!(
                             "received a GoAway ({}) greater than the former one ({})",
                             id, prev_id
@@ -896,7 +896,7 @@ where
 
                     return Poll::Ready(Err(self.handle_connection_error_on_stream(
                         InternalConnectionError::new(
-                            NewCode::H3_FRAME_UNEXPECTED,
+                            Code::H3_FRAME_UNEXPECTED,
                             format!("unexpected frame: {:?}", other_frame),
                         ),
                     )));
@@ -910,7 +910,7 @@ where
     }
 
     /// Poll receive trailers.
-    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_recv_trailers(
         &mut self,
         cx: &mut Context<'_>,
@@ -951,7 +951,7 @@ where
                     //# connection error of type H3_FRAME_UNEXPECTED.
                     return Poll::Ready(Err(self.handle_connection_error_on_stream(
                         InternalConnectionError::new(
-                            NewCode::H3_FRAME_UNEXPECTED,
+                            Code::H3_FRAME_UNEXPECTED,
                             format!("unexpected frame: {:?}", other_frame),
                         ),
                     )));
@@ -976,7 +976,7 @@ where
                     // Received a known frame after trailers -> fail.
                     return Poll::Ready(Err(self.handle_connection_error_on_stream(
                         InternalConnectionError::new(
-                            NewCode::H3_FRAME_UNEXPECTED,
+                            Code::H3_FRAME_UNEXPECTED,
                             format!("unexpected frame: {:?}", trailing_frame),
                         ),
                     )));
@@ -1003,19 +1003,32 @@ where
                     }));
                 }
                 Ok(decoded) => decoded,
-                Err(_e) => return Poll::Ready(Err(todo!("figure out qpack {}", _e))),
+                Err(_e) => {
+                    return Poll::Ready(Err(self.handle_connection_error_on_stream(
+                        InternalConnectionError {
+                            code: Code::QPACK_DECOMPRESSION_FAILED,
+                            message: "Failed to decode trailers".to_string(),
+                        },
+                    )))
+                }
             };
 
         Poll::Ready(Ok(Some(
             Header::try_from(fields)
-                .map_err(|e| todo!("Figure out qpack"))?
+                .map_err(|_e| {
+                    self.stop_sending(Code::H3_MESSAGE_ERROR);
+                    StreamError::StreamError {
+                        code: Code::H3_MESSAGE_ERROR,
+                        reason: "malformed request".to_string(),
+                    }
+                })?
                 .into_fields(),
         )))
     }
 
     #[allow(missing_docs)]
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn stop_sending(&mut self, err_code: NewCode) {
+    pub fn stop_sending(&mut self, err_code: Code) {
         self.stream.stop_sending(err_code);
     }
 }
@@ -1045,8 +1058,13 @@ where
         //# converted to lowercase prior to their encoding.
         let mut block = BytesMut::new();
 
-        let mem_size = qpack::encode_stateless(&mut block, Header::trailer(trailers))
-            .map_err(|_e| todo!("figure out qpack"))?;
+        let mem_size =
+            qpack::encode_stateless(&mut block, Header::trailer(trailers)).map_err(|_e| {
+                self.handle_connection_error_on_stream(InternalConnectionError {
+                    code: Code::H3_INTERNAL_ERROR,
+                    message: "Failed to encode trailers".to_string(),
+                })
+            })?;
 
         let max_mem_size = if let Some(settings) = self.settings() {
             settings.max_field_section_size
@@ -1076,7 +1094,7 @@ where
 
     /// Stops a stream with an error code
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn stop_stream(&mut self, code: NewCode) {
+    pub fn stop_stream(&mut self, code: Code) {
         self.stream.reset(code.into());
     }
 

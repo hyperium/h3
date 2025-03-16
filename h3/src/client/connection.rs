@@ -15,9 +15,9 @@ use tracing::{info, instrument, trace};
 
 use crate::{
     connection::{self, ConnectionInner},
-    error2::{
-        connection_error_creators::CloseStream, internal_error::InternalConnectionError,
-        ConnectionError, NewCode, StreamError,
+    error::{
+        connection_error_creators::CloseStream, internal_error::InternalConnectionError, Code,
+        ConnectionError, StreamError,
     },
     frame::FrameStream,
     proto::{frame::Frame, headers::Header, push::PushId, varint::VarInt},
@@ -164,8 +164,12 @@ where
             extensions,
             ..
         } = parts;
-        let headers = Header::request(method, uri, headers, extensions)
-            .map_err(|_e| todo!("figure out how to error when request is not sent"))?;
+        let headers = Header::request(method, uri, headers, extensions).map_err(|_e| {
+            self.handle_connection_error_on_stream(InternalConnectionError {
+                code: Code::H3_INTERNAL_ERROR,
+                message: "Failed to build request headers".to_string(),
+            })
+        })?;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
         //= type=implication
@@ -187,8 +191,12 @@ where
         //# more cookie-pairs, before compression.
 
         let mut block = BytesMut::new();
-        let mem_size = qpack::encode_stateless(&mut block, headers)
-            .map_err(|_e| todo!("figure out qpack errors"))?;
+        let mem_size = qpack::encode_stateless(&mut block, headers).map_err(|_e| {
+            self.handle_connection_error_on_stream(InternalConnectionError {
+                code: Code::H3_INTERNAL_ERROR,
+                message: "Failed to encode headers".to_string(),
+            })
+        })?;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
         //# An implementation that
@@ -252,7 +260,7 @@ where
             == 1
         {
             self.handle_connection_error_on_stream(InternalConnectionError::new(
-                NewCode::H3_NO_ERROR,
+                Code::H3_NO_ERROR,
                 "Connection closed by client".to_string(),
             ));
         }
@@ -424,7 +432,7 @@ where
                     if !StreamId::from(id).is_request() {
                         return Poll::Ready(self.inner.handle_connection_error(
                             InternalConnectionError::new(
-                                NewCode::H3_ID_ERROR,
+                                Code::H3_ID_ERROR,
                                 format!("non-request StreamId in a GoAway frame: {}", id),
                             ),
                         ));
@@ -448,7 +456,7 @@ where
                 Ok(frame) => {
                     return Poll::Ready(self.inner.handle_connection_error(
                         InternalConnectionError::new(
-                            NewCode::H3_FRAME_UNEXPECTED,
+                            Code::H3_FRAME_UNEXPECTED,
                             format!("on client control stream: {:?}", frame),
                         ),
                     ));
@@ -468,7 +476,7 @@ where
             return Poll::Ready(
                 self.inner
                     .handle_connection_error(InternalConnectionError::new(
-                        NewCode::H3_STREAM_CREATION_ERROR,
+                        Code::H3_STREAM_CREATION_ERROR,
                         "client received a server-initiated bidirectional stream".to_string(),
                     )),
             );

@@ -4,11 +4,11 @@ use std::fmt::{self};
 
 /// An HTTP/3 "application error code".
 #[derive(PartialEq, Eq, Hash, Clone, Copy)]
-pub struct NewCode {
+pub struct Code {
     code: u64,
 }
 
-impl NewCode {
+impl Code {
     /// Numerical error code
     ///
     /// See <https://www.rfc-editor.org/rfc/rfc9114.html#errors>
@@ -18,7 +18,7 @@ impl NewCode {
     }
 }
 
-impl PartialEq<u64> for NewCode {
+impl PartialEq<u64> for Code {
     fn eq(&self, other: &u64) -> bool {
         *other == self.code
     }
@@ -33,14 +33,14 @@ macro_rules! codes {
             ($num:expr, $name:ident);
         )+
     ) => {
-        impl NewCode {
+        impl Code {
         $(
             $(#[$docs])*
-            pub const $name: NewCode = NewCode{code: $num};
+            pub const $name: Code = Code{code: $num};
         )+
         }
 
-        impl fmt::Debug for NewCode {
+        impl fmt::Debug for Code {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 match self.code {
                 $(
@@ -51,7 +51,7 @@ macro_rules! codes {
             }
         }
 
-        impl fmt::Display for NewCode{
+        impl fmt::Display for Code{
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 match self.code {
                 $(
@@ -146,14 +146,14 @@ codes! {
     (0x202, QPACK_DECODER_STREAM_ERROR);
 }
 
-impl From<NewCode> for u64 {
-    fn from(code: NewCode) -> u64 {
+impl From<Code> for u64 {
+    fn from(code: Code) -> u64 {
         code.code
     }
 }
 
-impl From<u64> for NewCode {
-    fn from(code: u64) -> NewCode {
-        NewCode { code }
+impl From<u64> for Code {
+    fn from(code: u64) -> Code {
+        Code { code }
     }
 }

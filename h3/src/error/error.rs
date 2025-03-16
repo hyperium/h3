@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::quic::ConnectionErrorIncoming;
 
-use super::{codes::NewCode, internal_error::InternalConnectionError};
+use super::{codes::Code, internal_error::InternalConnectionError};
 
 /// This enum represents the closure of a connection because of an a closed quic connection
 /// This can be either from this endpoint because of a violation of the protocol or from the remote endpoint
@@ -39,7 +39,7 @@ pub enum LocalError {
     /// The application closed the connection
     Application {
         /// The error code
-        code: NewCode,
+        code: Code,
         /// The error reason
         reason: String,
     },
@@ -65,14 +65,14 @@ pub enum StreamError {
     #[non_exhaustive]
     StreamError {
         /// The error code
-        code: NewCode,
+        code: Code,
         /// The error reason
         reason: String,
     },
     /// Stream was Reset by the peer
     RemoteReset {
         /// Reset code received from the peer
-        code: NewCode,
+        code: Code,
     },
     /// The error occurred on the connection
     #[non_exhaustive]

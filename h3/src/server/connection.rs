@@ -17,7 +17,7 @@ use tokio::sync::mpsc;
 
 use crate::{
     connection::ConnectionInner,
-    error2::{internal_error::InternalConnectionError, ConnectionError, NewCode},
+    error::{internal_error::InternalConnectionError, Code, ConnectionError},
     frame::FrameStream,
     proto::{
         frame::{Frame, PayloadLen},
@@ -171,8 +171,8 @@ where
                     // some acceptable request streams arrive after rejected requests.
                     if let Some(max_id) = self.sent_closing {
                         if s.send_id() > max_id {
-                            s.stop_sending(NewCode::H3_REQUEST_REJECTED.value());
-                            s.reset(NewCode::H3_REQUEST_REJECTED.value());
+                            s.stop_sending(Code::H3_REQUEST_REJECTED.value());
+                            s.reset(Code::H3_REQUEST_REJECTED.value());
                             if self.poll_requests_completion(cx).is_ready() {
                                 break Poll::Ready(Ok(None));
                             }
@@ -196,7 +196,7 @@ where
         Poll::Pending
     }
 
-    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub(crate) fn poll_next_control(
         &mut self,
         cx: &mut Context<'_>,
@@ -235,7 +235,7 @@ where
             frame => {
                 return Poll::Ready(Err(self.inner.handle_connection_error(
                     InternalConnectionError::new(
-                        NewCode::H3_FRAME_UNEXPECTED,
+                        Code::H3_FRAME_UNEXPECTED,
                         format!("on server control stream: {:?}", frame),
                     ),
                 )));
@@ -273,10 +273,10 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn drop(&mut self) {
         self.inner.close_connection(
-            NewCode::H3_NO_ERROR,
+            Code::H3_NO_ERROR,
             "Connection was closed by the server".to_string(),
         );
     }

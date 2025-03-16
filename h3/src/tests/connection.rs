@@ -10,7 +10,7 @@ use http::{Request, Response, StatusCode};
 use tokio::sync::oneshot::{self};
 
 use crate::client::SendRequest;
-use crate::error2::{ConnectionError, LocalError, NewCode, StreamError};
+use crate::error::{Code, ConnectionError, LocalError, StreamError};
 use crate::quic::ConnectionErrorIncoming;
 use crate::tests::get_stream_blocking;
 use crate::{client, server, ConnectionState2};
@@ -40,7 +40,7 @@ async fn connect() {
             ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{
                 error_code: code,
                 ..
-            }) if code == NewCode::H3_NO_ERROR.value()
+            }) if code == Code::H3_NO_ERROR.value()
         );
     };
 
@@ -81,7 +81,7 @@ async fn accept_request_end_on_client_close() {
         assert_matches!(
             incoming.accept().await.err().unwrap(),
             ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{error_code: code, ..})
-            if code == NewCode::H3_NO_ERROR.value()
+            if code == Code::H3_NO_ERROR.value()
         );
     };
     tokio::join!(server_fut, client_fut);
@@ -113,7 +113,7 @@ async fn server_drop_close() {
                     error_code: code,
                     ..
                 }))
-                if code == NewCode::H3_NO_ERROR.value()
+                if code == Code::H3_NO_ERROR.value()
             );
         };
 
@@ -122,7 +122,7 @@ async fn server_drop_close() {
             assert_matches!(drive, ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{
                 error_code: code,
                 ..
-            }) if code == NewCode::H3_NO_ERROR.value());
+            }) if code == Code::H3_NO_ERROR.value());
         };
         tokio::join! {request_fut,drive_fut}
     };
@@ -184,7 +184,7 @@ async fn client_close_only_on_last_sender_drop() {
             .resolve_request()
             .await
             .unwrap();
-        stream.stop_stream(NewCode::H3_REQUEST_CANCELLED);
+        stream.stop_stream(Code::H3_REQUEST_CANCELLED);
 
         let (_, mut stream) = incoming
             .accept()
@@ -194,14 +194,14 @@ async fn client_close_only_on_last_sender_drop() {
             .resolve_request()
             .await
             .unwrap();
-        stream.stop_stream(NewCode::H3_REQUEST_CANCELLED);
+        stream.stop_stream(Code::H3_REQUEST_CANCELLED);
 
         assert_matches!(
             incoming.accept().await.err().unwrap(),
             ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{
                 error_code: code,
                 ..
-            }) if code == NewCode::H3_NO_ERROR.value()
+            }) if code == Code::H3_NO_ERROR.value()
         );
     };
 
@@ -217,7 +217,7 @@ async fn client_close_only_on_last_sender_drop() {
             request_stream_1.recv_response().await,
             Err(StreamError::RemoteReset{
                 code
-            }) if code == NewCode::H3_REQUEST_CANCELLED.value()
+            }) if code == Code::H3_REQUEST_CANCELLED.value()
         );
 
         let _ = request_stream_1.finish().await.unwrap();
@@ -231,7 +231,7 @@ async fn client_close_only_on_last_sender_drop() {
             request_stream_2.recv_response().await,
             Err(StreamError::RemoteReset{
                 code
-            }) if code == NewCode::H3_REQUEST_CANCELLED.value()
+            }) if code == Code::H3_REQUEST_CANCELLED.value()
         );
         let _ = request_stream_2.finish().await.unwrap();
 
@@ -243,7 +243,7 @@ async fn client_close_only_on_last_sender_drop() {
             drive,
             ConnectionError::Local {
                 error: LocalError::Application {
-                    code: NewCode::H3_NO_ERROR,
+                    code: Code::H3_NO_ERROR,
                     ..
                 }
             }
@@ -282,7 +282,7 @@ async fn settings_exchange_client() {
             ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{
                 error_code: code,
                 ..
-            }) if code == NewCode::H3_NO_ERROR.value());
+            }) if code == Code::H3_NO_ERROR.value());
         };
 
         tokio::select! { _ = settings_change => (), _ = drive => panic!("driver resolved first") };
@@ -325,7 +325,7 @@ async fn settings_exchange_server() {
                 ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{
                     error_code: code,
                     ..
-                }) if code == NewCode::H3_NO_ERROR.value()
+                }) if code == Code::H3_NO_ERROR.value()
             );
         };
 
@@ -373,7 +373,7 @@ async fn client_error_on_bidi_recv() {
             driver.await,
             ConnectionError::Local {
                 error: LocalError::Application {
-                    code: NewCode::H3_STREAM_CREATION_ERROR,
+                    code: Code::H3_STREAM_CREATION_ERROR,
                     reason: reason_string
                 }
             } if reason_string.starts_with("client received a server-initiated bidirectional stream")
@@ -381,7 +381,7 @@ async fn client_error_on_bidi_recv() {
         assert_matches!(send.send_request(Request::get("http://no.way").body(()).unwrap())
             .await.map(|_| ()).unwrap_err(),
             StreamError::ConnectionError(
-                ConnectionError::Local { error: LocalError::Application { code: NewCode::H3_STREAM_CREATION_ERROR, reason: reason_string } }
+                ConnectionError::Local { error: LocalError::Application { code: Code::H3_STREAM_CREATION_ERROR, reason: reason_string } }
             )
             if reason_string.starts_with("client received a server-initiated bidirectional stream")
         );
@@ -397,7 +397,7 @@ async fn client_error_on_bidi_recv() {
                         error_code,
                         ..
                     }),
-                )) if NewCode::H3_STREAM_CREATION_ERROR == error_code.into_inner() => return,
+                )) if Code::H3_STREAM_CREATION_ERROR == error_code.into_inner() => return,
                 Err(e) => panic!("got err: {}", e),
                 Ok(_) => (),
             }
@@ -440,7 +440,7 @@ async fn two_control_streams() {
             incoming.accept().await.map(|_| ()).unwrap_err(),
             ConnectionError::Local {
                 error: LocalError::Application {
-                    code: NewCode::H3_STREAM_CREATION_ERROR,
+                    code: Code::H3_STREAM_CREATION_ERROR,
                     ..
                 }
             }
@@ -489,7 +489,7 @@ async fn control_close_send_error() {
             }) => error_code.into_inner(),
             e => panic!("unexpected error: {:?}", e),
         };
-        assert_eq!(err_code, NewCode::H3_CLOSED_CRITICAL_STREAM.value());
+        assert_eq!(err_code, Code::H3_CLOSED_CRITICAL_STREAM.value());
     };
 
     let server_fut = async {
@@ -500,7 +500,7 @@ async fn control_close_send_error() {
             incoming.accept().await.map(|_| ()).unwrap_err(),
             ConnectionError::Local {
                 error: LocalError::Application {
-                    code: NewCode::H3_CLOSED_CRITICAL_STREAM,
+                    code: Code::H3_CLOSED_CRITICAL_STREAM,
                     reason: reason_string
                 }
             }
@@ -510,7 +510,7 @@ async fn control_close_send_error() {
             incoming.accept().await.map(|_| ()).unwrap_err(),
             ConnectionError::Local {
                 error: LocalError::Application {
-                    code: NewCode::H3_CLOSED_CRITICAL_STREAM,
+                    code: Code::H3_CLOSED_CRITICAL_STREAM,
                     reason: reason_string
                 }
             }
@@ -551,7 +551,7 @@ async fn missing_settings() {
             incoming.accept().await.map(|_| ()).unwrap_err(),
             ConnectionError::Local {
                 error: LocalError::Application {
-                    code: NewCode::H3_MISSING_SETTINGS,
+                    code: Code::H3_MISSING_SETTINGS,
                     ..
                 }
             }
@@ -595,7 +595,7 @@ async fn control_stream_frame_unexpected() {
             incoming.accept().await.map(|_| ()).unwrap_err(),
             ConnectionError::Local {
                 error: LocalError::Application {
-                    code: NewCode::H3_FRAME_UNEXPECTED,
+                    code: Code::H3_FRAME_UNEXPECTED,
                     ..
                 }
             }
@@ -653,7 +653,7 @@ async fn goaway_from_server_not_request_id() {
             future::poll_fn(|cx| driver.poll_close(cx)).await,
             ConnectionError::Local {
                 error: LocalError::Application {
-                    code: NewCode::H3_ID_ERROR,
+                    code: Code::H3_ID_ERROR,
                     ..
                 }
             }
@@ -707,7 +707,7 @@ async fn graceful_shutdown_server_rejects() {
         assert_matches!(
             rejected.unwrap_err(),
             StreamError::RemoteReset {
-                code: NewCode::H3_REQUEST_REJECTED
+                code: Code::H3_REQUEST_REJECTED
             }
         );
     };
@@ -768,7 +768,7 @@ async fn graceful_shutdown_grace_interval() {
             driver,
             ConnectionError::Local {
                 error: LocalError::Application {
-                    code: NewCode::H3_NO_ERROR,
+                    code: Code::H3_NO_ERROR,
                     ..
                 }
             }
@@ -814,7 +814,7 @@ async fn graceful_shutdown_closes_when_idle() {
             ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{
                 error_code: code,
                 ..
-            }) if code == NewCode::H3_NO_ERROR.value()
+            }) if code == Code::H3_NO_ERROR.value()
         );
     };
 
@@ -855,7 +855,7 @@ async fn graceful_shutdown_client() {
             ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{
                 error_code: code,
                 ..
-            }) if code == NewCode::H3_NO_ERROR.value()
+            }) if code == Code::H3_NO_ERROR.value()
         );
     };
 
@@ -917,7 +917,7 @@ async fn server_not_blocking_on_idle_request() {
 
         assert_matches!(err,
         quinn::ConnectionError::ApplicationClosed(quinn::ApplicationClose { error_code, .. })
-            if error_code.into_inner() == NewCode::H3_FRAME_UNEXPECTED.value()
+            if error_code.into_inner() == Code::H3_FRAME_UNEXPECTED.value()
         );
     };
 
@@ -939,7 +939,7 @@ async fn server_not_blocking_on_idle_request() {
                 err,
                 ConnectionError::Local {
                     error: LocalError::Application {
-                        code: NewCode::H3_FRAME_UNEXPECTED,
+                        code: Code::H3_FRAME_UNEXPECTED,
                         ..
                     }
                 }
