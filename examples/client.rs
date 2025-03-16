@@ -2,7 +2,6 @@ use std::{path::PathBuf, sync::Arc};
 
 use futures::future;
 use h3::error2::ConnectionError;
-use quinn::ConnectError;
 use rustls::pki_types::CertificateDer;
 use structopt::StructOpt;
 use tokio::io::AsyncWriteExt;

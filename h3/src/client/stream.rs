@@ -101,9 +101,12 @@ where
             .await
             .map_err(|e| self.handle_frame_stream_error_on_request_stream(e))?
             .ok_or_else(|| {
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+                //# Receipt of an invalid sequence of frames MUST be treated as a
+                //# connection error of type H3_FRAME_UNEXPECTED.
                 self.handle_connection_error_on_stream(InternalConnectionError::new(
-                    NewCode::H3_GENERAL_PROTOCOL_ERROR,
-                    "Did not receive response headers".to_string(),
+                    NewCode::H3_FRAME_UNEXPECTED,
+                    "Stream finished without receiving response headers".to_string(),
                 ))
             })?;
 

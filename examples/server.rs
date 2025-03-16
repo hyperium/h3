@@ -161,13 +161,7 @@ async fn handle_request<C>(
 where
     C: h3::quic::Connection<Bytes>,
 {
-    let (req, mut stream) = if let Some((req, stream)) = resolver.resolve_request().await? {
-        info!("received request: {:?}", req);
-        (req, stream)
-    } else {
-        info!("no request to resolve");
-        return Ok(());
-    };
+    let (req, mut stream) = resolver.resolve_request().await?;
 
     let (status, to_serve) = match serve_root.as_deref() {
         None => (StatusCode::OK, None),

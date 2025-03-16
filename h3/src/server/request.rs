@@ -66,14 +66,10 @@ where
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn resolve_request(
         mut self,
-    ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, StreamError> {
+    ) -> Result<(Request<()>, RequestStream<C::BidiStream, B>), StreamError> {
         let frame = std::future::poll_fn(|cx| self.frame_stream.poll_next(cx)).await;
         let req = self.accept_with_frame(frame)?;
-        if let Some(req) = req {
-            Ok(Some(req.resolve().await?))
-        } else {
-            Ok(None)
-        }
+        Ok(req.resolve().await?)
     }
 
     /// Accepts a http request where the first frame has already been read and decoded.
@@ -81,11 +77,11 @@ where
     /// This is needed as a bidirectional stream may be read as part of incoming webtransport
     /// bi-streams. If it turns out that the stream is *not* a `WEBTRANSPORT_STREAM` the request
     /// may still want to be handled and passed to the user.
-    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn accept_with_frame(
         mut self,
         frame: Result<Option<Frame<PayloadLen>>, FrameStreamError>,
-    ) -> Result<Option<ResolvedRequest<C, B>>, StreamError> {
+    ) -> Result<ResolvedRequest<C, B>, StreamError> {
         let mut encoded = match frame {
             Ok(Some(Frame::Headers(h))) => h,
 
@@ -152,11 +148,11 @@ where
             }
         };
 
-        Ok(Some(ResolvedRequest::new(
+        Ok(ResolvedRequest::new(
             request_stream,
             decoded,
             self.max_field_section_size,
-        )))
+        ))
     }
 }
 
@@ -189,7 +185,7 @@ where
     }
 
     /// Finishes the resolution of the request
-    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn resolve(
         mut self,
     ) -> Result<(Request<()>, RequestStream<C::BidiStream, B>), StreamError> {

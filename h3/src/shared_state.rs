@@ -81,7 +81,7 @@ pub trait ConnectionState2 {
     }
     /// Set the settings
     fn set_settings(&self, settings: Settings) {
-        self.shared_state().settings.set(settings);
+        let _ = self.shared_state().settings.set(settings);
     }
 
     /// Returns the waker for the connection

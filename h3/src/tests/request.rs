@@ -2,7 +2,6 @@ use std::{hint::black_box, time::Duration};
 
 use assert_matches::assert_matches;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use futures::join;
 use futures_util::future;
 use http::{request, HeaderMap, Request, Response, StatusCode};
 
@@ -1532,8 +1531,7 @@ where
         let stream = async {
             let (_, mut stream) = request_resolver
                 .resolve_request()
-                .await?
-                .expect("request end unexpected");
+                .await?;
 
             while stream.recv_data().await?.is_some() {}
             stream.recv_trailers().await?;

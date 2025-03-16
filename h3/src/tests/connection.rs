@@ -155,7 +155,7 @@ async fn server_send_data_without_finish() {
         let conn = server.next().await;
         let mut incoming = server::Connection::new(conn).await.unwrap();
         let request_resolver = incoming.accept().await.unwrap().unwrap();
-        let (_, mut stream) = request_resolver.resolve_request().await.unwrap().unwrap();
+        let (_, mut stream) = request_resolver.resolve_request().await.unwrap();
         let mut data = stream.recv_data().await.unwrap().unwrap();
         let data = data.copy_to_bytes(data.remaining());
         assert_eq!(data.len(), 100);
@@ -183,7 +183,6 @@ async fn client_close_only_on_last_sender_drop() {
             .unwrap()
             .resolve_request()
             .await
-            .unwrap()
             .unwrap();
         stream.stop_stream(NewCode::H3_REQUEST_CANCELLED);
 
@@ -194,7 +193,6 @@ async fn client_close_only_on_last_sender_drop() {
             .unwrap()
             .resolve_request()
             .await
-            .unwrap()
             .unwrap();
         stream.stop_stream(NewCode::H3_REQUEST_CANCELLED);
 
@@ -718,7 +716,7 @@ async fn graceful_shutdown_server_rejects() {
         let conn = server.next().await;
         let mut incoming = server::Connection::new(conn).await.unwrap();
         let request_resolver = incoming.accept().await.unwrap().unwrap();
-        let (_, stream) = request_resolver.resolve_request().await.unwrap().unwrap();
+        let (_, stream) = request_resolver.resolve_request().await.unwrap();
         response(stream).await;
         incoming.shutdown(0).await.unwrap();
         assert_matches!(incoming.accept().await.map(|x| x.map(|_| ())), Ok(None));
