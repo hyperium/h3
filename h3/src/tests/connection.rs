@@ -56,26 +56,34 @@ async fn connect() {
 async fn accept_request_end_on_client_close() {
     let mut pair = Pair::default();
     let mut server = pair.server();
-
+    let client = pair.client();
     let (tx, rx) = oneshot::channel::<()>();
+    let client_fut = async move {
+        let client = client.await;
+        let (mut driver, client) = client::new(client).await.expect("client init");
+        let driver = async move {
+            let _ = future::poll_fn(|cx: &mut std::task::Context<'_>| driver.poll_close(cx)).await;
+        };
 
-    let client_fut = async {
-        let client = pair.client().await;
-        let client = client::new(client).await.expect("client init");
-        // wait for the server to accept the connection
-        rx.await.unwrap();
-        // client is dropped, it will send H3_NO_ERROR
-        drop(client);
+        let client_fut = async move {
+            // wait for the server to accept the connection
+            rx.await.unwrap();
+            // client is dropped, it will send H3_NO_ERROR
+            drop(client);
+        };
+        tokio::join!(driver, client_fut);
     };
 
     let server_fut = async {
         let conn = server.next().await;
         let mut incoming = server::Connection::new(conn).await.unwrap();
         tx.send(()).unwrap();
-        // Accept returns Ok(None)
-        assert!(incoming.accept().await.unwrap().is_none());
+        assert_matches!(
+            incoming.accept().await.err().unwrap(),
+            ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{error_code: code, ..})
+            if code == NewCode::H3_NO_ERROR.value()
+        );
     };
-
     tokio::join!(server_fut, client_fut);
 }
 
@@ -167,9 +175,36 @@ async fn client_close_only_on_last_sender_drop() {
     let server_fut = async {
         let conn = server.next().await;
         let mut incoming = server::Connection::new(conn).await.unwrap();
-        assert!(incoming.accept().await.unwrap().is_some());
-        assert!(incoming.accept().await.unwrap().is_some());
-        assert!(incoming.accept().await.unwrap().is_none());
+
+        let (_, mut stream) = incoming
+            .accept()
+            .await
+            .unwrap()
+            .unwrap()
+            .resolve_request()
+            .await
+            .unwrap()
+            .unwrap();
+        stream.stop_stream(NewCode::H3_REQUEST_CANCELLED);
+
+        let (_, mut stream) = incoming
+            .accept()
+            .await
+            .unwrap()
+            .unwrap()
+            .resolve_request()
+            .await
+            .unwrap()
+            .unwrap();
+        stream.stop_stream(NewCode::H3_REQUEST_CANCELLED);
+
+        assert_matches!(
+            incoming.accept().await.err().unwrap(),
+            ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{
+                error_code: code,
+                ..
+            }) if code == NewCode::H3_NO_ERROR.value()
+        );
     };
 
     let client_fut = async {
@@ -180,27 +215,41 @@ async fn client_close_only_on_last_sender_drop() {
             .await
             .unwrap();
 
-        let _ = request_stream_1.recv_response().await;
+        assert_matches!(
+            request_stream_1.recv_response().await,
+            Err(StreamError::RemoteReset{
+                code
+            }) if code == NewCode::H3_REQUEST_CANCELLED.value()
+        );
 
-        let _ = request_stream_1.finish().await;
+        let _ = request_stream_1.finish().await.unwrap();
 
         let mut request_stream_2 = send2
             .send_request(Request::get("http://no.way").body(()).unwrap())
             .await
             .unwrap();
 
-        let _ = request_stream_2.recv_response().await;
-
-        let _ = request_stream_2.finish().await;
+        assert_matches!(
+            request_stream_2.recv_response().await,
+            Err(StreamError::RemoteReset{
+                code
+            }) if code == NewCode::H3_REQUEST_CANCELLED.value()
+        );
+        let _ = request_stream_2.finish().await.unwrap();
 
         drop(send1);
         drop(send2);
 
         let drive = future::poll_fn(|cx| conn.poll_close(cx)).await;
-        assert_matches!(drive, ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{
-            error_code: code,
-            ..
-        }) if code == NewCode::H3_NO_ERROR.value());
+        assert_matches!(
+            drive,
+            ConnectionError::Local {
+                error: LocalError::Application {
+                    code: NewCode::H3_NO_ERROR,
+                    ..
+                }
+            }
+        );
     };
 
     tokio::join!(server_fut, client_fut);
@@ -329,15 +378,14 @@ async fn client_error_on_bidi_recv() {
                     code: NewCode::H3_STREAM_CREATION_ERROR,
                     reason: reason_string
                 }
-            } if reason_string.starts_with("client received a bidirectional stream")
+            } if reason_string.starts_with("client received a server-initiated bidirectional stream")
         );
-
         assert_matches!(send.send_request(Request::get("http://no.way").body(()).unwrap())
             .await.map(|_| ()).unwrap_err(),
             StreamError::ConnectionError(
                 ConnectionError::Local { error: LocalError::Application { code: NewCode::H3_STREAM_CREATION_ERROR, reason: reason_string } }
             )
-            if reason_string.starts_with("client received a bidirectional stream")
+            if reason_string.starts_with("client received a server-initiated bidirectional stream")
         );
     };
 
@@ -351,11 +399,13 @@ async fn client_error_on_bidi_recv() {
                         error_code,
                         ..
                     }),
-                )) if NewCode::H3_STREAM_CREATION_ERROR == error_code.into_inner() => break,
+                )) if NewCode::H3_STREAM_CREATION_ERROR == error_code.into_inner() => return,
                 Err(e) => panic!("got err: {}", e),
-                Ok(_) => panic!("no error returned where it should be"),
+                Ok(_) => (),
             }
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
+        panic!("did not get the expected error");
     };
 
     tokio::join!(server_fut, client_fut);
@@ -455,7 +505,7 @@ async fn control_close_send_error() {
                     code: NewCode::H3_CLOSED_CRITICAL_STREAM,
                     reason: reason_string
                 }
-            } 
+            }
             if reason_string.starts_with("control stream was closed"));
         // Poll it once again returns the previously stored error
         assert_matches!(
@@ -465,7 +515,7 @@ async fn control_close_send_error() {
                     code: NewCode::H3_CLOSED_CRITICAL_STREAM,
                     reason: reason_string
                 }
-            } 
+            }
             if reason_string.starts_with("control stream was closed"));
     };
 
@@ -523,16 +573,20 @@ async fn control_stream_frame_unexpected() {
         let connection = pair.client_inner().await;
         let mut control_stream = connection.open_uni().await.unwrap();
 
+        // Send a Settings frame or we get a H3_MISSING_SETTINGS instead of H3_FRAME_UNEXPECTED
+        let mut buf = BytesMut::new();
+        StreamType::CONTROL.encode(&mut buf);
+        Frame::Settings::<Bytes>(Settings::default()).encode(&mut buf);
+        control_stream.write_all(&buf[..]).await.unwrap();
+
         //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.1
         //= type=test
         //# If
         //# a DATA frame is received on a control stream, the recipient MUST
         //# respond with a connection error of type H3_FRAME_UNEXPECTED.
         let mut buf = BytesMut::new();
-        StreamType::CONTROL.encode(&mut buf);
         Frame::Data(Bytes::from("")).encode(&mut buf);
         control_stream.write_all(&buf[..]).await.unwrap();
-
         tokio::time::sleep(Duration::from_secs(10)).await;
     };
 
@@ -712,10 +766,15 @@ async fn graceful_shutdown_grace_interval() {
                 error: LocalError::Closing,
             })
         );
-        assert_matches!(driver, ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{
-            error_code: code,
-            ..
-        }) if code == NewCode::H3_NO_ERROR.value());
+        assert_matches!(
+            driver,
+            ConnectionError::Local {
+                error: LocalError::Application {
+                    code: NewCode::H3_NO_ERROR,
+                    ..
+                }
+            }
+        );
     };
 
     let server_fut = async {

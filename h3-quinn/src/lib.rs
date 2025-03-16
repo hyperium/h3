@@ -87,7 +87,6 @@ where
         let (send, recv) = ready!(self.incoming_bi.poll_next_unpin(cx))
             .expect("BoxStream never returns None")
             .map_err(|e| convert_connection_error(e))?;
-
         Poll::Ready(Ok(Self::BidiStream {
             send: Self::SendStream::new(send),
             recv: Self::RecvStream::new(recv),
@@ -102,7 +101,6 @@ where
         let recv = ready!(self.incoming_uni.poll_next_unpin(cx))
             .expect("BoxStream never returns None")
             .map_err(|e| convert_connection_error(e))?;
-
         Poll::Ready(Ok(Self::RecvStream::new(recv)))
     }
 
@@ -152,7 +150,6 @@ where
                 Some((conn.open_bi().await, conn))
             }))
         });
-
         let (send, recv) = ready!(bi.poll_next_unpin(cx))
             .expect("BoxStream does not return None")
             .map_err(|e| StreamErrorIncoming::ConnectionErrorIncoming {

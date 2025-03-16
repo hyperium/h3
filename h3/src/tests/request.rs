@@ -2,6 +2,7 @@ use std::{hint::black_box, time::Duration};
 
 use assert_matches::assert_matches;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use futures::join;
 use futures_util::future;
 use http::{request, HeaderMap, Request, Response, StatusCode};
 
@@ -35,7 +36,7 @@ async fn get() {
     let client_fut = async {
         let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
-        let req_fut = async {
+        let req_fut = async move {
             let mut request_stream = client
                 .send_request(Request::get("http://localhost/salut").body(()).unwrap())
                 .await
@@ -51,7 +52,7 @@ async fn get() {
                 .expect("body");
             assert_eq!(body.chunk(), b"wonderful hypertext");
         };
-        tokio::select! { _ = req_fut => (), _ = drive_fut => () }
+        tokio::join!(req_fut, drive_fut)
     };
 
     let server_fut = async {
@@ -76,7 +77,11 @@ async fn get() {
             .expect("send_data");
         request_stream.finish().await.expect("finish");
 
-        let _ = incoming_req.accept().await.unwrap();
+        assert_matches!(
+            incoming_req.accept().await.err().unwrap(),
+            ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{error_code: code, ..})
+            if code == NewCode::H3_NO_ERROR.value()
+        );
     };
 
     tokio::join!(server_fut, client_fut);
@@ -91,7 +96,7 @@ async fn get_with_trailers_unknown_content_type() {
     let client_fut = async {
         let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
-        let req_fut = async {
+        let req_fut = async move {
             let mut request_stream = client
                 .send_request(Request::get("http://localhost/salut").body(()).unwrap())
                 .await
@@ -111,7 +116,7 @@ async fn get_with_trailers_unknown_content_type() {
                 .expect("trailers none");
             assert_eq!(trailers.get("trailer").unwrap(), &"value");
         };
-        tokio::select! { _ = req_fut => (), _ = drive_fut => () }
+        tokio::join!(req_fut, drive_fut);
     };
 
     let server_fut = async {
@@ -142,7 +147,11 @@ async fn get_with_trailers_unknown_content_type() {
             .expect("send_trailers");
         request_stream.finish().await.expect("finish");
 
-        let _ = incoming_req.accept().await.unwrap();
+        assert_matches!(
+            incoming_req.accept().await.err().unwrap(),
+            ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{error_code: code, ..})
+            if code == NewCode::H3_NO_ERROR.value()
+        );
     };
 
     tokio::join!(server_fut, client_fut);
@@ -157,7 +166,7 @@ async fn get_with_trailers_known_content_type() {
     let client_fut = async {
         let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
-        let req_fut = async {
+        let req_fut = async move {
             let mut request_stream = client
                 .send_request(Request::get("http://localhost/salut").body(()).unwrap())
                 .await
@@ -176,7 +185,7 @@ async fn get_with_trailers_known_content_type() {
                 .expect("trailers none");
             assert_eq!(trailers.get("trailer").unwrap(), &"value");
         };
-        tokio::select! { _ = req_fut => (), _ = drive_fut => () }
+        tokio::join!(req_fut, drive_fut);
     };
 
     let server_fut = async {
@@ -208,7 +217,11 @@ async fn get_with_trailers_known_content_type() {
             .expect("send_trailers");
         request_stream.finish().await.expect("finish");
 
-        let _ = incoming_req.accept().await.unwrap();
+        assert_matches!(
+            incoming_req.accept().await.err().unwrap(),
+            ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{error_code: code, ..})
+            if code == NewCode::H3_NO_ERROR.value()
+        );
     };
 
     tokio::join!(server_fut, client_fut);
@@ -223,7 +236,7 @@ async fn post() {
     let client_fut = async {
         let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
-        let req_fut = async {
+        let req_fut = async move {
             let mut request_stream = client
                 .send_request(Request::get("http://localhost/salut").body(()).unwrap())
                 .await
@@ -237,7 +250,7 @@ async fn post() {
 
             request_stream.recv_response().await.expect("recv response");
         };
-        tokio::select! { _ = req_fut => (), _ = drive_fut => () }
+        tokio::join!(req_fut, drive_fut);
     };
 
     let server_fut = async {
@@ -266,7 +279,11 @@ async fn post() {
         request_stream.finish().await.expect("client finish");
 
         // keep connection until client is finished
-        let _ = incoming_req.accept().await.expect("accept");
+        assert_matches!(
+            incoming_req.accept().await.err().unwrap(),
+            ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{error_code: code, ..})
+            if code == NewCode::H3_NO_ERROR.value()
+        );
     };
 
     tokio::join!(server_fut, client_fut);
@@ -281,7 +298,7 @@ async fn header_too_big_response_from_server() {
     let client_fut = async {
         let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
         let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
-        let req_fut = async {
+        let req_fut = async move {
             let mut request_stream = client
                 .send_request(Request::get("http://localhost/salut").body(()).unwrap())
                 .await
@@ -293,7 +310,7 @@ async fn header_too_big_response_from_server() {
                 StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
             );
         };
-        tokio::select! {biased; _ = req_fut => (), _ = drive_fut => () }
+        tokio::join!(req_fut, drive_fut);
     };
 
     let server_fut = async {
@@ -325,7 +342,11 @@ async fn header_too_big_response_from_server() {
         );
 
         // connection will end without an error
-        assert!(incoming_req.accept().await.unwrap().is_none());
+        assert_matches!(
+            incoming_req.accept().await.err().unwrap(),
+            ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{error_code: code, ..})
+            if code == NewCode::H3_NO_ERROR.value()
+        );
     };
 
     tokio::join!(server_fut, client_fut);
@@ -455,7 +476,10 @@ async fn header_too_big_client_error() {
                 .await
                 .err()
                 .expect("should return an error"),
-            StreamError::StreamError {code:NewCode::H3_REQUEST_INCOMPLETE, reason: _ }
+            StreamError::StreamError {
+                code: NewCode::H3_REQUEST_INCOMPLETE,
+                reason: _
+            }
         );
     };
 
@@ -471,8 +495,7 @@ async fn header_too_big_client_error_trailer() {
     let client_fut = async {
         let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
         let drive_fut = async {
-            let err = future::poll_fn(|cx| driver.poll_close(cx))
-                .await;
+            let err = future::poll_fn(|cx| driver.poll_close(cx)).await;
             match err {
                 ConnectionError::Timeout => (),
                 _ => panic!("unexpected error: {:?}", err),
@@ -799,7 +822,7 @@ async fn header_too_big_server_error_trailers() {
     let server_fut = async {
         let conn = server.next().await;
         let mut incoming_req = server::Connection::new(conn).await.unwrap();
-        
+
         // pretend the server already received client's settings
         let mut settings = Settings::default();
         settings.max_field_section_size = 42;
@@ -1481,7 +1504,9 @@ where
         };
 
         let driver = async {
-            return Result::<(), ConnectionError>::Err(future::poll_fn(|cx| driver.poll_close(cx)).await);
+            return Result::<(), ConnectionError>::Err(
+                future::poll_fn(|cx| driver.poll_close(cx)).await,
+            );
         };
 
         tokio::join!(client, driver)
@@ -1526,7 +1551,7 @@ where
     if let Err(err) = client_result_stream {
         // we have no influence wether the quinn returns the connection error to the stream api
         // but if it returns an error it needs to be the expected one
-        assert_matches!(err, quinn::ReadError::ConnectionLost(quinn::ConnectionError::ApplicationClosed(code)) 
+        assert_matches!(err, quinn::ReadError::ConnectionLost(quinn::ConnectionError::ApplicationClosed(code))
             if code.error_code.into_inner() == expected_error_code.expect("If this is a error an error was expected").value());
     }
 
