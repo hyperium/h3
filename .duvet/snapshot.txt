@@ -455,17 +455,17 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[!SHOULD,implementation]:    (Section 8.1).
     TEXT[!MUST,implication]: The recipient MUST NOT consider unknown stream types
     TEXT[!MUST,implication]:    to be a connection error of any kind.
-    TEXT[!SHOULD,implication]:    As certain stream types can affect connection state, a recipient
-    TEXT[!SHOULD,implication]:    SHOULD NOT discard data from incoming unidirectional streams prior to
-    TEXT[!SHOULD,implication]:    reading the stream type.
+    TEXT[!SHOULD]:    As certain stream types can affect connection state, a recipient
+    TEXT[!SHOULD]:    SHOULD NOT discard data from incoming unidirectional streams prior to
+    TEXT[!SHOULD]:    reading the stream type.
     TEXT[!MAY,todo]:    Implementations MAY send stream types before knowing whether the peer
     TEXT[!MAY,todo]:    supports them.
     TEXT[!MUST,todo]: However, stream types that could modify the state or
     TEXT[!MUST,todo]:    semantics of existing protocol components, including QPACK or other
     TEXT[!MUST,todo]:    extensions, MUST NOT be sent until the peer is known to support them.
-    TEXT[!MUST,todo]: A receiver MUST tolerate unidirectional streams being
-    TEXT[!MUST,todo]:    closed or reset prior to the reception of the unidirectional stream
-    TEXT[!MUST,todo]:    header.
+    TEXT[!MUST,implementation,todo]: A receiver MUST tolerate unidirectional streams being
+    TEXT[!MUST,implementation,todo]:    closed or reset prior to the reception of the unidirectional stream
+    TEXT[!MUST,implementation,todo]:    header.
 
   SECTION: [Control Streams](#section-6.2.1)
     TEXT[!MUST,implementation]:    Each side MUST initiate a single control stream at the beginning of
@@ -510,11 +510,11 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[!MAY,implementation]:    sent on connections where no data is currently being transferred.
     TEXT[!MUST,implication]:    Endpoints MUST NOT consider these streams to have any meaning upon
     TEXT[!MUST,implication]:    receipt.
-    TEXT[!MAY,implementation]: When sending a reserved stream type,
-    TEXT[!MAY,implementation]:    the implementation MAY either terminate the stream cleanly or reset
-    TEXT[!MAY,implementation]:    it.
-    TEXT[!SHOULD]: When resetting the stream, either the H3_NO_ERROR error code or
-    TEXT[!SHOULD]:    a reserved error code (Section 8.1) SHOULD be used.
+    TEXT[!MAY,implication]: When sending a reserved stream type,
+    TEXT[!MAY,implication]:    the implementation MAY either terminate the stream cleanly or reset
+    TEXT[!MAY,implication]:    it.
+    TEXT[!SHOULD,exception]: When resetting the stream, either the H3_NO_ERROR error code or
+    TEXT[!SHOULD,exception]:    a reserved error code (Section 8.1) SHOULD be used.
 
   SECTION: [Frame Layout](#section-7.1)
     TEXT[!MUST,todo]:    Each frame's payload MUST contain exactly the fields identified in
@@ -523,8 +523,8 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[!MUST,implementation,test]:    after the identified fields or a frame payload that terminates before
     TEXT[!MUST,implementation,test]:    the end of the identified fields MUST be treated as a connection
     TEXT[!MUST,implementation,test]:    error of type H3_FRAME_ERROR.
-    TEXT[!MUST,implementation,test]: In particular, redundant length
-    TEXT[!MUST,implementation,test]:    encodings MUST be verified to be self-consistent; see Section 10.8.
+    TEXT[!MUST]: In particular, redundant length
+    TEXT[!MUST]:    encodings MUST be verified to be self-consistent; see Section 10.8.
     TEXT[!MUST,implementation]:    When a stream terminates cleanly, if the last frame on the stream was
     TEXT[!MUST,implementation]:    truncated, this MUST be treated as a connection error of type
     TEXT[!MUST,implementation]:    H3_FRAME_ERROR.
@@ -565,10 +565,10 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[!MUST,implementation,test]: Receiving a
     TEXT[!MUST,implementation,test]:    CANCEL_PUSH frame on a stream other than the control stream MUST be
     TEXT[!MUST,implementation,test]:    treated as a connection error of type H3_FRAME_UNEXPECTED.
-    TEXT[!MUST,todo]: If a CANCEL_PUSH frame is received that
-    TEXT[!MUST,todo]:    references a push ID greater than currently allowed on the
-    TEXT[!MUST,todo]:    connection, this MUST be treated as a connection error of type
-    TEXT[!MUST,todo]:    H3_ID_ERROR.
+    TEXT[!MUST]: If a CANCEL_PUSH frame is received that
+    TEXT[!MUST]:    references a push ID greater than currently allowed on the
+    TEXT[!MUST]:    connection, this MUST be treated as a connection error of type
+    TEXT[!MUST]:    H3_ID_ERROR.
     TEXT[!MUST,todo]: If a server receives a CANCEL_PUSH frame for a push
     TEXT[!MUST,todo]:    ID that has not yet been mentioned by a PUSH_PROMISE frame, this MUST
     TEXT[!MUST,todo]:    be treated as a connection error of type H3_ID_ERROR.
@@ -587,10 +587,10 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[!MUST,implementation,test]:    H3_FRAME_UNEXPECTED.
     TEXT[!MUST,implementation]:    The same setting identifier MUST NOT occur more than once in the
     TEXT[!MUST,implementation]:    SETTINGS frame.
-    TEXT[!MAY,todo]: A receiver MAY treat the presence of duplicate
-    TEXT[!MAY,todo]:    setting identifiers as a connection error of type H3_SETTINGS_ERROR.
-    TEXT[!MUST,implication]:    An implementation MUST ignore any parameter with an identifier it
-    TEXT[!MUST,implication]:    does not understand.
+    TEXT[!MAY]: A receiver MAY treat the presence of duplicate
+    TEXT[!MAY]:    setting identifiers as a connection error of type H3_SETTINGS_ERROR.
+    TEXT[!MUST]:    An implementation MUST ignore any parameter with an identifier it
+    TEXT[!MUST]:    does not understand.
 
   SECTION: [Defined SETTINGS Parameters](#section-7.2.4.1)
     TEXT[implementation]:    Setting identifiers of the format 0x1f * N + 0x21 for non-negative
@@ -599,14 +599,14 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[implementation]:    meaning.
     TEXT[!SHOULD,implementation]: Endpoints SHOULD include at least one such setting in their
     TEXT[!SHOULD,implementation]:    SETTINGS frame.
-    TEXT[!MUST,implication]: Endpoints MUST NOT consider such settings to have
-    TEXT[!MUST,implication]:    any meaning upon receipt.
-    TEXT[implementation,todo]:    Setting identifiers that were defined in [HTTP/2] where there is no
-    TEXT[implementation,todo]:    corresponding HTTP/3 setting have also been reserved
-    TEXT[implementation,todo]:    (Section 11.2.2).
-    TEXT[!MUST,implementation,todo]: These reserved settings MUST NOT be sent, and
-    TEXT[!MUST,implementation,todo]:    their receipt MUST be treated as a connection error of type
-    TEXT[!MUST,implementation,todo]:    H3_SETTINGS_ERROR.
+    TEXT[!MUST]: Endpoints MUST NOT consider such settings to have
+    TEXT[!MUST]:    any meaning upon receipt.
+    TEXT[implementation]:    Setting identifiers that were defined in [HTTP/2] where there is no
+    TEXT[implementation]:    corresponding HTTP/3 setting have also been reserved
+    TEXT[implementation]:    (Section 11.2.2).
+    TEXT[!MUST,implementation]: These reserved settings MUST NOT be sent, and
+    TEXT[!MUST,implementation]:    their receipt MUST be treated as a connection error of type
+    TEXT[!MUST,implementation]:    H3_SETTINGS_ERROR.
 
   SECTION: [Initialization](#section-7.2.4.2)
     TEXT[!MUST,todo]:    An HTTP implementation MUST NOT send frames or requests that would be
@@ -715,13 +715,13 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[implication]:    types be ignored (Section 9).
     TEXT[!MAY,implication]: These frames have no semantics, and
     TEXT[!MAY,implication]:    they MAY be sent on any stream where frames are allowed to be sent.
-    TEXT[!MUST,todo]: Endpoints MUST
-    TEXT[!MUST,todo]:    NOT consider these frames to have any meaning upon receipt.
+    TEXT[!MUST,implementation,todo]: Endpoints MUST
+    TEXT[!MUST,implementation,todo]:    NOT consider these frames to have any meaning upon receipt.
     TEXT[todo]:    Frame types that were used in HTTP/2 where there is no corresponding
     TEXT[todo]:    HTTP/3 frame have also been reserved (Section 11.2.1).
-    TEXT[!MUST,todo]: These frame
-    TEXT[!MUST,todo]:    types MUST NOT be sent, and their receipt MUST be treated as a
-    TEXT[!MUST,todo]:    connection error of type H3_FRAME_UNEXPECTED.
+    TEXT[!MUST,implementation,todo]: These frame
+    TEXT[!MUST,implementation,todo]:    types MUST NOT be sent, and their receipt MUST be treated as a
+    TEXT[!MUST,implementation,todo]:    connection error of type H3_FRAME_UNEXPECTED.
 
   SECTION: [Error Handling](#section-8)
     TEXT[!MAY,todo]:    An endpoint MAY choose to treat a stream error as a connection error
@@ -865,3 +865,182 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[!MUST,exception]:    values of N (that is, 0x21, 0x40, ..., through 0x3ffffffffffffffe)
     TEXT[!MUST,exception]:    MUST NOT be assigned by IANA and MUST NOT appear in the listing of
     TEXT[!MUST,exception]:    assigned values.
+
+SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9204
+  SECTION: [Encoder](#section-2.1)
+    TEXT[!MAY]:    An encoder MAY insert any entry in the dynamic table it chooses; it
+    TEXT[!MAY]:    is not limited to field lines it is compressing.
+    TEXT[!MUST]: An encoder MUST emit field representations in the order
+    TEXT[!MUST]:    they appear in the input field section.
+
+  SECTION: [Limits on Dynamic Table Insertions](#section-2.1.1)
+    TEXT[!MUST]:    If the dynamic table does not contain enough room for a new entry
+    TEXT[!MUST]:    without evicting other entries, and the entries that would be evicted
+    TEXT[!MUST]:    are not evictable, the encoder MUST NOT insert that entry into the
+    TEXT[!MUST]:    dynamic table (including duplicates of existing entries).
+
+  SECTION: [Blocked Streams](#section-2.1.2)
+    TEXT[!MUST]: An encoder MUST limit the number of streams that could
+    TEXT[!MUST]:    become blocked to the value of SETTINGS_QPACK_BLOCKED_STREAMS at all
+    TEXT[!MUST]:    times.
+    TEXT[!MUST]: If a decoder encounters more blocked streams than it promised
+    TEXT[!MUST]:    to support, it MUST treat this as a connection error of type
+    TEXT[!MUST]:    QPACK_DECOMPRESSION_FAILED.
+
+  SECTION: [Avoiding Flow-Control Deadlocks](#section-2.1.3)
+    TEXT[!SHOULD]:    To avoid these deadlocks, an encoder SHOULD NOT write an instruction
+    TEXT[!SHOULD]:    unless sufficient stream and connection flow-control credit is
+    TEXT[!SHOULD]:    available for the entire instruction.
+
+  SECTION: [Decoder](#section-2.2)
+    TEXT[!MUST]:    The decoder MUST emit field lines in the order their representations
+    TEXT[!MUST]:    appear in the encoded field section.
+
+  SECTION: [Blocked Decoding](#section-2.2.1)
+    TEXT[!SHOULD]:    While blocked, encoded field section data SHOULD remain in the
+    TEXT[!SHOULD]:    blocked stream's flow-control window.
+    TEXT[!MUST]: If it encounters a Required Insert
+    TEXT[!MUST]:    Count smaller than expected, it MUST treat this as a connection error
+    TEXT[!MUST]:    of type QPACK_DECOMPRESSION_FAILED; see Section 2.2.3.
+    TEXT[!MAY]: If it
+    TEXT[!MAY]:    encounters a Required Insert Count larger than expected, it MAY treat
+    TEXT[!MAY]:    this as a connection error of type QPACK_DECOMPRESSION_FAILED.
+
+  SECTION: [Completed Processing of a Field Section](#section-2.2.2.1)
+    TEXT[!MUST]:    After the decoder finishes decoding a field section encoded using
+    TEXT[!MUST]:    representations containing dynamic table references, it MUST emit a
+    TEXT[!MUST]:    Section Acknowledgment instruction (Section 4.4.1).
+
+  SECTION: [Abandonment of a Stream](#section-2.2.2.2)
+    TEXT[!MAY]: A decoder with a maximum dynamic table
+    TEXT[!MAY]:    capacity (Section 3.2.3) equal to zero MAY omit sending Stream
+    TEXT[!MAY]:    Cancellations, because the encoder cannot have any dynamic table
+    TEXT[!MAY]:    references.
+
+  SECTION: [Invalid References](#section-2.2.3)
+    TEXT[!MUST]:    If the decoder encounters a reference in a field line representation
+    TEXT[!MUST]:    to a dynamic table entry that has already been evicted or that has an
+    TEXT[!MUST]:    absolute index greater than or equal to the declared Required Insert
+    TEXT[!MUST]:    Count (Section 4.5.1), it MUST treat this as a connection error of
+    TEXT[!MUST]:    type QPACK_DECOMPRESSION_FAILED.
+    TEXT[!MUST]:    If the decoder encounters a reference in an encoder instruction to a
+    TEXT[!MUST]:    dynamic table entry that has already been evicted, it MUST treat this
+    TEXT[!MUST]:    as a connection error of type QPACK_ENCODER_STREAM_ERROR.
+
+  SECTION: [Static Table](#section-3.1)
+    TEXT[!MUST]:    When the decoder encounters an invalid static table index in a field
+    TEXT[!MUST]:    line representation, it MUST treat this as a connection error of type
+    TEXT[!MUST]:    QPACK_DECOMPRESSION_FAILED.
+    TEXT[!MUST]: If this index is received on the encoder
+    TEXT[!MUST]:    stream, this MUST be treated as a connection error of type
+    TEXT[!MUST]:    QPACK_ENCODER_STREAM_ERROR.
+
+  SECTION: [Dynamic Table](#section-3.2)
+    TEXT[!MUST]: Therefore, duplicate entries MUST NOT
+    TEXT[!MUST]:    be treated as an error by the decoder.
+
+  SECTION: [Dynamic Table Capacity and Eviction](#section-3.2.2)
+    TEXT[!MUST]: The
+    TEXT[!MUST]:    encoder MUST NOT cause a dynamic table entry to be evicted unless
+    TEXT[!MUST]:    that entry is evictable; see Section 2.1.1.
+    TEXT[!MUST]: It is an error if the encoder attempts to add an
+    TEXT[!MUST]:    entry that is larger than the dynamic table capacity; the decoder
+    TEXT[!MUST]:    MUST treat this as a connection error of type
+    TEXT[!MUST]:    QPACK_ENCODER_STREAM_ERROR.
+
+  SECTION: [Maximum Dynamic Table Capacity](#section-3.2.3)
+    TEXT[!MUST]:    The encoder MUST NOT set a dynamic table capacity that exceeds this
+    TEXT[!MUST]:    maximum, but it can choose to use a lower dynamic table capacity; see
+    TEXT[!MUST]:    Section 4.3.1.
+    TEXT[!MAY]: When the client's 0-RTT value of the
+    TEXT[!MAY]:    SETTING is zero, the server MAY set it to a non-zero value in its
+    TEXT[!MAY]:    SETTINGS frame.
+    TEXT[!MUST]: If the remembered value is non-zero, the server MUST
+    TEXT[!MUST]:    send the same non-zero value in its SETTINGS frame.
+    TEXT[!MUST]:    When the maximum table capacity is zero, the encoder MUST NOT insert
+    TEXT[!MUST]:    entries into the dynamic table and MUST NOT send any encoder
+    TEXT[!MUST]:    instructions on the encoder stream.
+
+  SECTION: [Prefixed Integers](#section-4.1.1)
+    TEXT[!MUST]:    QPACK implementations MUST be able to decode integers up to and
+    TEXT[!MUST]:    including 62 bits long.
+
+  SECTION: [Encoder and Decoder Streams](#section-4.2)
+    TEXT[!MUST]: Each endpoint
+    TEXT[!MUST]:    MUST initiate, at most, one encoder stream and, at most, one decoder
+    TEXT[!MUST]:    stream.
+    TEXT[!MUST]: Receipt of a second instance of either stream type MUST be
+    TEXT[!MUST]:    treated as a connection error of type H3_STREAM_CREATION_ERROR.
+    TEXT[!MUST]:    The sender MUST NOT close either of these streams, and the receiver
+    TEXT[!MUST]:    MUST NOT request that the sender close either of these streams.
+    TEXT[!MUST]:    Closure of either unidirectional stream type MUST be treated as a
+    TEXT[!MUST]:    connection error of type H3_CLOSED_CRITICAL_STREAM.
+    TEXT[!MAY]:    An endpoint MAY avoid creating an encoder stream if it will not be
+    TEXT[!MAY]:    used (for example, if its encoder does not wish to use the dynamic
+    TEXT[!MAY]:    table or if the maximum size of the dynamic table permitted by the
+    TEXT[!MAY]:    peer is zero).
+    TEXT[!MAY]:    An endpoint MAY avoid creating a decoder stream if its decoder sets
+    TEXT[!MAY]:    the maximum capacity of the dynamic table to zero.
+    TEXT[!MUST]:    An endpoint MUST allow its peer to create an encoder stream and a
+    TEXT[!MUST]:    decoder stream even if the connection's settings prevent their use.
+
+  SECTION: [Set Dynamic Table Capacity](#section-4.3.1)
+    TEXT[!MUST]:    The new capacity MUST be lower than or equal to the limit described
+    TEXT[!MUST]:    in Section 3.2.3.
+    TEXT[!MUST]: The decoder MUST treat a new dynamic table capacity
+    TEXT[!MUST]:    value that exceeds this limit as a connection error of type
+    TEXT[!MUST]:    QPACK_ENCODER_STREAM_ERROR.
+    TEXT[!MUST]: This MUST NOT cause the eviction of entries that
+    TEXT[!MUST]:    are not evictable; see Section 2.1.1.
+
+  SECTION: [Section Acknowledgment](#section-4.4.1)
+    TEXT[!MUST]:    If an encoder receives a Section Acknowledgment instruction referring
+    TEXT[!MUST]:    to a stream on which every encoded field section with a non-zero
+    TEXT[!MUST]:    Required Insert Count has already been acknowledged, this MUST be
+    TEXT[!MUST]:    treated as a connection error of type QPACK_DECODER_STREAM_ERROR.
+
+  SECTION: [Insert Count Increment](#section-4.4.3)
+    TEXT[!MUST]:    An encoder that receives an Increment field equal to zero, or one
+    TEXT[!MUST]:    that increases the Known Received Count beyond what the encoder has
+    TEXT[!MUST]:    sent, MUST treat this as a connection error of type
+    TEXT[!MUST]:    QPACK_DECODER_STREAM_ERROR.
+
+  SECTION: [Required Insert Count](#section-4.5.1.1)
+    TEXT[!MUST]: If the decoder encounters a value
+    TEXT[!MUST]:    of EncodedInsertCount that could not have been produced by a
+    TEXT[!MUST]:    conformant encoder, it MUST treat this as a connection error of type
+    TEXT[!MUST]:    QPACK_DECOMPRESSION_FAILED.
+
+  SECTION: [Base](#section-4.5.1.2)
+    TEXT[!MUST]:    The value of Base MUST NOT be negative.
+    TEXT[!MUST]: An endpoint MUST treat a field block
+    TEXT[!MUST]:    with a Sign bit of 1 as invalid if the value of Required Insert Count
+    TEXT[!MUST]:    is less than or equal to the value of Delta Base.
+
+  SECTION: [Literal Field Line with Name Reference](#section-4.5.4)
+    TEXT[!MUST]: When
+    TEXT[!MUST]:    the 'N' bit is set, the encoded field line MUST always be encoded
+    TEXT[!MUST]:    with a literal representation.
+    TEXT[!MUST]: In particular, when a peer sends a
+    TEXT[!MUST]:    field line that it received represented as a literal field line with
+    TEXT[!MUST]:    the 'N' bit set, it MUST use a literal representation to forward this
+    TEXT[!MUST]:    field line.
+
+  SECTION: [Never-Indexed Literals](#section-7.1.3)
+    TEXT[!MUST]:    An intermediary MUST NOT re-encode a value that uses a literal
+    TEXT[!MUST]:    representation with the 'N' bit set with another representation that
+    TEXT[!MUST]:    would index it.
+    TEXT[!MUST]: If QPACK is used for re-encoding, a literal
+    TEXT[!MUST]:    representation with the 'N' bit set MUST be used.
+    TEXT[!MUST]: If HPACK is used
+    TEXT[!MUST]:    for re-encoding, the never-indexed literal representation (see
+    TEXT[!MUST]:    Section 6.2.3 of [RFC7541]) MUST be used.
+
+  SECTION: [Implementation Limits](#section-7.4)
+    TEXT[!SHOULD]: These limits SHOULD be large
+    TEXT[!SHOULD]:    enough to process the largest individual field the HTTP
+    TEXT[!SHOULD]:    implementation can be configured to accept.
+    TEXT[!MUST]:    If an implementation encounters a value larger than it is able to
+    TEXT[!MUST]:    decode, this MUST be treated as a stream error of type
+    TEXT[!MUST]:    QPACK_DECOMPRESSION_FAILED if on a request stream or a connection
+    TEXT[!MUST]:    error of the appropriate type if on the encoder or decoder stream.
