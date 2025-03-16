@@ -11,7 +11,10 @@ use std::{
     task::{self, Poll},
 };
 
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Buf, Bytes};
+
+#[cfg(feature = "datagram")]
+use bytes::BytesMut;
 
 use futures::{
     ready,
@@ -19,6 +22,7 @@ use futures::{
     Stream, StreamExt,
 };
 
+#[cfg(feature = "datagram")]
 use h3_datagram::quic_traits::SendDatagramErrorIncoming;
 
 #[cfg(feature = "datagram")]
@@ -205,6 +209,7 @@ where
     }
 }
 
+#[cfg(feature = "datagram")]
 fn convert_send_datagram_error(error: SendDatagramError) -> SendDatagramErrorIncoming {
     match error {
         SendDatagramError::UnsupportedByPeer | SendDatagramError::Disabled => {
@@ -217,6 +222,7 @@ fn convert_send_datagram_error(error: SendDatagramError) -> SendDatagramErrorInc
     }
 }
 
+#[cfg(feature = "datagram")]
 fn convert_h3_error_to_datagram_error(
     error: h3::quic::ConnectionErrorIncoming,
 ) -> h3_datagram::ConnectionErrorIncoming {
