@@ -24,11 +24,30 @@ pub enum ConnectionError {
     /// I might be an quic error or the remote h3 connection closed the connection with an error
     #[non_exhaustive]
     Remote(ConnectionErrorIncoming),
-    /// Received a goaway frame
-    RemoteClosing,
     /// Timeout occurred
     #[non_exhaustive]
     Timeout,
+}
+
+impl ConnectionError {
+    /// Returns if the error is H3_NO_ERROR local or remote
+    pub fn is_h3_no_error(&self) -> bool {
+        match self {
+            ConnectionError::Local {
+                error:
+                    LocalError::Application {
+                        code: Code::H3_NO_ERROR,
+                        ..
+                    },
+            } => true,
+            ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose { error_code })
+                if *error_code == Code::H3_NO_ERROR.value() =>
+            {
+                true
+            }
+            _ => false,
+        }
+    }
 }
 
 /// This enum represents a local error
@@ -46,15 +65,6 @@ pub enum LocalError {
     #[non_exhaustive]
     /// Graceful closing of the connection initiated by the local peer
     Closing,
-}
-
-impl From<InternalConnectionError> for LocalError {
-    fn from(err: InternalConnectionError) -> Self {
-        LocalError::Application {
-            code: err.code,
-            reason: err.message,
-        }
-    }
 }
 
 /// This enum represents a stream error
@@ -89,8 +99,35 @@ pub enum StreamError {
         /// The maximum size of the header block
         max_size: u64,
     },
+    /// Received a GoAway frame from the remote
+    ///
+    /// Stream operations cannot be performed
+    RemoteClosing,
     /// Undefined error propagated by the quic layer
     Undefined(Arc<dyn std::error::Error + Send + Sync>),
+}
+
+impl StreamError {
+    /// Returns if the error is H3_NO_ERROR
+    pub fn is_h3_no_error(&self) -> bool {
+        match self {
+            StreamError::StreamError {
+                code: Code::H3_NO_ERROR,
+                ..
+            } => true,
+            StreamError::ConnectionError(conn_error) => conn_error.is_h3_no_error(),
+            _ => false,
+        }
+    }
+}
+
+impl From<InternalConnectionError> for LocalError {
+    fn from(err: InternalConnectionError) -> Self {
+        LocalError::Application {
+            code: err.code,
+            reason: err.message,
+        }
+    }
 }
 
 impl std::fmt::Display for ConnectionError {
@@ -98,7 +135,6 @@ impl std::fmt::Display for ConnectionError {
         match self {
             ConnectionError::Local { error } => write!(f, "Local error: {:?}", error),
             ConnectionError::Remote(err) => write!(f, "Remote error: {}", err),
-            ConnectionError::RemoteClosing => write!(f, "Remote closing"),
             ConnectionError::Timeout => write!(f, "Timeout"),
         }
     }
@@ -123,6 +159,7 @@ impl std::fmt::Display for StreamError {
                 actual_size, max_size
             ),
             StreamError::Undefined(err) => write!(f, "Undefined error: {}", err),
+            StreamError::RemoteClosing => write!(f, "Remote is closing the connection"),
         }
     }
 }

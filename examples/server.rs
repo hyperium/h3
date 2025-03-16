@@ -127,12 +127,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                 });
                             }
-
-                            // indicating no more streams to be received
+                            // indicating that the remote sent a goaway frame
+                            // all requests have been processed
                             Ok(None) => {
                                 break;
                             }
-
                             Err(err) => {
                                 error!("error on accept {}", err);
                                 break;

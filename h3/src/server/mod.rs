@@ -8,7 +8,7 @@
 //! ```rust
 //! async fn doc<C>(conn: C)
 //! where
-//! C: h3::quic::Connection<bytes::Bytes>,
+//! C: h3::quic::Connection<bytes::Bytes> + 'static,
 //! <C as h3::quic::OpenStreams<bytes::Bytes>>::BidiStream: Send + 'static
 //! {
 //!     let mut server_builder = h3::server::builder();
@@ -17,9 +17,11 @@
 //!     loop {
 //!         // Accept incoming requests
 //!         match h3_conn.accept().await {
-//!             Ok(Some((req, mut stream))) => {
+//!             Ok(Some(resolver)) => {
 //!                 // spawn a new task to handle the request
 //!                 tokio::spawn(async move {
+//!                     // get the request
+//!                     let (req, mut stream) = resolver.resolve_request().await.unwrap();
 //!                     // build a http response
 //!                     let response = http::Response::builder().status(http::StatusCode::OK).body(()).unwrap();
 //!                     // send the response to the wire
@@ -35,12 +37,7 @@
 //!                 break;
 //!             }
 //!             Err(err) => {
-//!                 match err.get_error_level() {
-//!                     // break on connection errors
-//!                     h3::error::ErrorLevel::ConnectionError => break,
-//!                     // continue on stream errors
-//!                     h3::error::ErrorLevel::StreamError => continue,
-//!                 }
+//!                 break;
 //!             }
 //!         }
 //!     }

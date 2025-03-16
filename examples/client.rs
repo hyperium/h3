@@ -157,8 +157,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let (req_res, drive_res) = tokio::join!(request, drive);
-    req_res?;
-    drive_res?;
+    
+    if let Err(err) =req_res{
+        error!("request failed: {:?}", err);
+    }
+    if let Err(err) = drive_res{
+        error!("request background task failed: {:?}", err);
+    }
 
     // wait for the connection to be closed before exiting
     client_endpoint.wait_idle().await;

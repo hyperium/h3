@@ -758,12 +758,7 @@ async fn graceful_shutdown_grace_interval() {
         let (too_late, driver) = tokio::join!(too_late, driver);
         assert_matches!(first, Ok(_));
         assert_matches!(in_flight, Ok(_));
-        assert_matches!(
-            too_late.unwrap_err(),
-            StreamError::ConnectionError(ConnectionError::Local {
-                error: LocalError::Closing,
-            })
-        );
+        assert_matches!(too_late.unwrap_err(), StreamError::RemoteClosing);
         assert_matches!(
             driver,
             ConnectionError::Local {

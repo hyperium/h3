@@ -132,12 +132,11 @@ pub trait CloseStream: ConnectionState2 {
     }
 
     /// Checks if the peer connection is closing an if it is allowed to send a request / server push
-    fn check_peer_connection_closing(&self) -> Result<(), StreamError> {
+    fn check_peer_connection_closing(&self) -> Option<StreamError> {
         if self.is_closing() {
-            Err(StreamError::ConnectionError(ConnectionError::RemoteClosing))
-        } else {
-            Ok(())
-        }
+            return Some(StreamError::RemoteClosing);
+        };
+        None
     }
 }
 

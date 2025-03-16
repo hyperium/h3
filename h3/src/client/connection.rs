@@ -154,7 +154,9 @@ where
             VarInt::MAX.0
         };
 
-        self.check_peer_connection_closing()?;
+        if let Some(error) = self.check_peer_connection_closing() {
+            return Err(error);
+        };
 
         let (parts, _) = req.into_parts();
         let request::Parts {
@@ -298,7 +300,7 @@ where
 /// # {
 /// // Run the driver on a different task
 /// tokio::spawn(async move {
-///     future::poll_fn(|cx| connection.poll_close(cx)).await?;
+///     future::poll_fn(|cx| connection.poll_close(cx)).await;
 ///     Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
 /// })
 /// # }
@@ -328,13 +330,13 @@ where
 /// let driver = tokio::spawn(async move {
 ///     tokio::select! {
 ///         // Drive the connection
-///         closed = future::poll_fn(|cx| connection.poll_close(cx)) => closed?,
+///         closed = future::poll_fn(|cx| connection.poll_close(cx)) => closed,
 ///         // Listen for shutdown condition
 ///         max_streams = shutdown_rx => {
 ///             // Initiate shutdown
 ///             connection.shutdown(max_streams?);
 ///             // Wait for ongoing work to complete
-///             future::poll_fn(|cx| connection.poll_close(cx)).await?;
+///             future::poll_fn(|cx| connection.poll_close(cx)).await
 ///         }
 ///     };
 ///
