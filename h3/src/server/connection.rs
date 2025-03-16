@@ -94,9 +94,8 @@ where
 {
     /// Accept an incoming request.
     ///
-    /// It returns a tuple with a [`http::Request`] and an [`RequestStream`].
-    /// The [`http::Request`] is the received request from the client.
-    /// The [`RequestStream`] can be used to send the response.
+    /// This method returns a [`RequestResolver`] which can be used to read the request and send the response.
+    /// This method will return `None` when the connection receives a GOAWAY frame and all requests have been completed.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn accept(&mut self) -> Result<Option<RequestResolver<C, B>>, ConnectionError> {
         // Accept the incoming stream

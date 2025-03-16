@@ -24,18 +24,11 @@ pub enum ConnectionError {
     /// I might be an quic error or the remote h3 connection closed the connection with an error
     #[non_exhaustive]
     Remote(ConnectionErrorIncoming),
+    /// Received a goaway frame
+    RemoteClosing,
     /// Timeout occurred
     #[non_exhaustive]
     Timeout,
-}
-
-impl ConnectionError {
-    /// Create Error for Connection in Closing state
-    pub(crate) fn closing() -> Self {
-        ConnectionError::Local {
-            error: LocalError::Closing,
-        }
-    }
 }
 
 /// This enum represents a local error
@@ -51,7 +44,7 @@ pub enum LocalError {
         reason: String,
     },
     #[non_exhaustive]
-    /// The connection is closing
+    /// Graceful closing of the connection initiated by the local peer
     Closing,
 }
 
@@ -105,6 +98,7 @@ impl std::fmt::Display for ConnectionError {
         match self {
             ConnectionError::Local { error } => write!(f, "Local error: {:?}", error),
             ConnectionError::Remote(err) => write!(f, "Remote error: {}", err),
+            ConnectionError::RemoteClosing => write!(f, "Remote closing"),
             ConnectionError::Timeout => write!(f, "Timeout"),
         }
     }

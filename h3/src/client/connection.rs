@@ -143,7 +143,7 @@ where
     B: Buf,
 {
     /// Send an HTTP/3 request to the server
-    //#[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn send_request(
         &mut self,
         req: http::Request<()>,
@@ -154,11 +154,7 @@ where
             VarInt::MAX.0
         };
 
-        let closing = self.is_closing();
-
-        if closing {
-            return Err(StreamError::ConnectionError(ConnectionError::closing()));
-        }
+        self.check_peer_connection_closing()?;
 
         let (parts, _) = req.into_parts();
         let request::Parts {
