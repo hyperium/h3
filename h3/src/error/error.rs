@@ -15,17 +15,26 @@ use super::{codes::Code, internal_error::InternalConnectionError};
 #[non_exhaustive]
 pub enum ConnectionError {
     /// The error occurred on the local side of the connection
-    #[cfg_attr(not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"), non_exhaustive)]
+    #[cfg_attr(
+        not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"),
+        non_exhaustive
+    )]
     Local {
         /// The error
         error: LocalError,
     },
     /// Error returned by the quic layer
     /// I might be an quic error or the remote h3 connection closed the connection with an error
-    #[cfg_attr(not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"), non_exhaustive)]
+    #[cfg_attr(
+        not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"),
+        non_exhaustive
+    )]
     Remote(ConnectionErrorIncoming),
     /// Timeout occurred
-    #[cfg_attr(not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"), non_exhaustive)]
+    #[cfg_attr(
+        not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"),
+        non_exhaustive
+    )]
     Timeout,
 }
 
