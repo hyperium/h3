@@ -20,7 +20,7 @@ use crate::{
     quic::ConnectionErrorIncoming,
     server,
     tests::get_stream_blocking,
-    ConnectionState2,
+    ConnectionState,
 };
 
 use super::h3_quinn;
@@ -433,7 +433,6 @@ async fn header_too_big_client_error() {
                     ..
                 }) if code == Code::H3_NO_ERROR.value()
             );
-            // Todo: test with configuration for connection level errors when such a configuration is available
         };
         let req_fut = async {
             // pretend client already received server's settings

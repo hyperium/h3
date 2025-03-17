@@ -32,7 +32,7 @@ use crate::{
     connection::ConnectionInner,
     error::ConnectionError,
     quic::{self},
-    shared_state::SharedState2,
+    shared_state::SharedState,
 };
 
 use super::connection::Connection;
@@ -129,7 +129,7 @@ impl Builder {
         B: Buf,
     {
         let (sender, receiver) = mpsc::unbounded_channel();
-        let shared = SharedState2::default();
+        let shared = SharedState::default();
 
         Ok(Connection {
             inner: ConnectionInner::new(conn, Arc::new(shared), self.config).await?,

@@ -23,7 +23,7 @@ use crate::{
     proto::{frame::Frame, headers::Header, push::PushId, varint::VarInt},
     qpack,
     quic::{self, StreamId},
-    shared_state::{ConnectionState2, SharedState2},
+    shared_state::{ConnectionState, SharedState},
     stream::{self, BufRecvStream},
 };
 
@@ -112,7 +112,7 @@ where
     B: Buf,
 {
     pub(super) open: T,
-    pub(super) conn_state2: Arc<SharedState2>,
+    pub(super) conn_state: Arc<SharedState>,
     pub(super) max_field_section_size: u64, // maximum size for a header we receive
     // counts instances of SendRequest to close the connection when the last is dropped.
     pub(super) sender_count: Arc<AtomicUsize>,
@@ -120,13 +120,13 @@ where
     pub(super) send_grease_frame: bool,
 }
 
-impl<T, B> ConnectionState2 for SendRequest<T, B>
+impl<T, B> ConnectionState for SendRequest<T, B>
 where
     T: quic::OpenStreams<B>,
     B: Buf,
 {
-    fn shared_state(&self) -> &SharedState2 {
-        &self.conn_state2
+    fn shared_state(&self) -> &SharedState {
+        &self.conn_state
     }
 }
 
@@ -220,7 +220,7 @@ where
             inner: connection::RequestStream::new(
                 FrameStream::new(BufRecvStream::new(stream)),
                 self.max_field_section_size,
-                self.conn_state2.clone(),
+                self.conn_state.clone(),
                 self.send_grease_frame,
             ),
         };
@@ -240,7 +240,7 @@ where
             .fetch_add(1, std::sync::atomic::Ordering::Release);
 
         Self {
-            conn_state2: self.conn_state2.clone(),
+            conn_state: self.conn_state.clone(),
             open: self.open.clone(),
             max_field_section_size: self.max_field_section_size,
             sender_count: self.sender_count.clone(),
@@ -366,12 +366,12 @@ where
     pub(super) recv_closing: Option<StreamId>,
 }
 
-impl<C, B> ConnectionState2 for Connection<C, B>
+impl<C, B> ConnectionState for Connection<C, B>
 where
     C: quic::Connection<B>,
     B: Buf,
 {
-    fn shared_state(&self) -> &SharedState2 {
+    fn shared_state(&self) -> &SharedState {
         &self.inner.shared2
     }
 }

@@ -9,7 +9,7 @@ use crate::{
     },
     proto::varint::VarInt,
     quic::{self},
-    shared_state::{ConnectionState2, SharedState2},
+    shared_state::{ConnectionState, SharedState},
 };
 
 use super::connection::RequestEnd;
@@ -53,8 +53,8 @@ impl<S, B> AsMut<crate::connection::RequestStream<S, B>> for RequestStream<S, B>
     }
 }
 
-impl<S, B> ConnectionState2 for RequestStream<S, B> {
-    fn shared_state(&self) -> &SharedState2 {
+impl<S, B> ConnectionState for RequestStream<S, B> {
+    fn shared_state(&self) -> &SharedState {
         &self.inner.conn_state
     }
 }

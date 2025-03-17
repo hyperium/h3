@@ -8,7 +8,7 @@ use crate::{
     connection::ConnectionInner,
     frame::FrameStreamError,
     quic::{self, ConnectionErrorIncoming, StreamErrorIncoming},
-    shared_state::ConnectionState2,
+    shared_state::ConnectionState,
 };
 
 use super::{
@@ -105,7 +105,7 @@ fn convert_to_connection_error(error: ErrorOrigin) -> ConnectionError {
 }
 
 /// This trait is implemented for all types which can close a stream
-pub trait CloseStream: ConnectionState2 {
+pub trait CloseStream: ConnectionState {
     /// Handles a connection error on a stream
     fn handle_connection_error_on_stream(
         &mut self,

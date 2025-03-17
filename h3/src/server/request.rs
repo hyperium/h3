@@ -21,7 +21,7 @@ use crate::{
     },
     qpack,
     quic::{self, SendStream, StreamId},
-    shared_state::{ConnectionState2, SharedState2},
+    shared_state::{ConnectionState, SharedState},
 };
 
 use super::{connection::RequestEnd, stream::RequestStream};
@@ -37,15 +37,15 @@ where
     pub(super) request_end_send: UnboundedSender<StreamId>,
     pub(super) send_grease_frame: bool,
     pub(super) max_field_section_size: u64,
-    pub(super) shared: Arc<SharedState2>,
+    pub(super) shared: Arc<SharedState>,
 }
 
-impl<C, B> ConnectionState2 for RequestResolver<C, B>
+impl<C, B> ConnectionState for RequestResolver<C, B>
 where
     C: quic::Connection<B>,
     B: Buf,
 {
-    fn shared_state(&self) -> &SharedState2 {
+    fn shared_state(&self) -> &SharedState {
         &self.shared
     }
 }

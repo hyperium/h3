@@ -24,7 +24,7 @@ use crate::{
         push::PushId,
     },
     quic::{self, SendStream as _},
-    shared_state::{ConnectionState2, SharedState2},
+    shared_state::{ConnectionState, SharedState},
     stream::BufRecvStream,
 };
 
@@ -61,12 +61,12 @@ where
     pub(super) last_accepted_stream: Option<StreamId>,
 }
 
-impl<C, B> ConnectionState2 for Connection<C, B>
+impl<C, B> ConnectionState for Connection<C, B>
 where
     C: quic::Connection<B>,
     B: Buf,
 {
-    fn shared_state(&self) -> &SharedState2 {
+    fn shared_state(&self) -> &SharedState {
         &self.inner.shared2
     }
 }

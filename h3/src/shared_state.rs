@@ -8,7 +8,7 @@ use crate::{config::Settings, error::internal_error::ErrorOrigin};
 
 #[derive(Debug)]
 /// This struct represents the shared state of the h3 connection and the stream structs
-pub struct SharedState2 {
+pub struct SharedState {
     /// The settings, sent by the peer
     settings: OnceLock<Settings>,
     /// The connection error
@@ -19,7 +19,7 @@ pub struct SharedState2 {
     waker: AtomicWaker,
 }
 
-impl Default for SharedState2 {
+impl Default for SharedState {
     fn default() -> Self {
         Self {
             settings: OnceLock::new(),
@@ -30,16 +30,16 @@ impl Default for SharedState2 {
     }
 }
 
-impl ConnectionState2 for SharedState2 {
-    fn shared_state(&self) -> &SharedState2 {
+impl ConnectionState for SharedState {
+    fn shared_state(&self) -> &SharedState {
         self
     }
 }
 
 /// This trait can be implemented for all types which have a shared state
-pub trait ConnectionState2 {
+pub trait ConnectionState {
     /// Get the shared state
-    fn shared_state(&self) -> &SharedState2;
+    fn shared_state(&self) -> &SharedState;
     /// Get the connection error if the connection is in error state because of another task
     ///
     /// Return the error as an Err variant if it is set in order to allow using ? in the calling function

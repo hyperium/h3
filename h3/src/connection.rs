@@ -31,7 +31,7 @@ use crate::{
     },
     qpack,
     quic::{self, RecvStream, SendStream, StreamErrorIncoming},
-    shared_state::{ConnectionState2, SharedState2},
+    shared_state::{ConnectionState, SharedState},
     stream::{self, AcceptRecvStream, AcceptedRecvStream, BufRecvStream, UniStreamHeader},
     webtransport::SessionId,
 };
@@ -75,7 +75,7 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    pub(super) shared2: Arc<SharedState2>,
+    pub(super) shared2: Arc<SharedState>,
     /// TODO: breaking encapsulation just to see if we can get this to work, will fix before merging
     pub conn: C,
     control_send: C::SendStream,
@@ -112,12 +112,12 @@ where
     pub config: Config,
 }
 
-impl<B, C> ConnectionState2 for ConnectionInner<C, B>
+impl<B, C> ConnectionState for ConnectionInner<C, B>
 where
     C: quic::Connection<B>,
     B: Buf,
 {
-    fn shared_state(&self) -> &SharedState2 {
+    fn shared_state(&self) -> &SharedState {
         &self.shared2
     }
 }
@@ -244,7 +244,7 @@ where
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn new(
         mut conn: C,
-        shared2: Arc<SharedState2>,
+        shared2: Arc<SharedState>,
         config: Config,
     ) -> Result<Self, ConnectionError> {
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
@@ -612,7 +612,6 @@ where
                 return Poll::Ready(Err(self.handle_connection_error(
                     InternalConnectionError::new(
                         Code::H3_MISSING_SETTINGS,
-                        // TODO: put frame type in message
                         format!("received frame {:?} before settings", frame),
                     ),
                 )));
@@ -643,7 +642,6 @@ where
                 return Poll::Ready(Err(self.handle_connection_error(
                     InternalConnectionError::new(
                         Code::H3_FRAME_UNEXPECTED,
-                        // TODO: put frame type in message
                         format!("received unexpected frame {:?} on control stream", frame),
                     ),
                 )));
@@ -815,7 +813,7 @@ where
 pub struct RequestStream<S, B> {
     pub(super) stream: FrameStream<S, B>,
     pub(super) trailers: Option<Bytes>,
-    pub(super) conn_state: Arc<SharedState2>,
+    pub(super) conn_state: Arc<SharedState>,
     pub(super) max_field_section_size: u64,
     send_grease_frame: bool,
 }
@@ -825,7 +823,7 @@ impl<S, B> RequestStream<S, B> {
     pub fn new(
         stream: FrameStream<S, B>,
         max_field_section_size: u64,
-        conn_state: Arc<SharedState2>,
+        conn_state: Arc<SharedState>,
         grease: bool,
     ) -> Self {
         Self {
@@ -838,8 +836,8 @@ impl<S, B> RequestStream<S, B> {
     }
 }
 
-impl<S, B> ConnectionState2 for RequestStream<S, B> {
-    fn shared_state(&self) -> &SharedState2 {
+impl<S, B> ConnectionState for RequestStream<S, B> {
+    fn shared_state(&self) -> &SharedState {
         &self.conn_state
     }
 }

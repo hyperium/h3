@@ -18,7 +18,7 @@ mod buf;
 mod shared_state;
 
 #[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
-pub use shared_state::{ConnectionState2, SharedState2};
+pub use shared_state::{ConnectionState, SharedState};
 
 pub mod error;
 

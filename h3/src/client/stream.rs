@@ -15,7 +15,7 @@ use crate::{
     proto::{frame::Frame, headers::Header},
     qpack,
     quic::{self},
-    shared_state::{ConnectionState2, SharedState2},
+    shared_state::{ConnectionState, SharedState},
 };
 use std::{
     convert::TryFrom,
@@ -78,8 +78,8 @@ pub struct RequestStream<S, B> {
     pub(super) inner: connection::RequestStream<S, B>,
 }
 
-impl<S, B> ConnectionState2 for RequestStream<S, B> {
-    fn shared_state(&self) -> &SharedState2 {
+impl<S, B> ConnectionState for RequestStream<S, B> {
+    fn shared_state(&self) -> &SharedState {
         &self.inner.conn_state
     }
 }

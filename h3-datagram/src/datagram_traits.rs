@@ -12,7 +12,7 @@ use h3::{
     connection::ConnectionInner,
     error::ConnectionError,
     quic::{self, StreamId},
-    ConnectionState2,
+    ConnectionState,
 };
 use pin_project_lite::pin_project;
 
@@ -21,7 +21,7 @@ use crate::{
     quic_traits::{RecvDatagramExt, SendDatagramErrorIncoming},
 };
 
-pub trait HandleDatagramsExt<C, B>: ConnectionState2
+pub trait HandleDatagramsExt<C, B>: ConnectionState
 where
     B: Buf,
     C: quic::Connection<B>,
@@ -38,9 +38,9 @@ where
         match error {
             SendDatagramErrorIncoming::NotAvailable => SendDatagramError::NotAvailable,
             SendDatagramErrorIncoming::TooLarge => SendDatagramError::TooLarge,
-            SendDatagramErrorIncoming::ConnectionError(e) => {
-                todo!()
-                //SendDatagramError::ConnectionError(self..handle_quic_connection_error(e))
+            SendDatagramErrorIncoming::ConnectionError(error) => {
+                self.set_conn_error_and_wake(error.clone());
+                SendDatagramError::ConnectionError(ConnectionError::Remote(error))
             }
         }
     }

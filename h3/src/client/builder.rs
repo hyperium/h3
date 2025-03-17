@@ -12,7 +12,7 @@ use crate::{
     connection::ConnectionInner,
     error::ConnectionError,
     quic::{self},
-    shared_state::SharedState2,
+    shared_state::SharedState,
 };
 
 use super::connection::{Connection, SendRequest};
@@ -122,14 +122,14 @@ impl Builder {
         B: Buf,
     {
         let open = quic.opener();
-        let shared = SharedState2::default();
+        let shared = SharedState::default();
 
         let conn_state = Arc::new(shared);
 
         let inner = ConnectionInner::new(quic, conn_state.clone(), self.config).await?;
         let send_request = SendRequest {
             open,
-            conn_state2: conn_state,
+            conn_state,
             max_field_section_size: self.config.settings.max_field_section_size,
             sender_count: Arc::new(AtomicUsize::new(1)),
             send_grease_frame: self.config.send_grease,
