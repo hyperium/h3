@@ -7,7 +7,6 @@ use crate::{
         connection_error_creators::CloseStream, internal_error::InternalConnectionError, Code,
         StreamError,
     },
-    proto::varint::VarInt,
     quic::{self},
     shared_state::{ConnectionState, SharedState},
 };
@@ -132,17 +131,17 @@ where
             })
         })?;
 
-        let max_mem_size = if let Some(settings) = self.inner.settings() {
-            settings.max_field_section_size
-        } else {
-            VarInt::MAX.0
-        };
+        let max_mem_size = self.inner.settings().max_field_section_size;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
         //# An implementation that
         //# has received this parameter SHOULD NOT send an HTTP message header
         //# that exceeds the indicated size, as the peer will likely refuse to
         //# process it.
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.2
+        //# An HTTP implementation MUST NOT send frames or requests that would be
+        //# invalid based on its current understanding of the peer's settings.
+
         if mem_size > max_mem_size {
             return Err(StreamError::HeaderTooBig {
                 actual_size: mem_size,

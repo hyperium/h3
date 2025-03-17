@@ -609,12 +609,12 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[!MUST,implementation]:    H3_SETTINGS_ERROR.
 
   SECTION: [Initialization](#section-7.2.4.2)
-    TEXT[!MUST,todo]:    An HTTP implementation MUST NOT send frames or requests that would be
-    TEXT[!MUST,todo]:    invalid based on its current understanding of the peer's settings.
-    TEXT[!SHOULD,todo]: Each endpoint SHOULD use
-    TEXT[!SHOULD,todo]:    these initial values to send messages before the peer's SETTINGS
-    TEXT[!SHOULD,todo]:    frame has arrived, as packets carrying the settings can be lost or
-    TEXT[!SHOULD,todo]:    delayed.
+    TEXT[!MUST,implementation,todo]:    An HTTP implementation MUST NOT send frames or requests that would be
+    TEXT[!MUST,implementation,todo]:    invalid based on its current understanding of the peer's settings.
+    TEXT[!SHOULD,implementation,todo]: Each endpoint SHOULD use
+    TEXT[!SHOULD,implementation,todo]:    these initial values to send messages before the peer's SETTINGS
+    TEXT[!SHOULD,implementation,todo]:    frame has arrived, as packets carrying the settings can be lost or
+    TEXT[!SHOULD,implementation,todo]:    delayed.
     TEXT[!MUST,implication]: Endpoints MUST NOT require any data to be received from
     TEXT[!MUST,implication]:    the peer prior to sending the SETTINGS frame; settings MUST be sent
     TEXT[!MUST,implication]:    as soon as the transport is ready to send data.

@@ -269,10 +269,10 @@ async fn settings_exchange_client() {
         let (mut conn, client) = client::new(pair.client().await).await.expect("client init");
         let settings_change = async {
             for _ in 0..10 {
-                match client.settings() {
-                    Some(settings) if settings.max_field_section_size == 12 => return,
-                    _ => tokio::time::sleep(Duration::from_millis(2)).await,
+                if client.settings().max_field_section_size == 12 {
+                    return;
                 }
+                tokio::time::sleep(Duration::from_millis(2)).await;
             }
             panic!("peer's max_field_section_size didn't change");
         };
@@ -336,15 +336,15 @@ async fn settings_exchange_server() {
         let conn = server.next().await;
         let mut incoming = server::Connection::new(conn).await.unwrap();
 
-        let state = incoming.inner.shared2.clone();
+        let state = incoming.inner.shared.clone();
         let accept = async { incoming.accept().await.unwrap() };
 
         let settings_change = async {
             for _ in 0..10 {
-                match state.settings() {
-                    Some(settings) if settings.max_field_section_size == 12 => return,
-                    _ => tokio::time::sleep(Duration::from_millis(2)).await,
+                if state.settings().max_field_section_size == 12 {
+                    return;
                 }
+                tokio::time::sleep(Duration::from_millis(2)).await;
             }
             panic!("peer's max_field_section_size didn't change");
         };

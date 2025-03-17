@@ -67,7 +67,7 @@ where
     B: Buf,
 {
     fn shared_state(&self) -> &SharedState {
-        &self.inner.shared2
+        &self.inner.shared
     }
 }
 
@@ -114,7 +114,7 @@ where
             request_end_send: self.request_end_send.clone(),
             send_grease_frame: self.inner.send_grease_frame,
             max_field_section_size: self.max_field_section_size,
-            shared: self.inner.shared2.clone(),
+            shared: self.inner.shared.clone(),
         }));
 
         // send the grease frame only once

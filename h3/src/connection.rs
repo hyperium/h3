@@ -75,7 +75,7 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    pub(super) shared2: Arc<SharedState>,
+    pub shared: Arc<SharedState>,
     /// TODO: breaking encapsulation just to see if we can get this to work, will fix before merging
     pub conn: C,
     control_send: C::SendStream,
@@ -118,7 +118,7 @@ where
     B: Buf,
 {
     fn shared_state(&self) -> &SharedState {
-        &self.shared2
+        &self.shared
     }
 }
 
@@ -244,7 +244,7 @@ where
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn new(
         mut conn: C,
-        shared2: Arc<SharedState>,
+        shared: Arc<SharedState>,
         config: Config,
     ) -> Result<Self, ConnectionError> {
         //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
@@ -302,7 +302,7 @@ where
         //# sender MUST NOT close the control stream, and the receiver MUST NOT
         //# request that the sender close the control stream.
         let mut conn_inner = Self {
-            shared2,
+            shared,
             conn,
             control_send: control_send,
             control_recv: None,
@@ -1066,18 +1066,17 @@ where
                 })
             })?;
 
-        let max_mem_size = if let Some(settings) = self.settings() {
-            settings.max_field_section_size
-        } else {
-            // We have no peer settings, so we use no limit
-            VarInt::MAX.0
-        };
+        let max_mem_size = self.settings().max_field_section_size;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
         //# An implementation that
         //# has received this parameter SHOULD NOT send an HTTP message header
         //# that exceeds the indicated size, as the peer will likely refuse to
         //# process it.
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.2
+        //# An HTTP implementation MUST NOT send frames or requests that would be
+        //# invalid based on its current understanding of the peer's settings.
+
         if mem_size > max_mem_size {
             return Err(StreamError::HeaderTooBig {
                 actual_size: mem_size,

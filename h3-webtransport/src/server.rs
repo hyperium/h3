@@ -3,7 +3,7 @@
 use std::{
     marker::PhantomData,
     pin::Pin,
-    sync::Mutex,
+    sync::{Arc, Mutex},
     task::{Context, Poll},
 };
 
@@ -11,14 +11,15 @@ use bytes::Buf;
 use futures_util::{future::poll_fn, ready, Future};
 use h3::{
     connection::ConnectionState,
-    error::{Code, ErrorLevel},
+    error::{
+        internal_error::InternalConnectionError, Code, ConnectionError, ErrorLevel, StreamError,
+    },
     ext::Protocol,
     frame::FrameStream,
     proto::frame::Frame,
     quic::{self, OpenStreams, WriteBuf},
-    server::Connection,
-    server::RequestStream,
-    Error,
+    server::{Connection, RequestStream},
+    ConnectionState, Error, SharedState,
 };
 use h3::{
     quic::SendStreamUnframed,
@@ -53,6 +54,21 @@ where
     server_conn: Mutex<Connection<C, B>>,
     connect_stream: RequestStream<C::BidiStream, B>,
     opener: Mutex<C::OpenStreams>,
+    /// Shared State
+    ///
+    /// Shared state is already in server_conn, but this
+    shared: Arc<SharedState>,
+}
+
+impl<C, B> ConnectionState for WebTransportSession<C, B>
+where
+    C: quic::Connection<B>,
+    Connection<C, B>: HandleDatagramsExt<C, B>,
+    B: Buf,
+{
+    fn shared_state(&self) -> &SharedState {
+        &self.shared
+    }
 }
 
 impl<C, B> WebTransportSession<C, B>
@@ -68,24 +84,29 @@ where
         request: Request<()>,
         mut stream: RequestStream<C::BidiStream, B>,
         mut conn: Connection<C, B>,
-    ) -> Result<Self, Error> {
-        let shared = conn.shared_state().clone();
-        {
-            let config = shared.write("Read WebTransport support").peer_config;
+    ) -> Result<Self, StreamError> {
+        let shared = conn.inner.shared.clone();
 
-            if !config.enable_webtransport() {
-                return Err(conn.close(
-                    Code::H3_SETTINGS_ERROR,
-                    "webtransport is not supported by client",
-                ));
-            }
+        let config = shared.settings();
 
-            if !config.enable_datagram() {
-                return Err(conn.close(
-                    Code::H3_SETTINGS_ERROR,
-                    "datagrams are not supported by client",
-                ));
-            }
+        if !config.enable_webtransport() {
+            return Err(StreamError::ConnectionError(
+                conn.inner
+                    .handle_connection_error(InternalConnectionError::new(
+                        Code::H3_SETTINGS_ERROR,
+                        "webtransport is not supported by client".to_string(),
+                    )),
+            ));
+        }
+
+        if !config.enable_datagram() {
+            return Err(StreamError::ConnectionError(
+                conn.inner
+                    .handle_connection_error(InternalConnectionError::new(
+                        Code::H3_SETTINGS_ERROR,
+                        "datagrams are not supported by client".to_string(),
+                    )),
+            ));
         }
 
         // The peer is responsible for validating our side of the webtransport support.
@@ -132,6 +153,7 @@ where
             opener,
             server_conn: Mutex::new(conn),
             connect_stream: stream,
+            shared,
         })
     }
 
@@ -167,39 +189,15 @@ where
 
     /// Accepts an incoming bidirectional stream or request
     pub async fn accept_bi(&self) -> Result<Option<AcceptedBi<C, B>>, Error> {
-        todo!("fix webtransport later")
-        /*    // Get the next stream
+        // Get the next stream
         // Accept the incoming stream
-        let stream = poll_fn(|cx| {
-            let mut conn = self.server_conn.lock().unwrap();
-            conn.poll_accept_request_stream(cx)
-        })
-        .await;
-
-        let mut stream = match stream {
-            Ok(Some(s)) => FrameStream::new(BufRecvStream::new(s)),
-            Ok(None) => {
-                // FIXME: is proper HTTP GoAway shutdown required?
-                return Ok(None);
-            }
-            Err(err) => {
-                match err.kind() {
-                    h3::error::Kind::Closed => return Ok(None),
-                    h3::error::Kind::Application {
-                        code,
-                        reason,
-                        level: ErrorLevel::ConnectionError,
-                        ..
-                    } => {
-                        return Err(self.server_conn.lock().unwrap().close(
-                            code,
-                            reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
-                        ))
-                    }
-                    _ => return Err(err),
-                };
-            }
-        };
+        let stream = FrameStream::new(BufRecvStream::new(
+            poll_fn(|cx| {
+                let mut conn = self.server_conn.lock().unwrap();
+                conn.poll_accept_request_stream(cx)
+            })
+            .await??,
+        ));
 
         // Read the first frame.
         //
@@ -231,7 +229,6 @@ where
                 }
             }
         }
-        */
     }
 
     /// Open a new bidirectional stream
@@ -383,7 +380,6 @@ impl<'a, C, B> Future for ReadDatagram<'a, C, B>
 where
     C: quic::Connection<B> + RecvDatagramExt,
     B: Buf,
-    <C as RecvDatagramExt>::Error: h3::quic::Error + 'static,
 {
     type Output = Result<Option<(SessionId, C::Buf)>, Error>;
 

@@ -148,12 +148,6 @@ where
         &mut self,
         req: http::Request<()>,
     ) -> Result<RequestStream<T::BidiStream, B>, StreamError> {
-        let peer_max_field_section_size = if let Some(settings) = self.settings() {
-            settings.max_field_section_size
-        } else {
-            VarInt::MAX.0
-        };
-
         if let Some(error) = self.check_peer_connection_closing() {
             return Err(error);
         };
@@ -205,6 +199,10 @@ where
         //# has received this parameter SHOULD NOT send an HTTP message header
         //# that exceeds the indicated size, as the peer will likely refuse to
         //# process it.
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.2
+        //# An HTTP implementation MUST NOT send frames or requests that would be
+        //# invalid based on its current understanding of the peer's settings.
+        let peer_max_field_section_size = self.settings().max_field_section_size;
         if mem_size > peer_max_field_section_size {
             return Err(StreamError::HeaderTooBig {
                 actual_size: mem_size,
@@ -372,7 +370,7 @@ where
     B: Buf,
 {
     fn shared_state(&self) -> &SharedState {
-        &self.inner.shared2
+        &self.inner.shared
     }
 }
 

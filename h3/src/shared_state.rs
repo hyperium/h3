@@ -1,6 +1,6 @@
 //! This module represents the shared state of the h3 connection
 
-use std::sync::{atomic::AtomicBool, OnceLock};
+use std::{borrow::Cow, sync::{atomic::AtomicBool, OnceLock}};
 
 use futures_util::task::AtomicWaker;
 
@@ -64,8 +64,17 @@ pub trait ConnectionState {
     }
 
     /// Get the settings
-    fn settings(&self) -> Option<&Settings> {
-        self.shared_state().settings.get()
+    fn settings(&self) -> Cow<Settings> {
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.2
+        //# Each endpoint SHOULD use
+        //# these initial values to send messages before the peer's SETTINGS
+        //# frame has arrived, as packets carrying the settings can be lost or
+        //# delayed.
+        self.shared_state()
+            .settings
+            .get()
+            .map(|s| Cow::Borrowed(s))
+            .unwrap_or_default()
     }
     /// Set the connection to closing
     fn set_closing(&self) {

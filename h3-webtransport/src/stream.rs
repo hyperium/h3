@@ -1,7 +1,7 @@
 use std::task::Poll;
 
 use bytes::{Buf, Bytes};
-use h3::{quic, stream::BufRecvStream};
+use h3::{quic::{self, StreamErrorIncoming}, stream::BufRecvStream};
 use pin_project_lite::pin_project;
 use tokio::io::ReadBuf;
 
@@ -27,12 +27,10 @@ where
 {
     type Buf = Bytes;
 
-    type Error = S::Error;
-
     fn poll_data(
         &mut self,
         cx: &mut std::task::Context<'_>,
-    ) -> Poll<Result<Option<Self::Buf>, Self::Error>> {
+    ) -> Poll<Result<Option<Self::Buf>, StreamErrorIncoming>> {
         self.stream.poll_data(cx)
     }
 
@@ -105,7 +103,7 @@ where
         &mut self,
         cx: &mut std::task::Context<'_>,
         buf: &mut D,
-    ) -> Poll<Result<usize, Self::Error>> {
+    ) -> Poll<Result<usize, StreamErrorIncoming>> {
         self.stream.poll_send(cx, buf)
     }
 }
@@ -115,9 +113,7 @@ where
     S: quic::SendStream<B>,
     B: Buf,
 {
-    type Error = S::Error;
-
-    fn poll_finish(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_finish(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), StreamErrorIncoming>> {
         self.stream.poll_finish(cx)
     }
 
@@ -129,11 +125,11 @@ where
         self.stream.send_id()
     }
 
-    fn send_data<T: Into<h3::stream::WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error> {
+    fn send_data<T: Into<h3::stream::WriteBuf<B>>>(&mut self, data: T) -> Result<(), StreamErrorIncoming> {
         self.stream.send_data(data)
     }
 
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), StreamErrorIncoming>> {
         self.stream.poll_ready(cx)
     }
 }
@@ -220,9 +216,7 @@ where
     S: quic::SendStream<B>,
     B: Buf,
 {
-    type Error = S::Error;
-
-    fn poll_finish(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_finish(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), StreamErrorIncoming>> {
         self.stream.poll_finish(cx)
     }
 
@@ -234,11 +228,11 @@ where
         self.stream.send_id()
     }
 
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), StreamErrorIncoming>> {
         self.stream.poll_ready(cx)
     }
 
-    fn send_data<T: Into<h3::stream::WriteBuf<B>>>(&mut self, data: T) -> Result<(), Self::Error> {
+    fn send_data<T: Into<h3::stream::WriteBuf<B>>>(&mut self, data: T) -> Result<(), StreamErrorIncoming> {
         self.stream.send_data(data)
     }
 }
@@ -252,7 +246,7 @@ where
         &mut self,
         cx: &mut std::task::Context<'_>,
         buf: &mut D,
-    ) -> Poll<Result<usize, Self::Error>> {
+    ) -> Poll<Result<usize, StreamErrorIncoming>> {
         self.stream.poll_send(cx, buf)
     }
 }
@@ -260,12 +254,10 @@ where
 impl<S: quic::RecvStream, B> quic::RecvStream for BidiStream<S, B> {
     type Buf = Bytes;
 
-    type Error = S::Error;
-
     fn poll_data(
         &mut self,
         cx: &mut std::task::Context<'_>,
-    ) -> Poll<Result<Option<Self::Buf>, Self::Error>> {
+    ) -> Poll<Result<Option<Self::Buf>, StreamErrorIncoming>> {
         self.stream.poll_data(cx)
     }
 
