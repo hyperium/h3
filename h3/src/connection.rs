@@ -529,7 +529,9 @@ where
             Err(FrameStreamError::Quic(StreamErrorIncoming::ConnectionErrorIncoming {
                 connection_error,
             })) => return Poll::Ready(Err(self.handle_connection_error(connection_error))),
-            Err(FrameStreamError::Quic(StreamErrorIncoming::StreamTerminated { error_code: err })) =>
+            Err(FrameStreamError::Quic(StreamErrorIncoming::StreamTerminated {
+                error_code: err,
+            })) =>
             //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.1
             //# If either control
             //# stream is closed at any point, this MUST be treated as a connection

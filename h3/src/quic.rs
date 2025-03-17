@@ -61,7 +61,7 @@ pub enum StreamErrorIncoming {
         connection_error: ConnectionErrorIncoming,
     },
     /// Stream side was closed by the peer
-    /// 
+    ///
     /// This can mean a reset for peers sending side or a stop_sending for peers receiving side
     StreamTerminated {
         /// Error code sent by the peer

@@ -89,7 +89,7 @@ pub enum StreamError {
         reason: String,
     },
     /// The remote peer terminated the corresponding stream side
-    /// 
+    ///
     /// Either Reset on peers sending side or StopSending on peers receiving side
     RemoteTerminate {
         /// Reset code received from the peer
