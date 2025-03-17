@@ -488,7 +488,7 @@ impl quic::RecvStream for RecvStream {
 
 fn convert_read_error_to_stream_error(error: ReadError) -> StreamErrorIncoming {
     match error {
-        ReadError::Reset(var_int) => StreamErrorIncoming::StreamReset {
+        ReadError::Reset(var_int) => StreamErrorIncoming::StreamTerminated {
             error_code: var_int.into_inner(),
         },
         ReadError::ConnectionLost(connection_error) => {
@@ -504,7 +504,7 @@ fn convert_read_error_to_stream_error(error: ReadError) -> StreamErrorIncoming {
 
 fn convert_write_error_to_stream_error(error: quinn::WriteError) -> StreamErrorIncoming {
     match error {
-        quinn::WriteError::Stopped(var_int) => StreamErrorIncoming::StreamReset {
+        quinn::WriteError::Stopped(var_int) => StreamErrorIncoming::StreamTerminated {
             error_code: var_int.into_inner(),
         },
         quinn::WriteError::ConnectionLost(connection_error) => {

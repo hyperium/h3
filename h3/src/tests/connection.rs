@@ -215,7 +215,7 @@ async fn client_close_only_on_last_sender_drop() {
 
         assert_matches!(
             request_stream_1.recv_response().await,
-            Err(StreamError::RemoteReset{
+            Err(StreamError::RemoteTerminate{
                 code
             }) if code == Code::H3_REQUEST_CANCELLED.value()
         );
@@ -229,7 +229,7 @@ async fn client_close_only_on_last_sender_drop() {
 
         assert_matches!(
             request_stream_2.recv_response().await,
-            Err(StreamError::RemoteReset{
+            Err(StreamError::RemoteTerminate{
                 code
             }) if code == Code::H3_REQUEST_CANCELLED.value()
         );
@@ -706,7 +706,7 @@ async fn graceful_shutdown_server_rejects() {
         assert_matches!(first, Ok(_));
         assert_matches!(
             rejected.unwrap_err(),
-            StreamError::RemoteReset {
+            StreamError::RemoteTerminate {
                 code: Code::H3_REQUEST_REJECTED
             }
         );

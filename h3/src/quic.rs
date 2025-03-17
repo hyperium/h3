@@ -60,14 +60,16 @@ pub enum StreamErrorIncoming {
         /// Connection error
         connection_error: ConnectionErrorIncoming,
     },
-    /// Stream was closed by the peer
-    StreamReset {
+    /// Stream side was closed by the peer
+    /// 
+    /// This can mean a reset for peers sending side or a stop_sending for peers receiving side
+    StreamTerminated {
         /// Error code sent by the peer
         error_code: u64,
     },
     /// A unknown error occurred (not relevant to h3)
     ///
-    /// H3 will handle this exactly like a StreamReset
+    /// H3 will handle this exactly like a StreamTerminated
     /// like closing the connection with an error if http3 forbids a stream end for example with the control stream
     Unknown(Arc<dyn std::error::Error + Send + Sync>),
 }
@@ -81,7 +83,7 @@ impl Display for StreamErrorIncoming {
             StreamErrorIncoming::ConnectionErrorIncoming { connection_error } => {
                 write!(f, "ConnectionError: {}", connection_error)
             }
-            StreamErrorIncoming::StreamReset { error_code } => {
+            StreamErrorIncoming::StreamTerminated { error_code } => {
                 let error_code = Code::from(*error_code);
                 write!(f, "StreamClosed: {}", error_code)
             }

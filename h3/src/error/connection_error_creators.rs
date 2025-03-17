@@ -122,7 +122,7 @@ pub trait CloseStream: ConnectionState {
                 let err = self.set_conn_error_and_wake(connection_error);
                 StreamError::ConnectionError(convert_to_connection_error(err))
             }
-            StreamErrorIncoming::StreamReset { error_code } => StreamError::RemoteReset {
+            StreamErrorIncoming::StreamTerminated { error_code } => StreamError::RemoteTerminate {
                 code: Code::from(error_code),
             },
             StreamErrorIncoming::Unknown(custom_quic_impl_error) => {

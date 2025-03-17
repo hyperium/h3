@@ -634,7 +634,7 @@ async fn header_too_big_discard_from_client() {
         }
         assert_matches!(
             err.as_ref().unwrap(),
-            StreamError::RemoteReset {
+            StreamError::RemoteTerminate {
                 code: Code::H3_REQUEST_CANCELLED,
                 ..
             }
