@@ -1,3 +1,6 @@
+### v0.0.9 (2025-03-18)
+* fix private field usage from quinn
+
 ### v0.0.8 (2025-03-15)
 * avoid copying data when sending
 * new datagram feature
