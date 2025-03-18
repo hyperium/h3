@@ -15,7 +15,7 @@ license = "MIT"
 [dependencies]
 h3 = { version = "0.0.7", path = "../h3" }
 bytes = "1"
-quinn = { version = "0.11", default-features = false, features = [
+quinn = { version = "0.11.7", default-features = false, features = [
     "futures-io",
 ] }
 tokio-util = { version = "0.7.9" }
