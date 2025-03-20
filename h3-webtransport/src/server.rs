@@ -26,7 +26,7 @@ use h3::{
 };
 use h3_datagram::{
     datagram::Datagram,
-    datagram_traits::{HandleDatagramsExt, SendDatagramError},
+    datagram_handler::{HandleDatagramsExt, SendDatagramError},
     quic_traits::{RecvDatagramExt, SendDatagramExt},
 };
 use http::{Method, Request, Response, StatusCode};
@@ -175,7 +175,7 @@ where
         self.server_conn
             .lock()
             .unwrap()
-            .send_datagram(self.connect_stream.id(), data)?;
+            .get_datagram_sender(self.connect_stream.id(), data)?;
 
         Ok(())
     }

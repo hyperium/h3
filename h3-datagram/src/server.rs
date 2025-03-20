@@ -4,36 +4,45 @@ use std::marker::PhantomData;
 
 use bytes::Buf;
 use h3::{
-    quic::{self, StreamId},
+    quic::{self},
     server::Connection,
 };
 
 use crate::{
-    datagram::Datagram,
-    datagram_traits::{
-        ReadDatagram, {HandleDatagramsExt, SendDatagramError},
-    },
-    quic_traits::{RecvDatagramExt, SendDatagramExt},
+    datagram_handler::{DatagramReader, DatagramSender, HandleDatagramsExt},
+    quic_traits::DatagramConnectionExt,
 };
 
 impl<B, C> HandleDatagramsExt<C, B> for Connection<C, B>
 where
     B: Buf,
-    C: quic::Connection<B> + SendDatagramExt<B> + RecvDatagramExt,
+    C: quic::Connection<B> + DatagramConnectionExt<B>,
 {
-    /// Sends a datagram
-    fn send_datagram(&mut self, stream_id: StreamId, data: B) -> Result<(), SendDatagramError> {
-        self.inner
-            .conn
-            .send_datagram(Datagram::new(stream_id, data))
-            .map_err(|e| self.handle_send_datagram_error(e))
+    /// Get the datagram sender
+    fn get_datagram_sender(
+        &self,
+    ) -> crate::datagram_handler::DatagramSender<
+        <C as crate::quic_traits::DatagramConnectionExt<B>>::SendDatagramHandler,
+        B,
+    > {
+        DatagramSender {
+            handler: self.inner.conn.send_datagram_handler(),
+            _marker: PhantomData,
+            shared_state: self.inner.shared.clone(),
+        }
     }
 
-    /// Reads an incoming datagram
-    fn read_datagram(&mut self) -> ReadDatagram<C, B> {
-        ReadDatagram {
-            conn: &mut self.inner,
+    /// Get the datagram reader
+    fn get_datagram_reader(
+        &self,
+    ) -> crate::datagram_handler::DatagramReader<
+        <C as crate::quic_traits::DatagramConnectionExt<B>>::RecvDatagramHandler,
+        B,
+    > {
+        DatagramReader {
+            handler: self.inner.conn.recv_datagram_handler(),
             _marker: PhantomData,
+            shared_state: self.inner.shared.clone(),
         }
     }
 }
