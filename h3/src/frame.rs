@@ -5,10 +5,13 @@ use bytes::Buf;
 #[cfg(feature = "tracing")]
 use tracing::trace;
 
+use crate::error::Code;
+use crate::proto::frame::SettingsError;
+use crate::proto::push::InvalidPushId;
+use crate::quic::{InvalidStreamId, StreamErrorIncoming};
 use crate::stream::{BufRecvStream, WriteBuf};
 use crate::{
     buf::BufList,
-    error::TransportError,
     proto::{
         frame::{self, Frame, PayloadLen},
         stream::StreamId,
@@ -44,6 +47,9 @@ impl<S, B> FrameStream<S, B>
 where
     S: RecvStream,
 {
+    /// Polls the stream for the next frame header
+    ///
+    /// When a frame header is received use `poll_data` to retrieve the frame's data.
     pub fn poll_next(
         &mut self,
         cx: &mut Context<'_>,
@@ -120,7 +126,7 @@ where
     }
 
     /// Stops the underlying stream with the provided error code
-    pub(crate) fn stop_sending(&mut self, error_code: crate::error::Code) {
+    pub(crate) fn stop_sending(&mut self, error_code: Code) {
         self.stream.stop_sending(error_code.into());
     }
 
@@ -137,7 +143,7 @@ where
             return Poll::Ready(Ok(true));
         }
         match self.stream.poll_read(cx) {
-            Poll::Ready(Err(e)) => Poll::Ready(Err(FrameStreamError::Quic(e.into()))),
+            Poll::Ready(Err(e)) => Poll::Ready(Err(FrameStreamError::Quic(e))),
             Poll::Pending => Poll::Pending,
             Poll::Ready(Ok(eos)) => Poll::Ready(Ok(eos)),
         }
@@ -153,17 +159,15 @@ where
     T: SendStream<B>,
     B: Buf,
 {
-    type Error = <T as SendStream<B>>::Error;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), StreamErrorIncoming>> {
         self.stream.poll_ready(cx)
     }
 
-    fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), Self::Error> {
+    fn send_data<D: Into<WriteBuf<B>>>(&mut self, data: D) -> Result<(), StreamErrorIncoming> {
         self.stream.send_data(data)
     }
 
-    fn poll_finish(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_finish(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), StreamErrorIncoming>> {
         self.stream.poll_finish(cx)
     }
 
@@ -229,6 +233,9 @@ impl FrameDecoder {
 
             match decoded {
                 Err(frame::FrameError::UnknownFrame(_ty)) => {
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
+                    //# Endpoints MUST
+                    //# NOT consider these frames to have any meaning upon receipt.
                     #[cfg(feature = "tracing")]
                     trace!("ignore unknown frame type {:#x}", _ty);
 
@@ -240,11 +247,37 @@ impl FrameDecoder {
                     self.expected = Some(min);
                     return Ok(None);
                 }
-                Err(e) => return Err(e.into()),
                 Ok(frame) => {
                     src.advance(pos);
                     self.expected = None;
                     return Ok(Some(frame));
+                }
+                // -------------- Map the error Values --------------
+                Err(frame::FrameError::InvalidStreamId(e)) => {
+                    return Err(FrameStreamError::Proto(
+                        FrameProtocolError::InvalidStreamId(e),
+                    ));
+                }
+                Err(frame::FrameError::InvalidPushId(e)) => {
+                    return Err(FrameStreamError::Proto(FrameProtocolError::InvalidPushId(
+                        e,
+                    )));
+                }
+                Err(frame::FrameError::Settings(e)) => {
+                    return Err(FrameStreamError::Proto(FrameProtocolError::Settings(e)));
+                }
+                Err(frame::FrameError::UnsupportedFrame(ty)) => {
+                    return Err(FrameStreamError::Proto(FrameProtocolError::ForbiddenFrame(
+                        ty,
+                    )));
+                }
+                Err(frame::FrameError::InvalidFrameValue) => {
+                    return Err(FrameStreamError::Proto(
+                        FrameProtocolError::InvalidFrameValue,
+                    ));
+                }
+                Err(frame::FrameError::Malformed) => {
+                    return Err(FrameStreamError::Proto(FrameProtocolError::Malformed));
                 }
             }
         }
@@ -252,16 +285,22 @@ impl FrameDecoder {
 }
 
 #[derive(Debug)]
+/// Errors that can occur while decoding frames
 pub enum FrameStreamError {
-    Proto(frame::FrameError),
-    Quic(TransportError),
+    Proto(FrameProtocolError),
+    Quic(StreamErrorIncoming),
     UnexpectedEnd,
 }
 
-impl From<frame::FrameError> for FrameStreamError {
-    fn from(err: frame::FrameError) -> Self {
-        FrameStreamError::Proto(err)
-    }
+#[derive(Debug, PartialEq)]
+/// Protocol specific errors that can occur while decoding frames in a stream
+pub enum FrameProtocolError {
+    Malformed,
+    ForbiddenFrame(u64), // Known (http2) frames that should generate an error
+    InvalidFrameValue,
+    Settings(SettingsError),
+    InvalidStreamId(InvalidStreamId),
+    InvalidPushId(InvalidPushId),
 }
 
 #[cfg(test)]
@@ -271,12 +310,9 @@ mod tests {
     use assert_matches::assert_matches;
     use bytes::{BufMut, Bytes, BytesMut};
     use futures_util::future::poll_fn;
-    use std::{collections::VecDeque, fmt, sync::Arc};
+    use std::collections::VecDeque;
 
-    use crate::{
-        proto::{coding::Encode, frame::FrameType, varint::VarInt},
-        quic,
-    };
+    use crate::proto::{coding::Encode, frame::FrameType, varint::VarInt};
 
     // Decoder
 
@@ -560,12 +596,11 @@ mod tests {
 
     impl RecvStream for FakeRecv {
         type Buf = Bytes;
-        type Error = FakeError;
 
         fn poll_data(
             &mut self,
             _: &mut Context<'_>,
-        ) -> Poll<Result<Option<Self::Buf>, Self::Error>> {
+        ) -> Poll<Result<Option<Self::Buf>, StreamErrorIncoming>> {
             Poll::Ready(Ok(self.chunks.pop_front()))
         }
 
@@ -574,32 +609,6 @@ mod tests {
         }
 
         fn recv_id(&self) -> StreamId {
-            unimplemented!()
-        }
-    }
-
-    #[derive(Debug)]
-    struct FakeError;
-
-    impl quic::Error for FakeError {
-        fn is_timeout(&self) -> bool {
-            unimplemented!()
-        }
-
-        fn err_code(&self) -> Option<u64> {
-            unimplemented!()
-        }
-    }
-
-    impl std::error::Error for FakeError {}
-    impl fmt::Display for FakeError {
-        fn fmt(&self, _: &mut fmt::Formatter<'_>) -> fmt::Result {
-            unimplemented!()
-        }
-    }
-
-    impl From<FakeError> for Arc<dyn quic::Error> {
-        fn from(_: FakeError) -> Self {
             unimplemented!()
         }
     }

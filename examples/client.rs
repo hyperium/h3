@@ -1,6 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use futures::future;
+use h3::error::ConnectionError;
 use rustls::pki_types::CertificateDer;
 use structopt::StructOpt;
 use tokio::io::AsyncWriteExt;
@@ -116,8 +117,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut driver, mut send_request) = h3::client::new(quinn_conn).await?;
 
     let drive = async move {
-        future::poll_fn(|cx| driver.poll_close(cx)).await?;
-        Ok::<(), Box<dyn std::error::Error>>(())
+        return Err::<(), ConnectionError>(future::poll_fn(|cx| driver.poll_close(cx)).await);
     };
 
     // In the following block, we want to take ownership of `send_request`:
@@ -157,8 +157,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let (req_res, drive_res) = tokio::join!(request, drive);
-    req_res?;
-    drive_res?;
+
+    if let Err(err) = req_res {
+        error!("request failed: {:?}", err);
+    }
+    if let Err(err) = drive_res {
+        error!("request background task failed: {:?}", err);
+    }
 
     // wait for the connection to be closed before exiting
     client_endpoint.wait_idle().await;
