@@ -10,16 +10,15 @@ use std::{
 use bytes::Buf;
 use futures_util::{future::poll_fn, ready, Future};
 use h3::{
-    connection::ConnectionState,
     error::{
-        internal_error::InternalConnectionError, Code, ConnectionError, ErrorLevel, StreamError,
+        connection_error_creators::CloseStream, internal_error::InternalConnectionError, Code,
+        ConnectionError, StreamError,
     },
     ext::Protocol,
-    frame::FrameStream,
     proto::frame::Frame,
     quic::{self, OpenStreams, WriteBuf},
     server::{Connection, RequestStream},
-    ConnectionState, Error, SharedState,
+    ConnectionState, SharedState,
 };
 use h3::{
     quic::SendStreamUnframed,
@@ -27,7 +26,7 @@ use h3::{
 };
 use h3_datagram::{
     datagram::Datagram,
-    datagram_traits::HandleDatagramsExt,
+    datagram_traits::{HandleDatagramsExt, SendDatagramError},
     quic_traits::{RecvDatagramExt, SendDatagramExt},
 };
 use http::{Method, Request, Response, StatusCode};
@@ -159,6 +158,7 @@ where
 
     /// Receive a datagram from the client
     pub fn accept_datagram(&self) -> ReadDatagram<C, B> {
+        // TODO: Use h3-datagram to handle the datagram instead of reimplementing it here
         ReadDatagram {
             conn: &self.server_conn,
             _marker: PhantomData,
@@ -168,7 +168,7 @@ where
     /// Sends a datagram
     ///
     /// TODO: maybe make async. `quinn` does not require an async send
-    pub fn send_datagram(&self, data: B) -> Result<(), Error>
+    pub fn send_datagram(&self, data: B) -> Result<(), SendDatagramError>
     where
         C: SendDatagramExt<B>,
     {
@@ -188,27 +188,30 @@ where
     }
 
     /// Accepts an incoming bidirectional stream or request
-    pub async fn accept_bi(&self) -> Result<Option<AcceptedBi<C, B>>, Error> {
-        // Get the next stream
+    pub async fn accept_bi(&self) -> Result<Option<AcceptedBi<C, B>>, StreamError> {
         // Accept the incoming stream
-        let stream = FrameStream::new(BufRecvStream::new(
-            poll_fn(|cx| {
-                let mut conn = self.server_conn.lock().unwrap();
-                conn.poll_accept_request_stream(cx)
-            })
-            .await??,
-        ));
+        let mut resolver = match self
+            .server_conn
+            .lock()
+            .unwrap()
+            .accept()
+            .await
+            .map_err(|conn_err| StreamError::ConnectionError(conn_err))?
+        {
+            Some(v) => v,
+            None => return Ok(None),
+        };
 
         // Read the first frame.
         //
         // This will determine if it is a webtransport bi-stream or a request stream
-        let frame = poll_fn(|cx| stream.poll_next(cx)).await;
+        let frame = poll_fn(|cx| resolver.frame_stream.poll_next(cx)).await;
 
         match frame {
             Ok(None) => Ok(None),
             Ok(Some(Frame::WebTransportStream(session_id))) => {
                 // Take the stream out of the framed reader and split it in half like Paul Allen
-                let stream = stream.into_inner();
+                let stream = resolver.frame_stream.into_inner();
 
                 Ok(Some(AcceptedBi::BidiStream(
                     session_id,
@@ -217,16 +220,8 @@ where
             }
             // Make the underlying HTTP/3 connection handle the rest
             frame => {
-                let req = {
-                    let mut conn = self.server_conn.lock().unwrap();
-                    conn.accept_with_frame(stream, frame)?
-                };
-                if let Some(req) = req {
-                    let (req, resp) = req.resolve().await?;
-                    Ok(Some(AcceptedBi::Request(req, resp)))
-                } else {
-                    Ok(None)
-                }
+                let (req, resp) = resolver.accept_with_frame(frame)?.resolve().await?;
+                Ok(Some(AcceptedBi::Request(req, resp)))
             }
         }
     }
@@ -237,6 +232,9 @@ where
             opener: &self.opener,
             stream: None,
             session_id,
+            stream_handler: WTransportStreamHandler {
+                shared: self.shared.clone(),
+            },
         }
     }
 
@@ -246,6 +244,9 @@ where
             opener: &self.opener,
             stream: None,
             session_id,
+            stream_handler: WTransportStreamHandler {
+                shared: self.shared.clone(),
+            },
         }
     }
 
@@ -273,8 +274,21 @@ pin_project! {
         opener: &'a Mutex<C::OpenStreams>,
         stream: Option<PendingStreams<C,B>>,
         session_id: SessionId,
+        stream_handler: WTransportStreamHandler,
     }
 }
+
+struct WTransportStreamHandler {
+    shared: Arc<SharedState>,
+}
+
+impl ConnectionState for WTransportStreamHandler {
+    fn shared_state(&self) -> &SharedState {
+        &self.shared
+    }
+}
+
+impl CloseStream for WTransportStreamHandler {}
 
 impl<'a, B, C> Future for OpenBi<'a, C, B>
 where
@@ -282,7 +296,7 @@ where
     B: Buf,
     C::BidiStream: SendStreamUnframed<B>,
 {
-    type Output = Result<BidiStream<C::BidiStream, B>, Error>;
+    type Output = Result<BidiStream<C::BidiStream, B>, StreamError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut p = self.project();
@@ -290,7 +304,8 @@ where
             match &mut p.stream {
                 Some((stream, buf)) => {
                     while buf.has_remaining() {
-                        ready!(stream.poll_send(cx, buf))?;
+                        ready!(stream.poll_send(cx, buf))
+                            .map_err(|err| p.stream_handler.handle_quic_stream_error(err))?;
                     }
 
                     let (stream, _) = p.stream.take().unwrap();
@@ -299,7 +314,8 @@ where
                 None => {
                     let mut opener = (*p.opener).lock().unwrap();
                     // Open the stream first
-                    let res = ready!(opener.poll_open_bidi(cx))?;
+                    let res = ready!(opener.poll_open_bidi(cx))
+                        .map_err(|err| p.stream_handler.handle_quic_stream_error(err))?;
                     let stream = BidiStream::new(BufRecvStream::new(res));
 
                     let buf = WriteBuf::from(BidiStreamHeader::WebTransportBidi(*p.session_id));
@@ -317,6 +333,7 @@ pin_project! {
         stream: Option<PendingUniStreams<C, B>>,
         // Future for opening a uni stream
         session_id: SessionId,
+        stream_handler: WTransportStreamHandler
     }
 }
 
@@ -326,7 +343,7 @@ where
     B: Buf,
     C::SendStream: SendStreamUnframed<B>,
 {
-    type Output = Result<SendStream<C::SendStream, B>, Error>;
+    type Output = Result<SendStream<C::SendStream, B>, StreamError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut p = self.project();
@@ -334,7 +351,8 @@ where
             match &mut p.stream {
                 Some((send, buf)) => {
                     while buf.has_remaining() {
-                        ready!(send.poll_send(cx, buf))?;
+                        ready!(send.poll_send(cx, buf))
+                            .map_err(|err| p.stream_handler.handle_quic_stream_error(err))?;
                     }
                     let (send, buf) = p.stream.take().unwrap();
                     assert!(!buf.has_remaining());
@@ -342,7 +360,8 @@ where
                 }
                 None => {
                     let mut opener = (*p.opener).lock().unwrap();
-                    let send = ready!(opener.poll_open_send(cx))?;
+                    let send = ready!(opener.poll_open_send(cx))
+                        .map_err(|err| p.stream_handler.handle_quic_stream_error(err))?;
                     let send = BufRecvStream::new(send);
                     let send = SendStream::new(send);
 
@@ -381,7 +400,7 @@ where
     C: quic::Connection<B> + RecvDatagramExt,
     B: Buf,
 {
-    type Output = Result<Option<(SessionId, C::Buf)>, Error>;
+    type Output = Result<Option<(SessionId, C::Buf)>, SendDatagramError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut conn = self.conn.lock().unwrap();
@@ -412,7 +431,7 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    type Output = Result<Option<(SessionId, RecvStream<C::RecvStream, B>)>, Error>;
+    type Output = Result<Option<(SessionId, RecvStream<C::RecvStream, B>)>, ConnectionError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut conn = self.conn.lock().unwrap();

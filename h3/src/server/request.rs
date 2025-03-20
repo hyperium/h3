@@ -33,7 +33,9 @@ where
     C::BidiStream: quic::SendStream<B>,
     B: Buf,
 {
-    pub(super) frame_stream: FrameStream<C::BidiStream, B>,
+    #[doc(hidden)]
+    // TODO: make this private 
+    pub frame_stream: FrameStream<C::BidiStream, B>,
     pub(super) request_end_send: UnboundedSender<StreamId>,
     pub(super) send_grease_frame: bool,
     pub(super) max_field_section_size: u64,

@@ -116,7 +116,7 @@ pub trait CloseStream: ConnectionState {
     }
 
     /// Handles a incoming stream error from the quic layer
-    fn handle_quic_stream_error(&mut self, error: StreamErrorIncoming) -> StreamError {
+    fn handle_quic_stream_error(&self, error: StreamErrorIncoming) -> StreamError {
         match error {
             StreamErrorIncoming::ConnectionErrorIncoming { connection_error } => {
                 let err = self.set_conn_error_and_wake(connection_error);
