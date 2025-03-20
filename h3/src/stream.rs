@@ -707,7 +707,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use quinn_proto::coding::BufExt;
+    use crate::proto::coding::BufExt;
 
     use super::*;
 
