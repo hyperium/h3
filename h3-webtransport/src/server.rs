@@ -377,38 +377,6 @@ pub enum AcceptedBi<C: quic::Connection<B>, B: Buf> {
     Request(Request<()>, RequestStream<C::BidiStream, B>),
 }
 
-/*/// Future for [`Connection::read_datagram`]
-pub struct ReadDatagram<'a, C, B>
-where
-    C: quic::Connection<B>,
-    B: Buf,
-{
-    conn: &'a Mutex<Connection<C, B>>,
-    _marker: PhantomData<B>,
-}
-
-impl<'a, C, B> Future for ReadDatagram<'a, C, B>
-where
-    C: quic::Connection<B> + RecvDatagramExt,
-    B: Buf,
-{
-    type Output = Result<Option<(SessionId, C::Buf)>, SendDatagramError>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut conn = self.conn.lock().unwrap();
-        match ready!(conn.inner.conn.poll_accept_datagram(cx))? {
-            Some(v) => {
-                let datagram = Datagram::decode(v)?;
-                Poll::Ready(Ok(Some((
-                    datagram.stream_id().into(),
-                    datagram.into_payload(),
-                ))))
-            }
-            None => Poll::Ready(Ok(None)),
-        }
-    }
-}*/
-
 /// Future for [`WebTransportSession::accept_uni`]
 pub struct AcceptUni<'a, C, B>
 where
