@@ -25,7 +25,7 @@ where
             stream_id.into_inner() % 4 == 0,
             "StreamId is not divisible by 4"
         );
-        // TODO: does stream_id need to be devided by 4?
+        // StreamId will be divided by 4 when encoding the Datagram header
         Self { stream_id, payload }
     }
 
