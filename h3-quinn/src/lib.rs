@@ -542,9 +542,7 @@ where
                 buf.advance(written);
                 Poll::Ready(Ok(written))
             }
-            Err(err) => {
-                Poll::Ready(Err(convert_write_error_to_stream_error(err)))
-            }
+            Err(err) => Poll::Ready(Err(convert_write_error_to_stream_error(err))),
         }
     }
 }
