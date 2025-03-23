@@ -54,7 +54,7 @@ where
     opener: Mutex<C::OpenStreams>,
     /// Shared State
     ///
-    /// Shared state is already in server_conn, but this
+    /// Shared state is already in server_conn, but with this it is not necessary to lock the mutex
     shared: Arc<SharedState>,
 }
 
