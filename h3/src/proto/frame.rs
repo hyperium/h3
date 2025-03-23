@@ -550,6 +550,9 @@ impl Settings {
                 //# H3_SETTINGS_ERROR.
                 settings.insert(identifier, value)?;
             } else {
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
+                //# Endpoints MUST NOT consider such settings to have
+                //# any meaning upon receipt.
                 #[cfg(feature = "tracing")]
                 tracing::debug!("Unsupported setting: {:#x?}", identifier);
             }
