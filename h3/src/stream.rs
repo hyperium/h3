@@ -299,7 +299,7 @@ where
         }
     }
 
-    // New helper function to poll the next VarInt from self.stream
+    // helper function to poll the next VarInt from self.stream
     fn poll_next_varint(
         &mut self,
         cx: &mut Context<'_>,

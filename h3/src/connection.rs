@@ -494,7 +494,6 @@ where
 
                     stream.stop_sending(Code::H3_STREAM_CREATION_ERROR.value());
                 }
-                // TODO: Push streams
                 _ => (),
             };
         }
