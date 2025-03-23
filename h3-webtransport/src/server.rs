@@ -1,7 +1,6 @@
 //! Provides the server side WebTransport session
 
 use std::{
-    marker::PhantomData,
     pin::Pin,
     sync::{Arc, Mutex},
     task::{Context, Poll},
@@ -15,6 +14,7 @@ use h3::{
         ConnectionError, StreamError,
     },
     ext::Protocol,
+    frame::FrameStream,
     proto::frame::Frame,
     quic::{self, OpenStreams, WriteBuf},
     server::{Connection, RequestStream},
@@ -164,7 +164,10 @@ where
     ///
     /// TODO: maybe make async. `quinn` does not require an async send
     pub fn datagram_sender(&self) -> DatagramSender<C::SendDatagramHandler, B> {
-        self.server_conn.lock().unwrap().get_datagram_sender()
+        self.server_conn
+            .lock()
+            .unwrap()
+            .get_datagram_sender(self.connect_stream.send_id())
     }
 
     /// Accept an incoming unidirectional stream from the client, it reads the stream until EOF.
@@ -176,19 +179,22 @@ where
 
     /// Accepts an incoming bidirectional stream or request
     pub async fn accept_bi(&self) -> Result<Option<AcceptedBi<C, B>>, StreamError> {
-        // Accept the incoming stream
-        let mut resolver = match self
-            .server_conn
-            .lock()
-            .unwrap()
-            .accept()
-            .await
-            .map_err(|conn_err| StreamError::ConnectionError(conn_err))?
-        {
-            Some(v) => v,
-            None => return Ok(None),
+        let stream = poll_fn(|cx| {
+            let mut conn = self.server_conn.lock().unwrap();
+            conn.poll_accept_request_stream(cx)
+        })
+        .await;
+
+        let stream = match stream {
+            Ok(Some(s)) => FrameStream::new(BufRecvStream::new(s)),
+            Ok(None) => {
+                // FIXME: is proper HTTP GoAway shutdown required?
+                return Ok(None);
+            }
+            Err(err) => return Err(StreamError::ConnectionError(err)),
         };
 
+        let mut resolver = { self.server_conn.lock().unwrap().create_resolver(stream) };
         // Read the first frame.
         //
         // This will determine if it is a webtransport bi-stream or a request stream
@@ -199,7 +205,6 @@ where
             Ok(Some(Frame::WebTransportStream(session_id))) => {
                 // Take the stream out of the framed reader and split it in half like Paul Allen
                 let stream = resolver.frame_stream.into_inner();
-
                 Ok(Some(AcceptedBi::BidiStream(
                     session_id,
                     BidiStream::new(stream),

@@ -1,7 +1,10 @@
 use std::task::Poll;
 
 use bytes::{Buf, Bytes};
-use h3::{quic::{self, StreamErrorIncoming}, stream::BufRecvStream};
+use h3::{
+    quic::{self, StreamErrorIncoming},
+    stream::BufRecvStream,
+};
 use pin_project_lite::pin_project;
 use tokio::io::ReadBuf;
 
@@ -113,7 +116,10 @@ where
     S: quic::SendStream<B>,
     B: Buf,
 {
-    fn poll_finish(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), StreamErrorIncoming>> {
+    fn poll_finish(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), StreamErrorIncoming>> {
         self.stream.poll_finish(cx)
     }
 
@@ -125,11 +131,17 @@ where
         self.stream.send_id()
     }
 
-    fn send_data<T: Into<h3::stream::WriteBuf<B>>>(&mut self, data: T) -> Result<(), StreamErrorIncoming> {
+    fn send_data<T: Into<h3::stream::WriteBuf<B>>>(
+        &mut self,
+        data: T,
+    ) -> Result<(), StreamErrorIncoming> {
         self.stream.send_data(data)
     }
 
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), StreamErrorIncoming>> {
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), StreamErrorIncoming>> {
         self.stream.poll_ready(cx)
     }
 }
@@ -216,7 +228,10 @@ where
     S: quic::SendStream<B>,
     B: Buf,
 {
-    fn poll_finish(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), StreamErrorIncoming>> {
+    fn poll_finish(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), StreamErrorIncoming>> {
         self.stream.poll_finish(cx)
     }
 
@@ -228,11 +243,17 @@ where
         self.stream.send_id()
     }
 
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), StreamErrorIncoming>> {
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), StreamErrorIncoming>> {
         self.stream.poll_ready(cx)
     }
 
-    fn send_data<T: Into<h3::stream::WriteBuf<B>>>(&mut self, data: T) -> Result<(), StreamErrorIncoming> {
+    fn send_data<T: Into<h3::stream::WriteBuf<B>>>(
+        &mut self,
+        data: T,
+    ) -> Result<(), StreamErrorIncoming> {
         self.stream.send_data(data)
     }
 }

@@ -20,6 +20,7 @@ where
 {
     fn get_datagram_sender(
         &self,
+        stream_id: quic::StreamId,
     ) -> crate::datagram_handler::DatagramSender<
         <C as crate::quic_traits::DatagramConnectionExt<B>>::SendDatagramHandler,
         B,
@@ -28,6 +29,7 @@ where
             handler: self.inner.conn.send_datagram_handler(),
             _marker: PhantomData,
             shared_state: self.inner.shared.clone(),
+            stream_id,
         }
     }
 

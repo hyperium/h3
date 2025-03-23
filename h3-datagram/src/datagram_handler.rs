@@ -1,7 +1,7 @@
 //! Traits which define the user API for datagrams.
 //! These traits are implemented for the client and server types in the `h3` crate.
 
-use std::{future::poll_fn, marker::PhantomData, sync::Arc};
+use std::{error::Error, fmt::Display, future::poll_fn, marker::PhantomData, sync::Arc};
 
 use crate::{
     datagram::Datagram,
@@ -15,10 +15,12 @@ use h3::{
 };
 
 /// Gives the ability to send datagrams.
+#[derive(Debug)]
 pub struct DatagramSender<H: SendDatagram<B>, B: Buf> {
     pub(crate) handler: H,
     pub(crate) _marker: PhantomData<B>,
     pub(crate) shared_state: Arc<SharedState>,
+    pub(crate) stream_id: StreamId,
 }
 
 impl<H, B> ConnectionState for DatagramSender<H, B>
@@ -37,8 +39,8 @@ where
     B: Buf,
 {
     /// Sends a datagram
-    pub fn send_datagram(&mut self, stream_id: StreamId, data: B) -> Result<(), SendDatagramError> {
-        let encoded_datagram = Datagram::new(stream_id, data);
+    pub fn send_datagram(&mut self, data: B) -> Result<(), SendDatagramError> {
+        let encoded_datagram = Datagram::new(self.stream_id, data);
         match self.handler.send_datagram(encoded_datagram.encode()) {
             Ok(()) => Ok(()),
             Err(e) => Err(self.handle_send_datagram_error(e)),
@@ -60,6 +62,7 @@ where
     }
 }
 
+#[derive(Debug)]
 pub struct DatagramReader<H: RecvDatagram> {
     pub(crate) handler: H,
     pub(crate) shared_state: Arc<SharedState>,
@@ -100,7 +103,8 @@ where
     C: quic::Connection<B> + DatagramConnectionExt<B>,
 {
     /// Sends a datagram
-    fn get_datagram_sender(&self) -> DatagramSender<C::SendDatagramHandler, B>;
+    fn get_datagram_sender(&self, stream_id: StreamId)
+        -> DatagramSender<C::SendDatagramHandler, B>;
     /// Reads an incoming datagram
     fn get_datagram_reader(&self) -> DatagramReader<C::RecvDatagramHandler>;
 }
@@ -117,3 +121,15 @@ pub enum SendDatagramError {
     /// Connection error
     ConnectionError(ConnectionError),
 }
+
+impl Display for SendDatagramError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SendDatagramError::NotAvailable => write!(f, "Datagrams are not available"),
+            SendDatagramError::TooLarge => write!(f, "Datagram is too large"),
+            SendDatagramError::ConnectionError(e) => write!(f, "Connection error: {}", e),
+        }
+    }
+}
+
+impl Error for SendDatagramError {}

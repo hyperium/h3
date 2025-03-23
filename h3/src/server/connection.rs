@@ -87,6 +87,29 @@ where
     }
 }
 
+#[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
+/// Impls for extension implementation which are not stable
+impl<C, B> Connection<C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    #[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
+    /// Create a [`RequestResolver`] to handle an incoming request.
+    pub fn create_resolver(&self, stream: FrameStream<C::BidiStream, B>) -> RequestResolver<C, B> {
+        self.create_resolver_internal(stream)
+    }
+
+    /// Polls the Connection and accepts an incoming request_streams
+    #[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
+    pub fn poll_accept_request_stream(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<C::BidiStream>, ConnectionError>> {
+        self.poll_accept_request_stream_internal(cx)
+    }
+}
+
 impl<C, B> Connection<C, B>
 where
     C: quic::Connection<B>,
@@ -99,7 +122,7 @@ where
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn accept(&mut self) -> Result<Option<RequestResolver<C, B>>, ConnectionError> {
         // Accept the incoming stream
-        let stream = match poll_fn(|cx| self.poll_accept_request_stream(cx)).await? {
+        let stream = match poll_fn(|cx| self.poll_accept_request_stream_internal(cx)).await? {
             Some(s) => FrameStream::new(BufRecvStream::new(s)),
             None => {
                 // We always send a last GoAway frame to the client, so it knows which was the last
@@ -109,18 +132,25 @@ where
             }
         };
 
-        let resolver = Ok(Some(RequestResolver {
+        let resolver = self.create_resolver_internal(stream);
+
+        // send the grease frame only once
+        self.inner.send_grease_frame = false;
+
+        Ok(Some(resolver))
+    }
+
+    fn create_resolver_internal(
+        &self,
+        stream: FrameStream<C::BidiStream, B>,
+    ) -> RequestResolver<C, B> {
+        RequestResolver {
             frame_stream: stream,
             request_end_send: self.request_end_send.clone(),
             send_grease_frame: self.inner.send_grease_frame,
             max_field_section_size: self.max_field_section_size,
             shared: self.inner.shared.clone(),
-        }));
-
-        // send the grease frame only once
-        self.inner.send_grease_frame = false;
-
-        resolver
+        }
     }
 
     /// Initiate a graceful shutdown, accepting `max_request` potentially still in-flight
@@ -141,7 +171,7 @@ where
     /// This could be either a *Request* or a *WebTransportBiStream*, the first frame's type
     /// decides.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn poll_accept_request_stream(
+    fn poll_accept_request_stream_internal(
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<C::BidiStream>, ConnectionError>> {

@@ -7,6 +7,7 @@ use h3::{
 
 /// HTTP datagram frames
 /// See: <https://www.rfc-editor.org/rfc/rfc9297#section-2.1>
+#[derive(Debug, Clone)]
 pub struct Datagram<B> {
     /// Stream id divided by 4
     stream_id: StreamId,
@@ -82,6 +83,7 @@ where
     }
 }
 
+#[derive(Debug)]
 pub struct EncodedDatagram<B: Buf> {
     /// Encoded datagram stream ID as Varint
     stream_id: [u8; VarInt::MAX_SIZE],

@@ -1,6 +1,9 @@
 //! This module represents the shared state of the h3 connection
 
-use std::{borrow::Cow, sync::{atomic::AtomicBool, OnceLock}};
+use std::{
+    borrow::Cow,
+    sync::{atomic::AtomicBool, OnceLock},
+};
 
 use futures_util::task::AtomicWaker;
 

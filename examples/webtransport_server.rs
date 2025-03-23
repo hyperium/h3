@@ -1,17 +1,12 @@
 use anyhow::{Context, Result};
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use h3::{
-    error::ErrorLevel,
     ext::Protocol,
-    quic::{self, SendStreamUnframed},
+    quic::{self},
     server::Connection,
 };
-use h3_datagram::quic_traits::{RecvDatagramExt, SendDatagramExt};
 use h3_quinn::quinn::{self, crypto::rustls::QuicServerConfig};
-use h3_webtransport::{
-    server::{self, WebTransportSession},
-    stream,
-};
+use h3_webtransport::server::{self, WebTransportSession};
 use http::Method;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
@@ -131,11 +126,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // // if this is a webtransport session, then h3 needs to stop handing the datagrams, bidirectional streams, and unidirectional streams and give them
                     // // to the webtransport session.
 
-                    tokio::spawn(async move {
-                        if let Err(err) = handle_connection(h3_conn).await {
-                            tracing::error!("Failed to handle connection: {err:?}");
-                        }
-                    });
+                    if let Err(err) = handle_connection(h3_conn).await {
+                        tracing::error!("Failed to handle connection: {err:?}");
+                    }
+
                     // let mut session: WebTransportSession<_, Bytes> =
                     //     WebTransportSession::accept(h3_conn).await.unwrap();
                     // tracing::info!("Finished establishing webtransport session");
@@ -164,7 +158,15 @@ async fn handle_connection(mut conn: Connection<h3_quinn::Connection, Bytes>) ->
 
     loop {
         match conn.accept().await {
-            Ok(Some((req, stream))) => {
+            Ok(Some(resolver)) => {
+                // TODO: resolve request in a different task to not block the accept loop
+                let (req, stream) = match resolver.resolve_request().await {
+                    Ok(request) => request,
+                    Err(err) => {
+                        error!("error resolving request: {err:?}");
+                        continue;
+                    }
+                };
                 info!("new request: {:#?}", req);
 
                 let ext = req.extensions();
@@ -186,18 +188,13 @@ async fn handle_connection(mut conn: Connection<h3_quinn::Connection, Bytes>) ->
                     }
                 }
             }
-
             // indicating no more streams to be received
             Ok(None) => {
                 break;
             }
-
             Err(err) => {
-                error!("Error on accept {}", err);
-                match err.get_error_level() {
-                    ErrorLevel::ConnectionError => break,
-                    ErrorLevel::StreamError => continue,
-                }
+                error!("Connection errored with {}", err);
+                break;
             }
         }
     }
@@ -264,37 +261,9 @@ where
 }
 
 /// This method will echo all inbound datagrams, unidirectional and bidirectional streams.
-#[tracing::instrument(level = "info", skip(session))]
-async fn handle_session_and_echo_all_inbound_messages<C>(
-    session: WebTransportSession<C, Bytes>,
-) -> anyhow::Result<()>
-where
-    // Use trait bounds to ensure we only happen to use implementation that are only for the quinn
-    // backend.
-    C: 'static
-        + Send
-        + h3::quic::Connection<Bytes>
-        + RecvDatagramExt<Buf = Bytes>
-        + SendDatagramExt<Bytes>,
-    <C::SendStream as h3::quic::SendStream<Bytes>>::Error:
-        'static + std::error::Error + Send + Sync + Into<std::io::Error>,
-    <C::RecvStream as h3::quic::RecvStream>::Error:
-        'static + std::error::Error + Send + Sync + Into<std::io::Error>,
-    stream::BidiStream<C::BidiStream, Bytes>:
-        quic::BidiStream<Bytes> + Unpin + AsyncWrite + AsyncRead,
-    <stream::BidiStream<C::BidiStream, Bytes> as quic::BidiStream<Bytes>>::SendStream:
-        Unpin + AsyncWrite + Send + Sync,
-    <stream::BidiStream<C::BidiStream, Bytes> as quic::BidiStream<Bytes>>::RecvStream:
-        Unpin + AsyncRead + Send + Sync,
-    C::SendStream: Send + Unpin,
-    C::RecvStream: Send + Unpin,
-    C::BidiStream: Send + Unpin,
-    stream::SendStream<C::SendStream, Bytes>: AsyncWrite,
-    C::BidiStream: SendStreamUnframed<Bytes>,
-    C::SendStream: SendStreamUnframed<Bytes>,
-    <C as RecvDatagramExt>::Error: h3::quic::Error,
-    <C as SendDatagramExt<Bytes>>::Error: h3::quic::Error,
-{
+async fn handle_session_and_echo_all_inbound_messages(
+    session: WebTransportSession<h3_quinn::Connection, Bytes>,
+) -> anyhow::Result<()> {
     let session_id = session.session_id();
 
     // This will open a bidirectional stream and send a message to the client right after connecting!
@@ -302,20 +271,22 @@ where
 
     tokio::spawn(async move { log_result!(open_bidi_test(stream).await) });
 
+    let mut datagram_reader = session.datagram_reader();
+    let mut datagram_sender = session.datagram_sender();
+
     loop {
         tokio::select! {
-            datagram = session.accept_datagram() => {
-                let datagram = datagram?;
-                if let Some((_, datagram)) = datagram {
-                    tracing::info!("Responding with {datagram:?}");
-                    // Put something before to make sure encoding and decoding works and don't just
-                    // pass through
-                    let mut resp = BytesMut::from(&b"Response: "[..]);
-                    resp.put(datagram);
-
-                    session.send_datagram(resp.freeze())?;
-                    tracing::info!("Finished sending datagram");
-                }
+            datagram = datagram_reader.read_datagram() => {
+                let datagram = match datagram {
+                    Ok(datagram) => datagram,
+                    Err(err) => {
+                        tracing::error!("Failed to read datagram: {err:?}");
+                        break;
+                    }
+                };
+                tracing::info!("Received datagram: {datagram:?}");
+                let datagram = datagram.into_payload();
+                datagram_sender.send_datagram(datagram)?;
             }
             uni_stream = session.accept_uni() => {
                 let (id, stream) = uni_stream?.unwrap();

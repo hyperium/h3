@@ -20,7 +20,7 @@ use crate::{
         ConnectionError, StreamError,
     },
     frame::FrameStream,
-    proto::{frame::Frame, headers::Header, push::PushId, varint::VarInt},
+    proto::{frame::Frame, headers::Header, push::PushId},
     qpack,
     quic::{self, StreamId},
     shared_state::{ConnectionState, SharedState},

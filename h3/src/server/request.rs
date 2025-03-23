@@ -34,7 +34,7 @@ where
     B: Buf,
 {
     #[doc(hidden)]
-    // TODO: make this private 
+    // TODO: make this private
     pub frame_stream: FrameStream<C::BidiStream, B>,
     pub(super) request_end_send: UnboundedSender<StreamId>,
     pub(super) send_grease_frame: bool,
