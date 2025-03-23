@@ -543,14 +543,6 @@ where
                 Poll::Ready(Ok(written))
             }
             Err(err) => {
-                // We are forced to use AsyncWrite for now because we cannot store
-                // the result of a call to:
-                // quinn::send_stream::write<'a>(&'a mut self, buf: &'a [u8]) -> Result<usize, WriteError>.
-                //
-                // This is why we have to unpack the error from io::Error instead of having it
-                // returned directly. This should not panic as long as quinn's AsyncWrite impl
-                // doesn't change.
-
                 Poll::Ready(Err(convert_write_error_to_stream_error(err)))
             }
         }
