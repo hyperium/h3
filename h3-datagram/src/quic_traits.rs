@@ -9,7 +9,7 @@ use std::task::Poll;
 use bytes::Buf;
 use h3::quic::ConnectionErrorIncoming;
 
-use crate::datagram::Datagram;
+use crate::datagram::EncodedDatagram;
 
 /// Connection Extension trait for a DatagramHandler type defined by the quic implementation
 pub trait DatagramConnectionExt<B: Buf> {
@@ -17,7 +17,7 @@ pub trait DatagramConnectionExt<B: Buf> {
     type SendDatagramHandler: SendDatagram<B>;
 
     /// The type of the Datagram receive Handler
-    type RecvDatagramHandler: RecvDatagram<B>;
+    type RecvDatagramHandler: RecvDatagram;
 
     /// Get the send datagram handler
     fn send_datagram_handler(&self) -> Self::SendDatagramHandler;
@@ -31,18 +31,24 @@ pub trait DatagramConnectionExt<B: Buf> {
 /// See: <https://www.rfc-editor.org/rfc/rfc9297>
 pub trait SendDatagram<B: Buf> {
     /// Send a datagram
-    fn send_datagram(&mut self, data: B) -> Result<(), SendDatagramErrorIncoming>;
+    fn send_datagram<T: Into<EncodedDatagram<B>>>(
+        &mut self,
+        data: T,
+    ) -> Result<(), SendDatagramErrorIncoming>;
 }
 
 /// Extends the `Connection` trait for receiving datagrams
 ///
 /// See: <https://www.rfc-editor.org/rfc/rfc9297>
-pub trait RecvDatagram<B> {
+pub trait RecvDatagram {
+    /// The buffer type
+    type Buffer: Buf;
+
     /// Poll the connection for incoming datagrams.
     fn poll_incoming_datagram(
         &mut self,
         cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<B>, ConnectionErrorIncoming>>;
+    ) -> Poll<Result<Self::Buffer, ConnectionErrorIncoming>>;
 }
 
 /// Types of errors when sending a datagram.

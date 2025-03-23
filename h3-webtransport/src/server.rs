@@ -25,9 +25,8 @@ use h3::{
     stream::{BidiStreamHeader, BufRecvStream, UniStreamHeader},
 };
 use h3_datagram::{
-    datagram::Datagram,
-    datagram_handler::{HandleDatagramsExt, SendDatagramError},
-    quic_traits::{RecvDatagramExt, SendDatagramExt},
+    datagram_handler::{DatagramReader, DatagramSender, HandleDatagramsExt},
+    quic_traits,
 };
 use http::{Method, Request, Response, StatusCode};
 
@@ -43,7 +42,7 @@ use crate::stream::{BidiStream, RecvStream, SendStream};
 /// Similar to [`h3::server::Connection`](https://docs.rs/h3/latest/h3/server/struct.Connection.html) it is generic over the QUIC implementation and Buffer.
 pub struct WebTransportSession<C, B>
 where
-    C: quic::Connection<B>,
+    C: quic::Connection<B> + quic_traits::DatagramConnectionExt<B>,
     Connection<C, B>: HandleDatagramsExt<C, B>,
     B: Buf,
 {
@@ -61,7 +60,7 @@ where
 
 impl<C, B> ConnectionState for WebTransportSession<C, B>
 where
-    C: quic::Connection<B>,
+    C: quic::Connection<B> + quic_traits::DatagramConnectionExt<B>,
     Connection<C, B>: HandleDatagramsExt<C, B>,
     B: Buf,
 {
@@ -73,7 +72,7 @@ where
 impl<C, B> WebTransportSession<C, B>
 where
     Connection<C, B>: HandleDatagramsExt<C, B>,
-    C: quic::Connection<B>,
+    C: quic::Connection<B> + quic_traits::DatagramConnectionExt<B>,
     B: Buf,
 {
     /// Accepts a *CONNECT* request for establishing a WebTransport session.
@@ -157,27 +156,15 @@ where
     }
 
     /// Receive a datagram from the client
-    pub fn accept_datagram(&self) -> ReadDatagram<C, B> {
-        // TODO: Use h3-datagram to handle the datagram instead of reimplementing it here
-        ReadDatagram {
-            conn: &self.server_conn,
-            _marker: PhantomData,
-        }
+    pub fn datagram_reader(&self) -> DatagramReader<C::RecvDatagramHandler> {
+        self.server_conn.lock().unwrap().get_datagram_reader()
     }
 
     /// Sends a datagram
     ///
     /// TODO: maybe make async. `quinn` does not require an async send
-    pub fn send_datagram(&self, data: B) -> Result<(), SendDatagramError>
-    where
-        C: SendDatagramExt<B>,
-    {
-        self.server_conn
-            .lock()
-            .unwrap()
-            .get_datagram_sender(self.connect_stream.id(), data)?;
-
-        Ok(())
+    pub fn datagram_sender(&self) -> DatagramSender<C::SendDatagramHandler, B> {
+        self.server_conn.lock().unwrap().get_datagram_sender()
     }
 
     /// Accept an incoming unidirectional stream from the client, it reads the stream until EOF.
@@ -385,7 +372,7 @@ pub enum AcceptedBi<C: quic::Connection<B>, B: Buf> {
     Request(Request<()>, RequestStream<C::BidiStream, B>),
 }
 
-/// Future for [`Connection::read_datagram`]
+/*/// Future for [`Connection::read_datagram`]
 pub struct ReadDatagram<'a, C, B>
 where
     C: quic::Connection<B>,
@@ -415,7 +402,7 @@ where
             None => Poll::Ready(Ok(None)),
         }
     }
-}
+}*/
 
 /// Future for [`WebTransportSession::accept_uni`]
 pub struct AcceptUni<'a, C, B>

@@ -13,23 +13,14 @@ use std::{
 
 use bytes::{Buf, Bytes};
 
-#[cfg(feature = "datagram")]
-use bytes::BytesMut;
-
 use futures::{
     ready,
     stream::{self},
     Stream, StreamExt,
 };
 
-#[cfg(feature = "datagram")]
-use h3_datagram::quic_traits::SendDatagramErrorIncoming;
-
-#[cfg(feature = "datagram")]
-use h3_datagram::{datagram::Datagram, quic_traits};
-
+use quinn::ReadError;
 pub use quinn::{self, AcceptBi, AcceptUni, Endpoint, OpenBi, OpenUni, VarInt};
-use quinn::{ReadDatagram, ReadError, SendDatagramError};
 
 use h3::{
     error::Code,
@@ -39,6 +30,9 @@ use tokio_util::sync::ReusableBoxFuture;
 
 #[cfg(feature = "tracing")]
 use tracing::instrument;
+
+#[cfg(feature = "datagram")]
+pub mod datagram;
 
 /// BoxStream with Sync trait
 type BoxStreamSync<'a, T> = Pin<Box<dyn Stream<Item = T> + Sync + Send + 'a>>;
@@ -52,7 +46,6 @@ pub struct Connection {
     opening_bi: Option<BoxStreamSync<'static, <OpenBi<'static> as Future>::Output>>,
     incoming_uni: BoxStreamSync<'static, <AcceptUni<'static> as Future>::Output>,
     opening_uni: Option<BoxStreamSync<'static, <OpenUni<'static> as Future>::Output>>,
-    datagrams: BoxStreamSync<'static, <ReadDatagram<'static> as Future>::Output>,
 }
 
 impl Connection {
@@ -68,9 +61,6 @@ impl Connection {
                 Some((conn.accept_uni().await, conn))
             })),
             opening_uni: None,
-            datagrams: Box::pin(stream::unfold(conn, |conn| async {
-                Some((conn.read_datagram().await, conn))
-            })),
         }
     }
 }
@@ -88,7 +78,7 @@ where
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Self::BidiStream, ConnectionErrorIncoming>> {
         let (send, recv) = ready!(self.incoming_bi.poll_next_unpin(cx))
-            .expect("BoxStream never returns None")
+            .expect("self.incoming_bi BoxStream never returns None")
             .map_err(|e| convert_connection_error(e))?;
         Poll::Ready(Ok(Self::BidiStream {
             send: Self::SendStream::new(send),
@@ -102,7 +92,7 @@ where
         cx: &mut task::Context<'_>,
     ) -> Poll<Result<Self::RecvStream, ConnectionErrorIncoming>> {
         let recv = ready!(self.incoming_uni.poll_next_unpin(cx))
-            .expect("BoxStream never returns None")
+            .expect("self.incoming_uni BoxStream never returns None")
             .map_err(|e| convert_connection_error(e))?;
         Poll::Ready(Ok(Self::RecvStream::new(recv)))
     }
@@ -189,74 +179,6 @@ where
             VarInt::from_u64(code.value()).expect("error code VarInt"),
             reason,
         );
-    }
-}
-
-#[cfg(feature = "datagram")]
-impl<B> quic_traits::SendDatagramExt<B> for Connection
-where
-    B: Buf,
-{
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    fn send_datagram(&mut self, data: Datagram<B>) -> Result<(), SendDatagramErrorIncoming> {
-        // TODO investigate static buffer from known max datagram size
-        let mut buf = BytesMut::new();
-        data.encode(&mut buf);
-        self.conn
-            .send_datagram(buf.freeze())
-            .map_err(|e| convert_send_datagram_error(e))?;
-        Ok(())
-    }
-}
-
-#[cfg(feature = "datagram")]
-fn convert_send_datagram_error(error: SendDatagramError) -> SendDatagramErrorIncoming {
-    match error {
-        SendDatagramError::UnsupportedByPeer | SendDatagramError::Disabled => {
-            SendDatagramErrorIncoming::NotAvailable
-        }
-        SendDatagramError::TooLarge => SendDatagramErrorIncoming::TooLarge,
-        SendDatagramError::ConnectionLost(e) => SendDatagramErrorIncoming::ConnectionError(
-            convert_h3_error_to_datagram_error(convert_connection_error(e)),
-        ),
-    }
-}
-
-#[cfg(feature = "datagram")]
-fn convert_h3_error_to_datagram_error(
-    error: h3::quic::ConnectionErrorIncoming,
-) -> h3_datagram::ConnectionErrorIncoming {
-    match error {
-        ConnectionErrorIncoming::ApplicationClose { error_code } => {
-            h3_datagram::ConnectionErrorIncoming::ApplicationClose {
-                error_code: error_code,
-            }
-        }
-        ConnectionErrorIncoming::Timeout => h3_datagram::ConnectionErrorIncoming::Timeout,
-        ConnectionErrorIncoming::InternalError(err) => {
-            h3_datagram::ConnectionErrorIncoming::InternalError(err)
-        }
-        ConnectionErrorIncoming::Undefined(error) => {
-            h3_datagram::ConnectionErrorIncoming::Undefined(error)
-        }
-    }
-}
-
-#[cfg(feature = "datagram")]
-impl quic_traits::RecvDatagramExt for Connection {
-    type Buf = Bytes;
-
-    #[inline]
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    fn poll_accept_datagram(
-        &mut self,
-        cx: &mut task::Context<'_>,
-    ) -> Poll<Result<Option<Self::Buf>, ConnectionErrorIncoming>> {
-        match ready!(self.datagrams.poll_next_unpin(cx)) {
-            Some(Ok(x)) => Poll::Ready(Ok(Some(x))),
-            Some(Err(e)) => Poll::Ready(Err(convert_connection_error(e))),
-            None => Poll::Ready(Ok(None)),
-        }
     }
 }
 

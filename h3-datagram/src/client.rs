@@ -35,13 +35,10 @@ where
         &self,
     ) -> crate::datagram_handler::DatagramReader<
         <C as crate::quic_traits::DatagramConnectionExt<B>>::RecvDatagramHandler,
-        B,
     > {
         DatagramReader {
             handler: self.inner.conn.recv_datagram_handler(),
-            _marker: PhantomData,
             shared_state: self.inner.shared.clone(),
         }
-
     }
 }

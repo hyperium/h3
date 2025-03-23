@@ -9,7 +9,7 @@ use crate::{
 };
 use bytes::Buf;
 use h3::{
-    error::ConnectionError,
+    error::{connection_error_creators::CloseStream, ConnectionError, StreamError},
     quic::{self, StreamId},
     ConnectionState, SharedState,
 };
@@ -38,13 +38,11 @@ where
 {
     /// Sends a datagram
     pub fn send_datagram(&mut self, stream_id: StreamId, data: B) -> Result<(), SendDatagramError> {
-        let mut buf = BytesMut::new();
-        Datagram::new(stream_id, data).encode(&mut buf);
-
-        self.handler.send_datagram(data)
-
-        self.send_datagram(Datagram::new(stream_id, data))
-            .map_err(|e| self.handle_send_datagram_error(e))
+        let encoded_datagram = Datagram::new(stream_id, data);
+        match self.handler.send_datagram(encoded_datagram.encode()) {
+            Ok(()) => Ok(()),
+            Err(e) => Err(self.handle_send_datagram_error(e)),
+        }
     }
 
     fn handle_send_datagram_error(
@@ -62,31 +60,37 @@ where
     }
 }
 
-pub struct DatagramReader<H: RecvDatagram<B>, B: Buf> {
+pub struct DatagramReader<H: RecvDatagram> {
     pub(crate) handler: H,
-    pub(crate) _marker: PhantomData<B>,
     pub(crate) shared_state: Arc<SharedState>,
 }
 
-impl<H, B> ConnectionState for DatagramReader<H, B>
+impl<H> ConnectionState for DatagramReader<H>
 where
-    H: RecvDatagram<B>,
-    B: Buf,
+    H: RecvDatagram,
 {
     fn shared_state(&self) -> &SharedState {
         self.shared_state.as_ref()
     }
 }
 
-impl<H, B> DatagramReader<H, B>
+impl<H> CloseStream for DatagramReader<H> where H: RecvDatagram {}
+
+impl<H> DatagramReader<H>
 where
-    H: RecvDatagram<B>,
-    B: Buf,
+    H: RecvDatagram,
 {
     /// Reads an incoming datagram
-    pub async fn read_datagram(&mut self) -> Result<Datagram<B>, ConnectionError> {
-        let x = poll_fn(|cx| self.handler.poll_incoming_datagram(cx)).await;
-        todo!()
+    pub async fn read_datagram(&mut self) -> Result<Datagram<H::Buffer>, StreamError> {
+        match poll_fn(|cx| self.handler.poll_incoming_datagram(cx)).await {
+            Ok(datagram) => Datagram::decode(datagram)
+                .map_err(|err| self.handle_connection_error_on_stream(err)),
+            Err(err) => Err(self.handle_quic_stream_error(
+                quic::StreamErrorIncoming::ConnectionErrorIncoming {
+                    connection_error: err,
+                },
+            )),
+        }
     }
 }
 
@@ -98,7 +102,7 @@ where
     /// Sends a datagram
     fn get_datagram_sender(&self) -> DatagramSender<C::SendDatagramHandler, B>;
     /// Reads an incoming datagram
-    fn get_datagram_reader(&self) -> DatagramReader<C::RecvDatagramHandler, B>;
+    fn get_datagram_reader(&self) -> DatagramReader<C::RecvDatagramHandler>;
 }
 
 /// Types of errors when sending a datagram.
@@ -113,34 +117,3 @@ pub enum SendDatagramError {
     /// Connection error
     ConnectionError(ConnectionError),
 }
-
-/*pin_project! {
-    /// Future for [`Connection::read_datagram`]
-    pub struct ReadDatagram<'a, C, B>
-    where
-            C: quic::Connection<B>,
-            B: Buf,
-        {
-            pub(crate) conn: &'a mut ConnectionInner<C, B>,
-            pub(crate) _marker: PhantomData<B>,
-        }
-}
-
-impl<'a, C, B> Future for ReadDatagram<'a, C, B>
-where
-    C: quic::Connection<B> + RecvDatagramExt,
-    B: Buf,
-{
-    type Output = Result<Option<Datagram<C::Buf>>, ConnectionError>;
-
-    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match ready!(self.conn.conn.poll_accept_datagram(cx))
-            .map_err(|e| self.conn.handle_connection_error(e))?
-        {
-            Some(v) => Poll::Ready(Ok(Some(
-                Datagram::decode(v).map_err(|e| self.conn.handle_connection_error(e))?,
-            ))),
-            None => Poll::Ready(Ok(None)),
-        }
-    }
-}*/

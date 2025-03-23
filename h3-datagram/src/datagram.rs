@@ -1,4 +1,4 @@
-use bytes::{Buf, Bytes};
+use bytes::Buf;
 use h3::{
     error::{internal_error::InternalConnectionError, Code},
     proto::varint::VarInt,
@@ -7,7 +7,7 @@ use h3::{
 
 /// HTTP datagram frames
 /// See: <https://www.rfc-editor.org/rfc/rfc9297#section-2.1>
-pub struct Datagram<B = Bytes> {
+pub struct Datagram<B> {
     /// Stream id divided by 4
     stream_id: StreamId,
     /// The data contained in the datagram
@@ -64,13 +64,59 @@ where
     }
 
     /// Encode the datagram to wire format
-    pub fn encode<D: bytes::BufMut>(self, buf: &mut D) {
-        (VarInt::from(self.stream_id) / 4).encode(buf);
-        buf.put(self.payload);
+    pub fn encode(self) -> EncodedDatagram<B> {
+        let mut buffer = [0; VarInt::MAX_SIZE];
+        let varint = VarInt::from(self.stream_id) / 4;
+        varint.encode(&mut buffer.as_mut_slice());
+        EncodedDatagram {
+            stream_id: [0; VarInt::MAX_SIZE],
+            len: varint.size(),
+            pos: 0,
+            payload: self.payload,
+        }
     }
 
     /// Returns the datagram payload
     pub fn into_payload(self) -> B {
         self.payload
+    }
+}
+
+pub struct EncodedDatagram<B: Buf> {
+    /// Encoded datagram stream ID as Varint
+    stream_id: [u8; VarInt::MAX_SIZE],
+    /// Length of the varint
+    len: usize,
+    /// Position of the stream_id buffer
+    pos: usize,
+    /// Datagram Payload
+    payload: B,
+}
+
+/// Implementation of [`Buf`] for [`Datagram`]
+impl<B> Buf for EncodedDatagram<B>
+where
+    B: Buf,
+{
+    fn remaining(&self) -> usize {
+        self.len - self.pos + self.payload.remaining()
+    }
+
+    fn chunk(&self) -> &[u8] {
+        if self.len - self.pos > 0 {
+            return &self.stream_id[self.pos..self.len];
+        } else {
+            self.payload.chunk()
+        }
+    }
+
+    fn advance(&mut self, mut cnt: usize) {
+        let remaining_header = self.len - self.pos;
+        if remaining_header > 0 {
+            let advanced = usize::min(cnt, remaining_header);
+            self.pos += advanced;
+            cnt -= advanced;
+        }
+        self.payload.advance(cnt);
     }
 }
