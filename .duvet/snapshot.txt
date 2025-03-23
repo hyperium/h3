@@ -599,8 +599,8 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[implementation]:    meaning.
     TEXT[!SHOULD,implementation]: Endpoints SHOULD include at least one such setting in their
     TEXT[!SHOULD,implementation]:    SETTINGS frame.
-    TEXT[!MUST]: Endpoints MUST NOT consider such settings to have
-    TEXT[!MUST]:    any meaning upon receipt.
+    TEXT[!MUST,implementation]: Endpoints MUST NOT consider such settings to have
+    TEXT[!MUST,implementation]:    any meaning upon receipt.
     TEXT[implementation]:    Setting identifiers that were defined in [HTTP/2] where there is no
     TEXT[implementation]:    corresponding HTTP/3 setting have also been reserved
     TEXT[implementation]:    (Section 11.2.2).
