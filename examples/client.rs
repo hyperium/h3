@@ -1,6 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use futures::future;
+use h3::error::{ConnectionError, StreamError};
 use rustls::pki_types::CertificateDer;
 use structopt::StructOpt;
 use tokio::io::AsyncWriteExt;
@@ -116,8 +117,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut driver, mut send_request) = h3::client::new(quinn_conn).await?;
 
     let drive = async move {
-        future::poll_fn(|cx| driver.poll_close(cx)).await?;
-        Ok::<(), Box<dyn std::error::Error>>(())
+        return Err::<(), ConnectionError>(future::poll_fn(|cx| driver.poll_close(cx)).await);
     };
 
     // In the following block, we want to take ownership of `send_request`:
@@ -129,7 +129,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let request = async move {
         info!("sending request ...");
 
-        let req = http::Request::builder().uri(uri).body(())?;
+        let req = http::Request::builder().uri(uri).body(()).unwrap();
 
         // sending request results in a bidirectional stream,
         // which is also used for receiving response
@@ -149,16 +149,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // receiving potential response body
         while let Some(mut chunk) = stream.recv_data().await? {
             let mut out = tokio::io::stdout();
-            out.write_all_buf(&mut chunk).await?;
-            out.flush().await?;
+            out.write_all_buf(&mut chunk).await.unwrap();
+            out.flush().await.unwrap();
         }
 
-        Ok::<_, Box<dyn std::error::Error>>(())
+        Ok::<_, StreamError>(())
     };
 
     let (req_res, drive_res) = tokio::join!(request, drive);
-    req_res?;
-    drive_res?;
+
+    if let Err(err) = req_res {
+        if err.is_h3_no_error() {
+            info!("connection closed with H3_NO_ERROR");
+        } else {
+            error!("request failed: {:?}", err);
+        }
+        error!("request failed: {:?}", err);
+    }
+    if let Err(err) = drive_res {
+        if err.is_h3_no_error() {
+            info!("connection closed with H3_NO_ERROR");
+        } else {
+            error!("connection closed with error: {:?}", err);
+            return Err(err.into());
+        }
+    }
 
     // wait for the connection to be closed before exiting
     client_endpoint.wait_idle().await;

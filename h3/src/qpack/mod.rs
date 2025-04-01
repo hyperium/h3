@@ -1,6 +1,6 @@
 pub use self::{
-    decoder::{decode_stateless, Decoded, Error as DecoderError},
-    encoder::{encode_stateless, Error as EncoderError},
+    decoder::{decode_stateless, Decoded, DecoderError},
+    encoder::{encode_stateless, EncoderError},
     field::HeaderField,
 };
 

@@ -5,36 +5,42 @@ use std::marker::PhantomData;
 use bytes::Buf;
 use h3::{
     client::Connection,
-    quic::{self, StreamId},
-    Error,
+    quic::{self},
 };
 
 use crate::{
-    datagram::Datagram,
-    datagram_traits::{HandleDatagramsExt, ReadDatagram},
-    quic_traits::{self, RecvDatagramExt, SendDatagramExt},
+    datagram_handler::{DatagramReader, DatagramSender, HandleDatagramsExt},
+    quic_traits::DatagramConnectionExt,
 };
 
 impl<B, C> HandleDatagramsExt<C, B> for Connection<C, B>
 where
     B: Buf,
-    C: quic::Connection<B> + SendDatagramExt<B> + RecvDatagramExt,
-    <C as quic_traits::RecvDatagramExt>::Error: h3::quic::Error + 'static,
-    <C as quic_traits::SendDatagramExt<B>>::Error: h3::quic::Error + 'static,
+    C: quic::Connection<B> + DatagramConnectionExt<B>,
 {
-    /// Sends a datagram
-    fn send_datagram(&mut self, stream_id: StreamId, data: B) -> Result<(), Error> {
-        self.inner
-            .conn
-            .send_datagram(Datagram::new(stream_id, data))?;
-        Ok(())
+    fn get_datagram_sender(
+        &self,
+        stream_id: quic::StreamId,
+    ) -> crate::datagram_handler::DatagramSender<
+        <C as crate::quic_traits::DatagramConnectionExt<B>>::SendDatagramHandler,
+        B,
+    > {
+        DatagramSender {
+            handler: self.inner.conn.send_datagram_handler(),
+            _marker: PhantomData,
+            shared_state: self.inner.shared.clone(),
+            stream_id,
+        }
     }
 
-    /// Reads an incoming datagram
-    fn read_datagram(&mut self) -> ReadDatagram<C, B> {
-        ReadDatagram {
-            conn: &mut self.inner.conn,
-            _marker: PhantomData,
+    fn get_datagram_reader(
+        &self,
+    ) -> crate::datagram_handler::DatagramReader<
+        <C as crate::quic_traits::DatagramConnectionExt<B>>::RecvDatagramHandler,
+    > {
+        DatagramReader {
+            handler: self.inner.conn.recv_datagram_handler(),
+            shared_state: self.inner.shared.clone(),
         }
     }
 }

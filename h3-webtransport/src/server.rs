@@ -1,33 +1,32 @@
 //! Provides the server side WebTransport session
 
 use std::{
-    marker::PhantomData,
     pin::Pin,
-    sync::Mutex,
+    sync::{Arc, Mutex},
     task::{Context, Poll},
 };
 
 use bytes::Buf;
 use futures_util::{future::poll_fn, ready, Future};
 use h3::{
-    connection::ConnectionState,
-    error::{Code, ErrorLevel},
+    error::{
+        connection_error_creators::CloseStream, internal_error::InternalConnectionError, Code,
+        ConnectionError, StreamError,
+    },
     ext::Protocol,
     frame::FrameStream,
     proto::frame::Frame,
     quic::{self, OpenStreams, WriteBuf},
-    server::Connection,
-    server::RequestStream,
-    Error,
+    server::{Connection, RequestStream},
+    ConnectionState, SharedState,
 };
 use h3::{
     quic::SendStreamUnframed,
     stream::{BidiStreamHeader, BufRecvStream, UniStreamHeader},
 };
 use h3_datagram::{
-    datagram::Datagram,
-    datagram_traits::HandleDatagramsExt,
-    quic_traits::{RecvDatagramExt, SendDatagramExt},
+    datagram_handler::{DatagramReader, DatagramSender, HandleDatagramsExt},
+    quic_traits,
 };
 use http::{Method, Request, Response, StatusCode};
 
@@ -43,7 +42,7 @@ use crate::stream::{BidiStream, RecvStream, SendStream};
 /// Similar to [`h3::server::Connection`](https://docs.rs/h3/latest/h3/server/struct.Connection.html) it is generic over the QUIC implementation and Buffer.
 pub struct WebTransportSession<C, B>
 where
-    C: quic::Connection<B>,
+    C: quic::Connection<B> + quic_traits::DatagramConnectionExt<B>,
     Connection<C, B>: HandleDatagramsExt<C, B>,
     B: Buf,
 {
@@ -53,12 +52,27 @@ where
     server_conn: Mutex<Connection<C, B>>,
     connect_stream: RequestStream<C::BidiStream, B>,
     opener: Mutex<C::OpenStreams>,
+    /// Shared State
+    ///
+    /// Shared state is already in server_conn, but with this it is not necessary to lock the mutex
+    shared: Arc<SharedState>,
+}
+
+impl<C, B> ConnectionState for WebTransportSession<C, B>
+where
+    C: quic::Connection<B> + quic_traits::DatagramConnectionExt<B>,
+    Connection<C, B>: HandleDatagramsExt<C, B>,
+    B: Buf,
+{
+    fn shared_state(&self) -> &SharedState {
+        &self.shared
+    }
 }
 
 impl<C, B> WebTransportSession<C, B>
 where
     Connection<C, B>: HandleDatagramsExt<C, B>,
-    C: quic::Connection<B>,
+    C: quic::Connection<B> + quic_traits::DatagramConnectionExt<B>,
     B: Buf,
 {
     /// Accepts a *CONNECT* request for establishing a WebTransport session.
@@ -68,24 +82,29 @@ where
         request: Request<()>,
         mut stream: RequestStream<C::BidiStream, B>,
         mut conn: Connection<C, B>,
-    ) -> Result<Self, Error> {
-        let shared = conn.shared_state().clone();
-        {
-            let config = shared.write("Read WebTransport support").peer_config;
+    ) -> Result<Self, StreamError> {
+        let shared = conn.inner.shared.clone();
 
-            if !config.enable_webtransport() {
-                return Err(conn.close(
-                    Code::H3_SETTINGS_ERROR,
-                    "webtransport is not supported by client",
-                ));
-            }
+        let config = shared.settings();
 
-            if !config.enable_datagram() {
-                return Err(conn.close(
-                    Code::H3_SETTINGS_ERROR,
-                    "datagrams are not supported by client",
-                ));
-            }
+        if !config.enable_webtransport() {
+            return Err(StreamError::ConnectionError(
+                conn.inner
+                    .handle_connection_error(InternalConnectionError::new(
+                        Code::H3_SETTINGS_ERROR,
+                        "webtransport is not supported by client".to_string(),
+                    )),
+            ));
+        }
+
+        if !config.enable_datagram() {
+            return Err(StreamError::ConnectionError(
+                conn.inner
+                    .handle_connection_error(InternalConnectionError::new(
+                        Code::H3_SETTINGS_ERROR,
+                        "datagrams are not supported by client".to_string(),
+                    )),
+            ));
         }
 
         // The peer is responsible for validating our side of the webtransport support.
@@ -132,30 +151,23 @@ where
             opener,
             server_conn: Mutex::new(conn),
             connect_stream: stream,
+            shared,
         })
     }
 
     /// Receive a datagram from the client
-    pub fn accept_datagram(&self) -> ReadDatagram<C, B> {
-        ReadDatagram {
-            conn: &self.server_conn,
-            _marker: PhantomData,
-        }
+    pub fn datagram_reader(&self) -> DatagramReader<C::RecvDatagramHandler> {
+        self.server_conn.lock().unwrap().get_datagram_reader()
     }
 
     /// Sends a datagram
     ///
     /// TODO: maybe make async. `quinn` does not require an async send
-    pub fn send_datagram(&self, data: B) -> Result<(), Error>
-    where
-        C: SendDatagramExt<B>,
-    {
+    pub fn datagram_sender(&self) -> DatagramSender<C::SendDatagramHandler, B> {
         self.server_conn
             .lock()
             .unwrap()
-            .send_datagram(self.connect_stream.id(), data)?;
-
-        Ok(())
+            .get_datagram_sender(self.connect_stream.send_id())
     }
 
     /// Accept an incoming unidirectional stream from the client, it reads the stream until EOF.
@@ -166,51 +178,33 @@ where
     }
 
     /// Accepts an incoming bidirectional stream or request
-    pub async fn accept_bi(&self) -> Result<Option<AcceptedBi<C, B>>, Error> {
-        // Get the next stream
-        // Accept the incoming stream
+    pub async fn accept_bi(&self) -> Result<Option<AcceptedBi<C, B>>, StreamError> {
         let stream = poll_fn(|cx| {
             let mut conn = self.server_conn.lock().unwrap();
             conn.poll_accept_request_stream(cx)
         })
         .await;
 
-        let mut stream = match stream {
+        let stream = match stream {
             Ok(Some(s)) => FrameStream::new(BufRecvStream::new(s)),
             Ok(None) => {
                 // FIXME: is proper HTTP GoAway shutdown required?
                 return Ok(None);
             }
-            Err(err) => {
-                match err.kind() {
-                    h3::error::Kind::Closed => return Ok(None),
-                    h3::error::Kind::Application {
-                        code,
-                        reason,
-                        level: ErrorLevel::ConnectionError,
-                        ..
-                    } => {
-                        return Err(self.server_conn.lock().unwrap().close(
-                            code,
-                            reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
-                        ))
-                    }
-                    _ => return Err(err),
-                };
-            }
+            Err(err) => return Err(StreamError::ConnectionError(err)),
         };
 
+        let mut resolver = { self.server_conn.lock().unwrap().create_resolver(stream) };
         // Read the first frame.
         //
         // This will determine if it is a webtransport bi-stream or a request stream
-        let frame = poll_fn(|cx| stream.poll_next(cx)).await;
+        let frame = poll_fn(|cx| resolver.frame_stream.poll_next(cx)).await;
 
         match frame {
             Ok(None) => Ok(None),
             Ok(Some(Frame::WebTransportStream(session_id))) => {
                 // Take the stream out of the framed reader and split it in half like Paul Allen
-                let stream = stream.into_inner();
-
+                let stream = resolver.frame_stream.into_inner();
                 Ok(Some(AcceptedBi::BidiStream(
                     session_id,
                     BidiStream::new(stream),
@@ -218,16 +212,8 @@ where
             }
             // Make the underlying HTTP/3 connection handle the rest
             frame => {
-                let req = {
-                    let mut conn = self.server_conn.lock().unwrap();
-                    conn.accept_with_frame(stream, frame)?
-                };
-                if let Some(req) = req {
-                    let (req, resp) = req.resolve().await?;
-                    Ok(Some(AcceptedBi::Request(req, resp)))
-                } else {
-                    Ok(None)
-                }
+                let (req, resp) = resolver.accept_with_frame(frame)?.resolve().await?;
+                Ok(Some(AcceptedBi::Request(req, resp)))
             }
         }
     }
@@ -238,6 +224,9 @@ where
             opener: &self.opener,
             stream: None,
             session_id,
+            stream_handler: WTransportStreamHandler {
+                shared: self.shared.clone(),
+            },
         }
     }
 
@@ -247,6 +236,9 @@ where
             opener: &self.opener,
             stream: None,
             session_id,
+            stream_handler: WTransportStreamHandler {
+                shared: self.shared.clone(),
+            },
         }
     }
 
@@ -274,8 +266,21 @@ pin_project! {
         opener: &'a Mutex<C::OpenStreams>,
         stream: Option<PendingStreams<C,B>>,
         session_id: SessionId,
+        stream_handler: WTransportStreamHandler,
     }
 }
+
+struct WTransportStreamHandler {
+    shared: Arc<SharedState>,
+}
+
+impl ConnectionState for WTransportStreamHandler {
+    fn shared_state(&self) -> &SharedState {
+        &self.shared
+    }
+}
+
+impl CloseStream for WTransportStreamHandler {}
 
 impl<'a, B, C> Future for OpenBi<'a, C, B>
 where
@@ -283,7 +288,7 @@ where
     B: Buf,
     C::BidiStream: SendStreamUnframed<B>,
 {
-    type Output = Result<BidiStream<C::BidiStream, B>, Error>;
+    type Output = Result<BidiStream<C::BidiStream, B>, StreamError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut p = self.project();
@@ -291,7 +296,8 @@ where
             match &mut p.stream {
                 Some((stream, buf)) => {
                     while buf.has_remaining() {
-                        ready!(stream.poll_send(cx, buf))?;
+                        ready!(stream.poll_send(cx, buf))
+                            .map_err(|err| p.stream_handler.handle_quic_stream_error(err))?;
                     }
 
                     let (stream, _) = p.stream.take().unwrap();
@@ -300,7 +306,8 @@ where
                 None => {
                     let mut opener = (*p.opener).lock().unwrap();
                     // Open the stream first
-                    let res = ready!(opener.poll_open_bidi(cx))?;
+                    let res = ready!(opener.poll_open_bidi(cx))
+                        .map_err(|err| p.stream_handler.handle_quic_stream_error(err))?;
                     let stream = BidiStream::new(BufRecvStream::new(res));
 
                     let buf = WriteBuf::from(BidiStreamHeader::WebTransportBidi(*p.session_id));
@@ -318,6 +325,7 @@ pin_project! {
         stream: Option<PendingUniStreams<C, B>>,
         // Future for opening a uni stream
         session_id: SessionId,
+        stream_handler: WTransportStreamHandler
     }
 }
 
@@ -327,7 +335,7 @@ where
     B: Buf,
     C::SendStream: SendStreamUnframed<B>,
 {
-    type Output = Result<SendStream<C::SendStream, B>, Error>;
+    type Output = Result<SendStream<C::SendStream, B>, StreamError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut p = self.project();
@@ -335,7 +343,8 @@ where
             match &mut p.stream {
                 Some((send, buf)) => {
                     while buf.has_remaining() {
-                        ready!(send.poll_send(cx, buf))?;
+                        ready!(send.poll_send(cx, buf))
+                            .map_err(|err| p.stream_handler.handle_quic_stream_error(err))?;
                     }
                     let (send, buf) = p.stream.take().unwrap();
                     assert!(!buf.has_remaining());
@@ -343,7 +352,8 @@ where
                 }
                 None => {
                     let mut opener = (*p.opener).lock().unwrap();
-                    let send = ready!(opener.poll_open_send(cx))?;
+                    let send = ready!(opener.poll_open_send(cx))
+                        .map_err(|err| p.stream_handler.handle_quic_stream_error(err))?;
                     let send = BufRecvStream::new(send);
                     let send = SendStream::new(send);
 
@@ -367,39 +377,6 @@ pub enum AcceptedBi<C: quic::Connection<B>, B: Buf> {
     Request(Request<()>, RequestStream<C::BidiStream, B>),
 }
 
-/// Future for [`Connection::read_datagram`]
-pub struct ReadDatagram<'a, C, B>
-where
-    C: quic::Connection<B>,
-    B: Buf,
-{
-    conn: &'a Mutex<Connection<C, B>>,
-    _marker: PhantomData<B>,
-}
-
-impl<'a, C, B> Future for ReadDatagram<'a, C, B>
-where
-    C: quic::Connection<B> + RecvDatagramExt,
-    B: Buf,
-    <C as RecvDatagramExt>::Error: h3::quic::Error + 'static,
-{
-    type Output = Result<Option<(SessionId, C::Buf)>, Error>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut conn = self.conn.lock().unwrap();
-        match ready!(conn.inner.conn.poll_accept_datagram(cx))? {
-            Some(v) => {
-                let datagram = Datagram::decode(v)?;
-                Poll::Ready(Ok(Some((
-                    datagram.stream_id().into(),
-                    datagram.into_payload(),
-                ))))
-            }
-            None => Poll::Ready(Ok(None)),
-        }
-    }
-}
-
 /// Future for [`WebTransportSession::accept_uni`]
 pub struct AcceptUni<'a, C, B>
 where
@@ -414,7 +391,7 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    type Output = Result<Option<(SessionId, RecvStream<C::RecvStream, B>)>, Error>;
+    type Output = Result<Option<(SessionId, RecvStream<C::RecvStream, B>)>, ConnectionError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut conn = self.conn.lock().unwrap();

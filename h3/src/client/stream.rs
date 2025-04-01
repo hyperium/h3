@@ -6,11 +6,16 @@ use quic::StreamId;
 use tracing::instrument;
 
 use crate::{
-    connection::{self, ConnectionState, SharedStateRef},
-    error::{Code, Error, ErrorLevel},
+    connection::{self},
+    error::{
+        connection_error_creators::{CloseStream, HandleFrameStreamErrorOnRequestStream},
+        internal_error::InternalConnectionError,
+        Code, StreamError,
+    },
     proto::{frame::Frame, headers::Header},
     qpack,
     quic::{self},
+    shared_state::{ConnectionState, SharedState},
 };
 use std::{
     convert::TryFrom,
@@ -74,10 +79,12 @@ pub struct RequestStream<S, B> {
 }
 
 impl<S, B> ConnectionState for RequestStream<S, B> {
-    fn shared_state(&self) -> &SharedStateRef {
+    fn shared_state(&self) -> &SharedState {
         &self.inner.conn_state
     }
 }
+
+impl<S, B> CloseStream for RequestStream<S, B> {}
 
 impl<S, B> RequestStream<S, B>
 where
@@ -89,15 +96,18 @@ where
     ///
     /// [`recv_data()`]: #method.recv_data
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn recv_response(&mut self) -> Result<Response<()>, Error> {
+    pub async fn recv_response(&mut self) -> Result<Response<()>, StreamError> {
         let mut frame = future::poll_fn(|cx| self.inner.stream.poll_next(cx))
             .await
-            .map_err(|e| self.maybe_conn_err(e))?
+            .map_err(|e| self.handle_frame_stream_error_on_request_stream(e))?
             .ok_or_else(|| {
-                Code::H3_GENERAL_PROTOCOL_ERROR.with_reason(
-                    "Did not receive response headers",
-                    ErrorLevel::ConnectionError,
-                )
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+                //# Receipt of an invalid sequence of frames MUST be treated as a
+                //# connection error of type H3_FRAME_UNEXPECTED.
+                self.handle_connection_error_on_stream(InternalConnectionError::new(
+                    Code::H3_FRAME_UNEXPECTED,
+                    "Stream finished without receiving response headers".to_string(),
+                ))
             })?;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.5
@@ -120,24 +130,52 @@ where
                 //# the message header it will accept on an individual HTTP message.
                 Err(qpack::DecoderError::HeaderTooLong(cancel_size)) => {
                     self.inner.stop_sending(Code::H3_REQUEST_CANCELLED);
-                    return Err(Error::header_too_big(
-                        cancel_size,
-                        self.inner.max_field_section_size,
-                    ));
+                    return Err(StreamError::HeaderTooBig {
+                        actual_size: cancel_size,
+                        max_size: self.inner.max_field_section_size,
+                    });
                 }
                 Ok(decoded) => decoded,
-                Err(e) => return Err(e.into()),
+                Err(_e) => {
+                    return Err(
+                        self.handle_connection_error_on_stream(InternalConnectionError {
+                            code: Code::QPACK_DECOMPRESSION_FAILED,
+                            message: "Failed to decode headers".to_string(),
+                        }),
+                    )
+                }
             }
         } else {
-            return Err(Code::H3_FRAME_UNEXPECTED.with_reason(
-                "First response frame is not headers",
-                ErrorLevel::ConnectionError,
-            ));
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+            //# Receipt of an invalid sequence of frames MUST be treated as a
+            //# connection error of type H3_FRAME_UNEXPECTED.
+
+            return Err(
+                self.handle_connection_error_on_stream(InternalConnectionError::new(
+                    Code::H3_FRAME_UNEXPECTED,
+                    "First response frame is not headers".to_string(),
+                )),
+            );
         };
 
         let qpack::Decoded { fields, .. } = decoded;
 
-        let (status, headers) = Header::try_from(fields)?.into_response_parts()?;
+        let (status, headers) = Header::try_from(fields)
+            .map_err(|_e| {
+                self.inner.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
+                StreamError::StreamError {
+                    code: Code::H3_MESSAGE_ERROR,
+                    reason: "Received malformed header".to_string(),
+                }
+            })?
+            .into_response_parts()
+            .map_err(|_e| {
+                self.inner.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
+                StreamError::StreamError {
+                    code: Code::H3_MESSAGE_ERROR,
+                    reason: "Received malformed header".to_string(),
+                }
+            })?;
         let mut resp = Response::new(());
         *resp.status_mut() = status;
         *resp.headers_mut() = headers;
@@ -149,21 +187,21 @@ where
     /// Receive some of the request body.
     // TODO what if called before recv_response ?
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
-        self.inner.recv_data().await
+    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, StreamError> {
+        future::poll_fn(|cx| self.poll_recv_data(cx)).await
     }
 
     /// Receive request body
     pub fn poll_recv_data(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<impl Buf>, Error>> {
+    ) -> Poll<Result<Option<impl Buf>, StreamError>> {
         self.inner.poll_recv_data(cx)
     }
 
     /// Receive an optional set of trailers for the response.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
+    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, StreamError> {
         future::poll_fn(|cx| self.poll_recv_trailers(cx)).await
     }
 
@@ -172,10 +210,10 @@ where
     pub fn poll_recv_trailers(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<HeaderMap>, Error>> {
+    ) -> Poll<Result<Option<HeaderMap>, StreamError>> {
         let res = self.inner.poll_recv_trailers(cx);
         if let Poll::Ready(Err(e)) = &res {
-            if e.is_header_too_big() {
+            if let StreamError::HeaderTooBig { .. } = e {
                 self.inner.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
             }
         }
@@ -184,7 +222,7 @@ where
 
     /// Tell the peer to stop sending into the underlying QUIC stream
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn stop_sending(&mut self, error_code: crate::error::Code) {
+    pub fn stop_sending(&mut self, error_code: Code) {
         // TODO take by value to prevent any further call as this request is cancelled
         // rename `cancel()` ?
         self.inner.stream.stop_sending(error_code)
@@ -203,7 +241,7 @@ where
 {
     /// Send some data on the request body.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
+    pub async fn send_data(&mut self, buf: B) -> Result<(), StreamError> {
         self.inner.send_data(buf).await
     }
 
@@ -218,7 +256,7 @@ where
     ///
     /// [`RequestStream::finish()`] must be called to finalize a request.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
+    pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), StreamError> {
         self.inner.send_trailers(trailers).await
     }
 
@@ -226,7 +264,7 @@ where
     ///
     /// [`RequestStream::finish()`] must be called to finalize a request.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn finish(&mut self) -> Result<(), Error> {
+    pub async fn finish(&mut self) -> Result<(), StreamError> {
         self.inner.finish().await
     }
 

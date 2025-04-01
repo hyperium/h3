@@ -18,7 +18,8 @@ use std::{
     time::Duration,
 };
 
-use bytes::Bytes;
+use bytes::{Buf, Bytes};
+use http::Request;
 use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
@@ -31,6 +32,17 @@ pub fn init_tracing() {
         .with_span_events(tracing_subscriber::fmt::format::FmtSpan::FULL)
         .with_test_writer()
         .try_init();
+}
+
+/// This accepts an incoming request. After the bidirectional stream is started it will not poll the
+/// connection or receive further requests until the first headers are received.
+/// Only use this for testing purposes.
+async fn get_stream_blocking<C: quic::Connection<B>, B: Buf>(
+    incoming: &mut crate::server::Connection<C, B>,
+) -> Option<(Request<()>, crate::server::RequestStream<C::BidiStream, B>)> {
+    let request_resolver = incoming.accept().await.ok()??;
+    let (request, stream) = request_resolver.resolve_request().await.ok()?;
+    Some((request, stream))
 }
 
 pub struct Pair {

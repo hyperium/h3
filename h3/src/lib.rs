@@ -5,15 +5,22 @@
 pub mod client;
 
 mod config;
-pub mod error;
+//pub mod error;
 pub mod ext;
 pub mod quic;
 
 pub mod server;
 
-pub use error::Error;
+//pub use error::Error;
 
 mod buf;
+
+mod shared_state;
+
+#[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
+pub use shared_state::{ConnectionState, SharedState};
+
+pub mod error;
 
 #[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
 #[allow(missing_docs)]

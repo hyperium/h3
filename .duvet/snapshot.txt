@@ -455,17 +455,17 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[!SHOULD,implementation]:    (Section 8.1).
     TEXT[!MUST,implication]: The recipient MUST NOT consider unknown stream types
     TEXT[!MUST,implication]:    to be a connection error of any kind.
-    TEXT[!SHOULD,implication]:    As certain stream types can affect connection state, a recipient
-    TEXT[!SHOULD,implication]:    SHOULD NOT discard data from incoming unidirectional streams prior to
-    TEXT[!SHOULD,implication]:    reading the stream type.
+    TEXT[!SHOULD]:    As certain stream types can affect connection state, a recipient
+    TEXT[!SHOULD]:    SHOULD NOT discard data from incoming unidirectional streams prior to
+    TEXT[!SHOULD]:    reading the stream type.
     TEXT[!MAY,todo]:    Implementations MAY send stream types before knowing whether the peer
     TEXT[!MAY,todo]:    supports them.
     TEXT[!MUST,todo]: However, stream types that could modify the state or
     TEXT[!MUST,todo]:    semantics of existing protocol components, including QPACK or other
     TEXT[!MUST,todo]:    extensions, MUST NOT be sent until the peer is known to support them.
-    TEXT[!MUST,todo]: A receiver MUST tolerate unidirectional streams being
-    TEXT[!MUST,todo]:    closed or reset prior to the reception of the unidirectional stream
-    TEXT[!MUST,todo]:    header.
+    TEXT[!MUST,implementation,todo]: A receiver MUST tolerate unidirectional streams being
+    TEXT[!MUST,implementation,todo]:    closed or reset prior to the reception of the unidirectional stream
+    TEXT[!MUST,implementation,todo]:    header.
 
   SECTION: [Control Streams](#section-6.2.1)
     TEXT[!MUST,implementation]:    Each side MUST initiate a single control stream at the beginning of
@@ -510,11 +510,11 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[!MAY,implementation]:    sent on connections where no data is currently being transferred.
     TEXT[!MUST,implication]:    Endpoints MUST NOT consider these streams to have any meaning upon
     TEXT[!MUST,implication]:    receipt.
-    TEXT[!MAY,implementation]: When sending a reserved stream type,
-    TEXT[!MAY,implementation]:    the implementation MAY either terminate the stream cleanly or reset
-    TEXT[!MAY,implementation]:    it.
-    TEXT[!SHOULD]: When resetting the stream, either the H3_NO_ERROR error code or
-    TEXT[!SHOULD]:    a reserved error code (Section 8.1) SHOULD be used.
+    TEXT[!MAY,implication]: When sending a reserved stream type,
+    TEXT[!MAY,implication]:    the implementation MAY either terminate the stream cleanly or reset
+    TEXT[!MAY,implication]:    it.
+    TEXT[!SHOULD,exception]: When resetting the stream, either the H3_NO_ERROR error code or
+    TEXT[!SHOULD,exception]:    a reserved error code (Section 8.1) SHOULD be used.
 
   SECTION: [Frame Layout](#section-7.1)
     TEXT[!MUST,todo]:    Each frame's payload MUST contain exactly the fields identified in
@@ -523,8 +523,8 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[!MUST,implementation,test]:    after the identified fields or a frame payload that terminates before
     TEXT[!MUST,implementation,test]:    the end of the identified fields MUST be treated as a connection
     TEXT[!MUST,implementation,test]:    error of type H3_FRAME_ERROR.
-    TEXT[!MUST,implementation,test]: In particular, redundant length
-    TEXT[!MUST,implementation,test]:    encodings MUST be verified to be self-consistent; see Section 10.8.
+    TEXT[!MUST]: In particular, redundant length
+    TEXT[!MUST]:    encodings MUST be verified to be self-consistent; see Section 10.8.
     TEXT[!MUST,implementation]:    When a stream terminates cleanly, if the last frame on the stream was
     TEXT[!MUST,implementation]:    truncated, this MUST be treated as a connection error of type
     TEXT[!MUST,implementation]:    H3_FRAME_ERROR.
@@ -565,10 +565,10 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[!MUST,implementation,test]: Receiving a
     TEXT[!MUST,implementation,test]:    CANCEL_PUSH frame on a stream other than the control stream MUST be
     TEXT[!MUST,implementation,test]:    treated as a connection error of type H3_FRAME_UNEXPECTED.
-    TEXT[!MUST,todo]: If a CANCEL_PUSH frame is received that
-    TEXT[!MUST,todo]:    references a push ID greater than currently allowed on the
-    TEXT[!MUST,todo]:    connection, this MUST be treated as a connection error of type
-    TEXT[!MUST,todo]:    H3_ID_ERROR.
+    TEXT[!MUST]: If a CANCEL_PUSH frame is received that
+    TEXT[!MUST]:    references a push ID greater than currently allowed on the
+    TEXT[!MUST]:    connection, this MUST be treated as a connection error of type
+    TEXT[!MUST]:    H3_ID_ERROR.
     TEXT[!MUST,todo]: If a server receives a CANCEL_PUSH frame for a push
     TEXT[!MUST,todo]:    ID that has not yet been mentioned by a PUSH_PROMISE frame, this MUST
     TEXT[!MUST,todo]:    be treated as a connection error of type H3_ID_ERROR.
@@ -587,10 +587,10 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[!MUST,implementation,test]:    H3_FRAME_UNEXPECTED.
     TEXT[!MUST,implementation]:    The same setting identifier MUST NOT occur more than once in the
     TEXT[!MUST,implementation]:    SETTINGS frame.
-    TEXT[!MAY,todo]: A receiver MAY treat the presence of duplicate
-    TEXT[!MAY,todo]:    setting identifiers as a connection error of type H3_SETTINGS_ERROR.
-    TEXT[!MUST,implication]:    An implementation MUST ignore any parameter with an identifier it
-    TEXT[!MUST,implication]:    does not understand.
+    TEXT[!MAY]: A receiver MAY treat the presence of duplicate
+    TEXT[!MAY]:    setting identifiers as a connection error of type H3_SETTINGS_ERROR.
+    TEXT[!MUST]:    An implementation MUST ignore any parameter with an identifier it
+    TEXT[!MUST]:    does not understand.
 
   SECTION: [Defined SETTINGS Parameters](#section-7.2.4.1)
     TEXT[implementation]:    Setting identifiers of the format 0x1f * N + 0x21 for non-negative
@@ -599,22 +599,22 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[implementation]:    meaning.
     TEXT[!SHOULD,implementation]: Endpoints SHOULD include at least one such setting in their
     TEXT[!SHOULD,implementation]:    SETTINGS frame.
-    TEXT[!MUST,implication]: Endpoints MUST NOT consider such settings to have
-    TEXT[!MUST,implication]:    any meaning upon receipt.
-    TEXT[implementation,todo]:    Setting identifiers that were defined in [HTTP/2] where there is no
-    TEXT[implementation,todo]:    corresponding HTTP/3 setting have also been reserved
-    TEXT[implementation,todo]:    (Section 11.2.2).
-    TEXT[!MUST,implementation,todo]: These reserved settings MUST NOT be sent, and
-    TEXT[!MUST,implementation,todo]:    their receipt MUST be treated as a connection error of type
-    TEXT[!MUST,implementation,todo]:    H3_SETTINGS_ERROR.
+    TEXT[!MUST,implementation]: Endpoints MUST NOT consider such settings to have
+    TEXT[!MUST,implementation]:    any meaning upon receipt.
+    TEXT[implementation]:    Setting identifiers that were defined in [HTTP/2] where there is no
+    TEXT[implementation]:    corresponding HTTP/3 setting have also been reserved
+    TEXT[implementation]:    (Section 11.2.2).
+    TEXT[!MUST,implementation]: These reserved settings MUST NOT be sent, and
+    TEXT[!MUST,implementation]:    their receipt MUST be treated as a connection error of type
+    TEXT[!MUST,implementation]:    H3_SETTINGS_ERROR.
 
   SECTION: [Initialization](#section-7.2.4.2)
-    TEXT[!MUST,todo]:    An HTTP implementation MUST NOT send frames or requests that would be
-    TEXT[!MUST,todo]:    invalid based on its current understanding of the peer's settings.
-    TEXT[!SHOULD,todo]: Each endpoint SHOULD use
-    TEXT[!SHOULD,todo]:    these initial values to send messages before the peer's SETTINGS
-    TEXT[!SHOULD,todo]:    frame has arrived, as packets carrying the settings can be lost or
-    TEXT[!SHOULD,todo]:    delayed.
+    TEXT[!MUST,implementation,todo]:    An HTTP implementation MUST NOT send frames or requests that would be
+    TEXT[!MUST,implementation,todo]:    invalid based on its current understanding of the peer's settings.
+    TEXT[!SHOULD,implementation,todo]: Each endpoint SHOULD use
+    TEXT[!SHOULD,implementation,todo]:    these initial values to send messages before the peer's SETTINGS
+    TEXT[!SHOULD,implementation,todo]:    frame has arrived, as packets carrying the settings can be lost or
+    TEXT[!SHOULD,implementation,todo]:    delayed.
     TEXT[!MUST,implication]: Endpoints MUST NOT require any data to be received from
     TEXT[!MUST,implication]:    the peer prior to sending the SETTINGS frame; settings MUST be sent
     TEXT[!MUST,implication]:    as soon as the transport is ready to send data.
@@ -715,13 +715,13 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[implication]:    types be ignored (Section 9).
     TEXT[!MAY,implication]: These frames have no semantics, and
     TEXT[!MAY,implication]:    they MAY be sent on any stream where frames are allowed to be sent.
-    TEXT[!MUST,todo]: Endpoints MUST
-    TEXT[!MUST,todo]:    NOT consider these frames to have any meaning upon receipt.
+    TEXT[!MUST,implementation,todo]: Endpoints MUST
+    TEXT[!MUST,implementation,todo]:    NOT consider these frames to have any meaning upon receipt.
     TEXT[todo]:    Frame types that were used in HTTP/2 where there is no corresponding
     TEXT[todo]:    HTTP/3 frame have also been reserved (Section 11.2.1).
-    TEXT[!MUST,todo]: These frame
-    TEXT[!MUST,todo]:    types MUST NOT be sent, and their receipt MUST be treated as a
-    TEXT[!MUST,todo]:    connection error of type H3_FRAME_UNEXPECTED.
+    TEXT[!MUST,implementation,todo]: These frame
+    TEXT[!MUST,implementation,todo]:    types MUST NOT be sent, and their receipt MUST be treated as a
+    TEXT[!MUST,implementation,todo]:    connection error of type H3_FRAME_UNEXPECTED.
 
   SECTION: [Error Handling](#section-8)
     TEXT[!MAY,todo]:    An endpoint MAY choose to treat a stream error as a connection error
