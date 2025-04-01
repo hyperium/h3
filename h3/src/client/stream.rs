@@ -165,7 +165,7 @@ where
                 self.inner.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
                 StreamError::StreamError {
                     code: Code::H3_MESSAGE_ERROR,
-                    reason: "Received Malformad header".to_string(),
+                    reason: "Received malformed header".to_string(),
                 }
             })?
             .into_response_parts()
@@ -173,7 +173,7 @@ where
                 self.inner.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
                 StreamError::StreamError {
                     code: Code::H3_MESSAGE_ERROR,
-                    reason: "Received Malformad header".to_string(),
+                    reason: "Received malformed header".to_string(),
                 }
             })?;
         let mut resp = Response::new(());
