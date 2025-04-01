@@ -53,7 +53,7 @@ impl Debug for ConnectionErrorIncoming {
 ///
 /// This is used by to implement the quic abstraction traits
 /// When an error within the quic trait implementation occurs, use ConnectionErrorIncoming variant with InternalError
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum StreamErrorIncoming {
     /// Stream is closed because the whole connection is closed
     ConnectionErrorIncoming {
@@ -71,7 +71,7 @@ pub enum StreamErrorIncoming {
     ///
     /// H3 will handle this exactly like a StreamTerminated
     /// like closing the connection with an error if http3 forbids a stream end for example with the control stream
-    Unknown(Arc<dyn std::error::Error + Send + Sync>),
+    Unknown(Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl std::error::Error for StreamErrorIncoming {}

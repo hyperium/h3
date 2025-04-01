@@ -1,7 +1,4 @@
 //! This is the public facing error types for the h3 crate
-
-use std::sync::Arc;
-
 use crate::quic::ConnectionErrorIncoming;
 
 use super::{codes::Code, internal_error::InternalConnectionError};
@@ -77,7 +74,7 @@ pub enum LocalError {
 }
 
 /// This enum represents a stream error
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub enum StreamError {
     /// The error occurred on the stream
@@ -136,7 +133,7 @@ pub enum StreamError {
         not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"),
         non_exhaustive
     )]
-    Undefined(Arc<dyn std::error::Error + Send + Sync>),
+    Undefined(Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl StreamError {

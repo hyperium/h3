@@ -414,9 +414,9 @@ fn convert_read_error_to_stream_error(error: ReadError) -> StreamErrorIncoming {
                 connection_error: convert_connection_error(connection_error),
             }
         }
-        error @ ReadError::ClosedStream => StreamErrorIncoming::Unknown(Arc::new(error)),
+        error @ ReadError::ClosedStream => StreamErrorIncoming::Unknown(Box::new(error)),
         ReadError::IllegalOrderedRead => panic!("h3-quinn only performs ordered reads"),
-        error @ ReadError::ZeroRttRejected => StreamErrorIncoming::Unknown(Arc::new(error)),
+        error @ ReadError::ZeroRttRejected => StreamErrorIncoming::Unknown(Box::new(error)),
     }
 }
 
@@ -431,7 +431,7 @@ fn convert_write_error_to_stream_error(error: quinn::WriteError) -> StreamErrorI
             }
         }
         error @ quinn::WriteError::ClosedStream | error @ quinn::WriteError::ZeroRttRejected => {
-            StreamErrorIncoming::Unknown(Arc::new(error))
+            StreamErrorIncoming::Unknown(Box::new(error))
         }
     }
 }
@@ -483,7 +483,7 @@ where
         Poll::Ready(
             self.stream
                 .finish()
-                .map_err(|e| StreamErrorIncoming::Unknown(Arc::new(e))),
+                .map_err(|e| StreamErrorIncoming::Unknown(Box::new(e))),
         )
     }
 
