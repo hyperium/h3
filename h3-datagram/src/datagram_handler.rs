@@ -111,14 +111,18 @@ where
 
 /// Types of errors when sending a datagram.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum SendDatagramError {
     /// The peer is not accepting datagrams on the quic layer
     ///
     /// This can be because the peer does not support it or disabled it or any other reason.
+    #[non_exhaustive]
     NotAvailable,
     /// The datagram is too large to send
+    #[non_exhaustive]
     TooLarge,
     /// Connection error
+    #[non_exhaustive]
     ConnectionError(ConnectionError),
 }
 
