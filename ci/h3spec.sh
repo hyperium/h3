@@ -3,7 +3,7 @@
 LOGFILE=h3server.log
 if ! [ -e "h3spec-linux-x86_64" ] ; then
     # if we don't already have a h3spec executable, wget it from github
-    wget https://github.com/kazu-yamamoto/h3spec/releases/download/v0.1.10/h3spec-linux-x86_64
+    wget https://github.com/kazu-yamamoto/h3spec/releases/download/v0.1.12/h3spec-linux-x86_64
     chmod +x h3spec-linux-x86_64
 fi
 
