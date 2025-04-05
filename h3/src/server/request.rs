@@ -1,4 +1,4 @@
-use std::{convert::TryFrom, sync::Arc};
+use std::{convert::TryFrom, future::Future, sync::Arc};
 
 use bytes::Buf;
 use http::{Request, StatusCode};
@@ -19,7 +19,7 @@ use crate::{
         frame::{Frame, PayloadLen},
         headers::Header,
     },
-    qpack,
+    qpack::{self, decoder2},
     quic::{self, SendStream, StreamId},
     shared_state::{ConnectionState, SharedState},
 };
@@ -27,11 +27,12 @@ use crate::{
 use super::{connection::RequestEnd, stream::RequestStream};
 
 /// Helper struct to await the request headers and return a `Request` object
-pub struct RequestResolver<C, B>
+pub struct RequestResolver<C, B, F>
 where
     C: quic::Connection<B>,
     C::BidiStream: quic::SendStream<B>,
     B: Buf,
+    F: Future<Output = Result<(), ()>>,
 {
     #[doc(hidden)]
     // TODO: make this private
@@ -40,29 +41,34 @@ where
     pub(super) send_grease_frame: bool,
     pub(super) max_field_section_size: u64,
     pub(super) shared: Arc<SharedState>,
+    pub(super) future: F,
+    //  pub(super) decoder: decoder2::decoder::Decoder,
 }
 
-impl<C, B> ConnectionState for RequestResolver<C, B>
+impl<C, B, F> ConnectionState for RequestResolver<C, B, F>
 where
     C: quic::Connection<B>,
     B: Buf,
+    F: Future<Output = Result<(), ()>>,
 {
     fn shared_state(&self) -> &SharedState {
         &self.shared
     }
 }
 
-impl<C, B> CloseStream for RequestResolver<C, B>
+impl<C, B, F> CloseStream for RequestResolver<C, B, F>
 where
     C: quic::Connection<B>,
     B: Buf,
+    F: Future<Output = Result<(), ()>>,
 {
 }
 
-impl<C, B> RequestResolver<C, B>
+impl<C, B, F> RequestResolver<C, B, F>
 where
     C: quic::Connection<B>,
     B: Buf,
+    F: Future<Output = Result<(), ()>>,
 {
     /// Returns a future to await the request headers and return a `Request` object
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]

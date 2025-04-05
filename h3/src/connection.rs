@@ -81,6 +81,10 @@ where
     control_send: C::SendStream,
     control_recv: Option<FrameStream<C::RecvStream, B>>,
     qpack_streams: QpackStreams<C, B>,
+
+    /// QPack decoder stream handler
+    decoder: qpack::decoder2::decoder_stream_handler::DecoderStreamHandler<C, B>,
+
     /// Buffers incoming uni/recv streams which have yet to be claimed.
     ///
     /// This is opposed to discarding them by returning in `poll_accept_recv`, which may cause them to be missed by something else polling.
@@ -307,6 +311,7 @@ where
             control_send: control_send,
             control_recv: None,
             qpack_streams,
+            decoder: todo!(),
             handled_connection_error: None,
             pending_recv_streams: Vec::with_capacity(3),
             got_peer_settings: false,

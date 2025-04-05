@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use bytes::{Bytes, BytesMut};
 use http::StatusCode;
@@ -153,12 +153,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn handle_request<C>(
-    resolver: RequestResolver<C, Bytes>,
+async fn handle_request<C, F>(
+    resolver: RequestResolver<C, Bytes, F>,
     serve_root: Arc<Option<PathBuf>>,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
     C: h3::quic::Connection<Bytes>,
+    F: Future<Output = Result<(), ()>> + Send + 'static,
 {
     let (req, mut stream) = resolver.resolve_request().await?;
 
