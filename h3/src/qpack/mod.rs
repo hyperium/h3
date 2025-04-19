@@ -21,6 +21,8 @@ mod prefix_string;
 #[cfg(test)]
 mod tests;
 
+pub(crate) mod decoder2;
+
 #[derive(Debug)]
 pub enum Error {
     Encoder(EncoderError),
