@@ -99,7 +99,7 @@ where
     pub fn create_resolver(
         &self,
         stream: FrameStream<C::BidiStream, B>,
-    ) -> RequestResolver<C, B, impl Future<Output = Result<(), ()>>> {
+    ) -> RequestResolver<C, B> {
         self.create_resolver_internal(stream)
     }
 
@@ -125,7 +125,7 @@ where
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn accept(
         &mut self,
-    ) -> Result<Option<RequestResolver<C, B, impl Future<Output = Result<(), ()>>>>, ConnectionError>
+    ) -> Result<Option<RequestResolver<C, B>>, ConnectionError>
     {
         // Accept the incoming stream
         let stream = match poll_fn(|cx| self.poll_accept_request_stream_internal(cx)).await? {
@@ -148,18 +148,13 @@ where
     fn create_resolver_internal(
         &self,
         stream: FrameStream<C::BidiStream, B>,
-    ) -> RequestResolver<C, B, impl Future<Output = Result<(), ()>>> {
+    ) -> RequestResolver<C, B> {
         RequestResolver {
             frame_stream: stream,
             request_end_send: self.request_end_send.clone(),
             send_grease_frame: self.inner.send_grease_frame,
             max_field_section_size: self.max_field_section_size,
             shared: self.inner.shared.clone(),
-            future: async {
-                // Wait for the request to finish
-                todo!();
-                Ok(())
-            },
         }
     }
 

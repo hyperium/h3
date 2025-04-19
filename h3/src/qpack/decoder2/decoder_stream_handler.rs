@@ -2,7 +2,16 @@
 
 use std::task::{ready, Poll};
 
-use crate::{error::internal_error::InternalConnectionError, quic, stream::BufRecvStream};
+use tokio::sync::mpsc;
+use tracing::event;
+
+use crate::{
+    error::internal_error::InternalConnectionError,
+    quic::{self, RecvStream},
+    stream::BufRecvStream,
+};
+
+use super::{decoder, dynamic_table::MainDynamicTableForDecoder};
 
 pub(crate) struct DecoderStreamHandler<C, B>
 where
@@ -10,10 +19,10 @@ where
     B: bytes::Buf,
 {
     decoder_send: C::SendStream,
-    pub(crate) encoder_recv: Option<BufRecvStream<C::RecvStream, B>>,
+    pub(crate) encoder_recv: BufRecvStream<C::RecvStream, B>,
     table: super::dynamic_table::MainDynamicTableForDecoder,
-   // future: F,
-
+    /// When decoder events are triggered, this channel is used to notify the decoder
+    decoder_event: mpsc::Receiver<()>,
 }
 
 impl<C, B> DecoderStreamHandler<C, B>
@@ -22,30 +31,72 @@ where
     B: bytes::Buf,
 {
     /// Creates a new decoder stream handler
-    pub fn new(decoder_send: C::SendStream) -> Self {
+    pub fn new(decoder_send: C::SendStream, encoder_recv: BufRecvStream<C::RecvStream, B>) -> Self {
+        let (table, event) = super::dynamic_table::MainDynamicTableForDecoder::new();
+
         Self {
             decoder_send,
-            encoder_recv: None,
-            table: super::dynamic_table::MainDynamicTableForDecoder::new(),
+            encoder_recv,
+            table: table,
+            decoder_event: event,
         }
     }
     /// Returns a Decoder with a link to the same dynamic table
     pub fn get_decoder(&self) -> super::decoder::Decoder {
-        //   super::decoder::Decoder::new(self.table.shared())
-        todo!()
+        super::decoder::Decoder::new(self.table.shared())
     }
 
-    /// Listen for incoming data on the encoder_recv stream
-    pub fn poll_incoming_encoder_instructions(
-        &mut self,
-        cx: &mut std::task::Context,
-    ) -> Poll<Result<(), InternalConnectionError>> {
-        // Poll the encoder_recv stream for incoming data
-        /*ready!(self.encoder_recv.poll_read(cx)).map_err(|e| {
-            todo!("Handle error: {}", e);
-        })?;
+    /// Function to handle the encoder streams
+    async fn handle_qpack_decoder(self) -> Result<(), InternalConnectionError> {
+        let Self {
+            decoder_send,
+            encoder_recv,
+            table,
+            decoder_event,
+        } = self;
 
-        */
-        todo!("Handle incoming encoder instructions");
+        Err(tokio::select! {
+            err = recv_encoder_instruction(table, encoder_recv) => err,
+            err = send_decoder_instructions(decoder_send, decoder_event) => err,
+        })
+    }
+}
+
+/// Function to handle the encoder_recv stream
+///
+/// This function is responsible for receiving the encoder instructions from the peer
+/// The future resolves only in the event of an error
+async fn recv_encoder_instruction<S>(
+    table: MainDynamicTableForDecoder,
+    encoder_recv: S,
+) -> InternalConnectionError
+where
+    S: RecvStream,
+{
+    loop {
+        // Wait for encoder instructions from peer
+
+        // Decode the instructions
+
+        // Update the dynamic table
+    }
+}
+
+/// Function to handle the decoder_send stream
+///
+/// This function is responsible for sending the decoder instructions to the peer
+/// The future resolves only in the event of an error
+async fn send_decoder_instructions<S, B>(
+    decoder_send: S,
+    decoder_event: mpsc::Receiver<()>,
+) -> InternalConnectionError
+where
+    S: quic::SendStream<B>,
+    B: bytes::Buf,
+{
+    loop {
+        // Wait for decoder events
+
+        // Send the decoder instructions
     }
 }

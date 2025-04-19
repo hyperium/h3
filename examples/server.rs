@@ -153,13 +153,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn handle_request<C, F>(
-    resolver: RequestResolver<C, Bytes, F>,
+async fn handle_request<C>(
+    resolver: RequestResolver<C, Bytes>,
     serve_root: Arc<Option<PathBuf>>,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
     C: h3::quic::Connection<Bytes>,
-    F: Future<Output = Result<(), ()>> + Send + 'static,
 {
     let (req, mut stream) = resolver.resolve_request().await?;
 

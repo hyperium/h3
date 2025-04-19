@@ -2,44 +2,33 @@
 
 use std::{sync::Arc, task::Poll};
 
-use async_lock::futures::Read;
-use ouroboros::self_referencing;
-use tokio::sync::futures::Notified;
+use tokio::sync::Notify;
 
 use super::dynamic_table::RequestStreamDynamicTableForDecoder;
 
 /// Decoder for QPACK. Each RequestStream has a instance of this decoder
-//#[self_referencing]
+#[derive(Debug, Clone)]
 pub(crate) struct Decoder {
     /// The dynamic table
-    state: Arc<RequestStreamDynamicTableForDecoder>,
-    // Notifier if the request stream becomes blocked
-   // #[borrows(state)]
-   // #[not_covariant]
-   // blocked: Option<Notified<'this>>,
+    state: RequestStreamDynamicTableForDecoder,
 }
 
 impl Decoder {
-    /*/// Creates a new decoder
-    pub fn new(state: Arc<RequestStreamDynamicTableForDecoder>) -> Self {
-        Self {
-            state,
-            blocked: None,
-        }
-    }*/
-    fn poll_new_read(
-        &mut self,
-        cx: &mut std::task::Context,
-    ) -> Poll<()> {
+    /// Creates a new decoder
+    pub fn new(state: RequestStreamDynamicTableForDecoder) -> Self {
+        Self { state }
+    }
+    fn poll_new_read(&mut self, cx: &mut std::task::Context) -> Poll<()> {
         // Poll the blocked stream
-        let x = self.state.table.read();
+        let x = self.state.inner.table.read();
         todo!()
     }
-    /*/// Sets the notifier for the blocked stream
-    pub fn set_blocked<'b>( mut self)    {
+    /// Sets the notifier for the blocked stream
+    pub fn set_blocked(mut self) {
         self.state
+            .inner
             .blocked_streams
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.blocked = Some(self.state.event.notified());
-    }*/
+        // self.blocked = Some(self.state.event.clone());
+    }
 }
