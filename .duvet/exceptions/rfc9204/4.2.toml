@@ -1,0 +1,24 @@
+[[exception]]
+target = "https://www.rfc-editor.org/rfc/rfc9204.html#section-4.2"
+quote = '''
+An endpoint MAY avoid creating an encoder stream if it will not be
+used (for example, if its encoder does not wish to use the dynamic
+table or if the maximum size of the dynamic table permitted by the
+peer is zero).
+'''
+reason = '''
+H3 creates the streams even if they are not used.
+See https://github.com/hyperium/h3/pull/242
+'''
+
+
+[[exception]]
+target = "https://www.rfc-editor.org/rfc/rfc9204.html#section-4.2"
+quote = '''
+An endpoint MAY avoid creating a decoder stream if its decoder sets
+the maximum capacity of the dynamic table to zero.
+'''
+reason = '''
+H3 creates the streams even if they are not used.
+See https://github.com/hyperium/h3/pull/242
+'''

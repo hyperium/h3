@@ -966,21 +966,21 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9204.html
     TEXT[!MUST]:    including 62 bits long.
 
   SECTION: [Encoder and Decoder Streams](#section-4.2)
-    TEXT[!MUST]: Each endpoint
-    TEXT[!MUST]:    MUST initiate, at most, one encoder stream and, at most, one decoder
-    TEXT[!MUST]:    stream.
-    TEXT[!MUST]: Receipt of a second instance of either stream type MUST be
-    TEXT[!MUST]:    treated as a connection error of type H3_STREAM_CREATION_ERROR.
+    TEXT[!MUST,implementation]: Each endpoint
+    TEXT[!MUST,implementation]:    MUST initiate, at most, one encoder stream and, at most, one decoder
+    TEXT[!MUST,implementation]:    stream.
+    TEXT[!MUST,implementation]: Receipt of a second instance of either stream type MUST be
+    TEXT[!MUST,implementation]:    treated as a connection error of type H3_STREAM_CREATION_ERROR.
     TEXT[!MUST]:    The sender MUST NOT close either of these streams, and the receiver
     TEXT[!MUST]:    MUST NOT request that the sender close either of these streams.
     TEXT[!MUST]:    Closure of either unidirectional stream type MUST be treated as a
     TEXT[!MUST]:    connection error of type H3_CLOSED_CRITICAL_STREAM.
-    TEXT[!MAY]:    An endpoint MAY avoid creating an encoder stream if it will not be
-    TEXT[!MAY]:    used (for example, if its encoder does not wish to use the dynamic
-    TEXT[!MAY]:    table or if the maximum size of the dynamic table permitted by the
-    TEXT[!MAY]:    peer is zero).
-    TEXT[!MAY]:    An endpoint MAY avoid creating a decoder stream if its decoder sets
-    TEXT[!MAY]:    the maximum capacity of the dynamic table to zero.
+    TEXT[!MAY,exception]:    An endpoint MAY avoid creating an encoder stream if it will not be
+    TEXT[!MAY,exception]:    used (for example, if its encoder does not wish to use the dynamic
+    TEXT[!MAY,exception]:    table or if the maximum size of the dynamic table permitted by the
+    TEXT[!MAY,exception]:    peer is zero).
+    TEXT[!MAY,exception]:    An endpoint MAY avoid creating a decoder stream if its decoder sets
+    TEXT[!MAY,exception]:    the maximum capacity of the dynamic table to zero.
     TEXT[!MUST]:    An endpoint MUST allow its peer to create an encoder stream and a
     TEXT[!MUST]:    decoder stream even if the connection's settings prevent their use.
 
