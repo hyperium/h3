@@ -1,0 +1,18 @@
+# https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference#package-ecosystem-
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+  - package-ecosystem: "cargo"
+    directories:
+      - "/"
+      - "/examples"
+      - "/fuzz"
+      - "/h3"
+      - "/h3-datagram"
+      - "/h3-quinn"
+      - "/h3-webtransport"
+    schedule:
+      interval: "weekly"
