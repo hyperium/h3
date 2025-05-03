@@ -77,7 +77,7 @@ pub fn encode<B: BufMut>(size: u8, flags: u8, value: u64, buf: &mut B) {
     buf.write(remaining as u8);
 }
 
-const MAX_POWER: usize = 10 * 7;
+const MAX_POWER: usize = 9 * 7;
 
 impl From<coding::UnexpectedEnd> for Error {
     fn from(_: coding::UnexpectedEnd) -> Self {
@@ -87,7 +87,10 @@ impl From<coding::UnexpectedEnd> for Error {
 
 #[cfg(test)]
 mod test {
+    use assert_matches::assert_matches;
     use std::io::Cursor;
+
+    use crate::qpack::prefix_int::Error;
 
     fn check_codec(size: u8, flags: u8, value: u64, data: &[u8]) {
         let mut buf = Vec::new();
@@ -155,7 +158,17 @@ mod test {
         let buf = vec![95, 225, 255, 255, 255, 255, 255, 255, 255, 255, 1];
         let mut read = Cursor::new(&buf);
         let x = super::decode(5, &mut read);
-        println!("{:?}", x);
-        println!("{:?}", u64::MAX);
+        assert_matches!(x, Err(Error::Overflow));
+    }
+
+    #[test]
+    fn allow_62_bit() {
+        // This is the maximum value that can be encoded in with a flag size of 7 bits
+        // The value is requires more than 62 bits so the spec is fulfilled
+        let buf = vec![3, 255, 255, 255, 255, 255, 255, 255, 255, 127];
+        let mut read = Cursor::new(&buf);
+        let (flag, value) = super::decode(1, &mut read).expect("Value is allowed to be parsed");
+        assert_eq!(flag, 1);
+        assert_eq!(value, 9223372036854775808);
     }
 }
