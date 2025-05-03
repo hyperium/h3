@@ -77,11 +77,7 @@ pub fn encode<B: BufMut>(size: u8, flags: u8, value: u64, buf: &mut B) {
     buf.write(remaining as u8);
 }
 
-#[cfg(target_pointer_width = "64")]
 const MAX_POWER: usize = 10 * 7;
-
-#[cfg(target_pointer_width = "32")]
-const MAX_POWER: usize = 5 * 7;
 
 impl From<coding::UnexpectedEnd> for Error {
     fn from(_: coding::UnexpectedEnd) -> Self {
