@@ -26,6 +26,8 @@ jobs:
       - test
       - doc
       - fuzz
+      - examples
+      - compliance
     steps:
       - run: exit 0
 
@@ -105,28 +107,43 @@ jobs:
           args: -p h3-quinn
 
   test:
-    name: Test ${{ matrix.toolchain }} ${{ matrix.os }}
+    name: Test ${{ matrix.toolchain }} ${{ matrix.os }} ${{ matrix.target }}
     needs: [style]
     strategy:
       matrix:
         os: [ubuntu-latest]
         toolchain: [stable, beta]
         features: [i-implement-a-third-party-backend-and-opt-into-breaking-changes, tracing, 'tracing,i-implement-a-third-party-backend-and-opt-into-breaking-changes']
+        target: [x86_64-unknown-linux-gnu]
+        include:
+          # Add a 32-bit target test configuration
+          - os: ubuntu-latest
+            toolchain: stable
+            features: i-implement-a-third-party-backend-and-opt-into-breaking-changes
+            target: i686-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
+      # Add this step for 32-bit build support
+      - name: Install 32-bit development libraries
+        if: matrix.target == 'i686-unknown-linux-gnu'
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib libc6-dev-i386
       - name: Install Rust ${{ matrix.toolchain }}
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: ${{ matrix.toolchain }}
+          target: ${{ matrix.target }}
           override: true
       - uses: Swatinem/rust-cache@v2
       - name: cargo test
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --features ${{ matrix.features }}
+          args: --features ${{ matrix.features }} --target ${{ matrix.target }}
       - name: h3Spec
         run: ./ci/h3spec.sh
         if: matrix.toolchain == 'stable'
@@ -186,3 +203,19 @@ jobs:
         uses: ./.github/actions/compliance
         with:
           report-script: ${{ github.workspace }}/ci/compliance/report.sh
+
+  examples:
+    name: Run Examples
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust stable
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - uses: Swatinem/rust-cache@v2
+      - name: Run server and client examples test
+        run: ./ci/example_test.sh
