@@ -154,4 +154,12 @@ mod test {
     fn number_never_ends_with_0x80() {
         check_codec(4, 0b0001, 143, &[31, 128, 1]);
     }
+    #[test]
+    fn overflow2() {
+        let buf = vec![95, 225, 255, 255, 255, 255, 255, 255, 255, 255, 1];
+        let mut read = Cursor::new(&buf);
+        let x = super::decode(5, &mut read);
+        println!("{:?}", x);
+        println!("{:?}", u64::MAX);
+    }
 }
