@@ -26,6 +26,8 @@ jobs:
       - test
       - doc
       - fuzz
+      - examples
+      - compliance
     steps:
       - run: exit 0
 
@@ -201,3 +203,19 @@ jobs:
         uses: ./.github/actions/compliance
         with:
           report-script: ${{ github.workspace }}/ci/compliance/report.sh
+
+  examples:
+    name: Run Examples
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust stable
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - uses: Swatinem/rust-cache@v2
+      - name: Run server and client examples test
+        run: ./ci/example_test.sh
