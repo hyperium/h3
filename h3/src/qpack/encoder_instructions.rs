@@ -1,13 +1,23 @@
+//! Types that can be sent and received in the encoder stream
+
 use bytes::{Buf, BufMut};
-use std::{convert::TryInto, io::Cursor};
 
-use crate::error::{internal_error::InternalConnectionError, Code};
+use crate::error::internal_error::InternalConnectionError;
 
-use super::{
-    parse_error::ParseError,
-    prefix_int::{self, Error as IntError},
-    prefix_string::{self, Error as StringError},
-};
+use super::prefix_int;
+use super::prefix_int::Error as IntError;
+use super::prefix_string;
+use super::prefix_string::Error as StringError;
+
+/// Error type for parsing encoder instructions
+#[derive(Debug)]
+pub enum ParseEncoderInstructionError {
+    /// The buffer is not long enough to read the instruction
+    /// The Caller decides how to handle this because not all data may arrived yet
+    UnexpectedEnd,
+    /// Error is used when integer overflow occurs with the prefix_int
+    IntegerOverflow,
+}
 
 // 4.3. Encoder Instructions
 pub enum EncoderInstruction {
@@ -70,7 +80,7 @@ impl EncoderInstruction {
         }
     }*/
 
-   /* fn decode<R: Buf>(read: &mut R) -> Result<Option<EncoderInstruction>, InternalConnectionError> {
+    /* fn decode<R: Buf>(read: &mut R) -> Result<Option<EncoderInstruction>, InternalConnectionError> {
         if read.remaining() < 1 {
             return Ok(None);
         }
@@ -154,16 +164,16 @@ impl InsertWithNameRef {
         }
     }
 
-    pub fn decode<R: Buf>(buf: &mut R) -> Result<Option<Self>, ParseError> {
+    pub fn decode<R: Buf>(buf: &mut R) -> Result<Option<Self>, ParseEncoderInstructionError> {
         let (flags, index) = match prefix_int::decode(6, buf) {
             Ok((f, x)) if f & 0b10 == 0b10 => (f, x),
             Ok((f, _)) => return Err(ParseError::InvalidPrefix(f)),
             Err(IntError::UnexpectedEnd) => return Ok(None),
             Err(e) => return Err(e.into()),
         };
-        let index: usize = index
-            .try_into()
-            .map_err(|_e| ParseError::Integer(crate::qpack::prefix_int::Error::Overflow))?;
+        let index: usize = index.try_into().map_err(|_e| {
+            ParseEncoderInstructionError::Integer(crate::qpack::prefix_int::Error::Overflow)
+        })?;
 
         let value = match prefix_string::decode(8, buf) {
             Ok(x) => x,
@@ -207,7 +217,7 @@ impl InsertWithoutNameRef {
         }
     }
 
-    pub fn decode<R: Buf>(buf: &mut R) -> Result<Option<Self>, ParseError> {
+    pub fn decode<R: Buf>(buf: &mut R) -> Result<Option<Self>, ParseEncoderInstructionError> {
         let name = match prefix_string::decode(6, buf) {
             Ok(x) => x,
             Err(StringError::UnexpectedEnd) => return Ok(None),
@@ -232,17 +242,17 @@ impl InsertWithoutNameRef {
 pub struct Duplicate(pub usize);
 
 impl Duplicate {
-    pub fn decode<R: Buf>(buf: &mut R) -> Result<Option<Self>, ParseError> {
+    pub fn decode<R: Buf>(buf: &mut R) -> Result<Option<Self>, ParseEncoderInstructionError> {
         let index = match prefix_int::decode(5, buf) {
             Ok((0, x)) => {
                 if x > (usize::MAX as u64) {
-                    return Err(ParseError::Integer(
+                    return Err(ParseEncoderInstructionError::Integer(
                         crate::qpack::prefix_int::Error::Overflow,
                     ));
                 }
                 x as usize
             }
-            Ok((f, _)) => return Err(ParseError::InvalidPrefix(f)),
+            Ok((f, _)) => return Err(ParseEncoderInstructionError::InvalidPrefix(f)),
             Err(IntError::UnexpectedEnd) => return Ok(None),
             Err(e) => return Err(e.into()),
         };
@@ -258,17 +268,17 @@ impl Duplicate {
 pub struct DynamicTableSizeUpdate(pub usize);
 
 impl DynamicTableSizeUpdate {
-    pub fn decode<R: Buf>(buf: &mut R) -> Result<Option<Self>, ParseError> {
+    pub fn decode<R: Buf>(buf: &mut R) -> Result<Self, ParseEncoderInstructionError> {
         let size = match prefix_int::decode(5, buf) {
             Ok((0b001, x)) => {
                 if x > (usize::MAX as u64) {
-                    return Err(ParseError::Integer(
+                    return Err(ParseEncoderInstructionError::Integer(
                         crate::qpack::prefix_int::Error::Overflow,
                     ));
                 }
                 x as usize
             }
-            Ok((f, _)) => return Err(ParseError::InvalidPrefix(f)),
+            Ok((f, _)) => return Err(ParseEncoderInstructionError::InvalidPrefix(f)),
             Err(IntError::UnexpectedEnd) => return Ok(None),
             Err(e) => return Err(e.into()),
         };
@@ -277,193 +287,5 @@ impl DynamicTableSizeUpdate {
 
     pub fn encode<W: BufMut>(&self, buf: &mut W) {
         prefix_int::encode(5, 0b001, self.0 as u64, buf);
-    }
-}
-
-// 4.4. Decoder Instructions
-// A decoder sends decoder instructions on the decoder stream to inform the encoder
-// about the processing of field sections and table updates to ensure consistency
-// of the dynamic table.
-#[derive(Debug, PartialEq)]
-pub enum DecoderInstruction {
-    // 4.4.1. Section Acknowledgement
-    // Acknowledge processing of an encoded field section whose declared Required
-    // Insert Count is not zero.
-    //   0   1   2   3   4   5   6   7
-    // +---+---+---+---+---+---+---+---+
-    // | 1 |      Stream ID (7+)       |
-    // +---+---------------------------+
-    HeaderAck,
-    // 4.4.2. Stream Cancellation
-    // When a stream is reset or reading is abandoned.
-    //   0   1   2   3   4   5   6   7
-    // +---+---+---+---+---+---+---+---+
-    // | 0 | 1 |     Stream ID (6+)    |
-    // +---+---+-----------------------+
-    StreamCancel,
-    //  4.4.3. Insert Count Increment
-    //  Increases the Known Received Count to the total number of dynamic table
-    //  insertions and duplications processed so far.
-    //   0   1   2   3   4   5   6   7
-    // +---+---+---+---+---+---+---+---+
-    // | 0 | 0 |     Increment (6+)    |
-    // +---+---+-----------------------+
-    InsertCountIncrement,
-    Unknown,
-}
-
-impl DecoderInstruction {
-    pub fn decode(first: u8) -> Self {
-        if first & 0b1100_0000 == 0 {
-            DecoderInstruction::InsertCountIncrement
-        } else if first & 0b1000_0000 != 0 {
-            DecoderInstruction::HeaderAck
-        } else if first & 0b0100_0000 == 0b0100_0000 {
-            DecoderInstruction::StreamCancel
-        } else {
-            DecoderInstruction::Unknown
-        }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct InsertCountIncrement(pub u8);
-
-impl InsertCountIncrement {
-    pub fn decode<R: Buf>(buf: &mut R) -> Result<Option<Self>, ParseError> {
-        let insert_count = match prefix_int::decode(6, buf) {
-            Ok((0b00, x)) => {
-                if x > 64 {
-                    return Err(ParseError::Integer(
-                        crate::qpack::prefix_int::Error::Overflow,
-                    ));
-                }
-                x as u8
-            }
-            Ok((f, _)) => return Err(ParseError::InvalidPrefix(f)),
-            Err(IntError::UnexpectedEnd) => return Ok(None),
-            Err(e) => return Err(e.into()),
-        };
-        Ok(Some(InsertCountIncrement(insert_count)))
-    }
-
-    pub fn encode<W: BufMut>(&self, buf: &mut W) {
-        prefix_int::encode(6, 0b00, self.0 as u64, buf);
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct HeaderAck(pub u64);
-
-impl HeaderAck {
-    pub fn decode<R: Buf>(buf: &mut R) -> Result<Option<Self>, ParseError> {
-        let stream_id = match prefix_int::decode(7, buf) {
-            Ok((0b1, x)) => x,
-            Ok((f, _)) => return Err(ParseError::InvalidPrefix(f)),
-            Err(IntError::UnexpectedEnd) => return Ok(None),
-            Err(e) => return Err(e.into()),
-        };
-        Ok(Some(HeaderAck(stream_id)))
-    }
-
-    pub fn encode<W: BufMut>(&self, buf: &mut W) {
-        prefix_int::encode(7, 0b1, self.0, buf);
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct StreamCancel(pub u64);
-
-impl StreamCancel {
-    pub fn decode<R: Buf>(buf: &mut R) -> Result<Option<Self>, ParseError> {
-        let stream_id = match prefix_int::decode(6, buf) {
-            Ok((0b01, x)) => x,
-            Ok((f, _)) => return Err(ParseError::InvalidPrefix(f)),
-            Err(IntError::UnexpectedEnd) => return Ok(None),
-            Err(e) => return Err(e.into()),
-        };
-        Ok(Some(StreamCancel(stream_id)))
-    }
-
-    pub fn encode<W: BufMut>(&self, buf: &mut W) {
-        prefix_int::encode(6, 0b01, self.0, buf);
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use std::io::Cursor;
-
-    #[test]
-    fn insert_with_name_ref() {
-        let instruction = InsertWithNameRef::new_static(0, "value");
-        let mut buf = vec![];
-        instruction.encode(&mut buf).unwrap();
-        let mut read = Cursor::new(&buf);
-        assert_eq!(InsertWithNameRef::decode(&mut read), Ok(Some(instruction)));
-    }
-
-    #[test]
-    fn insert_without_name_ref() {
-        let instruction = InsertWithoutNameRef::new("name", "value");
-        let mut buf = vec![];
-        instruction.encode(&mut buf).unwrap();
-        let mut read = Cursor::new(&buf);
-        assert_eq!(
-            InsertWithoutNameRef::decode(&mut read),
-            Ok(Some(instruction))
-        );
-    }
-
-    #[test]
-    fn insert_duplicate() {
-        let instruction = Duplicate(42);
-        let mut buf = vec![];
-        instruction.encode(&mut buf);
-        let mut read = Cursor::new(&buf);
-        assert_eq!(Duplicate::decode(&mut read), Ok(Some(instruction)));
-    }
-
-    #[test]
-    fn dynamic_table_size_update() {
-        let instruction = DynamicTableSizeUpdate(42);
-        let mut buf = vec![];
-        instruction.encode(&mut buf);
-        let mut read = Cursor::new(&buf);
-        assert_eq!(
-            DynamicTableSizeUpdate::decode(&mut read),
-            Ok(Some(instruction))
-        );
-    }
-
-    #[test]
-    fn insert_count_increment() {
-        let instruction = InsertCountIncrement(42);
-        let mut buf = vec![];
-        instruction.encode(&mut buf);
-        let mut read = Cursor::new(&buf);
-        assert_eq!(
-            InsertCountIncrement::decode(&mut read),
-            Ok(Some(instruction))
-        );
-    }
-
-    #[test]
-    fn header_ack() {
-        let instruction = HeaderAck(42);
-        let mut buf = vec![];
-        instruction.encode(&mut buf);
-        let mut read = Cursor::new(&buf);
-        assert_eq!(HeaderAck::decode(&mut read), Ok(Some(instruction)));
-    }
-
-    #[test]
-    fn stream_cancel() {
-        let instruction = StreamCancel(42);
-        let mut buf = vec![];
-        instruction.encode(&mut buf);
-        let mut read = Cursor::new(&buf);
-        assert_eq!(StreamCancel::decode(&mut read), Ok(Some(instruction)));
     }
 }

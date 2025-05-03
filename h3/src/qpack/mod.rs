@@ -15,6 +15,9 @@ mod vas;
 mod decoder;
 mod encoder;
 
+
+//mod encoder_instructions;
+
 mod prefix_int;
 mod prefix_string;
 

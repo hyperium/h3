@@ -34,6 +34,9 @@ pub fn decode<B: Buf>(size: u8, buf: &mut B) -> Result<(u8, u64), Error> {
         return Ok((flags, first as u64));
     }
 
+    //= https://www.rfc-editor.org/rfc/rfc9204.html#section-4.1.1
+    //# QPACK implementations MUST be able to decode integers up to and
+    //# including 62 bits long.
     let mut value = mask as u64;
     let mut power = 0usize;
     loop {
@@ -91,7 +94,7 @@ impl From<coding::UnexpectedEnd> for Error {
 
 #[cfg(test)]
 mod test {
-    use std::io::Cursor;
+    use std::{io::Cursor, u64};
 
     fn check_codec(size: u8, flags: u8, value: u64, data: &[u8]) {
         let mut buf = Vec::new();
@@ -107,6 +110,10 @@ mod test {
         check_codec(5, 0b101, 0, &[0b1010_0000]);
         check_codec(5, 0b010, 1337, &[0b0101_1111, 154, 10]);
         check_codec(5, 0b010, 31, &[0b0101_1111, 0]);
+        //= https://www.rfc-editor.org/rfc/rfc9204.html#section-4.1.1
+        //= type=test
+        //# QPACK implementations MUST be able to decode integers up to and
+        //# including 62 bits long.
         check_codec(
             5,
             0b010,

@@ -412,6 +412,9 @@ where
         loop {
             match self
                 .conn
+                //= https://www.rfc-editor.org/rfc/rfc9204.html#section-4.2
+                //# An endpoint MUST allow its peer to create an encoder stream and a
+                //# decoder stream even if the connection's settings prevent their use.
                 .poll_accept_recv(cx)
                 .map_err(|e| self.handle_connection_error(e))?
             {

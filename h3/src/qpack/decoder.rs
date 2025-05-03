@@ -117,8 +117,8 @@ impl Decoder {
         write: &mut W,
     ) -> Result<usize, DecoderError> {
         let inserted_on_start = self.table.total_inserted();
-
-        while let Some(instruction) = self.parse_instruction(read)? {
+        todo!()
+        /*while let Some(instruction) = self.parse_instruction(read)? {
             #[cfg(feature = "tracing")]
             trace!("instruction {:?}", instruction);
 
@@ -135,46 +135,7 @@ impl Decoder {
                 .encode(write);
         }
 
-        Ok(self.table.total_inserted())
-    }
-
-    fn parse_instruction<R: Buf>(&self, read: &mut R) -> Result<Option<Instruction>, DecoderError> {
-        if read.remaining() < 1 {
-            return Ok(None);
-        }
-
-        let mut buf = Cursor::new(read.chunk());
-        let first = buf.chunk()[0];
-        let instruction = match EncoderInstruction::decode(first) {
-            EncoderInstruction::Unknown => return Err(DecoderError::UnknownPrefix(first)),
-            EncoderInstruction::DynamicTableSizeUpdate => {
-                DynamicTableSizeUpdate::decode(&mut buf)?.map(|x| Instruction::TableSizeUpdate(x.0))
-            }
-            EncoderInstruction::InsertWithoutNameRef => InsertWithoutNameRef::decode(&mut buf)?
-                .map(|x| Instruction::Insert(HeaderField::new(x.name, x.value))),
-            EncoderInstruction::Duplicate => match Duplicate::decode(&mut buf)? {
-                Some(Duplicate(index)) => {
-                    Some(Instruction::Insert(self.table.get_relative(index)?.clone()))
-                }
-                None => None,
-            },
-            EncoderInstruction::InsertWithNameRef => match InsertWithNameRef::decode(&mut buf)? {
-                Some(InsertWithNameRef::Static { index, value }) => Some(Instruction::Insert(
-                    StaticTable::get(index)?.with_value(value),
-                )),
-                Some(InsertWithNameRef::Dynamic { index, value }) => Some(Instruction::Insert(
-                    self.table.get_relative(index)?.with_value(value),
-                )),
-                None => None,
-            },
-        };
-
-        if instruction.is_some() {
-            let pos = buf.position();
-            read.advance(pos as usize);
-        }
-
-        Ok(instruction)
+        Ok(self.table.total_inserted())*/
     }
 
     fn parse_header_field<R: Buf>(
@@ -509,7 +470,7 @@ mod tests {
         assert!(dec.is_empty());
     }
 
-    #[test]
+  /*  #[test]
     fn enc_recv_buf_too_short() {
         let decoder = Decoder::from(build_table_with_size(0));
         let mut buf = vec![];
@@ -522,7 +483,7 @@ mod tests {
         let mut enc = Cursor::new(&buf);
         assert_eq!(decoder.parse_instruction(&mut enc), Ok(None));
     }
-
+*/
     #[test]
     fn enc_recv_accepts_truncated_messages() {
         let mut buf = vec![];
