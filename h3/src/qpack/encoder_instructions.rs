@@ -3,11 +3,12 @@
 use bytes::{Buf, BufMut};
 
 use crate::error::internal_error::InternalConnectionError;
+use crate::error::Code;
 
 use super::prefix_int;
 use super::prefix_int::Error as IntError;
 use super::prefix_string;
-use super::prefix_string::Error as StringError;
+use super::prefix_string::PrefixStringError as StringError;
 
 /// Error type for parsing encoder instructions
 #[derive(Debug)]
@@ -15,8 +16,17 @@ pub enum ParseEncoderInstructionError {
     /// The buffer is not long enough to read the instruction
     /// The Caller decides how to handle this because not all data may arrived yet
     UnexpectedEnd,
-    /// Error is used when integer overflow occurs with the prefix_int
-    IntegerOverflow,
+    /// Failed to interpret the instruction
+    ConnectionError(InternalConnectionError),
+}
+
+impl ParseEncoderInstructionError {
+    fn connection_error(message: String) -> Self {
+        ParseEncoderInstructionError::ConnectionError(InternalConnectionError::new(
+            Code::QPACK_ENCODER_STREAM_ERROR,
+            message,
+        ))
+    }
 }
 
 // 4.3. Encoder Instructions
@@ -188,7 +198,7 @@ impl InsertWithNameRef {
         }
     }
 
-    pub fn encode<W: BufMut>(&self, buf: &mut W) -> Result<(), prefix_string::Error> {
+    pub fn encode<W: BufMut>(&self, buf: &mut W) -> Result<(), prefix_string::PrefixStringError> {
         match self {
             InsertWithNameRef::Static { index, value } => {
                 prefix_int::encode(6, 0b11, *index as u64, buf);
@@ -231,7 +241,7 @@ impl InsertWithoutNameRef {
         Ok(Some(Self::new(name, value)))
     }
 
-    pub fn encode<W: BufMut>(&self, buf: &mut W) -> Result<(), prefix_string::Error> {
+    pub fn encode<W: BufMut>(&self, buf: &mut W) -> Result<(), prefix_string::PrefixStringError> {
         prefix_string::encode(6, 0b01, &self.name, buf)?;
         prefix_string::encode(8, 0, &self.value, buf)?;
         Ok(())
@@ -239,24 +249,26 @@ impl InsertWithoutNameRef {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct Duplicate(pub usize);
+pub struct Duplicate(u64);
 
 impl Duplicate {
-    pub fn decode<R: Buf>(buf: &mut R) -> Result<Option<Self>, ParseEncoderInstructionError> {
+    /// Call this function only if you are sure that the prefix is 0b000
+    pub fn decode<R: Buf>(buf: &mut R) -> Result<Self, ParseEncoderInstructionError> {
         let index = match prefix_int::decode(5, buf) {
-            Ok((0, x)) => {
-                if x > (usize::MAX as u64) {
-                    return Err(ParseEncoderInstructionError::Integer(
-                        crate::qpack::prefix_int::Error::Overflow,
-                    ));
-                }
-                x as usize
+            Ok((0, x)) => x,
+            Ok(_) => {
+                unreachable!("This function must not be called when the prefix is other than 0b000")
             }
-            Ok((f, _)) => return Err(ParseEncoderInstructionError::InvalidPrefix(f)),
-            Err(IntError::UnexpectedEnd) => return Ok(None),
-            Err(e) => return Err(e.into()),
+            Err(IntError::UnexpectedEnd) => {
+                return Err(ParseEncoderInstructionError::UnexpectedEnd)
+            }
+            Err(IntError::Overflow) => {
+                return Err(ParseEncoderInstructionError::connection_error(
+                    "Integer value to large".to_string(),
+                ))
+            }
         };
-        Ok(Some(Duplicate(index)))
+        Ok(Duplicate(index))
     }
 
     pub fn encode<W: BufMut>(&self, buf: &mut W) {
@@ -265,24 +277,26 @@ impl Duplicate {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct DynamicTableSizeUpdate(pub usize);
+pub struct DynamicTableSizeUpdate(u64);
 
 impl DynamicTableSizeUpdate {
+    /// Call this function only if you are sure that the prefix is 0b001
     pub fn decode<R: Buf>(buf: &mut R) -> Result<Self, ParseEncoderInstructionError> {
         let size = match prefix_int::decode(5, buf) {
-            Ok((0b001, x)) => {
-                if x > (usize::MAX as u64) {
-                    return Err(ParseEncoderInstructionError::Integer(
-                        crate::qpack::prefix_int::Error::Overflow,
-                    ));
-                }
-                x as usize
+            Ok((0b001, x)) => x,
+            Ok(_) => {
+                unreachable!("This function must not be called when the prefix is other than 0b001")
             }
-            Ok((f, _)) => return Err(ParseEncoderInstructionError::InvalidPrefix(f)),
-            Err(IntError::UnexpectedEnd) => return Ok(None),
-            Err(e) => return Err(e.into()),
+            Err(IntError::UnexpectedEnd) => {
+                return Err(ParseEncoderInstructionError::UnexpectedEnd)
+            }
+            Err(IntError::Overflow) => {
+                return Err(ParseEncoderInstructionError::connection_error(
+                    "Integer value to large".to_string(),
+                ))
+            }
         };
-        Ok(Some(DynamicTableSizeUpdate(size)))
+        Ok(DynamicTableSizeUpdate(size))
     }
 
     pub fn encode<W: BufMut>(&self, buf: &mut W) {

@@ -6,7 +6,7 @@ use crate::error::{internal_error::InternalConnectionError, Code};
 use super::{
     parse_error::ParseError,
     prefix_int::{self, Error as IntError},
-    prefix_string::{self, Error as StringError},
+    prefix_string::{self, PrefixStringError as StringError},
 };
 
 // 4.3. Encoder Instructions
@@ -178,7 +178,7 @@ impl InsertWithNameRef {
         }
     }
 
-    pub fn encode<W: BufMut>(&self, buf: &mut W) -> Result<(), prefix_string::Error> {
+    pub fn encode<W: BufMut>(&self, buf: &mut W) -> Result<(), prefix_string::PrefixStringError> {
         match self {
             InsertWithNameRef::Static { index, value } => {
                 prefix_int::encode(6, 0b11, *index as u64, buf);
@@ -221,7 +221,7 @@ impl InsertWithoutNameRef {
         Ok(Some(Self::new(name, value)))
     }
 
-    pub fn encode<W: BufMut>(&self, buf: &mut W) -> Result<(), prefix_string::Error> {
+    pub fn encode<W: BufMut>(&self, buf: &mut W) -> Result<(), prefix_string::PrefixStringError> {
         prefix_string::encode(6, 0b01, &self.name, buf)?;
         prefix_string::encode(8, 0, &self.value, buf)?;
         Ok(())

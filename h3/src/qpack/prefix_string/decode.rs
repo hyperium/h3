@@ -1,7 +1,7 @@
 use super::BitWindow;
 
 #[derive(Debug, PartialEq)]
-pub enum Error {
+pub enum HuffmanDecodingError {
     MissingBits(BitWindow),
     Unhandled(BitWindow, usize),
 }
@@ -19,7 +19,7 @@ struct HuffmanDecoder {
 }
 
 impl HuffmanDecoder {
-    fn check_eof(&self, bit_pos: &mut BitWindow, input: &[u8]) -> Result<Option<u32>, Error> {
+    fn check_eof(&self, bit_pos: &mut BitWindow, input: &[u8]) -> Result<Option<u32>, HuffmanDecodingError> {
         use std::cmp::Ordering;
         match ((bit_pos.byte + 1) as usize).cmp(&input.len()) {
             // Position is out-of-range
@@ -33,7 +33,7 @@ impl HuffmanDecoder {
                 let rest = match read_bits(input, side.byte, side.bit, side.count) {
                     Ok(x) => x,
                     Err(()) => {
-                        return Err(Error::MissingBits(side));
+                        return Err(HuffmanDecodingError::MissingBits(side));
                     }
                 };
 
@@ -44,17 +44,17 @@ impl HuffmanDecoder {
             }
             Ordering::Less => {}
         }
-        Err(Error::MissingBits(bit_pos.clone()))
+        Err(HuffmanDecodingError::MissingBits(bit_pos.clone()))
     }
 
-    fn fetch_value(&self, bit_pos: &mut BitWindow, input: &[u8]) -> Result<Option<u32>, Error> {
+    fn fetch_value(&self, bit_pos: &mut BitWindow, input: &[u8]) -> Result<Option<u32>, HuffmanDecodingError> {
         match read_bits(input, bit_pos.byte, bit_pos.bit, bit_pos.count) {
             Ok(value) => Ok(Some(value as u32)),
             Err(()) => self.check_eof(bit_pos, input),
         }
     }
 
-    fn decode_next(&self, bit_pos: &mut BitWindow, input: &[u8]) -> Result<Option<u8>, Error> {
+    fn decode_next(&self, bit_pos: &mut BitWindow, input: &[u8]) -> Result<Option<u8>, HuffmanDecodingError> {
         bit_pos.forwards(self.lookup);
 
         let value = match self.fetch_value(bit_pos, input) {
@@ -65,7 +65,7 @@ impl HuffmanDecoder {
 
         let at_value = match (self.table).get(value) {
             Some(x) => x,
-            None => return Err(Error::Unhandled(bit_pos.clone(), value)),
+            None => return Err(HuffmanDecodingError::Unhandled(bit_pos.clone(), value)),
         };
 
         match at_value {
@@ -300,7 +300,7 @@ pub struct DecodeIter<'a> {
 }
 
 impl<'a> Iterator for DecodeIter<'a> {
-    type Item = Result<u8, Error>;
+    type Item = Result<u8, HuffmanDecodingError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match HPACK_STRING.decode_next(&mut self.bit_pos, self.content) {
@@ -1719,7 +1719,7 @@ mod tests {
             0b1111_1111,
         ];
         let expected = (0u8..=255).collect();
-        let res: Result<Vec<_>, Error> = bytes.hpack_decode().collect();
+        let res: Result<Vec<_>, HuffmanDecodingError> = bytes.hpack_decode().collect();
         assert_eq!(res, Ok(expected));
     }
 }

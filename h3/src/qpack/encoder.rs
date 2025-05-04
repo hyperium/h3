@@ -13,7 +13,7 @@ use super::{
     },
     parse_error::ParseError,
     prefix_int::Error as IntError,
-    prefix_string::Error as StringError,
+    prefix_string::PrefixStringError as StringError,
     static_::StaticTable,
     stream::{
         DecoderInstruction, Duplicate, DynamicTableSizeUpdate, HeaderAck, InsertCountIncrement,

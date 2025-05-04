@@ -28,7 +28,7 @@ use super::{prefix_int, prefix_string};
 #[derive(Debug, PartialEq)]
 pub enum DecoderError {
     InvalidInteger(prefix_int::Error),
-    InvalidString(prefix_string::Error),
+    InvalidString(prefix_string::PrefixStringError),
     InvalidIndex(vas::Error),
     DynamicTable(DynamicTableError),
     InvalidStaticIndex(usize),
@@ -255,10 +255,10 @@ impl From<prefix_int::Error> for DecoderError {
     }
 }
 
-impl From<prefix_string::Error> for DecoderError {
-    fn from(e: prefix_string::Error) -> Self {
+impl From<prefix_string::PrefixStringError> for DecoderError {
+    fn from(e: prefix_string::PrefixStringError) -> Self {
         match e {
-            prefix_string::Error::UnexpectedEnd => DecoderError::UnexpectedEnd,
+            prefix_string::PrefixStringError::UnexpectedEnd => DecoderError::UnexpectedEnd,
             e => DecoderError::InvalidString(e),
         }
     }
