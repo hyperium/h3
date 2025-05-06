@@ -1,3 +1,11 @@
+### v0.0.8 (2025-05-06)
+* fix integer overflow when parsing qpack prefixed integers
+* introduce new user facing error types 
+* introduce new quic traits facing error types
+* `server::Connection::accept` now returns a  `RequestResolver` instead of direct resolving the request to avoid head of line blocking
+* h3-datagram traits cleanup
+* some fixes in error handling 
+
 ### v0.0.7 (2025-03-13)
 * Expose poll_recv_trailers APIs
 * Avoiding extra allocation for shared error
