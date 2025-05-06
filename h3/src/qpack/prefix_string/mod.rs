@@ -18,6 +18,8 @@ pub use self::{
 use crate::proto::coding::BufMutExt;
 use crate::qpack::prefix_int::{self, Error as IntegerError};
 
+use super::prefix_int::PrefixIntDecodeError;
+
 #[derive(Debug, PartialEq)]
 pub enum PrefixStringError {
     UnexpectedEnd,
@@ -39,8 +41,21 @@ impl std::fmt::Display for PrefixStringError {
     }
 }
 
-pub fn decode<B: Buf>(size: u8, buf: &mut B) -> Result<Vec<u8>, PrefixStringError> {
-    let (flags, len) = prefix_int::decode(size - 1, buf)?;
+#[derive(Debug, thiserror::Error)]
+pub enum PrefixStringDecoderError {
+    #[error("error while decoding integer: {0}")]
+    Integer(PrefixIntDecodeError),
+    #[error("error while decoding with huffman table: {0}")]
+    HuffmanDecoding(HuffmanDecodingError),
+}
+
+pub fn decode<B: Buf>(size: u8, buf: &mut B) -> Result<Option<Vec<u8>>, PrefixStringDecoderError> {
+    let (flags, len) = match prefix_int::decode(size - 1, buf){
+        Ok(Some((flags, len))) => (flags, len),
+        Ok(None) => return Ok(None),
+        Err(e) => return Err(PrefixStringError::Integer(e)),
+    };
+
     let len: usize = len.try_into()?;
     if buf.remaining() < len {
         return Err(PrefixStringError::UnexpectedEnd);

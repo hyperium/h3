@@ -1,7 +1,8 @@
 use super::BitWindow;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, thiserror::Error)]
 pub enum HuffmanDecodingError {
+    #[error("missing bits while decoding")]
     MissingBits(BitWindow),
     Unhandled(BitWindow, usize),
 }

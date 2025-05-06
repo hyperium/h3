@@ -10,16 +10,6 @@ use super::prefix_int::Error as IntError;
 use super::prefix_string;
 use super::prefix_string::PrefixStringError as StringError;
 
-/// Error type for parsing encoder instructions
-#[derive(Debug)]
-pub enum ParseEncoderInstructionError {
-    /// The buffer is not long enough to read the instruction
-    /// The Caller decides how to handle this because not all data may arrived yet
-    UnexpectedEnd,
-    /// Failed to interpret the instruction
-    ConnectionError(InternalConnectionError),
-}
-
 impl ParseEncoderInstructionError {
     fn connection_error(message: String) -> Self {
         ParseEncoderInstructionError::ConnectionError(InternalConnectionError::new(
@@ -174,7 +164,7 @@ impl InsertWithNameRef {
         }
     }
 
-    pub fn decode<R: Buf>(buf: &mut R) -> Result<Option<Self>, ParseEncoderInstructionError> {
+    pub fn decode<R: Buf>(buf: &mut R) -> Result<Option<Self>, InternalConnectionError> {
         let (flags, index) = match prefix_int::decode(6, buf) {
             Ok((f, x)) if f & 0b10 == 0b10 => (f, x),
             Ok((f, _)) => return Err(ParseError::InvalidPrefix(f)),
@@ -227,7 +217,7 @@ impl InsertWithoutNameRef {
         }
     }
 
-    pub fn decode<R: Buf>(buf: &mut R) -> Result<Option<Self>, ParseEncoderInstructionError> {
+    pub fn decode<R: Buf>(buf: &mut R) -> Result<Option<Self>, InternalConnectionError> {
         let name = match prefix_string::decode(6, buf) {
             Ok(x) => x,
             Err(StringError::UnexpectedEnd) => return Ok(None),
@@ -253,22 +243,21 @@ pub struct Duplicate(u64);
 
 impl Duplicate {
     /// Call this function only if you are sure that the prefix is 0b000
-    pub fn decode<R: Buf>(buf: &mut R) -> Result<Self, ParseEncoderInstructionError> {
+    pub fn decode<R: Buf>(buf: &mut R) -> Result<Option<Self>, InternalConnectionError> {
         let index = match prefix_int::decode(5, buf) {
             Ok((0, x)) => x,
             Ok(_) => {
                 unreachable!("This function must not be called when the prefix is other than 0b000")
             }
-            Err(IntError::UnexpectedEnd) => {
-                return Err(ParseEncoderInstructionError::UnexpectedEnd)
-            }
+            Err(IntError::UnexpectedEnd) => return Ok(None),
             Err(IntError::Overflow) => {
-                return Err(ParseEncoderInstructionError::connection_error(
-                    "Integer value to large".to_string(),
-                ))
+                return Err(InternalConnectionError {
+                    code: Code::QPACK_ENCODER_STREAM_ERROR,
+                    message: "Integer value to large".to_string(),
+                })
             }
         };
-        Ok(Duplicate(index))
+        Ok(Some(Duplicate(index)))
     }
 
     pub fn encode<W: BufMut>(&self, buf: &mut W) {
@@ -281,22 +270,21 @@ pub struct DynamicTableSizeUpdate(u64);
 
 impl DynamicTableSizeUpdate {
     /// Call this function only if you are sure that the prefix is 0b001
-    pub fn decode<R: Buf>(buf: &mut R) -> Result<Self, ParseEncoderInstructionError> {
+    pub fn decode<R: Buf>(buf: &mut R) -> Result<Option<Self>, InternalConnectionError> {
         let size = match prefix_int::decode(5, buf) {
             Ok((0b001, x)) => x,
             Ok(_) => {
                 unreachable!("This function must not be called when the prefix is other than 0b001")
             }
-            Err(IntError::UnexpectedEnd) => {
-                return Err(ParseEncoderInstructionError::UnexpectedEnd)
-            }
+            Err(IntError::UnexpectedEnd) => return Ok(None),
             Err(IntError::Overflow) => {
-                return Err(ParseEncoderInstructionError::connection_error(
-                    "Integer value to large".to_string(),
-                ))
+                return Err(InternalConnectionError {
+                    code: Code::QPACK_ENCODER_STREAM_ERROR,
+                    message: "Integer value to large".to_string(),
+                })
             }
         };
-        Ok(DynamicTableSizeUpdate(size))
+        Ok(Some(DynamicTableSizeUpdate(size)))
     }
 
     pub fn encode<W: BufMut>(&self, buf: &mut W) {
