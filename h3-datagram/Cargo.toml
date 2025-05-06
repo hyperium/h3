@@ -1,6 +1,6 @@
 [package]
 name = "h3-datagram"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 documentation = "https://docs.rs/h3-datagram"
 repository = "https://github.com/hyperium/h3"
