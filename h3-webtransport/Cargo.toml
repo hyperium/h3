@@ -1,6 +1,6 @@
 [package]
 name = "h3-webtransport"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 documentation = "https://docs.rs/h3-webtransport"
 repository = "https://github.com/hyperium/h3"
