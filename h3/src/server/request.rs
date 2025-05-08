@@ -19,7 +19,7 @@ use crate::{
         frame::{Frame, PayloadLen},
         headers::Header,
     },
-    qpack::{self, decoder2},
+    qpack::{self},
     quic::{self, SendStream, StreamId},
     shared_state::{ConnectionState, SharedState},
 };

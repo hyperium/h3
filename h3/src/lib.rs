@@ -51,6 +51,11 @@ mod webtransport;
 
 #[allow(dead_code)]
 mod qpack;
+
+#[allow(dead_code)]
+mod qpack2;
+
+
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

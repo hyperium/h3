@@ -83,7 +83,7 @@ where
     qpack_streams: QpackStreams<C, B>,
 
     /// QPack decoder stream handler
-    decoder: qpack::decoder2::decoder_stream_handler::DecoderStreamHandler<C, B>,
+    decoder: crate::qpack2::decoder2::decoder_stream_handler::DecoderStreamHandler<C, B>,
 
     /// Buffers incoming uni/recv streams which have yet to be claimed.
     ///

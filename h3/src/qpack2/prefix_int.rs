@@ -19,9 +19,18 @@ impl std::fmt::Display for Error {
     }
 }
 
-pub fn decode<B: Buf>(size: u8, buf: &mut B) -> Result<(u8, u64), Error> {
+#[derive(Debug, thiserror::Error)]
+pub enum PrefixIntDecodeError {
+    #[error("integer overflow")]
+    Overflow,
+}
+
+pub fn decode<B: Buf>(size: u8, buf: &mut B) -> Result<Option<(u8, u64)>, PrefixIntDecodeError> {
     assert!(size <= 8);
-    let mut first = buf.get::<u8>()?;
+    let mut first = match buf.get::<u8>() {
+        Ok(first) => first,
+        Err(coding::UnexpectedEnd(_)) => return Ok(None),
+    };
 
     // NOTE: following casts to u8 intend to trim the most significant bits, they are used as a
     //       workaround for shiftoverflow errors when size == 8.
@@ -31,13 +40,19 @@ pub fn decode<B: Buf>(size: u8, buf: &mut B) -> Result<(u8, u64), Error> {
 
     // if first < 2usize.pow(size) - 1
     if first < mask {
-        return Ok((flags, first as u64));
+        return Ok(Some((flags, first as u64)));
     }
 
+    //= https://www.rfc-editor.org/rfc/rfc9204.html#section-4.1.1
+    //# QPACK implementations MUST be able to decode integers up to and
+    //# including 62 bits long.
     let mut value = mask as u64;
     let mut power = 0usize;
     loop {
-        let byte = buf.get::<u8>()? as u64;
+        let byte = match buf.get::<u8>() {
+            Ok(byte) => byte,
+            Err(coding::UnexpectedEnd(_)) => return Ok(None),
+        } as u64;
         value += (byte & 127) << power;
         power += 7;
 
@@ -46,11 +61,11 @@ pub fn decode<B: Buf>(size: u8, buf: &mut B) -> Result<(u8, u64), Error> {
         }
 
         if power >= MAX_POWER {
-            return Err(Error::Overflow);
+            return Err(PrefixIntDecodeError::Overflow);
         }
     }
 
-    Ok((flags, value))
+    Ok(Some((flags, value)))
 }
 
 pub fn encode<B: BufMut>(size: u8, flags: u8, value: u64, buf: &mut B) {
@@ -106,6 +121,10 @@ mod test {
         check_codec(5, 0b101, 0, &[0b1010_0000]);
         check_codec(5, 0b010, 1337, &[0b0101_1111, 154, 10]);
         check_codec(5, 0b010, 31, &[0b0101_1111, 0]);
+        //= https://www.rfc-editor.org/rfc/rfc9204.html#section-4.1.1
+        //= type=test
+        //# QPACK implementations MUST be able to decode integers up to and
+        //# including 62 bits long.
         check_codec(
             5,
             0b010,

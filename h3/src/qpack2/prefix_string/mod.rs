@@ -11,15 +11,17 @@ use bytes::{Buf, BufMut};
 pub use self::bitwin::BitWindow;
 
 pub use self::{
-    decode::{Error as HuffmanDecodingError, HpackStringDecode},
-    encode::{Error as HuffmanEncodingError, HpackStringEncode},
+    decode::{HuffmanDecodingError, HpackStringDecode},
+    encode::{HuffmanEncodingError, HpackStringEncode},
 };
 
 use crate::proto::coding::BufMutExt;
 use crate::qpack::prefix_int::{self, Error as IntegerError};
 
+use super::prefix_int::PrefixIntDecodeError;
+
 #[derive(Debug, PartialEq)]
-pub enum Error {
+pub enum PrefixStringError {
     UnexpectedEnd,
     Integer(IntegerError),
     HuffmanDecoding(HuffmanDecodingError),
@@ -27,23 +29,36 @@ pub enum Error {
     BufSize(TryFromIntError),
 }
 
-impl std::fmt::Display for Error {
+impl std::fmt::Display for PrefixStringError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::UnexpectedEnd => write!(f, "unexpected end"),
-            Error::Integer(e) => write!(f, "could not parse integer: {}", e),
-            Error::HuffmanDecoding(e) => write!(f, "Huffman decode failed: {:?}", e),
-            Error::HuffmanEncoding(e) => write!(f, "Huffman encode failed: {:?}", e),
-            Error::BufSize(_) => write!(f, "number in buffer wrong size"),
+            PrefixStringError::UnexpectedEnd => write!(f, "unexpected end"),
+            PrefixStringError::Integer(e) => write!(f, "could not parse integer: {}", e),
+            PrefixStringError::HuffmanDecoding(e) => write!(f, "Huffman decode failed: {:?}", e),
+            PrefixStringError::HuffmanEncoding(e) => write!(f, "Huffman encode failed: {:?}", e),
+            PrefixStringError::BufSize(_) => write!(f, "number in buffer wrong size"),
         }
     }
 }
 
-pub fn decode<B: Buf>(size: u8, buf: &mut B) -> Result<Vec<u8>, Error> {
-    let (flags, len) = prefix_int::decode(size - 1, buf)?;
+#[derive(Debug, thiserror::Error)]
+pub enum PrefixStringDecoderError {
+    #[error("error while decoding integer: {0}")]
+    Integer(PrefixIntDecodeError),
+    #[error("error while decoding with huffman table: {0}")]
+    HuffmanDecoding(HuffmanDecodingError),
+}
+
+pub fn decode<B: Buf>(size: u8, buf: &mut B) -> Result<Option<Vec<u8>>, PrefixStringDecoderError> {
+    let (flags, len) = match prefix_int::decode(size - 1, buf){
+        Ok(Some((flags, len))) => (flags, len),
+        Ok(None) => return Ok(None),
+        Err(e) => return Err(PrefixStringError::Integer(e)),
+    };
+
     let len: usize = len.try_into()?;
     if buf.remaining() < len {
-        return Err(Error::UnexpectedEnd);
+        return Err(PrefixStringError::UnexpectedEnd);
     }
 
     let payload = buf.copy_to_bytes(len);
@@ -59,7 +74,7 @@ pub fn decode<B: Buf>(size: u8, buf: &mut B) -> Result<Vec<u8>, Error> {
     Ok(value)
 }
 
-pub fn encode<B: BufMut>(size: u8, flags: u8, value: &[u8], buf: &mut B) -> Result<(), Error> {
+pub fn encode<B: BufMut>(size: u8, flags: u8, value: &[u8], buf: &mut B) -> Result<(), PrefixStringError> {
     let encoded = Vec::from(value).hpack_encode()?;
     prefix_int::encode(size - 1, flags << 1 | 1, encoded.len().try_into()?, buf);
     for byte in encoded {
@@ -68,30 +83,30 @@ pub fn encode<B: BufMut>(size: u8, flags: u8, value: &[u8], buf: &mut B) -> Resu
     Ok(())
 }
 
-impl From<HuffmanEncodingError> for Error {
+impl From<HuffmanEncodingError> for PrefixStringError {
     fn from(error: HuffmanEncodingError) -> Self {
-        Error::HuffmanEncoding(error)
+        PrefixStringError::HuffmanEncoding(error)
     }
 }
 
-impl From<IntegerError> for Error {
+impl From<IntegerError> for PrefixStringError {
     fn from(error: IntegerError) -> Self {
         match error {
-            IntegerError::UnexpectedEnd => Error::UnexpectedEnd,
-            e => Error::Integer(e),
+            IntegerError::UnexpectedEnd => PrefixStringError::UnexpectedEnd,
+            e => PrefixStringError::Integer(e),
         }
     }
 }
 
-impl From<HuffmanDecodingError> for Error {
+impl From<HuffmanDecodingError> for PrefixStringError {
     fn from(error: HuffmanDecodingError) -> Self {
-        Error::HuffmanDecoding(error)
+        PrefixStringError::HuffmanDecoding(error)
     }
 }
 
-impl From<TryFromIntError> for Error {
+impl From<TryFromIntError> for PrefixStringError {
     fn from(error: TryFromIntError) -> Self {
-        Error::BufSize(error)
+        PrefixStringError::BufSize(error)
     }
 }
 
@@ -159,6 +174,6 @@ mod tests {
     fn decode_too_short() {
         let buf = vec![0b0100_0011, b'b', b'a'];
         let mut read = Cursor::new(&buf);
-        assert_matches!(decode(6, &mut read), Err(Error::UnexpectedEnd));
+        assert_matches!(decode(6, &mut read), Err(PrefixStringError::UnexpectedEnd));
     }
 }

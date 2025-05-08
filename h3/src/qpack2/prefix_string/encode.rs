@@ -1,7 +1,7 @@
 use super::BitWindow;
 
 #[derive(Debug, PartialEq)]
-pub struct Error {
+pub struct HuffmanEncodingError {
     buffer_pos: BitWindow,
     len: usize,
     capacity: usize,
@@ -52,7 +52,7 @@ impl HuffmanEncoder {
         }
     }
 
-    fn put(&mut self, code: u8) -> Result<(), Error> {
+    fn put(&mut self, code: u8) -> Result<(), HuffmanEncodingError> {
         let encode_value = &HPACK_STRING[code as usize];
 
         self.ensure_free_space(encode_value.bit_count);
@@ -70,7 +70,7 @@ impl HuffmanEncoder {
         Ok(())
     }
 
-    fn ends(self) -> Result<Vec<u8>, Error> {
+    fn ends(self) -> Result<Vec<u8>, HuffmanEncodingError> {
         Ok(self.buffer)
     }
 }
@@ -383,11 +383,11 @@ const HPACK_STRING: [EncodeValue; 256] = bits_encode![
 ];
 
 pub trait HpackStringEncode {
-    fn hpack_encode(&self) -> Result<Vec<u8>, Error>;
+    fn hpack_encode(&self) -> Result<Vec<u8>, HuffmanEncodingError>;
 }
 
 impl HpackStringEncode for Vec<u8> {
-    fn hpack_encode(&self) -> Result<Vec<u8>, Error> {
+    fn hpack_encode(&self) -> Result<Vec<u8>, HuffmanEncodingError> {
         let mut encoder = HuffmanEncoder::new();
         for code in self {
             encoder.put(*code)?;

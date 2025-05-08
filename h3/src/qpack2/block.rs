@@ -318,7 +318,7 @@ impl LiteralWithNameRef {
         }
     }
 
-    pub fn encode<W: BufMut>(&self, buf: &mut W) -> Result<(), prefix_string::Error> {
+    pub fn encode<W: BufMut>(&self, buf: &mut W) -> Result<(), prefix_string::PrefixStringError> {
         match self {
             LiteralWithNameRef::Static { index, value } => {
                 prefix_int::encode(4, 0b0101, *index as u64, buf);
@@ -365,7 +365,7 @@ impl LiteralWithPostBaseNameRef {
         }
     }
 
-    pub fn encode<W: BufMut>(&self, buf: &mut W) -> Result<(), prefix_string::Error> {
+    pub fn encode<W: BufMut>(&self, buf: &mut W) -> Result<(), prefix_string::PrefixStringError> {
         prefix_int::encode(3, 0b0000, self.index as u64, buf);
         prefix_string::encode(8, 0, &self.value, buf)?;
         Ok(())
@@ -398,7 +398,7 @@ impl Literal {
         ))
     }
 
-    pub fn encode<W: BufMut>(&self, buf: &mut W) -> Result<(), prefix_string::Error> {
+    pub fn encode<W: BufMut>(&self, buf: &mut W) -> Result<(), prefix_string::PrefixStringError> {
         prefix_string::encode(4, 0b0010, &self.name, buf)?;
         prefix_string::encode(8, 0, &self.value, buf)?;
         Ok(())

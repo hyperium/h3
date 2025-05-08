@@ -1,10 +1,12 @@
 use bytes::{Buf, BufMut};
-use std::convert::TryInto;
+use std::{convert::TryInto, io::Cursor};
+
+use crate::error::{internal_error::InternalConnectionError, Code};
 
 use super::{
     parse_error::ParseError,
     prefix_int::{self, Error as IntError},
-    prefix_string::{self, Error as StringError},
+    prefix_string::{self, PrefixStringError as StringError},
 };
 
 // 4.3. Encoder Instructions
@@ -15,7 +17,7 @@ pub enum EncoderInstruction {
     // +---+---+---+---+---+---+---+---+
     // | 0 | 0 | 1 |   Capacity (5+)   |
     // +---+---+---+-------------------+
-    DynamicTableSizeUpdate,
+    DynamicTableSizeUpdate(DynamicTableSizeUpdate),
     // 4.3.2. Insert With Name Reference
     // An encoder adds an entry to the dynamic table where the field name
     // matches the field name of an entry stored in the static or the dynamic
@@ -28,7 +30,7 @@ pub enum EncoderInstruction {
     // +---+---------------------------+
     // |  Value String (Length bytes)  |
     // +-------------------------------+
-    InsertWithNameRef,
+    InsertWithNameRef(InsertWithNameRef),
     // 4.3.3. Insert With Literal Name
     // An encoder adds an entry to the dynamic table where both the field name
     // and the field value are represented as string literals.
@@ -42,19 +44,19 @@ pub enum EncoderInstruction {
     // +---+---------------------------+
     // |  Value String (Length bytes)  |
     // +-------------------------------+
-    InsertWithoutNameRef,
+    InsertWithoutNameRef(InsertWithoutNameRef),
     // 4.3.4. Duplicate
     // An encoder duplicates an existing entry in the dynamic table.
     //   0   1   2   3   4   5   6   7
     // +---+---+---+---+---+---+---+---+
     // | 0 | 0 | 0 |    Index (5+)     |
     // +---+---+---+-------------------+
-    Duplicate,
+    Duplicate(Duplicate),
     Unknown,
 }
 
 impl EncoderInstruction {
-    pub fn decode(first: u8) -> Self {
+    /*pub fn decode(first: u8) -> Self {
         if first & 0b1000_0000 != 0 {
             EncoderInstruction::InsertWithNameRef
         } else if first & 0b0100_0000 == 0b0100_0000 {
@@ -66,7 +68,69 @@ impl EncoderInstruction {
         } else {
             EncoderInstruction::Unknown
         }
-    }
+    }*/
+
+   /* fn decode<R: Buf>(read: &mut R) -> Result<Option<EncoderInstruction>, InternalConnectionError> {
+        if read.remaining() < 1 {
+            return Ok(None);
+        }
+
+        let mut buf = Cursor::new(read.chunk());
+        let first = buf.chunk()[0];
+
+        let x = if first & 0b1000_0000 != 0 {
+            //EncoderInstruction::InsertWithNameRef
+            todo!()
+        } else if first & 0b0100_0000 == 0b0100_0000 {
+            //EncoderInstruction::InsertWithoutNameRef
+            todo!()
+        } else if first & 0b1110_0000 == 0 {
+            //EncoderInstruction::Duplicate
+            todo!()
+        } else if first & 0b0010_0000 == 0b0010_0000 {
+            //EncoderInstruction::DynamicTableSizeUpdate
+            let table_size_update= DynamicTableSizeUpdate::decode(&mut buf);
+            EncoderInstruction::DynamicTableSizeUpdate(DynamicTableSizeUpdate::decode(&mut buf))
+        } else {
+            //EncoderInstruction::Unknown
+            // TODO: can this be unreachable!()?
+            return Err(InternalConnectionError::new(
+                Code::H3_INTERNAL_ERROR,
+                "Unknown EncoderInstruction".to_string(),
+            ));
+        };
+
+        let instruction = match EncoderInstruction::decode(first) {
+            EncoderInstruction::Unknown => return Err(DecoderError::UnknownPrefix(first)),
+            EncoderInstruction::DynamicTableSizeUpdate => {
+                DynamicTableSizeUpdate::decode(&mut buf)?.map(|x| Instruction::TableSizeUpdate(x.0))
+            }
+            EncoderInstruction::InsertWithoutNameRef => InsertWithoutNameRef::decode(&mut buf)?
+                .map(|x| Instruction::Insert(HeaderField::new(x.name, x.value))),
+            EncoderInstruction::Duplicate => match Duplicate::decode(&mut buf)? {
+                Some(Duplicate(index)) => {
+                    Some(Instruction::Insert(self.table.get_relative(index)?.clone()))
+                }
+                None => None,
+            },
+            EncoderInstruction::InsertWithNameRef => match InsertWithNameRef::decode(&mut buf)? {
+                Some(InsertWithNameRef::Static { index, value }) => Some(Instruction::Insert(
+                    StaticTable::get(index)?.with_value(value),
+                )),
+                Some(InsertWithNameRef::Dynamic { index, value }) => Some(Instruction::Insert(
+                    self.table.get_relative(index)?.with_value(value),
+                )),
+                None => None,
+            },
+        };
+
+        if instruction.is_some() {
+            let pos = buf.position();
+            read.advance(pos as usize);
+        }
+
+        Ok(instruction)
+    }*/
 }
 
 #[derive(Debug, PartialEq)]
@@ -114,7 +178,7 @@ impl InsertWithNameRef {
         }
     }
 
-    pub fn encode<W: BufMut>(&self, buf: &mut W) -> Result<(), prefix_string::Error> {
+    pub fn encode<W: BufMut>(&self, buf: &mut W) -> Result<(), prefix_string::PrefixStringError> {
         match self {
             InsertWithNameRef::Static { index, value } => {
                 prefix_int::encode(6, 0b11, *index as u64, buf);
@@ -157,7 +221,7 @@ impl InsertWithoutNameRef {
         Ok(Some(Self::new(name, value)))
     }
 
-    pub fn encode<W: BufMut>(&self, buf: &mut W) -> Result<(), prefix_string::Error> {
+    pub fn encode<W: BufMut>(&self, buf: &mut W) -> Result<(), prefix_string::PrefixStringError> {
         prefix_string::encode(6, 0b01, &self.name, buf)?;
         prefix_string::encode(8, 0, &self.value, buf)?;
         Ok(())
