@@ -81,6 +81,10 @@ where
     control_send: C::SendStream,
     control_recv: Option<FrameStream<C::RecvStream, B>>,
     qpack_streams: QpackStreams<C, B>,
+
+    /// QPack decoder stream handler
+    decoder: crate::qpack2::decoder2::decoder_stream_handler::DecoderStreamHandler<C, B>,
+
     /// Buffers incoming uni/recv streams which have yet to be claimed.
     ///
     /// This is opposed to discarding them by returning in `poll_accept_recv`, which may cause them to be missed by something else polling.
@@ -192,6 +196,11 @@ where
 
         let mut decoder_send = Option::take(&mut self.qpack_streams.decoder_send);
         let mut encoder_send = Option::take(&mut self.qpack_streams.encoder_send);
+
+        //= https://www.rfc-editor.org/rfc/rfc9204.html#section-4.2
+        //# Each endpoint
+        //# MUST initiate, at most, one encoder stream and, at most, one decoder
+        //# stream.
 
         let (control, ..) = future::join3(
             stream::write(
@@ -307,6 +316,7 @@ where
             control_send: control_send,
             control_recv: None,
             qpack_streams,
+            decoder: todo!(),
             handled_connection_error: None,
             pending_recv_streams: Vec::with_capacity(3),
             got_peer_settings: false,
@@ -402,6 +412,9 @@ where
         loop {
             match self
                 .conn
+                //= https://www.rfc-editor.org/rfc/rfc9204.html#section-4.2
+                //# An endpoint MUST allow its peer to create an encoder stream and a
+                //# decoder stream even if the connection's settings prevent their use.
                 .poll_accept_recv(cx)
                 .map_err(|e| self.handle_connection_error(e))?
             {
@@ -450,6 +463,14 @@ where
                 }
                 enc @ AcceptedRecvStream::Encoder(_) => {
                     if let Some(_prev) = self.qpack_streams.encoder_recv.replace(enc) {
+                        //= https://www.rfc-editor.org/rfc/rfc9204.html#section-4.2
+                        //# Receipt of a second instance of either stream type MUST be
+                        //# treated as a connection error of type H3_STREAM_CREATION_ERROR.
+
+                        //= https://www.rfc-editor.org/rfc/rfc9204.html#section-4.2
+                        //# An endpoint MUST allow its peer to create an encoder stream and a
+                        //# decoder stream even if the connection's settings prevent their use.
+
                         return Err(self.handle_connection_error(InternalConnectionError::new(
                             Code::H3_STREAM_CREATION_ERROR,
                             "got two encoder streams".to_string(),
@@ -458,6 +479,14 @@ where
                 }
                 dec @ AcceptedRecvStream::Decoder(_) => {
                     if let Some(_prev) = self.qpack_streams.decoder_recv.replace(dec) {
+                        //= https://www.rfc-editor.org/rfc/rfc9204.html#section-4.2
+                        //# Receipt of a second instance of either stream type MUST be
+                        //# treated as a connection error of type H3_STREAM_CREATION_ERROR.
+
+                        //= https://www.rfc-editor.org/rfc/rfc9204.html#section-4.2
+                        //# An endpoint MUST allow its peer to create an encoder stream and a
+                        //# decoder stream even if the connection's settings prevent their use.
+
                         return Err(self.handle_connection_error(InternalConnectionError::new(
                             Code::H3_STREAM_CREATION_ERROR,
                             "got two decoder streams".to_string(),

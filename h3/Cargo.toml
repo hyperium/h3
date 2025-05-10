@@ -31,6 +31,7 @@ tokio = { version = "1", features = ["sync"] }
 pin-project-lite = { version = "0.2", default-features = false }
 tracing = {version = "0.1.40", optional = true}
 fastrand = "2.0.1"
+thiserror = "2"
 
 [dev-dependencies]
 assert_matches = "1.5.0"

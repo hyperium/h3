@@ -4,7 +4,7 @@
 
 use std::{
     collections::HashSet,
-    future::poll_fn,
+    future::{poll_fn, Future},
     option::Option,
     result::Result,
     task::{ready, Context, Poll},
@@ -96,7 +96,10 @@ where
 {
     #[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
     /// Create a [`RequestResolver`] to handle an incoming request.
-    pub fn create_resolver(&self, stream: FrameStream<C::BidiStream, B>) -> RequestResolver<C, B> {
+    pub fn create_resolver(
+        &self,
+        stream: FrameStream<C::BidiStream, B>,
+    ) -> RequestResolver<C, B> {
         self.create_resolver_internal(stream)
     }
 
@@ -120,7 +123,10 @@ where
     /// This method returns a [`RequestResolver`] which can be used to read the request and send the response.
     /// This method will return `None` when the connection receives a GOAWAY frame and all requests have been completed.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn accept(&mut self) -> Result<Option<RequestResolver<C, B>>, ConnectionError> {
+    pub async fn accept(
+        &mut self,
+    ) -> Result<Option<RequestResolver<C, B>>, ConnectionError>
+    {
         // Accept the incoming stream
         let stream = match poll_fn(|cx| self.poll_accept_request_stream_internal(cx)).await? {
             Some(s) => FrameStream::new(BufRecvStream::new(s)),
@@ -131,11 +137,10 @@ where
                 return Ok(None);
             }
         };
-
+        self.inner.send_grease_frame = false;
         let resolver = self.create_resolver_internal(stream);
 
         // send the grease frame only once
-        self.inner.send_grease_frame = false;
 
         Ok(Some(resolver))
     }
