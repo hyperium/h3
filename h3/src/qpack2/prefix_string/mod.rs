@@ -1,7 +1,7 @@
 mod bitwin;
 mod decode;
-mod encode;
-
+//mod encode;
+/*
 use std::convert::TryInto;
 use std::fmt;
 use std::num::TryFromIntError;
@@ -16,9 +16,7 @@ pub use self::{
 };
 
 use crate::proto::coding::BufMutExt;
-use crate::qpack::prefix_int::{self, Error as IntegerError};
 
-use super::prefix_int::PrefixIntDecodeError;
 
 #[derive(Debug, PartialEq)]
 pub enum PrefixStringError {
@@ -41,13 +39,6 @@ impl std::fmt::Display for PrefixStringError {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum PrefixStringDecoderError {
-    #[error("error while decoding integer: {0}")]
-    Integer(PrefixIntDecodeError),
-    #[error("error while decoding with huffman table: {0}")]
-    HuffmanDecoding(HuffmanDecodingError),
-}
 
 pub fn decode<B: Buf>(size: u8, buf: &mut B) -> Result<Option<Vec<u8>>, PrefixStringDecoderError> {
     let (flags, len) = match prefix_int::decode(size - 1, buf){
@@ -72,7 +63,9 @@ pub fn decode<B: Buf>(size: u8, buf: &mut B) -> Result<Option<Vec<u8>>, PrefixSt
         decoded
     };
     Ok(value)
-}
+}*/
+
+/*
 
 pub fn encode<B: BufMut>(size: u8, flags: u8, value: &[u8], buf: &mut B) -> Result<(), PrefixStringError> {
     let encoded = Vec::from(value).hpack_encode()?;
@@ -177,3 +170,4 @@ mod tests {
         assert_matches!(decode(6, &mut read), Err(PrefixStringError::UnexpectedEnd));
     }
 }
+*/

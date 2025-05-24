@@ -1,4 +1,5 @@
-use super::BitWindow;
+use super::bitwin::BitWindow;
+
 
 #[derive(Debug, PartialEq, thiserror::Error)]
 pub enum HuffmanDecodingError {

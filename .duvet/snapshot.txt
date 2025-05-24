@@ -962,8 +962,8 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9204.html
     TEXT[!MUST]:    instructions on the encoder stream.
 
   SECTION: [Prefixed Integers](#section-4.1.1)
-    TEXT[!MUST]:    QPACK implementations MUST be able to decode integers up to and
-    TEXT[!MUST]:    including 62 bits long.
+    TEXT[!MUST,implementation,test]:    QPACK implementations MUST be able to decode integers up to and
+    TEXT[!MUST,implementation,test]:    including 62 bits long.
 
   SECTION: [Encoder and Decoder Streams](#section-4.2)
     TEXT[!MUST,implementation]: Each endpoint
@@ -981,8 +981,8 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9204.html
     TEXT[!MAY,exception]:    peer is zero).
     TEXT[!MAY,exception]:    An endpoint MAY avoid creating a decoder stream if its decoder sets
     TEXT[!MAY,exception]:    the maximum capacity of the dynamic table to zero.
-    TEXT[!MUST]:    An endpoint MUST allow its peer to create an encoder stream and a
-    TEXT[!MUST]:    decoder stream even if the connection's settings prevent their use.
+    TEXT[!MUST,implementation]:    An endpoint MUST allow its peer to create an encoder stream and a
+    TEXT[!MUST,implementation]:    decoder stream even if the connection's settings prevent their use.
 
   SECTION: [Set Dynamic Table Capacity](#section-4.3.1)
     TEXT[!MUST]:    The new capacity MUST be lower than or equal to the limit described

@@ -1,9 +1,7 @@
-use std::fmt;
-
-use bytes::{Buf, BufMut};
+use bytes::Buf;
 use thiserror::Error;
 
-use crate::proto::coding::{self, BufExt, BufMutExt};
+use crate::proto::coding::BufExt;
 
 #[derive(Debug, PartialEq, Error)]
 pub enum PrefixIntParseError {
@@ -60,7 +58,7 @@ impl<const F: u8> PrefixIntParser<F> {
                 Err(_) => return ParseProgressResult::MoreData(self),
             };
             // Get the flags from the first byte
-            let flags = (first >> F) as u8;
+            let flags = (first as usize >> F) as u8;
             // Get the value from the first byte
             let value = first & Self::MASK;
             // Check if the value is less than the mask
@@ -102,6 +100,9 @@ impl<const F: u8> PrefixIntParser<F> {
     }
 }
 
+//= https://www.rfc-editor.org/rfc/rfc9204.html#section-4.1.1
+//# QPACK implementations MUST be able to decode integers up to and
+//# including 62 bits long.
 const MAX_POWER: u8 = 9 * 7;
 
 #[cfg(test)]
@@ -237,7 +238,7 @@ mod test {
     #[test]
     #[should_panic]
     fn size_too_big_of_size() {
-        let x = new_prefix_int_parser::<9>();
+        let _ = new_prefix_int_parser::<9>();
     }
 
     #[test]
@@ -297,5 +298,26 @@ mod test {
         let mut buffer2 = &[0b00000001][..];
         let result = parser.parse_progress(&mut buffer2);
         assert_matches!(result, ParseProgressResult::Done((0b011, 32)));
+    }
+
+    #[test]
+    fn overflow_x() {
+        check_overflow::<5>(&[95, 225, 255, 255, 255, 255, 255, 255, 255, 255, 1]);
+    }
+
+    #[test]
+    fn allow_62_bit() {
+        //= https://www.rfc-editor.org/rfc/rfc9204.html#section-4.1.1
+        //= type=test
+        //# QPACK implementations MUST be able to decode integers up to and
+        //# including 62 bits long.
+
+        // This is the maximum value that can be encoded in with a flag size of 7 bits
+        // The value is requires more than 62 bits so the spec is fulfilled
+        check_codec::<1>(
+            1,
+            9223372036854775808,
+            &[3, 255, 255, 255, 255, 255, 255, 255, 255, 127],
+        );
     }
 }
