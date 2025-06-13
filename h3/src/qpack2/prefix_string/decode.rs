@@ -1,11 +1,131 @@
-use super::bitwin::BitWindow;
+use bytes::{buf, Buf};
 
+use crate::qpack2::qpack_result::ParseProgressResult;
+
+use super::bitwin::BitWindow;
 
 #[derive(Debug, PartialEq, thiserror::Error)]
 pub enum HuffmanDecodingError {
     #[error("missing bits while decoding")]
     MissingBits(BitWindow),
+    #[error("unhandled decoding at {0:?} for value {1}")]
     Unhandled(BitWindow, usize),
+}
+
+pub enum HuffmanDecodingError2 {}
+
+struct StatefulDecoder {
+    current_byte: Option<u8>,
+    current_bit_pos: u8,
+    decoded_string: Vec<u8>,
+    current_decoder: &'static HuffmanDecoder,
+}
+
+impl StatefulDecoder {
+    fn new(capacity: usize) -> Self {
+        StatefulDecoder {
+            current_byte: None,
+            current_bit_pos: 0,
+            decoded_string: Vec::with_capacity(capacity),
+            current_decoder: &HPACK_STRING,
+        }
+    }
+
+    /// Reads the next byte from the buffer and updates the current byte.
+    fn get_next_byte(&mut self, buf: &mut impl Buf) -> Option<u8> {
+        let byte = buf.try_get_u8().ok()?;
+        self.current_byte = Some(byte);
+        Some(byte)
+    }
+
+    fn decode_with_buf(
+        mut self,
+        mut buf: impl Buf,
+    ) -> ParseProgressResult<Self, HuffmanDecodingError2, Vec<u8>> {
+        loop {
+            // Gets the current byte or tries to read the next byte
+            // There is no Option::get_or_try_insert_with
+            let current_byte = match self.current_byte {
+                Some(8) => {
+                    // If the current byte is 8, it means we have read all bits
+
+                    // set bit position to 0
+                    self.current_bit_pos = 0;
+                    match buf.try_get_u8() {
+                        // Read new bits
+                        Ok(value) => {
+                            self.current_byte = Some(value);
+                            value
+                        }
+                        Err(_) => return ParseProgressResult::MoreData(self),
+                    }
+                }
+                Some(byte) => byte,
+                None => match buf.try_get_u8() {
+                    // Inital branch, read the first byte
+                    Ok(value) => {
+                        self.current_byte = Some(value);
+                        value
+                    }
+                    Err(_) => return ParseProgressResult::MoreData(self),
+                },
+            };
+
+            // the bit position can only be between 0 and 7
+            self.current_bit_pos %= 8;
+
+            // Check if the remaining bits in the current byte are enough
+            let value = if self.current_decoder.lookup > (8 - self.current_bit_pos) {
+                // Not enough bits, so we need to read the next byte
+                let next_byte = match buf.try_get_u8() {
+                    Ok(value) => {
+                        self.current_byte = Some(value);
+                        value as u16
+                    }
+                    Err(_) => return ParseProgressResult::MoreData(self),
+                };
+                // Combine the current byte and the next byte into a 16-bit value
+                let value = ((current_byte as u16) << 8) | next_byte;
+
+                // Shift to left to remove the already read bits
+                let value = value << self.current_bit_pos;
+
+                // allign bits to the right
+                let value = value >> (16 - self.current_decoder.lookup);
+                value as u8
+            } else {
+                // Enough bits, so we can read the value directly
+
+                // Remove the already read bits from the current byte
+                let current_byte = current_byte << self.current_bit_pos;
+                // allign bits to the right
+                current_byte >> (8 - self.current_decoder.lookup)
+            };
+
+            // Update the current bit position
+            self.current_bit_pos += self.current_decoder.lookup as u8;
+
+            match self.current_decoder.table.get(value as usize).expect(
+                "Huffman decoding table is always large enough for the max value of the read bits",
+            ) {
+                DecodeValue::Sym(sym) => {
+                    // If the value is a symbol, we can add it to the decoded string
+                    self.decoded_string.push(*sym);
+                    // Reset to the initial decoder
+                    self.current_decoder = &HPACK_STRING;
+                }
+                DecodeValue::Partial(decoder) => {
+                    // If the value is a partial decoder, we need to update the current decoder
+                    self.current_decoder = decoder;
+                    // Reset the bit position to 0, as we are starting a new decoding
+                    self.current_bit_pos = 0;
+                }
+            }
+
+            // TODO: Check for EOF
+        }
+        todo!()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -16,13 +136,18 @@ enum DecodeValue {
 
 #[derive(Clone, Debug)]
 struct HuffmanDecoder {
-    lookup: u32,
+    lookup: u8,
     table: &'static [DecodeValue],
 }
 
 impl HuffmanDecoder {
-    fn check_eof(&self, bit_pos: &mut BitWindow, input: &[u8]) -> Result<Option<u32>, HuffmanDecodingError> {
+    /*fn check_eof(
+        &self,
+        bit_pos: &mut BitWindow,
+        input: &[u8],
+    ) -> Result<Option<u32>, HuffmanDecodingError> {
         use std::cmp::Ordering;
+
         match ((bit_pos.byte + 1) as usize).cmp(&input.len()) {
             // Position is out-of-range
             Ordering::Greater => {
@@ -49,14 +174,22 @@ impl HuffmanDecoder {
         Err(HuffmanDecodingError::MissingBits(bit_pos.clone()))
     }
 
-    fn fetch_value(&self, bit_pos: &mut BitWindow, input: &[u8]) -> Result<Option<u32>, HuffmanDecodingError> {
+    fn fetch_value(
+        &self,
+        bit_pos: &mut BitWindow,
+        input: &[u8],
+    ) -> Result<Option<u32>, HuffmanDecodingError> {
         match read_bits(input, bit_pos.byte, bit_pos.bit, bit_pos.count) {
             Ok(value) => Ok(Some(value as u32)),
             Err(()) => self.check_eof(bit_pos, input),
         }
     }
 
-    fn decode_next(&self, bit_pos: &mut BitWindow, input: &[u8]) -> Result<Option<u8>, HuffmanDecodingError> {
+    fn decode_next(
+        &self,
+        bit_pos: &mut BitWindow,
+        input: &[u8],
+    ) -> Result<Option<u8>, HuffmanDecodingError> {
         bit_pos.forwards(self.lookup);
 
         let value = match self.fetch_value(bit_pos, input) {
@@ -73,6 +206,23 @@ impl HuffmanDecoder {
         match at_value {
             DecodeValue::Sym(x) => Ok(Some(*x)),
             DecodeValue::Partial(d) => d.decode_next(bit_pos, input),
+        }
+    }*/
+}
+
+pub struct DecodeIter<'a> {
+    bit_pos: BitWindow,
+    content: &'a Vec<u8>,
+}
+
+impl<'a> Iterator for DecodeIter<'a> {
+    type Item = Result<u8, HuffmanDecodingError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match HPACK_STRING.decode_next(&mut self.bit_pos, self.content) {
+            Ok(Some(x)) => Some(Ok(x)),
+            Err(err) => Some(Err(err)),
+            Ok(None) => None,
         }
     }
 }
@@ -295,23 +445,6 @@ bits_decode![
     END31_1 => (lookup: 2, [10, 13, 22, => EOF,]),
     EOF => (lookup: 8, []),
     ];
-
-pub struct DecodeIter<'a> {
-    bit_pos: BitWindow,
-    content: &'a Vec<u8>,
-}
-
-impl<'a> Iterator for DecodeIter<'a> {
-    type Item = Result<u8, HuffmanDecodingError>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match HPACK_STRING.decode_next(&mut self.bit_pos, self.content) {
-            Ok(Some(x)) => Some(Ok(x)),
-            Err(err) => Some(Err(err)),
-            Ok(None) => None,
-        }
-    }
-}
 
 pub trait HpackStringDecode {
     fn hpack_decode(&self) -> DecodeIter;

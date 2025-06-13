@@ -1,23 +1,12 @@
 use bytes::Buf;
 use thiserror::Error;
 
-use crate::proto::coding::BufExt;
+use crate::{proto::coding::BufExt, qpack2::qpack_result::ParseProgressResult};
 
 #[derive(Debug, PartialEq, Error)]
 pub enum PrefixIntParseError {
     #[error("value overflow")]
     Overflow,
-}
-
-/// Return type for parsing qpack stuff
-#[derive(Debug)]
-pub enum ParseProgressResult<T, E, R> {
-    /// Error while parsing
-    Error(E),
-    /// Parsing is done
-    Done(R),
-    /// More data is needed to continue parsing
-    MoreData(T),
 }
 
 /// PrefixIntParser is a parser for prefix integers.
