@@ -32,6 +32,9 @@ pub mod frame;
 #[allow(missing_docs)]
 pub mod proto;
 #[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
+#[allow(dead_code, missing_docs)]
+pub mod qpack;
+#[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
 #[allow(missing_docs)]
 pub mod stream;
 #[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
@@ -45,12 +48,13 @@ mod frame;
 #[cfg(not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"))]
 mod proto;
 #[cfg(not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"))]
+#[allow(dead_code)]
+mod qpack;
+#[cfg(not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"))]
 mod stream;
 #[cfg(not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"))]
 mod webtransport;
 
-#[allow(dead_code)]
-mod qpack;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
