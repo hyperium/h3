@@ -23,8 +23,79 @@ use http::Request;
 use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
-use crate::quic;
+use crate::{qpack2::qpack_result::StatefulParser, quic};
 use h3_quinn::{quinn::TransportConfig, Connection};
+
+pub(crate) fn test_all_chunking_combinations<P, B, O, E>(
+    input: &mut B,
+    create: impl Fn() -> P,
+    expected_output: O,
+) where
+    P: StatefulParser<B, E, O>,
+    B: Buf,
+{
+    let all_combinations = all_chunking_combinations();
+
+    for chunking in all_combinations {
+        let mut parser = create();
+        let mut chunks = chunking.iter();
+
+        loop {
+            let buf = chunks.next().unwrap().clone();
+            let mut read = Cursor::new(&buf);
+
+            parser = match parser.parse_progress(&mut read) {
+                ParseProgressResult::Error(PrefixIntParseError::Overflow) => {
+                    break;
+                }
+                ParseProgressResult::Done(result_value) => {
+                    panic!("Expected overflow, but got {:?}", result_value);
+                }
+                ParseProgressResult::MoreData(m) => m,
+            }
+        }
+    }
+}
+
+/// Generates all possible ways to chunk a buffer into a series of contiguous parts
+/// Order is preserved and all elements appear exactly once across all chunks
+pub(crate) fn all_chunking_combinations(buf: &[u8]) -> Vec<Vec<Vec<u8>>> {
+    // Special case: empty buffer has only one way to chunk it - as empty
+    if buf.is_empty() {
+        return vec![vec![]];
+    }
+
+    // Special case: buffer of length 1 has only one chunking option
+    if buf.len() == 1 {
+        return vec![vec![buf.to_vec()]];
+    }
+
+    let mut result = Vec::new();
+
+    // Consider all possible places to make the first cut
+    for i in 1..=buf.len() {
+        let first_chunk = buf[0..i].to_vec();
+
+        // If this is the last possible cut (i == buf.len()), we're done
+        if i == buf.len() {
+            result.push(vec![first_chunk]);
+            continue;
+        }
+
+        // Otherwise, recursively find all ways to chunk the remainder
+        let remainder = &buf[i..];
+        let remainder_chunking = all_chunking_combinations(remainder);
+
+        // Combine the first chunk with each way to chunk the remainder
+        for chunking in remainder_chunking {
+            let mut new_chunking = vec![first_chunk.clone()];
+            new_chunking.extend(chunking);
+            result.push(new_chunking);
+        }
+    }
+
+    result
+}
 
 pub fn init_tracing() {
     let _ = tracing_subscriber::fmt()

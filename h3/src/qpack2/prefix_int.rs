@@ -1,7 +1,10 @@
 use bytes::Buf;
 use thiserror::Error;
 
-use crate::{proto::coding::BufExt, qpack2::qpack_result::ParseProgressResult};
+use crate::{
+    proto::coding::BufExt,
+    qpack2::qpack_result::{ParseProgressResult, StatefulParser},
+};
 
 #[derive(Debug, PartialEq, Error)]
 pub enum PrefixIntParseError {
@@ -32,11 +35,11 @@ fn new_prefix_int_parser<const F2: u8>() -> PrefixIntParser<F2> {
     }
 }
 
-impl<const F: u8> PrefixIntParser<F> {
-    const MASK: u8 = 0xFF >> (8 - F);
-
-    // parses date from a buffer to make progress on the prefix integer
-    fn parse_progress<B: Buf>(
+impl<const F: u8, B> StatefulParser<B, PrefixIntParseError, (u8, u64)> for PrefixIntParser<F>
+where
+    B: Buf,
+{
+    fn parse_progress(
         mut self,
         buf: &mut B,
     ) -> ParseProgressResult<Self, PrefixIntParseError, (u8, u64)> {
@@ -89,6 +92,10 @@ impl<const F: u8> PrefixIntParser<F> {
     }
 }
 
+impl<const F: u8> PrefixIntParser<F> {
+    const MASK: u8 = 0xFF >> (8 - F);
+}
+
 //= https://www.rfc-editor.org/rfc/rfc9204.html#section-4.1.1
 //# QPACK implementations MUST be able to decode integers up to and
 //# including 62 bits long.
@@ -97,6 +104,8 @@ const MAX_POWER: u8 = 9 * 7;
 #[cfg(test)]
 mod test {
     use std::{io::Cursor, panic};
+
+    use crate::tests::all_chunking_combinations;
 
     use super::*;
     use assert_matches::assert_matches;
@@ -158,46 +167,6 @@ mod test {
                 }
             }
         }
-    }
-
-    /// Generates all possible ways to chunk a buffer into a series of contiguous parts
-    /// Order is preserved and all elements appear exactly once across all chunks
-    fn all_chunking_combinations(buf: &[u8]) -> Vec<Vec<Vec<u8>>> {
-        // Special case: empty buffer has only one way to chunk it - as empty
-        if buf.is_empty() {
-            return vec![vec![]];
-        }
-
-        // Special case: buffer of length 1 has only one chunking option
-        if buf.len() == 1 {
-            return vec![vec![buf.to_vec()]];
-        }
-
-        let mut result = Vec::new();
-
-        // Consider all possible places to make the first cut
-        for i in 1..=buf.len() {
-            let first_chunk = buf[0..i].to_vec();
-
-            // If this is the last possible cut (i == buf.len()), we're done
-            if i == buf.len() {
-                result.push(vec![first_chunk]);
-                continue;
-            }
-
-            // Otherwise, recursively find all ways to chunk the remainder
-            let remainder = &buf[i..];
-            let remainder_chunking = all_chunking_combinations(remainder);
-
-            // Combine the first chunk with each way to chunk the remainder
-            for chunking in remainder_chunking {
-                let mut new_chunking = vec![first_chunk.clone()];
-                new_chunking.extend(chunking);
-                result.push(new_chunking);
-            }
-        }
-
-        result
     }
 
     #[test]
