@@ -35,11 +35,8 @@ fn new_prefix_int_parser<const F2: u8>() -> PrefixIntParser<F2> {
     }
 }
 
-impl<const F: u8, B> StatefulParser<B, PrefixIntParseError, (u8, u64)> for PrefixIntParser<F>
-where
-    B: Buf,
-{
-    fn parse_progress(
+impl<const F: u8> StatefulParser<PrefixIntParseError, (u8, u64)> for PrefixIntParser<F> {
+    fn parse_progress<B: Buf>(
         mut self,
         buf: &mut B,
     ) -> ParseProgressResult<Self, PrefixIntParseError, (u8, u64)> {
@@ -105,68 +102,25 @@ const MAX_POWER: u8 = 9 * 7;
 mod test {
     use std::{io::Cursor, panic};
 
-    use crate::tests::all_chunking_combinations;
+    use crate::tests::test_all_chunking_combinations;
 
     use super::*;
     use assert_matches::assert_matches;
 
     fn check_codec<const F: u8>(flags: u8, value: u64, data: &[u8]) {
-        //let mut buf = Vec::new();
-        //super::encode(size, flags, value, &mut buf);
-        //assert_eq!(buf, data);
-        //let mut read = Cursor::new(&buf);
-
-        let all_combinations = all_chunking_combinations(data);
-
-        for chunking in all_combinations {
-            let mut parser = new_prefix_int_parser::<F>();
-            let mut chunks = chunking.iter();
-
-            loop {
-                let buf = chunks.next().unwrap().clone();
-                let mut read = Cursor::new(&buf);
-
-                parser = match parser.parse_progress(&mut read) {
-                    ParseProgressResult::Error(e) => {
-                        panic!("Encountered error while parsing {:?}", e)
-                    }
-                    ParseProgressResult::Done(result_value) => {
-                        assert_eq!(result_value, (flags, value));
-                        break;
-                    }
-                    ParseProgressResult::MoreData(m) => m,
-                }
-            }
-        }
+        test_all_chunking_combinations(
+            &mut Cursor::new(data),
+            || new_prefix_int_parser::<F>(),
+            ParseProgressResult::Done((flags, value)),
+        );
     }
 
     fn check_overflow<const F: u8>(data: &[u8]) {
-        //let mut buf = Vec::new();
-        //super::encode(size, flags, value, &mut buf);
-        //assert_eq!(buf, data);
-        //let mut read = Cursor::new(&buf);
-
-        let all_combinations = all_chunking_combinations(data);
-
-        for chunking in all_combinations {
-            let mut parser = new_prefix_int_parser::<F>();
-            let mut chunks = chunking.iter();
-
-            loop {
-                let buf = chunks.next().unwrap().clone();
-                let mut read = Cursor::new(&buf);
-
-                parser = match parser.parse_progress(&mut read) {
-                    ParseProgressResult::Error(PrefixIntParseError::Overflow) => {
-                        break;
-                    }
-                    ParseProgressResult::Done(result_value) => {
-                        panic!("Expected overflow, but got {:?}", result_value);
-                    }
-                    ParseProgressResult::MoreData(m) => m,
-                }
-            }
-        }
+        test_all_chunking_combinations(
+            &mut Cursor::new(data),
+            || new_prefix_int_parser::<F>(),
+            ParseProgressResult::Error(PrefixIntParseError::Overflow),
+        );
     }
 
     #[test]

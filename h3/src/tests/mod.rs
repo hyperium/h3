@@ -13,6 +13,8 @@ mod request;
 
 use std::{
     convert::TryInto,
+    fmt::Debug,
+    io::Cursor,
     net::{Ipv6Addr, ToSocketAddrs},
     sync::Arc,
     time::Duration,
@@ -23,18 +25,26 @@ use http::Request;
 use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
-use crate::{qpack2::qpack_result::StatefulParser, quic};
+use crate::{
+    qpack2::qpack_result::{ParseProgressResult, StatefulParser},
+    quic,
+};
 use h3_quinn::{quinn::TransportConfig, Connection};
 
 pub(crate) fn test_all_chunking_combinations<P, B, O, E>(
     input: &mut B,
     create: impl Fn() -> P,
-    expected_output: O,
+    expected_output: ParseProgressResult<P, E, O>,
 ) where
-    P: StatefulParser<B, E, O>,
+    P: StatefulParser<E, O> + Debug,
     B: Buf,
+    O: PartialEq + Debug,
+    E: PartialEq + Debug,
 {
-    let all_combinations = all_chunking_combinations();
+    let mut data = vec![0; input.remaining()];
+    input.copy_to_slice(data.as_mut_slice());
+
+    let all_combinations = all_chunking_combinations(&data);
 
     for chunking in all_combinations {
         let mut parser = create();
@@ -45,14 +55,18 @@ pub(crate) fn test_all_chunking_combinations<P, B, O, E>(
             let mut read = Cursor::new(&buf);
 
             parser = match parser.parse_progress(&mut read) {
-                ParseProgressResult::Error(PrefixIntParseError::Overflow) => {
+                result @ ParseProgressResult::Error(_) => {
+                    println!("Encountered error while parsing: {:?}", result);
+                    assert_eq!(result, expected_output);
                     break;
                 }
-                ParseProgressResult::Done(result_value) => {
-                    panic!("Expected overflow, but got {:?}", result_value);
+                result @ ParseProgressResult::Done(_) => {
+                    println!("Parsing completed with result: {:?}", result);
+                    assert_eq!(result, expected_output);
+                    break;
                 }
-                ParseProgressResult::MoreData(m) => m,
-            }
+                ParseProgressResult::MoreData(p) => p,
+            };
         }
     }
 }

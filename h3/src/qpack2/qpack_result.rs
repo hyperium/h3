@@ -11,13 +11,24 @@ pub enum ParseProgressResult<T: Sized, E, R> {
     MoreData(T),
 }
 
+/// implement PartialEq for ParseProgressResult
+#[cfg(test)]
+impl<T, E: PartialEq, R: PartialEq> PartialEq for ParseProgressResult<T, E, R> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (ParseProgressResult::Error(e1), ParseProgressResult::Error(e2)) => e1 == e2,
+            (ParseProgressResult::Done(r1), ParseProgressResult::Done(r2)) => r1 == r2,
+            (ParseProgressResult::MoreData(_), ParseProgressResult::MoreData(_)) => false, // T is not comparable. This is for tests so we can ignore it.
+            _ => false,
+        }
+    }
+}
+
 /// Trait for stateful parsers
-pub trait StatefulParser<B, E, R>
+pub trait StatefulParser<E, R>
 where
-    B: Buf,
     Self: Sized,
 {
     /// Parse the next chunk of data
-    fn parse_progress(self, reader: &mut B) -> ParseProgressResult<Self, E, R>;
+    fn parse_progress<B: Buf>(self, reader: &mut B) -> ParseProgressResult<Self, E, R>;
 }
-

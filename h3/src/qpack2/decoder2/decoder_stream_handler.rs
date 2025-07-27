@@ -4,7 +4,6 @@ use std::task::{ready, Poll};
 
 use bytes::Buf;
 use tokio::sync::mpsc;
-use tracing::event;
 
 use crate::{
     error::internal_error::InternalConnectionError,
