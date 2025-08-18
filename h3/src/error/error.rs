@@ -143,7 +143,7 @@ impl StreamError {
             StreamError::StreamError {
                 code: Code::H3_NO_ERROR,
                 ..
-            } => true,
+            } | StreamError::RemoteTerminate { code: Code::H3_NO_ERROR } => true,
             StreamError::ConnectionError(conn_error) => conn_error.is_h3_no_error(),
             _ => false,
         }
