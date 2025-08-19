@@ -77,11 +77,7 @@ pub fn encode<B: BufMut>(size: u8, flags: u8, value: u64, buf: &mut B) {
     buf.write(remaining as u8);
 }
 
-#[cfg(target_pointer_width = "64")]
-const MAX_POWER: usize = 10 * 7;
-
-#[cfg(target_pointer_width = "32")]
-const MAX_POWER: usize = 5 * 7;
+const MAX_POWER: usize = 9 * 7;
 
 impl From<coding::UnexpectedEnd> for Error {
     fn from(_: coding::UnexpectedEnd) -> Self {
@@ -91,7 +87,10 @@ impl From<coding::UnexpectedEnd> for Error {
 
 #[cfg(test)]
 mod test {
+    use assert_matches::assert_matches;
     use std::io::Cursor;
+
+    use crate::qpack::prefix_int::Error;
 
     fn check_codec(size: u8, flags: u8, value: u64, data: &[u8]) {
         let mut buf = Vec::new();
@@ -110,8 +109,8 @@ mod test {
         check_codec(
             5,
             0b010,
-            u64::max_value(),
-            &[95, 224, 255, 255, 255, 255, 255, 255, 255, 255, 1],
+            0x80_00_00_00_00_00_00_1E,
+            &[95, 255, 255, 255, 255, 255, 255, 255, 255, 127],
         );
     }
 
@@ -122,8 +121,8 @@ mod test {
         check_codec(
             8,
             0,
-            u64::max_value(),
-            &[255, 128, 254, 255, 255, 255, 255, 255, 255, 255, 1],
+            0x80_00_00_00_00_00_00_FE,
+            &[255, 255, 255, 255, 255, 255, 255, 255, 255, 127],
         );
     }
 
@@ -153,5 +152,23 @@ mod test {
     #[test]
     fn number_never_ends_with_0x80() {
         check_codec(4, 0b0001, 143, &[31, 128, 1]);
+    }
+    #[test]
+    fn overflow2() {
+        let buf = vec![95, 225, 255, 255, 255, 255, 255, 255, 255, 255, 1];
+        let mut read = Cursor::new(&buf);
+        let x = super::decode(5, &mut read);
+        assert_matches!(x, Err(Error::Overflow));
+    }
+
+    #[test]
+    fn allow_62_bit() {
+        // This is the maximum value that can be encoded in with a flag size of 7 bits
+        // The value is requires more than 62 bits so the spec is fulfilled
+        let buf = vec![3, 255, 255, 255, 255, 255, 255, 255, 255, 127];
+        let mut read = Cursor::new(&buf);
+        let (flag, value) = super::decode(1, &mut read).expect("Value is allowed to be parsed");
+        assert_eq!(flag, 1);
+        assert_eq!(value, 9223372036854775808);
     }
 }

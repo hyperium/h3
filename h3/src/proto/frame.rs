@@ -117,6 +117,10 @@ impl Frame<PayloadLen> {
             FrameType::PUSH_PROMISE => Ok(Frame::PushPromise(PushPromise::decode(&mut payload)?)),
             FrameType::GOAWAY => Ok(Frame::Goaway(VarInt::decode(&mut payload)?)),
             FrameType::MAX_PUSH_ID => Ok(Frame::MaxPushId(payload.get_var()?.try_into()?)),
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
+            //# These frame
+            //# types MUST NOT be sent, and their receipt MUST be treated as a
+            //# connection error of type H3_FRAME_UNEXPECTED.
             FrameType::H2_PRIORITY
             | FrameType::H2_PING
             | FrameType::H2_WINDOW_UPDATE
@@ -124,6 +128,9 @@ impl Frame<PayloadLen> {
             FrameType::WEBTRANSPORT_BI_STREAM | FrameType::DATA => unreachable!(),
             _ => {
                 buf.advance(len as usize);
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
+                //# Endpoints MUST
+                //# NOT consider these frames to have any meaning upon receipt.
                 Err(FrameError::UnknownFrame(ty.0))
             }
         };
@@ -543,6 +550,9 @@ impl Settings {
                 //# H3_SETTINGS_ERROR.
                 settings.insert(identifier, value)?;
             } else {
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
+                //# Endpoints MUST NOT consider such settings to have
+                //# any meaning upon receipt.
                 #[cfg(feature = "tracing")]
                 tracing::debug!("Unsupported setting: {:#x?}", identifier);
             }

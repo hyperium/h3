@@ -7,35 +7,31 @@ use std::{
     future::poll_fn,
     option::Option,
     result::Result,
-    sync::Arc,
     task::{ready, Context, Poll},
 };
 
 use bytes::Buf;
-use http::Request;
 use quic::RecvStream;
 use quic::StreamId;
 use tokio::sync::mpsc;
 
 use crate::{
-    connection::{self, ConnectionInner, ConnectionState, SharedStateRef},
-    error::{Code, Error, ErrorLevel},
-    frame::{FrameStream, FrameStreamError},
+    connection::ConnectionInner,
+    error::{internal_error::InternalConnectionError, Code, ConnectionError},
+    frame::FrameStream,
     proto::{
         frame::{Frame, PayloadLen},
         push::PushId,
     },
-    qpack,
     quic::{self, SendStream as _},
+    shared_state::{ConnectionState, SharedState},
     stream::BufRecvStream,
 };
-
-use crate::server::request::ResolveRequest;
 
 #[cfg(feature = "tracing")]
 use tracing::{instrument, trace, warn};
 
-use super::stream::RequestStream;
+use super::request::RequestResolver;
 
 /// Server connection driver
 ///
@@ -70,7 +66,7 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    fn shared_state(&self) -> &SharedStateRef {
+    fn shared_state(&self) -> &SharedState {
         &self.inner.shared
     }
 }
@@ -86,14 +82,31 @@ where
     /// with different settings.
     /// Provide a Connection which implements [`quic::Connection`].
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn new(conn: C) -> Result<Self, Error> {
+    pub async fn new(conn: C) -> Result<Self, ConnectionError> {
         super::builder::builder().build(conn).await
     }
+}
 
-    /// Closes the connection with a code and a reason.
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn close<T: AsRef<str>>(&mut self, code: Code, reason: T) -> Error {
-        self.inner.close(code, reason)
+#[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
+/// Impls for extension implementation which are not stable
+impl<C, B> Connection<C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    #[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
+    /// Create a [`RequestResolver`] to handle an incoming request.
+    pub fn create_resolver(&self, stream: FrameStream<C::BidiStream, B>) -> RequestResolver<C, B> {
+        self.create_resolver_internal(stream)
+    }
+
+    /// Polls the Connection and accepts an incoming request_streams
+    #[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
+    pub fn poll_accept_request_stream(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<C::BidiStream>, ConnectionError>> {
+        self.poll_accept_request_stream_internal(cx)
     }
 }
 
@@ -104,184 +117,47 @@ where
 {
     /// Accept an incoming request.
     ///
-    /// It returns a tuple with a [`http::Request`] and an [`RequestStream`].
-    /// The [`http::Request`] is the received request from the client.
-    /// The [`RequestStream`] can be used to send the response.
+    /// This method returns a [`RequestResolver`] which can be used to read the request and send the response.
+    /// This method will return `None` when the connection receives a GOAWAY frame and all requests have been completed.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn accept(
-        &mut self,
-    ) -> Result<Option<(Request<()>, RequestStream<C::BidiStream, B>)>, Error> {
+    pub async fn accept(&mut self) -> Result<Option<RequestResolver<C, B>>, ConnectionError> {
         // Accept the incoming stream
-        let mut stream = match poll_fn(|cx| self.poll_accept_request_stream(cx)).await {
-            Ok(Some(s)) => FrameStream::new(BufRecvStream::new(s)),
-            Ok(None) => {
+        let stream = match poll_fn(|cx| self.poll_accept_request_stream_internal(cx)).await? {
+            Some(s) => FrameStream::new(BufRecvStream::new(s)),
+            None => {
                 // We always send a last GoAway frame to the client, so it knows which was the last
                 // non-rejected request.
                 self.shutdown(0).await?;
                 return Ok(None);
             }
-            Err(err) => {
-                match err.inner.kind {
-                    crate::error::Kind::Closed => return Ok(None),
-                    crate::error::Kind::Application {
-                        code,
-                        reason,
-                        level: ErrorLevel::ConnectionError,
-                    } => return Err(self.inner.close(code, reason.unwrap_or_default())),
-                    _ => return Err(err),
-                };
-            }
         };
 
-        let frame = poll_fn(|cx| stream.poll_next(cx)).await;
-        let req = self.accept_with_frame(stream, frame)?;
-        if let Some(req) = req {
-            Ok(Some(req.resolve().await?))
-        } else {
-            Ok(None)
-        }
+        let resolver = self.create_resolver_internal(stream);
+
+        // send the grease frame only once
+        self.inner.send_grease_frame = false;
+
+        Ok(Some(resolver))
     }
 
-    /// Accepts a http request where the first frame has already been read and decoded.
-    ///
-    ///
-    /// This is needed as a bidirectional stream may be read as part of incoming webtransport
-    /// bi-streams. If it turns out that the stream is *not* a `WEBTRANSPORT_STREAM` the request
-    /// may still want to be handled and passed to the user.
-    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn accept_with_frame(
-        &mut self,
-        mut stream: FrameStream<C::BidiStream, B>,
-        frame: Result<Option<Frame<PayloadLen>>, FrameStreamError>,
-    ) -> Result<Option<ResolveRequest<C, B>>, Error> {
-        let mut encoded = match frame {
-            Ok(Some(Frame::Headers(h))) => h,
-
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
-            //# If a client-initiated
-            //# stream terminates without enough of the HTTP message to provide a
-            //# complete response, the server SHOULD abort its response stream with
-            //# the error code H3_REQUEST_INCOMPLETE.
-            Ok(None) => {
-                return Err(self.inner.close(
-                    Code::H3_REQUEST_INCOMPLETE,
-                    "request stream closed before headers",
-                ));
-            }
-
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
-            //# Receipt of an invalid sequence of frames MUST be treated as a
-            //# connection error of type H3_FRAME_UNEXPECTED.
-
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.5
-            //# A server MUST treat the
-            //# receipt of a PUSH_PROMISE frame as a connection error of type
-            //# H3_FRAME_UNEXPECTED.
-            Ok(Some(_)) => {
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
-                //# Receipt of an invalid sequence of frames MUST be treated as a
-                //# connection error of type H3_FRAME_UNEXPECTED.
-                // Close if the first frame is not a header frame
-                return Err(self.inner.close(
-                    Code::H3_FRAME_UNEXPECTED,
-                    "first request frame is not headers",
-                ));
-            }
-            Err(e) => {
-                let err: Error = e.into();
-                if err.is_closed() {
-                    return Ok(None);
-                }
-                match err.inner.kind {
-                    crate::error::Kind::Closed => return Ok(None),
-                    crate::error::Kind::Application {
-                        code,
-                        reason,
-                        level: ErrorLevel::ConnectionError,
-                    } => {
-                        return Err(self.inner.close(
-                            code,
-                            reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
-                        ))
-                    }
-                    crate::error::Kind::Application {
-                        code,
-                        reason: _,
-                        level: ErrorLevel::StreamError,
-                    } => {
-                        stream.reset(code.into());
-                        return Err(err);
-                    }
-                    _ => return Err(err),
-                };
-            }
-        };
-
-        let mut request_stream = RequestStream {
-            request_end: Arc::new(RequestEnd {
-                request_end: self.request_end_send.clone(),
-                stream_id: stream.send_id(),
-            }),
-            inner: connection::RequestStream::new(
-                stream,
-                self.max_field_section_size,
-                self.inner.shared.clone(),
-                self.inner.send_grease_frame,
-            ),
-        };
-
-        let decoded = match qpack::decode_stateless(&mut encoded, self.max_field_section_size) {
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
-            //# An HTTP/3 implementation MAY impose a limit on the maximum size of
-            //# the message header it will accept on an individual HTTP message.
-            Err(qpack::DecoderError::HeaderTooLong(cancel_size)) => Err(cancel_size),
-            Ok(decoded) => {
-                // send the grease frame only once
-                self.inner.send_grease_frame = false;
-                Ok(decoded)
-            }
-            Err(e) => {
-                let err: Error = e.into();
-                if err.is_closed() {
-                    return Ok(None);
-                }
-                match err.inner.kind {
-                    crate::error::Kind::Closed => return Ok(None),
-                    crate::error::Kind::Application {
-                        code,
-                        reason,
-                        level: ErrorLevel::ConnectionError,
-                    } => {
-                        return Err(self.inner.close(
-                            code,
-                            reason.unwrap_or_else(|| String::into_boxed_str(String::from(""))),
-                        ))
-                    }
-                    crate::error::Kind::Application {
-                        code,
-                        reason: _,
-                        level: ErrorLevel::StreamError,
-                    } => {
-                        request_stream.stop_stream(code);
-                        return Err(err);
-                    }
-                    _ => return Err(err),
-                };
-            }
-        };
-
-        Ok(Some(ResolveRequest::new(
-            request_stream,
-            decoded,
-            self.max_field_section_size,
-        )))
+    fn create_resolver_internal(
+        &self,
+        stream: FrameStream<C::BidiStream, B>,
+    ) -> RequestResolver<C, B> {
+        RequestResolver {
+            frame_stream: stream,
+            request_end_send: self.request_end_send.clone(),
+            send_grease_frame: self.inner.send_grease_frame,
+            max_field_section_size: self.max_field_section_size,
+            shared: self.inner.shared.clone(),
+        }
     }
 
     /// Initiate a graceful shutdown, accepting `max_request` potentially still in-flight
     ///
     /// See [connection shutdown](https://www.rfc-editor.org/rfc/rfc9114.html#connection-shutdown) for more information.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub async fn shutdown(&mut self, max_requests: usize) -> Result<(), Error> {
+    pub async fn shutdown(&mut self, max_requests: usize) -> Result<(), ConnectionError> {
         let max_id = self
             .last_accepted_stream
             .map(|id| id + max_requests)
@@ -295,16 +171,16 @@ where
     /// This could be either a *Request* or a *WebTransportBiStream*, the first frame's type
     /// decides.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub fn poll_accept_request_stream(
+    fn poll_accept_request_stream_internal(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<C::BidiStream>, Error>> {
+    ) -> Poll<Result<Option<C::BidiStream>, ConnectionError>> {
         let _ = self.poll_control(cx)?;
         let _ = self.poll_requests_completion(cx);
         loop {
             let conn = self.inner.poll_accept_bi(cx)?;
             return match conn {
-                Poll::Ready(None) | Poll::Pending => {
+                Poll::Pending => {
                     let done = if conn.is_pending() {
                         self.recv_closing.is_some() && self.poll_requests_completion(cx).is_ready()
                     } else {
@@ -319,7 +195,7 @@ where
                         Poll::Pending
                     }
                 }
-                Poll::Ready(Some(mut s)) => {
+                Poll::Ready(mut s) => {
                     // When the connection is in a graceful shutdown procedure, reject all
                     // incoming requests not belonging to the grace interval. It's possible that
                     // some acceptable request streams arrive after rejected requests.
@@ -342,7 +218,10 @@ where
     }
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    pub(crate) fn poll_control(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+    pub(crate) fn poll_control(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), ConnectionError>> {
         while (self.poll_next_control(cx)?).is_ready() {}
         Poll::Pending
     }
@@ -351,7 +230,7 @@ where
     pub(crate) fn poll_next_control(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Frame<PayloadLen>, Error>> {
+    ) -> Poll<Result<Frame<PayloadLen>, ConnectionError>> {
         let frame = ready!(self.inner.poll_control(cx))?;
 
         match &frame {
@@ -384,10 +263,12 @@ where
             //# receipt of a PUSH_PROMISE frame as a connection error of type
             //# H3_FRAME_UNEXPECTED.
             frame => {
-                return Poll::Ready(Err(Code::H3_FRAME_UNEXPECTED.with_reason(
-                    format!("on server control stream: {:?}", frame),
-                    ErrorLevel::ConnectionError,
-                )))
+                return Poll::Ready(Err(self.inner.handle_connection_error(
+                    InternalConnectionError::new(
+                        Code::H3_FRAME_UNEXPECTED,
+                        format!("on server control stream: {:?}", frame),
+                    ),
+                )));
             }
         }
         Poll::Ready(Ok(frame))
@@ -424,7 +305,10 @@ where
 {
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn drop(&mut self) {
-        self.inner.close(Code::H3_NO_ERROR, "");
+        self.inner.close_connection(
+            Code::H3_NO_ERROR,
+            "Connection was closed by the server".to_string(),
+        );
     }
 }
 

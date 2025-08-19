@@ -1,73 +1,48 @@
 //! server API
 
-use std::{
-    future::Future,
-    marker::PhantomData,
-    task::{ready, Context, Poll},
-};
+use std::marker::PhantomData;
 
 use bytes::Buf;
 use h3::{
-    quic::{self, StreamId},
+    quic::{self},
     server::Connection,
-    Error,
 };
-use pin_project_lite::pin_project;
 
 use crate::{
-    datagram::Datagram,
-    datagram_traits::HandleDatagramsExt,
-    quic_traits::{self, RecvDatagramExt, SendDatagramExt},
+    datagram_handler::{DatagramReader, DatagramSender, HandleDatagramsExt},
+    quic_traits::DatagramConnectionExt,
 };
 
 impl<B, C> HandleDatagramsExt<C, B> for Connection<C, B>
 where
     B: Buf,
-    C: quic::Connection<B> + SendDatagramExt<B> + RecvDatagramExt,
-    <C as quic_traits::RecvDatagramExt>::Error: h3::quic::Error + 'static,
-    <C as quic_traits::SendDatagramExt<B>>::Error: h3::quic::Error + 'static,
+    C: quic::Connection<B> + DatagramConnectionExt<B>,
 {
-    /// Sends a datagram
-    fn send_datagram(&mut self, stream_id: StreamId, data: B) -> Result<(), Error> {
-        self.inner
-            .conn
-            .send_datagram(Datagram::new(stream_id, data))?;
-        Ok(())
-    }
-
-    /// Reads an incoming datagram
-    fn read_datagram(&mut self) -> ReadDatagram<C, B> {
-        ReadDatagram {
-            conn: self,
+    /// Get the datagram sender
+    fn get_datagram_sender(
+        &self,
+        stream_id: quic::StreamId,
+    ) -> crate::datagram_handler::DatagramSender<
+        <C as crate::quic_traits::DatagramConnectionExt<B>>::SendDatagramHandler,
+        B,
+    > {
+        DatagramSender {
+            handler: self.inner.conn.send_datagram_handler(),
             _marker: PhantomData,
+            shared_state: self.inner.shared.clone(),
+            stream_id,
         }
     }
-}
 
-pin_project! {
-    /// Future for [`Connection::read_datagram`]
-    pub struct ReadDatagram<'a, C, B>
-    where
-            C: quic::Connection<B>,
-            B: Buf,
-        {
-            conn: &'a mut Connection<C, B>,
-            _marker: PhantomData<B>,
-        }
-}
-
-impl<'a, C, B> Future for ReadDatagram<'a, C, B>
-where
-    C: quic::Connection<B> + RecvDatagramExt,
-    <C as quic_traits::RecvDatagramExt>::Error: h3::quic::Error + 'static,
-    B: Buf,
-{
-    type Output = Result<Option<Datagram<C::Buf>>, Error>;
-
-    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match ready!(self.conn.inner.conn.poll_accept_datagram(cx))? {
-            Some(v) => Poll::Ready(Ok(Some(Datagram::decode(v)?))),
-            None => Poll::Ready(Ok(None)),
+    /// Get the datagram reader
+    fn get_datagram_reader(
+        &self,
+    ) -> crate::datagram_handler::DatagramReader<
+        <C as crate::quic_traits::DatagramConnectionExt<B>>::RecvDatagramHandler,
+    > {
+        DatagramReader {
+            handler: self.inner.conn.recv_datagram_handler(),
+            shared_state: self.inner.shared.clone(),
         }
     }
 }
