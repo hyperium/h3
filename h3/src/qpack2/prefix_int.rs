@@ -111,6 +111,7 @@ mod test {
         test_all_chunking_combinations(
             &mut Cursor::new(data),
             || new_prefix_int_parser::<F>(),
+            false,
             ParseProgressResult::Done((flags, value)),
         );
     }
@@ -119,6 +120,7 @@ mod test {
         test_all_chunking_combinations(
             &mut Cursor::new(data),
             || new_prefix_int_parser::<F>(),
+            false,
             ParseProgressResult::Error(PrefixIntParseError::Overflow),
         );
     }
