@@ -223,7 +223,9 @@ pub(crate) fn sampled_chunking_combinations(buf: &[u8]) -> Vec<Vec<Vec<u8>>> {
     }
 
     // 3) Fixed strides (powers of two and some primes) to create regular boundaries
-    let mut strides = vec![2usize, 3, 4, 5, 7, 8, 11, 13, 16, 19, 23, 29, 32, 37, 43, 47, 53, 64];
+    let mut strides = vec![
+        2usize, 3, 4, 5, 7, 8, 11, 13, 16, 19, 23, 29, 32, 37, 43, 47, 53, 64,
+    ];
     strides.retain(|&s| s <= len);
     strides.sort_unstable();
     for s in strides {

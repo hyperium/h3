@@ -393,8 +393,8 @@ bits_decode![
 mod tests {
     #![allow(clippy::identity_op)]
 
-    use super::*;
     use super::super::encode::HpackStringEncode;
+    use super::*;
     use crate::tests::{
         all_chunking_combinations, sampled_chunking_combinations, test_all_chunking_combinations,
     };
@@ -412,7 +412,6 @@ mod tests {
             );
         } )* }
     }
-
 
     /**
      * https://tools.ietf.org/html/rfc7541

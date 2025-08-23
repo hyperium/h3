@@ -101,7 +101,6 @@ where
     }
 }
 
-
 /*fn parse_instruction<R: Buf>(read: &mut R) -> Result<Option<Instruction>, InternalConnectionError> {
     if read.remaining() < 1 {
         return Ok(None);
