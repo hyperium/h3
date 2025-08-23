@@ -22,7 +22,7 @@ pub enum HuffmanDecodingError2 {
 
 /// A stateful decoder for Huffman encoded strings.
 #[derive(Debug)]
-struct StatefulHuffmanDecoder {
+pub(super) struct StatefulHuffmanDecoder {
     /// The current byte being processed.
     current_byte: Option<u8>,
     /// The current bit position within the current byte.
@@ -142,7 +142,7 @@ impl StatefulParser<HuffmanDecodingError2, Vec<u8>> for StatefulHuffmanDecoder {
 
 impl StatefulHuffmanDecoder {
     /// Creates a new `StatefulDecoder` with the specified length.
-    fn new(length: usize) -> Self {
+    pub(super) fn new(length: usize) -> Self {
         StatefulHuffmanDecoder {
             current_byte: None,
             current_bit_pos: 0,
@@ -394,6 +394,7 @@ mod tests {
     #![allow(clippy::identity_op)]
 
     use super::*;
+    use super::super::encode::HpackStringEncode;
     use crate::tests::{
         all_chunking_combinations, sampled_chunking_combinations, test_all_chunking_combinations,
     };
@@ -1757,7 +1758,6 @@ mod tests {
             0b1111_1111,
         ];
 
-
         let expected = (0u8..=255).collect();
         let len = bytes.len();
 
@@ -1767,5 +1767,60 @@ mod tests {
             true,
             ParseProgressResult::Done(expected),
         );
+    }
+
+    #[test]
+    fn decode_common_header_values() {
+        // A small suite of typical header values to exercise varied symbol coverage and boundaries.
+        let cases = [
+            "gzip",
+            "deflate",
+            "br",
+            "gzip, deflate, br",
+            "keep-alive",
+            "close",
+            "no-cache",
+            "no-store",
+            "private",
+            "max-age=0",
+            "max-age=31536000",
+            "public, max-age=0, must-revalidate",
+            "keep-alive; timeout=5; max=1000",
+            "text/html",
+            "text/plain; charset=utf-8",
+            "text/html; charset=UTF-8",
+            "application/json",
+            "application/javascript",
+            "application/octet-stream",
+            "application/x-www-form-urlencoded",
+            "image/svg+xml",
+            "image/webp",
+            "*/*",
+            "en",
+            "en-US",
+            "en-US,en;q=0.9",
+            "utf-8",
+            "attachment; filename=\"report.pdf\"",
+            "inline; filename=\"report.txt\"",
+            "https://example.com",
+            "http://localhost:8080/",
+            "Mon, 21 Oct 2015 07:28:00 GMT",
+            "Wed, 21 Aug 2024 12:34:56 GMT",
+            "Привет мир",
+            "こんにちは世界",
+            "34erjiodferu8ioer90sdfhglsugh54o8hsliufh3489hsieulrfgow78fzsoiudrfhiow4z",
+            "3216543216879865asdfasdfasdfasdfasdfasdfasdfasdfasdfasdfasdfa",
+            "sev9a8w4p98ecru0twke89rmpa9eqmpt54ß0as8w9p84euzqxopm89a9w8ecrm09t8wc34895u7v0q3m85zvuvaoöticlastmiq,p33489ctm tm94"
+        ];
+
+        for s in cases {
+            let encoded = s.as_bytes().to_vec().hpack_encode().expect("encode");
+            test_all_chunking_combinations(
+                &mut Cursor::new(&encoded),
+                || StatefulHuffmanDecoder::new(encoded.len()),
+                true,
+                ParseProgressResult::Done(s.as_bytes().to_vec()),
+            );
+        }
     }
 }

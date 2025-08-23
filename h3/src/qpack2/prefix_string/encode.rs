@@ -1,4 +1,4 @@
-use super::BitWindow;
+use crate::qpack2::prefix_string::bitwin::BitWindow;
 
 #[derive(Debug, PartialEq)]
 pub struct HuffmanEncodingError {
@@ -401,6 +401,9 @@ mod tests {
     #![allow(clippy::identity_op)]
 
     use super::*;
+    use crate::qpack2::prefix_string::decode::StatefulHuffmanDecoder;
+    use crate::qpack2::qpack_result::{ParseProgressResult, StatefulParser};
+    use std::io::Cursor;
 
     #[test]
     fn test_set_bits() {
@@ -1792,38 +1795,48 @@ mod tests {
         assert_eq!(res, Ok(bytes));
     }
 
-    use super::super::HpackStringDecode;
-
     #[test]
-    fn byte_count_exact_when_bit_count_multiple_of_8() {
+    /// Round-trip must be byte-for-byte identical when the total Huffman bit length
+    /// is an exact multiple of 8 (no partial last byte). This guards against
+    /// off-by-one writes and missing/extra padding issues.
+    fn round_trip_exact_when_bit_len_multiple_of_8() {
         let encoded = vec![
             0x8c, 0x2d, 0x4b, 0x70, 0xdd, 0xf4, 0x5a, 0xbe, 0xfb, 0x40, 0x05, 0xdb,
         ];
+        // Decode using the new stateful decoder
+        let decoded = match StatefulHuffmanDecoder::new(encoded.len())
+            .parse_progress(&mut Cursor::new(&encoded))
+        {
+            ParseProgressResult::Done(bytes) => bytes,
+            ParseProgressResult::MoreData(_) => panic!("decoder unexpectedly requires more data"),
+            ParseProgressResult::Error(e) => panic!("decode error: {e:?}"),
+        };
 
-        let mut res = Vec::new();
-        for byte in encoded.hpack_decode() {
-            res.push(byte.unwrap());
-        }
-
-        let reencoded = res.hpack_encode();
-
-        assert_eq!(reencoded.unwrap().last(), Some(&0xdb));
+        let reencoded = decoded.hpack_encode().expect("re-encode");
+        // Padding is only relevant in the last byte; for our encoder it is deterministic,
+        // therefore the full buffer must match exactly.
+        assert_eq!(reencoded, encoded);
     }
 
     #[test]
-    fn byte_() {
+    /// Round-trip must be byte-for-byte identical for a non-byte-aligned input
+    /// (partial last byte). Padding bits in the final byte are required and
+    /// deterministic with this encoder, so the entire buffer must match.
+    fn round_trip_exact_when_non_byte_aligned() {
         let encoded = vec![
             0x55, 0x92, 0xbe, 0xff, 0x48, 0x36, 0xcb, 0x86, 0x37, 0x3d, 0x68, 0xca, 0xc9, 0x61,
             0xce, 0xde, 0xdc, 0xe5, 0xfc,
         ];
+        // Decode using the new stateful decoder
+        let decoded = match StatefulHuffmanDecoder::new(encoded.len())
+            .parse_progress(&mut Cursor::new(&encoded))
+        {
+            ParseProgressResult::Done(bytes) => bytes,
+            ParseProgressResult::MoreData(_) => panic!("decoder unexpectedly requires more data"),
+            ParseProgressResult::Error(e) => panic!("decode error: {e:?}"),
+        };
 
-        let mut res = Vec::new();
-        for byte in encoded.hpack_decode() {
-            res.push(byte.unwrap());
-        }
-
-        let reencoded = res.hpack_encode();
-
-        assert_eq!(reencoded.unwrap().last(), Some(&0xfc));
+        let reencoded = decoded.hpack_encode().expect("re-encode");
+        assert_eq!(reencoded, encoded);
     }
 }

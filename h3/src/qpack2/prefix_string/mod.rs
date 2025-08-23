@@ -1,6 +1,6 @@
 mod bitwin;
 mod decode;
-//mod encode;
+mod encode;
 /*
 use std::convert::TryInto;
 use std::fmt;

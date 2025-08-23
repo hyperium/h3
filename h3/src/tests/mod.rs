@@ -61,12 +61,10 @@ pub(crate) fn test_all_chunking_combinations<P, B, O, E>(
 
             parser = match parser.parse_progress(&mut read) {
                 result @ ParseProgressResult::Error(_) => {
-                    println!("Encountered error while parsing: {:?}", result);
                     assert_eq!(result, expected_output);
                     break;
                 }
                 result @ ParseProgressResult::Done(_) => {
-                    println!("Parsing completed with result: {:?}", result);
                     assert_eq!(result, expected_output);
                     break;
                 }
