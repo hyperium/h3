@@ -1,8 +1,8 @@
-use bytes::Buf;
+use bytes::{Buf, BufMut};
 use thiserror::Error;
 
 use crate::{
-    proto::coding::BufExt,
+    proto::coding::{BufExt, BufMutExt},
     qpack2::qpack_result::{ParseProgressResult, StatefulParser},
 };
 
@@ -15,7 +15,7 @@ pub enum PrefixIntParseError {
 /// PrefixIntParser is a parser for prefix integers.
 /// It is used to decode and encode prefix integers in the QPACK format.
 #[derive(Debug)]
-pub struct PrefixIntParser<const F: u8> {
+pub(super) struct PrefixIntParser<const F: u8> {
     value: u64,
     position: u8,
     flags: Option<u8>,
@@ -24,7 +24,7 @@ pub struct PrefixIntParser<const F: u8> {
 /// Creates a new PrefixIntParser with the given size.
 /// The size is the number of bits used to encode the prefix integer.
 /// The size must be between 1 and 8.
-fn new_prefix_int_parser<const F2: u8>() -> PrefixIntParser<F2> {
+pub(super) fn new_prefix_int_parser<const F2: u8>() -> PrefixIntParser<F2> {
     // TODO: maybe add compile-time check for F2
     assert!(F2 <= 8);
 
@@ -93,6 +93,31 @@ impl<const F: u8> PrefixIntParser<F> {
     const MASK: u8 = 0xFF >> (8 - F);
 }
 
+pub fn encode<B: BufMut>(size: u8, flags: u8, value: u64, buf: &mut B) {
+    assert!(size <= 8);
+    // NOTE: following casts to u8 intend to trim the most significant bits, they are used as a
+    //       workaround for shiftoverflow errors when size == 8.
+    let mask = !(0xFF << size) as u8;
+    let flags = ((flags as usize) << size) as u8;
+
+    // if value < 2usize.pow(size) - 1
+    if value < (mask as u64) {
+        buf.write(flags | value as u8);
+        return;
+    }
+
+    buf.write(mask | flags);
+    let mut remaining = value - mask as u64;
+
+    while remaining >= 128 {
+        let rest = (remaining % 128) as u8;
+        buf.write(rest + 128);
+        remaining /= 128;
+    }
+    buf.write(remaining as u8);
+}
+
+
 //= https://www.rfc-editor.org/rfc/rfc9204.html#section-4.1.1
 //# QPACK implementations MUST be able to decode integers up to and
 //# including 62 bits long.
@@ -114,6 +139,11 @@ mod test {
             false,
             ParseProgressResult::Done((flags, value)),
         );
+
+        // Test encoding
+        let mut buf = Vec::new();
+        encode(F, flags, value, &mut buf);
+        assert_eq!(&buf, data);
     }
 
     fn check_overflow<const F: u8>(data: &[u8]) {
