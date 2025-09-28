@@ -108,7 +108,7 @@ macro_rules! bits_decode {
         HuffmanDecoder {
             lookup: $count,
             table: &[
-                $( DecodeValue::Sym($sym as u8), )*
+                $( DecodeValue::Sym($sym), )*
                 $( DecodeValue::Partial(&$sub), )*
             ]
         }
@@ -118,8 +118,8 @@ macro_rules! bits_decode {
         HuffmanDecoder {
             lookup: 1,
             table: &[
-                DecodeValue::Sym($first as u8),
-                DecodeValue::Sym($second as u8),
+                DecodeValue::Sym($first),
+                DecodeValue::Sym($second),
             ]
         }
     };
@@ -128,10 +128,10 @@ macro_rules! bits_decode {
         HuffmanDecoder {
             lookup: 2,
             table: &[
-                DecodeValue::Sym($first as u8),
-                DecodeValue::Sym($second as u8),
-                DecodeValue::Sym($third as u8),
-                DecodeValue::Sym($fourth as u8),
+                DecodeValue::Sym($first),
+                DecodeValue::Sym($second),
+                DecodeValue::Sym($third),
+                DecodeValue::Sym($fourth),
             ]
         }
     };
@@ -140,7 +140,7 @@ macro_rules! bits_decode {
         HuffmanDecoder {
             lookup: 1,
             table: &[
-                DecodeValue::Sym($first as u8),
+                DecodeValue::Sym($first),
                 DecodeValue::Partial(&$second),
             ]
         }
@@ -176,7 +176,7 @@ macro_rules! bits_decode {
 #[rustfmt::skip]
 bits_decode![
     HPACK_STRING => (
-        lookup: 5, [ '0', '1', '2', 'a', 'c', 'e', 'i', 'o', 's', 't',
+        lookup: 5, [ b'0', b'1', b'2', b'a', b'c', b'e', b'i', b'o', b's', b't',
         => END0_01010, => END0_01011, => END0_01100, => END0_01101,
         => END0_01110, => END0_01111, => END0_10000, => END0_10001,
         => END0_10010, => END0_10011, => END0_10100, => END0_10101,
@@ -184,46 +184,46 @@ bits_decode![
         => END0_11010, => END0_11011, => END0_11100, => END0_11101,
         => END0_11110, => END0_11111,
         ]),
-    END0_01010 => ( 32, '%'),
-    END0_01011 => ('-', '.'),
-    END0_01100 => ('/', '3'),
-    END0_01101 => ('4', '5'),
-    END0_01110 => ('6', '7'),
-    END0_01111 => ('8', '9'),
-    END0_10000 => ('=', 'A'),
-    END0_10001 => ('_', 'b'),
-    END0_10010 => ('d', 'f'),
-    END0_10011 => ('g', 'h'),
-    END0_10100 => ('l', 'm'),
-    END0_10101 => ('n', 'p'),
-    END0_10110 => ('r', 'u'),
-    END0_10111 => (':', 'B', 'C', 'D'),
-    END0_11000 => ('E', 'F', 'G', 'H'),
-    END0_11001 => ('I', 'J', 'K', 'L'),
-    END0_11010 => ('M', 'N', 'O', 'P'),
-    END0_11011 => ('Q', 'R', 'S', 'T'),
-    END0_11100 => ('U', 'V', 'W', 'Y'),
-    END0_11101 => ('j', 'k', 'q', 'v'),
-    END0_11110 => ('w', 'x', 'y', 'z'),
+    END0_01010 => ( 32 , b'%'),
+    END0_01011 => (b'-' , b'.'),
+    END0_01100 => (b'/' , b'3'),
+    END0_01101 => (b'4' , b'5'),
+    END0_01110 => (b'6' , b'7'),
+    END0_01111 => (b'8' , b'9'),
+    END0_10000 => (b'=' , b'A'),
+    END0_10001 => (b'_' , b'b'),
+    END0_10010 => (b'd' , b'f'),
+    END0_10011 => (b'g' , b'h'),
+    END0_10100 => (b'l' , b'm'),
+    END0_10101 => (b'n' , b'p'),
+    END0_10110 => (b'r' , b'u'),
+    END0_10111 => (b':', b'B', b'C', b'D'),
+    END0_11000 => (b'E', b'F', b'G', b'H'),
+    END0_11001 => (b'I', b'J', b'K', b'L'),
+    END0_11010 => (b'M', b'N', b'O', b'P'),
+    END0_11011 => (b'Q', b'R', b'S', b'T'),
+    END0_11100 => (b'U', b'V', b'W', b'Y'),
+    END0_11101 => (b'j', b'k', b'q', b'v'),
+    END0_11110 => (b'w', b'x', b'y', b'z'),
     END0_11111 => (=> END5_00, => END5_01, => END5_10, => END5_11),
-    END5_00 => ('&', '*'),
-    END5_01 => (',', 59),
-    END5_10 => ('X', 'Z'),
+    END5_00 => (b'&' , b'*'),
+    END5_01 => (b',', 59),
+    END5_10 => (b'X' , b'Z'),
     END5_11 => (=> END7_0, => END7_1),
-    END7_0 => ('!', '"', '(', ')'),
+    END7_0 => (b'!', b'"', b'(', b')'),
     END7_1 => (=> END8_0, => END8_1),
-    END8_0 => ('?', => END9A_1),
-    END9A_1 => ('\'', '+'),
-    END8_1 => (lookup: 2, ['|', => END9B_01, => END9B_10, => END9B_11,]),
-    END9B_01 => ('#', '>'),
-    END9B_10 => (0, '$', '@', '['),
-    END9B_11 => (lookup: 2, [']', '~', => END13_10, => END13_11,]),
-    END13_10 => ('^', '}'),
+    END8_0 => (b'?', => END9A_1),
+    END9A_1 => (b'\'' , b'+'),
+    END8_1 => (lookup: 2, [b'|', => END9B_01, => END9B_10, => END9B_11,]),
+    END9B_01 => (b'#' , b'>'),
+    END9B_10 => (0, b'$', b'@', b'['),
+    END9B_11 => (lookup: 2, [b']', b'~', => END13_10, => END13_11,]),
+    END13_10 => (b'^', b'}'),
     END13_11 => (=> END14_0, => END14_1),
-    END14_0 => ('<', '`'),
-    END14_1 => ('{', => END15_1),
+    END14_0 => (b'<', b'`'),
+    END14_1 => (b'{', => END15_1),
     END15_1 =>
-    (lookup: 4, [ '\\', 195, 208, => END19_0011,
+    (lookup: 4, [ b'\\', 195, 208, => END19_0011,
      => END19_0100, => END19_0101, => END19_0110, => END19_0111,
      => END19_1000, => END19_1001, => END19_1010, => END19_1011,
      => END19_1100, => END19_1101, => END19_1110, => END19_1111,
