@@ -212,10 +212,8 @@ where
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<HeaderMap>, StreamError>> {
         let res = self.inner.poll_recv_trailers(cx);
-        if let Poll::Ready(Err(e)) = &res {
-            if let StreamError::HeaderTooBig { .. } = e {
-                self.inner.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
-            }
+        if let Poll::Ready(Err(StreamError::HeaderTooBig { .. })) = &res {
+            self.inner.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
         }
         res
     }

@@ -76,7 +76,7 @@ pub trait ConnectionState {
         self.shared_state()
             .settings
             .get()
-            .map(|s| Cow::Borrowed(s))
+            .map(Cow::Borrowed)
             .unwrap_or_default()
     }
     /// Set the connection to closing

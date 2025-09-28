@@ -71,7 +71,7 @@ where
     ) -> Result<(Request<()>, RequestStream<C::BidiStream, B>), StreamError> {
         let frame = std::future::poll_fn(|cx| self.frame_stream.poll_next(cx)).await;
         let req = self.accept_with_frame(frame)?;
-        Ok(req.resolve().await?)
+        req.resolve().await
     }
 
     /// Accepts a http request where the first frame has already been read and decoded.

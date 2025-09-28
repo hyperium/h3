@@ -237,7 +237,6 @@ where
             Frame::Settings(_setting) => {
                 #[cfg(feature = "tracing")]
                 trace!("Got settings > {:?}", _setting);
-                ()
             }
             &Frame::Goaway(id) => self.inner.process_goaway(&mut self.recv_closing, id)?,
             _frame @ Frame::MaxPushId(_) | _frame @ Frame::CancelPush(_) => {

@@ -304,7 +304,7 @@ where
         let mut conn_inner = Self {
             shared,
             conn,
-            control_send: control_send,
+            control_send,
             control_recv: None,
             qpack_streams,
             handled_connection_error: None,
@@ -399,17 +399,13 @@ where
         let _ = self.poll_connection_error(cx)?;
 
         // Get all currently pending streams
-        loop {
-            match self
-                .conn
-                .poll_accept_recv(cx)
-                .map_err(|e| self.handle_connection_error(e))?
-            {
-                Poll::Ready(stream) => self
-                    .pending_recv_streams
-                    .push(Some(AcceptRecvStream::new(stream))),
-                Poll::Pending => break,
-            }
+        while let Poll::Ready(stream) = self
+            .conn
+            .poll_accept_recv(cx)
+            .map_err(|e| self.handle_connection_error(e))?
+        {
+            self.pending_recv_streams
+                .push(Some(AcceptRecvStream::new(stream)))
         }
 
         for stream in self.pending_recv_streams.iter_mut().filter(|s| s.is_some()) {

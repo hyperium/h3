@@ -12,6 +12,7 @@ pub mod internal_error;
 #[cfg(not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"))]
 pub(crate) mod internal_error;
 
+#[allow(clippy::module_inception)]
 mod error;
 
 pub use codes::Code;

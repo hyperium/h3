@@ -604,7 +604,7 @@ where
         // If there is data available *do not* poll for more data, as that may suspend indefinitely
         // if no more data is sent, causing data loss.
         if !p.has_remaining() {
-            let eos = ready!(p.poll_read(cx).map_err(|err| convert_to_std_io_error(err)))?;
+            let eos = ready!(p.poll_read(cx).map_err(convert_to_std_io_error))?;
             if eos {
                 return Poll::Ready(Ok(0));
             }
@@ -639,7 +639,7 @@ where
         // If there is data available *do not* poll for more data, as that may suspend indefinitely
         // if no more data is sent, causing data loss.
         if !p.has_remaining() {
-            let eos = ready!(p.poll_read(cx).map_err(|err| convert_to_std_io_error(err)))?;
+            let eos = ready!(p.poll_read(cx).map_err(convert_to_std_io_error))?;
             if eos {
                 return Poll::Ready(Ok(()));
             }
@@ -668,8 +668,7 @@ where
         mut buf: &[u8],
     ) -> Poll<std::io::Result<usize>> {
         let p = &mut *self;
-        p.poll_send(cx, &mut buf)
-            .map_err(|err| convert_to_std_io_error(err))
+        p.poll_send(cx, &mut buf).map_err(convert_to_std_io_error)
     }
 
     fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> {
@@ -678,8 +677,7 @@ where
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         let p = &mut *self;
-        p.poll_finish(cx)
-            .map_err(|err| convert_to_std_io_error(err))
+        p.poll_finish(cx).map_err(convert_to_std_io_error)
     }
 }
 
@@ -694,8 +692,7 @@ where
         mut buf: &[u8],
     ) -> Poll<std::io::Result<usize>> {
         let p = &mut *self;
-        p.poll_send(cx, &mut buf)
-            .map_err(|err| convert_to_std_io_error(err))
+        p.poll_send(cx, &mut buf).map_err(convert_to_std_io_error)
     }
 
     fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<std::io::Result<()>> {
@@ -704,13 +701,12 @@ where
 
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         let p = &mut *self;
-        p.poll_finish(cx)
-            .map_err(|err| convert_to_std_io_error(err))
+        p.poll_finish(cx).map_err(convert_to_std_io_error)
     }
 }
 
 fn convert_to_std_io_error(error: StreamErrorIncoming) -> std::io::Error {
-    std::io::Error::new(std::io::ErrorKind::Other, error)
+    std::io::Error::other(error)
 }
 
 #[cfg(test)]
