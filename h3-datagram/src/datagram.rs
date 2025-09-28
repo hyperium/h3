@@ -20,6 +20,8 @@ where
     B: Buf,
 {
     /// Creates a new datagram frame
+    // TODO: remove for MSRV >= 1.87 https://github.com/rust-lang/rust/issues/128101
+    #[allow(unknown_lints, clippy::manual_is_multiple_of)]
     pub fn new(stream_id: StreamId, payload: B) -> Self {
         assert!(
             stream_id.into_inner() % 4 == 0,
