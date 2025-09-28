@@ -14,7 +14,7 @@ use crate::{
     error::{internal_error::InternalConnectionError, Code},
     frame::FrameStream,
     proto::{
-        coding::{Decode as _, Encode},
+        coding::Encode,
         frame::{Frame, Settings},
         stream::StreamType,
         varint::VarInt,
@@ -324,9 +324,9 @@ where
                 Err(StreamErrorIncoming::StreamTerminated { error_code }) => {
                     Some(StreamEnd::Reset(error_code))
                 }
-                Err(StreamErrorIncoming::Unknown(err)) => {
+                Err(StreamErrorIncoming::Unknown(_err)) => {
                     #[cfg(feature = "tracing")]
-                    tracing::error!("Unknown error when reading stream {}", err);
+                    tracing::error!("Unknown error when reading stream {}", _err);
 
                     Some(StreamEnd::Other)
                 }
@@ -383,6 +383,7 @@ where
 
 enum StreamEnd {
     EndOfStream,
+    #[allow(dead_code)]
     Reset(u64),
     // if the quic layer returns an unknown error
     Other,

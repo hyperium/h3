@@ -171,7 +171,7 @@ where
     }
 
     /// Accept an incoming unidirectional stream from the client, it reads the stream until EOF.
-    pub fn accept_uni(&self) -> AcceptUni<C, B> {
+    pub fn accept_uni(&self) -> AcceptUni<'_, C, B> {
         AcceptUni {
             conn: &self.server_conn,
         }
@@ -219,7 +219,7 @@ where
     }
 
     /// Open a new bidirectional stream
-    pub fn open_bi(&self, session_id: SessionId) -> OpenBi<C, B> {
+    pub fn open_bi(&self, session_id: SessionId) -> OpenBi<'_, C, B> {
         OpenBi {
             opener: &self.opener,
             stream: None,
@@ -231,7 +231,7 @@ where
     }
 
     /// Open a new unidirectional stream
-    pub fn open_uni(&self, session_id: SessionId) -> OpenUni<C, B> {
+    pub fn open_uni(&self, session_id: SessionId) -> OpenUni<'_, C, B> {
         OpenUni {
             opener: &self.opener,
             stream: None,

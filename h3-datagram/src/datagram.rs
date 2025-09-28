@@ -106,7 +106,7 @@ where
 
     fn chunk(&self) -> &[u8] {
         if self.len - self.pos > 0 {
-            return &self.stream_id[self.pos..self.len];
+            &self.stream_id[self.pos..self.len]
         } else {
             self.payload.chunk()
         }

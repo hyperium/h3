@@ -14,10 +14,9 @@ runs:
   using: "composite"
   steps:
     - name: Install Rust toolchain
-      uses: actions-rs/toolchain@v1
+      uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
         toolchain: stable
-        override: true
 
     - name: Cache builds
       uses: camshaft/rust-cache@v1
@@ -67,7 +66,7 @@ runs:
     # publish report only when pushing to master
     - name: Push to gh-pages
       if: github.ref == 'refs/heads/master'
-      uses: ad-m/github-push-action@master
+      uses: ad-m/github-push-action@v1
       with:
         github_token: ${{ github.token }}
         branch: gh-pages

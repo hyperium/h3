@@ -258,11 +258,11 @@ impl DynamicTable {
         DynamicTable::default()
     }
 
-    pub fn decoder(&self, base: usize) -> DynamicTableDecoder {
+    pub fn decoder(&self, base: usize) -> DynamicTableDecoder<'_> {
         DynamicTableDecoder { table: self, base }
     }
 
-    pub fn encoder(&mut self, stream_id: u64) -> DynamicTableEncoder {
+    pub fn encoder(&mut self, stream_id: u64) -> DynamicTableEncoder<'_> {
         for (idx, field) in self.fields.iter().enumerate() {
             self.name_map
                 .insert(field.name.clone(), self.vas.index(idx).unwrap());

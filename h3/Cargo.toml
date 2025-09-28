@@ -1,7 +1,7 @@
 [package]
 name = "h3"
 version = "0.0.8"
-rust-version = "1.70"
+rust-version = "1.74"
 authors = [
     "Sean McArthur <sean@seanmonstar.com>",
     "Jean-Christophe BEGUE <jc.begue@pm.me>",
@@ -42,7 +42,7 @@ quinn = { version = "0.11", default-features = false, features = [
     "ring",
 ] }
 quinn-proto = { version = "0.11", default-features = false }
-rcgen = "0.13"
+rcgen = "0.14"
 rustls = { version = "0.23", default-features = false, features = ["logging", "ring", "std"] }
 tokio = { version = "1", features = ["rt", "macros", "io-util", "io-std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = [
