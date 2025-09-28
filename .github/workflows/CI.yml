@@ -110,6 +110,8 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
           target: ${{ matrix.target }}
       - run: cargo test --features ${{ matrix.features }} --target ${{ matrix.target }}
+        env:  #[cfg(feature = "datagram")] unexpected `cfg` condition value: `datagram`
+          RUSTFLAGS: "-A unexpected_cfgs"
       - name: h3Spec
         run: ./ci/h3spec.sh
         if: matrix.toolchain == 'stable'

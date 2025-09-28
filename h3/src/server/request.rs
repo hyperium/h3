@@ -66,6 +66,7 @@ where
 {
     /// Returns a future to await the request headers and return a `Request` object
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    #[allow(clippy::type_complexity)]
     pub async fn resolve_request(
         mut self,
     ) -> Result<(Request<()>, RequestStream<C::BidiStream, B>), StreamError> {
@@ -192,6 +193,7 @@ where
 
     /// Finishes the resolution of the request
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    #[allow(clippy::type_complexity)]
     pub async fn resolve(
         mut self,
     ) -> Result<(Request<()>, RequestStream<C::BidiStream, B>), StreamError> {

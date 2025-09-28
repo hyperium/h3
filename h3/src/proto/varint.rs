@@ -180,6 +180,7 @@ impl fmt::Display for VarInt {
 }
 
 pub trait BufExt {
+    #[allow(dead_code)]
     fn get_var(&mut self) -> Result<u64, UnexpectedEnd>;
 }
 
@@ -190,6 +191,7 @@ impl<T: Buf> BufExt for T {
 }
 
 pub trait BufMutExt {
+    #[allow(dead_code)]
     fn write_var(&mut self, x: u64);
 }
 
