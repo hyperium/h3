@@ -9,7 +9,7 @@ env:
   RUST_BACKTRACE: 1
   toolchain_style: stable
   toolchain_msrv: 1.70.0
-  toolchain_h3_quinn_msrv: 1.71.0
+  toolchain_h3_quinn_msrv: 1.74.1
   toolchain_doc: nightly-2025-04-02
   toolchain_lint: stable
   toolchain_fuzz: nightly-2025-04-02
