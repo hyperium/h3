@@ -246,6 +246,13 @@ where
 
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
                 //= type=TODO
+                //# If a CANCEL_PUSH frame is received that
+                //# references a push ID greater than currently allowed on the
+                //# connection, this MUST be treated as a connection error of type
+                //# H3_ID_ERROR.
+
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.3
+                //= type=TODO
                 //# If a server receives a CANCEL_PUSH frame for a push
                 //# ID that has not yet been mentioned by a PUSH_PROMISE frame, this MUST
                 //# be treated as a connection error of type H3_ID_ERROR.

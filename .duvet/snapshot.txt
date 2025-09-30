@@ -565,10 +565,10 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[!MUST,implementation,test]: Receiving a
     TEXT[!MUST,implementation,test]:    CANCEL_PUSH frame on a stream other than the control stream MUST be
     TEXT[!MUST,implementation,test]:    treated as a connection error of type H3_FRAME_UNEXPECTED.
-    TEXT[!MUST]: If a CANCEL_PUSH frame is received that
-    TEXT[!MUST]:    references a push ID greater than currently allowed on the
-    TEXT[!MUST]:    connection, this MUST be treated as a connection error of type
-    TEXT[!MUST]:    H3_ID_ERROR.
+    TEXT[!MUST,todo]: If a CANCEL_PUSH frame is received that
+    TEXT[!MUST,todo]:    references a push ID greater than currently allowed on the
+    TEXT[!MUST,todo]:    connection, this MUST be treated as a connection error of type
+    TEXT[!MUST,todo]:    H3_ID_ERROR.
     TEXT[!MUST,todo]: If a server receives a CANCEL_PUSH frame for a push
     TEXT[!MUST,todo]:    ID that has not yet been mentioned by a PUSH_PROMISE frame, this MUST
     TEXT[!MUST,todo]:    be treated as a connection error of type H3_ID_ERROR.
