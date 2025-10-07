@@ -12,6 +12,7 @@ pub mod internal_error;
 #[cfg(not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"))]
 pub(crate) mod internal_error;
 
+// Todo better module names
 #[allow(clippy::module_inception)]
 mod error;
 
