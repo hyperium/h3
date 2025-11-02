@@ -1,5 +1,3 @@
-use std::mem;
-
 use bytes::{Buf, BufMut};
 
 use crate::qpack2::{
@@ -16,6 +14,7 @@ enum StringDecodeError {
     HuffmanDecodeError(#[from] HuffmanDecodingError),
 }
 
+#[derive(Debug)]
 enum StatefulPrefixStringDecoder<const S: u8> {
     Integer(PrefixIntParser<S>),
     HuffmanString {
@@ -38,7 +37,9 @@ fn new_prefix_string_parser<const S: u8>() -> StatefulPrefixStringDecoder<S> {
     StatefulPrefixStringDecoder::Integer(new_prefix_int_parser::<S>())
 }
 
-impl StatefulParser<StringDecodeError, (u8, Vec<u8>)> for StatefulPrefixStringDecoder<8> {
+impl<const S: u8> StatefulParser<StringDecodeError, (u8, Vec<u8>)>
+    for StatefulPrefixStringDecoder<S>
+{
     fn parse_progress<B: Buf>(
         mut self,
         buf: &mut B,
@@ -110,9 +111,6 @@ impl StatefulParser<StringDecodeError, (u8, Vec<u8>)> for StatefulPrefixStringDe
 
                     value.put(taken);
 
-                    // Advance the original buffer. Is this necessary?
-                    buf.advance(read);
-
                     if value.len() == len as usize {
                         return ParseProgressResult::Done((flags, std::mem::take(value)));
                     } else {
@@ -148,3 +146,82 @@ pub fn decode<B: Buf>(size: u8, buf: &mut B) -> Result<Vec<u8>, Error> {
     };
     Ok(value)
 }*/
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::qpack2::{
+        prefix_int,
+        prefix_string::huffman_encode::HpackStringEncode,
+        qpack_result::ParseProgressResult,
+    };
+    use crate::tests::test_all_chunking_combinations;
+    use std::io::Cursor;
+
+    // Helper: build an encoded prefix string buffer
+    // S = 7 (HPACK/QPACK string literal: 1-bit H flag + 7-bit length prefix)
+    fn build_prefix_string(huffman: bool, value: &[u8]) -> Vec<u8> {
+        let mut buf = Vec::new();
+        if huffman {
+            let encoded = value.to_vec().hpack_encode();
+            // flags: H=1, upper flag bits=0
+            prefix_int::encode(7, 1, encoded.len() as u64, &mut buf);
+            buf.extend_from_slice(&encoded);
+        } else {
+            // flags: H=0, upper flag bits=0
+            prefix_int::encode(7, 0, value.len() as u64, &mut buf);
+            buf.extend_from_slice(value);
+        }
+        buf
+    }
+
+    #[test]
+    fn decode_plain_small_all_chunkings() {
+        let input = b"hello";
+        let data = build_prefix_string(false, input);
+        test_all_chunking_combinations(
+            &mut Cursor::new(&data),
+            || new_prefix_string_parser::<7>(),
+            false,
+            // flags are returned with H stripped (flags >> 1), so 0 here
+            ParseProgressResult::Done((0u8, input.to_vec())),
+        );
+    }
+
+    #[test]
+    fn decode_huffman_small_all_chunkings() {
+        let input = b"hello";
+        let data = build_prefix_string(true, input);
+        test_all_chunking_combinations(
+            &mut Cursor::new(&data),
+            || new_prefix_string_parser::<7>(),
+            false,
+            ParseProgressResult::Done((0u8, input.to_vec())),
+        );
+    }
+
+    #[test]
+    fn decode_plain_empty() {
+        let input: &[u8] = b"";
+        let data = build_prefix_string(false, input);
+        test_all_chunking_combinations(
+            &mut Cursor::new(&data),
+            || new_prefix_string_parser::<7>(),
+            false,
+            ParseProgressResult::Done((0u8, input.to_vec())),
+        );
+    }
+
+    #[test]
+    fn decode_huffman_long_sampled_chunkings() {
+        // Longer string to exercise multi-byte length encoding and chunked parsing
+        let input = b"The quick brown fox jumps over the lazy dog 1234567890!";
+        let data = build_prefix_string(true, input);
+        test_all_chunking_combinations(
+            &mut Cursor::new(&data),
+            || new_prefix_string_parser::<7>(),
+            true, // sampled to keep runtime reasonable
+            ParseProgressResult::Done((0u8, input.to_vec())),
+        );
+    }
+}
