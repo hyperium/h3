@@ -55,6 +55,8 @@ mod stream;
 #[cfg(not(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes"))]
 mod webtransport;
 
+#[allow(dead_code)]
+mod qpack2;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

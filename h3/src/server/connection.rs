@@ -4,7 +4,7 @@
 
 use std::{
     collections::HashSet,
-    future::poll_fn,
+    future::{poll_fn, Future},
     option::Option,
     result::Result,
     task::{ready, Context, Poll},
@@ -131,11 +131,10 @@ where
                 return Ok(None);
             }
         };
-
+        self.inner.send_grease_frame = false;
         let resolver = self.create_resolver_internal(stream);
 
         // send the grease frame only once
-        self.inner.send_grease_frame = false;
 
         Ok(Some(resolver))
     }

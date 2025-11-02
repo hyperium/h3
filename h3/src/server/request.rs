@@ -1,4 +1,4 @@
-use std::{convert::TryFrom, sync::Arc};
+use std::{convert::TryFrom, future::Future, sync::Arc};
 
 use bytes::Buf;
 use http::{Request, StatusCode};
@@ -19,7 +19,7 @@ use crate::{
         frame::{Frame, PayloadLen},
         headers::Header,
     },
-    qpack,
+    qpack::{self},
     quic::{self, SendStream, StreamId},
     shared_state::{ConnectionState, SharedState},
 };
@@ -40,6 +40,7 @@ where
     pub(super) send_grease_frame: bool,
     pub(super) max_field_section_size: u64,
     pub(super) shared: Arc<SharedState>,
+    //  pub(super) decoder: decoder2::decoder::Decoder,
 }
 
 impl<C, B> ConnectionState for RequestResolver<C, B>
