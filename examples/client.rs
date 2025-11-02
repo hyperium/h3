@@ -3,6 +3,7 @@ use std::{path::PathBuf, sync::Arc};
 use futures::future;
 use h3::error::{ConnectionError, StreamError};
 use rustls::pki_types::CertificateDer;
+use rustls_native_certs::CertificateResult;
 use structopt::StructOpt;
 use tokio::io::AsyncWriteExt;
 use tracing::{error, info};
@@ -63,18 +64,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // load CA certificates stored in the system
     let mut roots = rustls::RootCertStore::empty();
-    match rustls_native_certs::load_native_certs() {
-        Ok(certs) => {
-            for cert in certs {
-                if let Err(e) = roots.add(cert) {
-                    error!("failed to parse trust anchor: {}", e);
-                }
-            }
+    let CertificateResult { certs, errors, .. } = rustls_native_certs::load_native_certs();
+    for cert in certs {
+        if let Err(e) = roots.add(cert) {
+            error!("failed to parse trust anchor: {}", e);
         }
-        Err(e) => {
-            error!("couldn't load any default trust roots: {}", e);
-        }
-    };
+    }
+    for e in errors {
+        error!("couldn't load default trust roots: {}", e);
+    }
 
     // load certificate of CA who issues the server certificate
     // NOTE that this should be used for dev only

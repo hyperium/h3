@@ -1,7 +1,7 @@
 [package]
 name = "h3-quinn"
 version = "0.0.10"
-rust-version = "1.70"
+rust-version = "1.74"
 authors = ["Jean-Christophe BEGUE <jc.begue@pm.me>"]
 edition = "2021"
 documentation = "https://docs.rs/h3-quinn"

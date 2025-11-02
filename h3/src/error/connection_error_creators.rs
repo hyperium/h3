@@ -85,7 +85,7 @@ where
     }
 
     /// Close the connection
-    pub fn close_connection(&mut self, code: Code, reason: String) -> () {
+    pub fn close_connection(&mut self, code: Code, reason: String) {
         self.conn.close(code, reason.as_bytes())
     }
 }
@@ -151,8 +151,7 @@ pub(crate) trait CloseRawQuicConnection<B: Buf>: quic::Connection<B> {
                     reason: reason.to_string(),
                 };
                 self.close(Code::H3_INTERNAL_ERROR, reason.as_bytes());
-                let conn_error = ConnectionError::Local { error: local_error };
-                conn_error
+                ConnectionError::Local { error: local_error }
             }
             _ => ConnectionError::Remote(error),
         }
@@ -196,7 +195,7 @@ where
         match error {
             FrameStreamError::Quic(error) => self.handle_quic_stream_error(error),
             FrameStreamError::Proto(frame_error) => self.handle_connection_error_on_stream(
-                InternalConnectionError::got_frame_error(frame_error).into(),
+                InternalConnectionError::got_frame_error(frame_error),
             ),
             FrameStreamError::UnexpectedEnd => {
                 self.handle_connection_error_on_stream(InternalConnectionError::new(

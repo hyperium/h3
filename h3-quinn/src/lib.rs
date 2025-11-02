@@ -79,7 +79,7 @@ where
     ) -> Poll<Result<Self::BidiStream, ConnectionErrorIncoming>> {
         let (send, recv) = ready!(self.incoming_bi.poll_next_unpin(cx))
             .expect("self.incoming_bi BoxStream never returns None")
-            .map_err(|e| convert_connection_error(e))?;
+            .map_err(convert_connection_error)?;
         Poll::Ready(Ok(Self::BidiStream {
             send: Self::SendStream::new(send),
             recv: Self::RecvStream::new(recv),
@@ -93,7 +93,7 @@ where
     ) -> Poll<Result<Self::RecvStream, ConnectionErrorIncoming>> {
         let recv = ready!(self.incoming_uni.poll_next_unpin(cx))
             .expect("self.incoming_uni BoxStream never returns None")
-            .map_err(|e| convert_connection_error(e))?;
+            .map_err(convert_connection_error)?;
         Poll::Ready(Ok(Self::RecvStream::new(recv)))
     }
 
@@ -383,7 +383,7 @@ impl quic::RecvStream for RecvStream {
         let (stream, chunk) = ready!(self.read_chunk_fut.poll(cx));
         self.stream = Some(stream);
         Poll::Ready(Ok(chunk
-            .map_err(|e| convert_read_error_to_stream_error(e))?
+            .map_err(convert_read_error_to_stream_error)?
             .map(|c| c.bytes)))
     }
 
@@ -450,7 +450,7 @@ where
 {
     fn new(stream: quinn::SendStream) -> SendStream<B> {
         Self {
-            stream: stream,
+            stream,
             writing: None,
         }
     }
@@ -466,7 +466,7 @@ where
             while data.has_remaining() {
                 let stream = Pin::new(&mut self.stream);
                 let written = ready!(stream.poll_write(cx, data.chunk()))
-                    .map_err(|err| convert_write_error_to_stream_error(err))?;
+                    .map_err(convert_write_error_to_stream_error)?;
                 data.advance(written);
             }
         }

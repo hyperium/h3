@@ -31,7 +31,7 @@ impl<B: Buf> SendDatagram<B> for SendDatagramHandler {
         let mut buf: EncodedDatagram<B> = data.into();
         self.conn
             .send_datagram(buf.copy_to_bytes(buf.remaining()))
-            .map_err(|err| convert_send_datagram_error(err))
+            .map_err(convert_send_datagram_error)
     }
 }
 
@@ -49,7 +49,7 @@ impl RecvDatagram for RecvDatagramHandler {
         Poll::Ready(
             ready!(self.datagrams.poll_next_unpin(cx))
                 .expect("self. datagrams never returns None")
-                .map_err(|e| convert_connection_error(e)),
+                .map_err(convert_connection_error),
         )
     }
 }
@@ -90,9 +90,7 @@ fn convert_h3_error_to_datagram_error(
 ) -> h3_datagram::ConnectionErrorIncoming {
     match error {
         ConnectionErrorIncoming::ApplicationClose { error_code } => {
-            h3_datagram::ConnectionErrorIncoming::ApplicationClose {
-                error_code: error_code,
-            }
+            h3_datagram::ConnectionErrorIncoming::ApplicationClose { error_code }
         }
         ConnectionErrorIncoming::Timeout => h3_datagram::ConnectionErrorIncoming::Timeout,
         ConnectionErrorIncoming::InternalError(err) => {

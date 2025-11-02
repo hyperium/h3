@@ -66,12 +66,13 @@ where
 {
     /// Returns a future to await the request headers and return a `Request` object
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    #[allow(clippy::type_complexity)]
     pub async fn resolve_request(
         mut self,
     ) -> Result<(Request<()>, RequestStream<C::BidiStream, B>), StreamError> {
         let frame = std::future::poll_fn(|cx| self.frame_stream.poll_next(cx)).await;
         let req = self.accept_with_frame(frame)?;
-        Ok(req.resolve().await?)
+        req.resolve().await
     }
 
     /// Accepts a http request where the first frame has already been read and decoded.
@@ -192,6 +193,7 @@ where
 
     /// Finishes the resolution of the request
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    #[allow(clippy::type_complexity)]
     pub async fn resolve(
         mut self,
     ) -> Result<(Request<()>, RequestStream<C::BidiStream, B>), StreamError> {

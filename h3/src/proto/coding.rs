@@ -36,7 +36,9 @@ impl Decode for u8 {
 }
 
 pub trait BufExt {
+    #[allow(dead_code)]
     fn get<T: Decode>(&mut self) -> Result<T>;
+    #[allow(dead_code)]
     fn get_var(&mut self) -> Result<u64>;
 }
 
@@ -51,7 +53,9 @@ impl<T: Buf> BufExt for T {
 }
 
 pub trait BufMutExt {
+    #[allow(dead_code)]
     fn write<T: Encode>(&mut self, x: T);
+    #[allow(dead_code)]
     fn write_var(&mut self, x: u64);
 }
 
