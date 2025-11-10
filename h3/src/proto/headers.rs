@@ -383,6 +383,14 @@ impl Pseudo {
             None
         };
 
+        // For standard CONNECT (that is, without :protocol pseudo-header) scheme and path
+        // are not set. See: [https://www.rfc-editor.org/rfc/rfc9114#section-4.4]
+        let (scheme, path) = if method == Method::CONNECT && protocol.is_none() {
+            (None, None)
+        } else {
+            (scheme.or(Some(Scheme::HTTPS)), Some(path))
+        };
+
         let len = 3 + authority.is_some() as usize + protocol.is_some() as usize;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3
@@ -398,9 +406,9 @@ impl Pseudo {
         //# CONNECT request; see Section 4.4.
         Self {
             method: Some(method),
-            scheme: scheme.or(Some(Scheme::HTTPS)),
+            scheme,
             authority,
-            path: Some(path),
+            path,
             status: None,
             protocol,
             len,
