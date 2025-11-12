@@ -41,6 +41,13 @@ impl<S, B> FrameStream<S, B> {
     pub fn into_inner(self) -> BufRecvStream<S, B> {
         self.stream
     }
+
+    pub(crate) fn is_0rtt(&self) -> bool
+    where
+        S: crate::server::Is0rtt,
+    {
+        self.stream.is_0rtt()
+    }
 }
 
 impl<S, B> FrameStream<S, B>

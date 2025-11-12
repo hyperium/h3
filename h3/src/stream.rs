@@ -437,6 +437,13 @@ impl<S, B> BufRecvStream<S, B> {
             _marker: PhantomData,
         }
     }
+
+    pub(crate) fn is_0rtt(&self) -> bool
+    where
+        S: crate::server::Is0rtt,
+    {
+        self.stream.is_0rtt()
+    }
 }
 
 impl<B, S: RecvStream> BufRecvStream<S, B> {

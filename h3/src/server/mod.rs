@@ -56,4 +56,4 @@ pub use builder::builder;
 pub use builder::Builder;
 pub use connection::Connection;
 pub use request::RequestResolver;
-pub use stream::RequestStream;
+pub use stream::{Is0rtt, RequestStream};

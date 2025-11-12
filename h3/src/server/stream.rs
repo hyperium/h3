@@ -105,6 +105,34 @@ where
     pub fn id(&self) -> StreamId {
         self.inner.stream.id()
     }
+
+	/// Check if this stream was opened during 0-RTT.
+	///
+	/// See [RFC 8470 Section 5.2](https://www.rfc-editor.org/rfc/rfc8470.html#section-5.2).
+	///
+	/// # Example
+	///
+	/// ```no_run
+	/// # use h3::server::RequestStream;
+	/// # async fn example(mut stream: RequestStream<impl h3::quic::BidiStream<bytes::Bytes>, bytes::Bytes>) {
+	/// if stream.is_0rtt() {
+	///     // Reject non-idempotent methods (e.g., POST, PUT, DELETE)
+	///     // to prevent replay attacks
+	/// }
+	/// # }
+	/// ```
+    pub fn is_0rtt(&self) -> bool
+    where
+        S: Is0rtt,
+    {
+        self.inner.stream.is_0rtt()
+    }
+}
+
+/// Trait for QUIC streams that support 0-RTT detection.
+pub trait Is0rtt {
+    /// Check if this stream was opened during 0-RTT.
+    fn is_0rtt(&self) -> bool;
 }
 
 impl<S, B> RequestStream<S, B>

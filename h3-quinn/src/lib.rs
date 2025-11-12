@@ -270,6 +270,18 @@ where
     recv: RecvStream,
 }
 
+impl<B> BidiStream<B>
+where
+    B: Buf,
+{
+    /// Check if this stream was opened during 0-RTT.
+    ///
+    /// See [RFC 8470 Section 5.2](https://www.rfc-editor.org/rfc/rfc8470.html#section-5.2).
+    pub fn is_0rtt(&self) -> bool {
+        self.recv.is_0rtt()
+    }
+}
+
 impl<B> quic::BidiStream<B> for BidiStream<B>
 where
     B: Buf,
@@ -338,6 +350,15 @@ where
     }
 }
 
+impl<B> h3::server::Is0rtt for BidiStream<B>
+where
+    B: Buf,
+{
+    fn is_0rtt(&self) -> bool {
+        BidiStream::is_0rtt(self)
+    }
+}
+
 /// Quinn-backed receive stream
 ///
 /// Implements a [`quic::RecvStream`] backed by a [`quinn::RecvStream`].
@@ -361,6 +382,17 @@ impl RecvStream {
             // Should only allocate once the first time it's used
             read_chunk_fut: ReusableBoxFuture::new(async { unreachable!() }),
         }
+    }
+
+	/// Check if this stream has been opened during 0-RTT.
+	///
+	/// In which case any non-idempotent request should be considered dangerous at the application
+	/// level. Because read data is subject to replay attacks.
+    pub fn is_0rtt(&self) -> bool {
+        self.stream
+            .as_ref()
+            .map(|s| s.is_0rtt())
+            .unwrap_or(false)
     }
 }
 
