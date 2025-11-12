@@ -14,7 +14,6 @@ license = "MIT"
 [dependencies]
 #h3 = { path = "../h3" }
 bytes = "1.4"
-pin-project-lite = { version = "0.2", default-features = false }
 tracing = { version = "0.1.40", optional = true }
 
 [features]

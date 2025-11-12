@@ -8,13 +8,12 @@ use std::{
     future::Future,
     pin::Pin,
     sync::Arc,
-    task::{self, Poll},
+    task::{self, ready, Poll},
 };
 
 use bytes::{Buf, Bytes};
 
-use futures::{
-    ready,
+use futures_util::{
     stream::{self},
     Stream, StreamExt,
 };
