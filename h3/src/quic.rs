@@ -230,3 +230,19 @@ pub trait BidiStream<B: Buf>: SendStream<B> + RecvStream {
     /// Split this stream into two halves.
     fn split(self) -> (Self::SendStream, Self::RecvStream);
 }
+
+/// Trait for QUIC streams that support 0-RTT detection.
+///
+/// This allows detection of streams opened during the 0-RTT phase of a QUIC connection.
+/// 0-RTT data is vulnerable to replay attacks, so applications should be cautious when
+/// processing non-idempotent requests on such streams.
+///
+/// See [RFC 8470 Section 5.2](https://www.rfc-editor.org/rfc/rfc8470.html#section-5.2)
+/// for guidance on handling 0-RTT data in HTTP/3.
+pub trait Is0rtt {
+    /// Check if this stream was opened during 0-RTT.
+    ///
+    /// Returns `true` if the stream was opened during the 0-RTT phase,
+    /// `false` otherwise.
+    fn is_0rtt(&self) -> bool;
+}

@@ -123,16 +123,10 @@ where
 	/// ```
     pub fn is_0rtt(&self) -> bool
     where
-        S: Is0rtt,
+        S: quic::Is0rtt,
     {
         self.inner.stream.is_0rtt()
     }
-}
-
-/// Trait for QUIC streams that support 0-RTT detection.
-pub trait Is0rtt {
-    /// Check if this stream was opened during 0-RTT.
-    fn is_0rtt(&self) -> bool;
 }
 
 impl<S, B> RequestStream<S, B>

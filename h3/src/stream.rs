@@ -440,7 +440,7 @@ impl<S, B> BufRecvStream<S, B> {
 
     pub(crate) fn is_0rtt(&self) -> bool
     where
-        S: crate::server::Is0rtt,
+        S: crate::quic::Is0rtt,
     {
         self.stream.is_0rtt()
     }
