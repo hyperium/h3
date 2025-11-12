@@ -5,7 +5,7 @@
 use std::future::Future;
 use std::task::{ready, Poll};
 
-use futures::{stream, StreamExt};
+use futures_util::{stream, StreamExt};
 use h3_datagram::datagram::EncodedDatagram;
 use h3_datagram::quic_traits::{
     DatagramConnectionExt, RecvDatagram, SendDatagram, SendDatagramErrorIncoming,
