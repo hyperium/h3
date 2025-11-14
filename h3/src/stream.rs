@@ -34,8 +34,8 @@ where
     D: Into<WriteBuf<B>>,
     B: Buf,
 {
-    stream.send_data(data)?;
     future::poll_fn(|cx| stream.poll_ready(cx)).await?;
+    stream.send_data(data)?;
 
     Ok(())
 }
