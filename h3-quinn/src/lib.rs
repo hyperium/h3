@@ -338,12 +338,22 @@ where
     }
 }
 
+impl<B> quic::Is0rtt for BidiStream<B>
+where
+    B: Buf,
+{
+    fn is_0rtt(&self) -> bool {
+        self.recv.is_0rtt()
+    }
+}
+
 /// Quinn-backed receive stream
 ///
 /// Implements a [`quic::RecvStream`] backed by a [`quinn::RecvStream`].
 pub struct RecvStream {
     stream: Option<quinn::RecvStream>,
     read_chunk_fut: ReadChunkFuture,
+    is_0rtt: bool,
 }
 
 type ReadChunkFuture = ReusableBoxFuture<
@@ -356,10 +366,12 @@ type ReadChunkFuture = ReusableBoxFuture<
 
 impl RecvStream {
     fn new(stream: quinn::RecvStream) -> Self {
+        let is_0rtt = stream.is_0rtt();
         Self {
             stream: Some(stream),
             // Should only allocate once the first time it's used
             read_chunk_fut: ReusableBoxFuture::new(async { unreachable!() }),
+            is_0rtt,
         }
     }
 }
@@ -400,6 +412,16 @@ impl quic::RecvStream for RecvStream {
         let num: u64 = self.stream.as_ref().unwrap().id().into();
 
         num.try_into().expect("invalid stream id")
+    }
+}
+
+impl quic::Is0rtt for RecvStream {
+    /// Check if this stream has been opened during 0-RTT.
+    ///
+    /// In which case any non-idempotent request should be considered dangerous at the application
+    /// level. Because read data is subject to replay attacks.
+    fn is_0rtt(&self) -> bool {
+        self.is_0rtt
     }
 }
 

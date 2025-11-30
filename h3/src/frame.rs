@@ -45,6 +45,16 @@ impl<S, B> FrameStream<S, B> {
 
 impl<S, B> FrameStream<S, B>
 where
+    S: crate::quic::Is0rtt,
+{
+    /// Checks if the stream was opened in 0-RTT mode
+    pub(crate) fn is_0rtt(&self) -> bool {
+        self.stream.is_0rtt()
+    }
+}
+
+impl<S, B> FrameStream<S, B>
+where
     S: RecvStream,
 {
     /// Polls the stream for the next frame header
