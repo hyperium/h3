@@ -374,14 +374,6 @@ impl RecvStream {
             is_0rtt,
         }
     }
-
-    /// Check if this stream has been opened during 0-RTT.
-    ///
-    /// In which case any non-idempotent request should be considered dangerous at the application
-    /// level. Because read data is subject to replay attacks.
-    pub fn is_0rtt(&self) -> bool {
-        self.is_0rtt
-    }
 }
 
 impl quic::RecvStream for RecvStream {
@@ -424,6 +416,10 @@ impl quic::RecvStream for RecvStream {
 }
 
 impl quic::Is0rtt for RecvStream {
+    /// Check if this stream has been opened during 0-RTT.
+    ///
+    /// In which case any non-idempotent request should be considered dangerous at the application
+    /// level. Because read data is subject to replay attacks.
     fn is_0rtt(&self) -> bool {
         self.is_0rtt
     }

@@ -41,11 +41,14 @@ impl<S, B> FrameStream<S, B> {
     pub fn into_inner(self) -> BufRecvStream<S, B> {
         self.stream
     }
+}
 
-    pub(crate) fn is_0rtt(&self) -> bool
-    where
-        S: crate::quic::Is0rtt,
-    {
+impl<S, B> FrameStream<S, B>
+where
+    S: crate::quic::Is0rtt,
+{
+    /// Checks if the stream was opened in 0-RTT mode
+    pub(crate) fn is_0rtt(&self) -> bool {
         self.stream.is_0rtt()
     }
 }

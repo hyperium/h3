@@ -437,11 +437,14 @@ impl<S, B> BufRecvStream<S, B> {
             _marker: PhantomData,
         }
     }
+}
 
-    pub(crate) fn is_0rtt(&self) -> bool
-    where
-        S: crate::quic::Is0rtt,
-    {
+impl<S, B> BufRecvStream<S, B>
+where
+    S: crate::quic::Is0rtt,
+{
+    /// Checks if the stream was opened in 0-RTT mode
+    pub(crate) fn is_0rtt(&self) -> bool {
         self.stream.is_0rtt()
     }
 }
