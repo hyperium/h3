@@ -20,7 +20,7 @@ The eventual goal is to use `h3` as an internal dependency of [hyper][].
 [hyper]: https://hyper.rs
 
 ### Duvet
-This create uses the [duvet crate][] to check compliance of the [spec][].  
+This crate uses the [duvet crate][] to check compliance of the [spec][].  
 The generated [report][] displays the current status of the requirements of the spec.  
 
 Get more information about this tool in the [contributing][] document.
