@@ -114,7 +114,7 @@ where
     ///
     /// ```no_run
     /// # use h3::server::RequestStream;
-    /// # async fn example(mut stream: RequestStream<impl h3::quic::BidiStream<bytes::Bytes>, bytes::Bytes>) {
+    /// # async fn example(mut stream: RequestStream<impl h3::quic::BidiStream<bytes::Bytes> + h3::quic::Is0rtt, bytes::Bytes>) {
     /// if stream.is_0rtt() {
     ///     // Reject non-idempotent methods (e.g., POST, PUT, DELETE)
     ///     // to prevent replay attacks
