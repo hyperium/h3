@@ -1,6 +1,6 @@
 use std::task::Poll;
 
-use bytes::{Buf, Bytes};
+use bytes::Buf;
 use h3::{
     quic::{self, StreamErrorIncoming},
     stream::BufRecvStream,
@@ -10,25 +10,25 @@ use tokio::io::ReadBuf;
 
 pin_project! {
     /// WebTransport receive stream
-    pub struct RecvStream<S,B> {
+    pub struct RecvStream<S, B, R> {
         #[pin]
-        stream: BufRecvStream<S, B>,
+        stream: BufRecvStream<S, B, R>,
     }
 }
 
-impl<S, B> RecvStream<S, B> {
+impl<S, B, R> RecvStream<S, B, R> {
     #[allow(missing_docs)]
-    pub fn new(stream: BufRecvStream<S, B>) -> Self {
+    pub fn new(stream: BufRecvStream<S, B, R>) -> Self {
         Self { stream }
     }
 }
 
-impl<S, B> quic::RecvStream for RecvStream<S, B>
+impl<S, B, R> quic::RecvStream for RecvStream<S, B, R>
 where
-    S: quic::RecvStream,
-    B: Buf,
+    S: quic::RecvStream<Buf = R>,
+    R: Buf,
 {
-    type Buf = Bytes;
+    type Buf = R;
 
     fn poll_data(
         &mut self,
@@ -46,9 +46,9 @@ where
     }
 }
 
-impl<S, B> futures_util::io::AsyncRead for RecvStream<S, B>
+impl<S, B, R> futures_util::io::AsyncRead for RecvStream<S, B, R>
 where
-    BufRecvStream<S, B>: futures_util::io::AsyncRead,
+    BufRecvStream<S, B, R>: futures_util::io::AsyncRead,
 {
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
@@ -60,9 +60,9 @@ where
     }
 }
 
-impl<S, B> tokio::io::AsyncRead for RecvStream<S, B>
+impl<S, B, R> tokio::io::AsyncRead for RecvStream<S, B, R>
 where
-    BufRecvStream<S, B>: tokio::io::AsyncRead,
+    BufRecvStream<S, B, R>: tokio::io::AsyncRead,
 {
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
@@ -76,13 +76,13 @@ where
 
 pin_project! {
     /// WebTransport send stream
-    pub struct SendStream<S,B> {
+    pub struct SendStream<S, B, R> {
         #[pin]
-        stream: BufRecvStream<S ,B>,
+        stream: BufRecvStream<S, B, R>
     }
 }
 
-impl<S, B> std::fmt::Debug for SendStream<S, B> {
+impl<S, B, R> std::fmt::Debug for SendStream<S, B, R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SendStream")
             .field("stream", &self.stream)
@@ -90,14 +90,14 @@ impl<S, B> std::fmt::Debug for SendStream<S, B> {
     }
 }
 
-impl<S, B> SendStream<S, B> {
+impl<S, B, R> SendStream<S, B, R> {
     #[allow(missing_docs)]
-    pub(crate) fn new(stream: BufRecvStream<S, B>) -> Self {
+    pub(crate) fn new(stream: BufRecvStream<S, B, R>) -> Self {
         Self { stream }
     }
 }
 
-impl<S, B> quic::SendStreamUnframed<B> for SendStream<S, B>
+impl<S, B, R> quic::SendStreamUnframed<B> for SendStream<S, B, R>
 where
     S: quic::SendStreamUnframed<B>,
     B: Buf,
@@ -111,7 +111,7 @@ where
     }
 }
 
-impl<S, B> quic::SendStream<B> for SendStream<S, B>
+impl<S, B, R> quic::SendStream<B> for SendStream<S, B, R>
 where
     S: quic::SendStream<B>,
     B: Buf,
@@ -146,9 +146,9 @@ where
     }
 }
 
-impl<S, B> futures_util::io::AsyncWrite for SendStream<S, B>
+impl<S, B, R> futures_util::io::AsyncWrite for SendStream<S, B, R>
 where
-    BufRecvStream<S, B>: futures_util::io::AsyncWrite,
+    BufRecvStream<S, B, R>: futures_util::io::AsyncWrite,
 {
     fn poll_write(
         self: std::pin::Pin<&mut Self>,
@@ -176,9 +176,9 @@ where
     }
 }
 
-impl<S, B> tokio::io::AsyncWrite for SendStream<S, B>
+impl<S, B, R> tokio::io::AsyncWrite for SendStream<S, B, R>
 where
-    BufRecvStream<S, B>: tokio::io::AsyncWrite,
+    BufRecvStream<S, B, R>: tokio::io::AsyncWrite,
 {
     fn poll_write(
         self: std::pin::Pin<&mut Self>,
@@ -211,19 +211,19 @@ pin_project! {
     ///
     /// Can be split into a [`RecvStream`] and [`SendStream`] if the underlying QUIC implementation
     /// supports it.
-    pub struct BidiStream<S, B> {
+    pub struct BidiStream<S, B, R> {
         #[pin]
-        stream: BufRecvStream<S, B>,
+        stream: BufRecvStream<S, B, R>,
     }
 }
 
-impl<S, B> BidiStream<S, B> {
-    pub(crate) fn new(stream: BufRecvStream<S, B>) -> Self {
+impl<S, B, R> BidiStream<S, B, R> {
+    pub(crate) fn new(stream: BufRecvStream<S, B, R>) -> Self {
         Self { stream }
     }
 }
 
-impl<S, B> quic::SendStream<B> for BidiStream<S, B>
+impl<S, B, R> quic::SendStream<B> for BidiStream<S, B, R>
 where
     S: quic::SendStream<B>,
     B: Buf,
@@ -258,10 +258,11 @@ where
     }
 }
 
-impl<S, B> quic::SendStreamUnframed<B> for BidiStream<S, B>
+impl<S, B, R> quic::SendStreamUnframed<B> for BidiStream<S, B, R>
 where
     S: quic::SendStreamUnframed<B>,
     B: Buf,
+    R: Buf,
 {
     fn poll_send<D: Buf>(
         &mut self,
@@ -272,8 +273,8 @@ where
     }
 }
 
-impl<S: quic::RecvStream, B> quic::RecvStream for BidiStream<S, B> {
-    type Buf = Bytes;
+impl<S: quic::RecvStream<Buf = R>, B, R: Buf> quic::RecvStream for BidiStream<S, B, R> {
+    type Buf = R;
 
     fn poll_data(
         &mut self,
@@ -291,14 +292,15 @@ impl<S: quic::RecvStream, B> quic::RecvStream for BidiStream<S, B> {
     }
 }
 
-impl<S, B> quic::BidiStream<B> for BidiStream<S, B>
+impl<S, B, R> quic::BidiStream<B> for BidiStream<S, B, R>
 where
-    S: quic::BidiStream<B>,
+    S: quic::BidiStream<B, RecvStream: quic::RecvStream<Buf = R>> + quic::RecvStream<Buf = R>,
     B: Buf,
+    R: Buf,
 {
-    type SendStream = SendStream<S::SendStream, B>;
+    type SendStream = SendStream<S::SendStream, B, R>;
 
-    type RecvStream = RecvStream<S::RecvStream, B>;
+    type RecvStream = RecvStream<S::RecvStream, B, R>;
 
     fn split(self) -> (Self::SendStream, Self::RecvStream) {
         let (send, recv) = self.stream.split();
@@ -306,9 +308,9 @@ where
     }
 }
 
-impl<S, B> futures_util::io::AsyncRead for BidiStream<S, B>
+impl<S, B, R> futures_util::io::AsyncRead for BidiStream<S, B, R>
 where
-    BufRecvStream<S, B>: futures_util::io::AsyncRead,
+    BufRecvStream<S, B, R>: futures_util::io::AsyncRead,
 {
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
@@ -320,9 +322,9 @@ where
     }
 }
 
-impl<S, B> futures_util::io::AsyncWrite for BidiStream<S, B>
+impl<S, B, R> futures_util::io::AsyncWrite for BidiStream<S, B, R>
 where
-    BufRecvStream<S, B>: futures_util::io::AsyncWrite,
+    BufRecvStream<S, B, R>: futures_util::io::AsyncWrite,
 {
     fn poll_write(
         self: std::pin::Pin<&mut Self>,
@@ -350,9 +352,9 @@ where
     }
 }
 
-impl<S, B> tokio::io::AsyncRead for BidiStream<S, B>
+impl<S, B, R> tokio::io::AsyncRead for BidiStream<S, B, R>
 where
-    BufRecvStream<S, B>: tokio::io::AsyncRead,
+    BufRecvStream<S, B, R>: tokio::io::AsyncRead,
 {
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
@@ -364,9 +366,9 @@ where
     }
 }
 
-impl<S, B> tokio::io::AsyncWrite for BidiStream<S, B>
+impl<S, B, R> tokio::io::AsyncWrite for BidiStream<S, B, R>
 where
-    BufRecvStream<S, B>: tokio::io::AsyncWrite,
+    BufRecvStream<S, B, R>: tokio::io::AsyncWrite,
 {
     fn poll_write(
         self: std::pin::Pin<&mut Self>,

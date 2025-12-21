@@ -4,13 +4,12 @@ use std::{
     task::{Context, Poll},
 };
 
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{Buf, BufMut};
 use futures_util::{future, ready};
 use pin_project_lite::pin_project;
 use tokio::io::ReadBuf;
 
 use crate::{
-    buf::BufList,
     error::{internal_error::InternalConnectionError, Code},
     frame::FrameStream,
     proto::{
@@ -251,24 +250,30 @@ where
 
 pub(super) enum AcceptedRecvStream<S, B>
 where
-    S: quic::RecvStream,
+    S: RecvStream,
     B: Buf,
 {
-    Control(FrameStream<S, B>),
-    Push(FrameStream<S, B>),
-    Encoder(BufRecvStream<S, B>),
-    Decoder(BufRecvStream<S, B>),
-    WebTransportUni(SessionId, BufRecvStream<S, B>),
-    Unknown(BufRecvStream<S, B>),
+    Control(FrameStream<S, B, S::Buf>),
+    Push(FrameStream<S, B, S::Buf>),
+    Encoder(BufRecvStream<S, B, S::Buf>),
+    Decoder(BufRecvStream<S, B, S::Buf>),
+    WebTransportUni(SessionId, BufRecvStream<S, B, S::Buf>),
+    Unknown(BufRecvStream<S, B, S::Buf>),
 }
 
 /// Resolves an incoming streams type as well as `PUSH_ID`s and `SESSION_ID`s
-pub(super) struct AcceptRecvStream<S, B> {
-    stream: BufRecvStream<S, B>,
+pub(super) struct AcceptRecvStream<S, B>
+where
+    S: RecvStream,
+    B: Buf,
+{
+    stream: BufRecvStream<S, B, S::Buf>,
     ty: Option<StreamType>,
     /// push_id or session_id
     id: Option<VarInt>,
-    expected: Option<usize>,
+    missing: usize,
+    buffered: usize,
+    buf: [u8; 8],
 }
 
 impl<S, B> AcceptRecvStream<S, B>
@@ -281,7 +286,9 @@ where
             stream: BufRecvStream::new(stream),
             ty: None,
             id: None,
-            expected: None,
+            missing: 0,
+            buffered: 0,
+            buf: [0; 8],
         }
     }
 
@@ -298,7 +305,13 @@ where
             _ => AcceptedRecvStream::Unknown(self.stream),
         }
     }
+}
 
+impl<S, B> AcceptRecvStream<S, B>
+where
+    S: RecvStream,
+    B: Buf,
+{
     // helper function to poll the next VarInt from self.stream
     fn poll_next_varint(
         &mut self,
@@ -332,27 +345,42 @@ where
                 }
             };
 
-            let mut buf = self.stream.buf_mut();
-            if self.expected.is_none() && buf.remaining() >= 1 {
-                self.expected = Some(VarInt::encoded_size(buf.chunk()[0]));
-            }
+            let buf = self.stream.buf_mut();
+            if let Some(mut buf) = buf.as_mut() {
+                let remaining = buf.remaining();
+                if remaining > 0 {
+                    let varint = if self.missing > 0 {
+                        let to_copy = self.missing.min(remaining);
+                        buf.copy_to_slice(&mut self.buf[self.buffered..self.buffered + to_copy]);
+                        self.missing -= to_copy;
+                        if self.missing == 0 {
+                            self.buffered = 0;
+                            VarInt::decode(&mut &self.buf[..])
+                        } else {
+                            self.buffered += to_copy;
+                            continue;
+                        }
+                    } else {
+                        let expected = VarInt::encoded_size(buf.chunk()[0]);
+                        if remaining >= expected {
+                            VarInt::decode(&mut buf)
+                        } else {
+                            self.missing = expected - remaining;
+                            buf.copy_to_slice(&mut self.buf[..remaining]);
+                            self.buffered = remaining;
+                            continue;
+                        }
+                    };
 
-            if let Some(expected) = self.expected {
-                if buf.remaining() < expected {
-                    continue;
+                    let result = varint.map_err(|_| {
+                        PollTypeError::InternalError(InternalConnectionError::new(
+                            Code::H3_INTERNAL_ERROR,
+                            "Unexpected end parsing varint".to_string(),
+                        ))
+                    })?;
+                    return Poll::Ready(Ok((result, stream_stopped)));
                 }
-            } else {
-                continue;
             }
-
-            let reult = VarInt::decode(&mut buf).map_err(|_| {
-                PollTypeError::InternalError(InternalConnectionError::new(
-                    Code::H3_INTERNAL_ERROR,
-                    "Unexpected end parsing varint".to_string(),
-                ))
-            })?;
-
-            return Poll::Ready(Ok((reult, stream_stopped)));
         }
     }
 
@@ -407,8 +435,8 @@ pin_project! {
     ///
     /// Implements `quic::RecvStream` which will first return buffered data, and then read from the
     /// stream
-    pub struct BufRecvStream<S, B> {
-        buf: BufList<Bytes>,
+    pub struct BufRecvStream<S, B, R> {
+        buf: Option<R>,
         // Indicates that the end of the stream has been reached
         //
         // Data may still be available as buffered
@@ -418,20 +446,20 @@ pin_project! {
     }
 }
 
-impl<S, B> std::fmt::Debug for BufRecvStream<S, B> {
+impl<S, B, R> std::fmt::Debug for BufRecvStream<S, B, R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BufRecvStream")
-            .field("buf", &self.buf)
+            .field("buf", &self.buf.is_some())
             .field("eos", &self.eos)
             .field("stream", &"...")
             .finish()
     }
 }
 
-impl<S, B> BufRecvStream<S, B> {
+impl<S, B, R> BufRecvStream<S, B, R> {
     pub fn new(stream: S) -> Self {
         Self {
-            buf: BufList::new(),
+            buf: None,
             eos: false,
             stream,
             _marker: PhantomData,
@@ -439,7 +467,7 @@ impl<S, B> BufRecvStream<S, B> {
     }
 }
 
-impl<S, B> BufRecvStream<S, B>
+impl<S, B, R> BufRecvStream<S, B, R>
 where
     S: crate::quic::Is0rtt,
 {
@@ -449,15 +477,24 @@ where
     }
 }
 
-impl<B, S: RecvStream> BufRecvStream<S, B> {
-    /// Reads more data into the buffer, returning the number of bytes read.
+impl<S, B, R> BufRecvStream<S, B, R>
+where
+    S: RecvStream<Buf = R>,
+    R: Buf,
+{
+    /// Reads more data into the buffer if the buffer is not empty
     ///
     /// Returns `true` if the end of the stream is reached.
     pub fn poll_read(&mut self, cx: &mut Context<'_>) -> Poll<Result<bool, StreamErrorIncoming>> {
+        if let Some(buf) = self.buf.as_ref() {
+            if buf.remaining() > 0 {
+                return Poll::Ready(Ok(false));
+            }
+        }
         let data = ready!(self.stream.poll_data(cx))?;
 
-        if let Some(mut data) = data {
-            self.buf.push_bytes(&mut data);
+        if data.is_some() {
+            self.buf = data;
             Poll::Ready(Ok(false))
         } else {
             self.eos = true;
@@ -467,25 +504,17 @@ impl<B, S: RecvStream> BufRecvStream<S, B> {
 
     /// Returns the currently buffered data, allowing it to be partially read
     #[inline]
-    pub(crate) fn buf_mut(&mut self) -> &mut BufList<Bytes> {
+    pub(crate) fn buf_mut(&mut self) -> &mut Option<S::Buf> {
         &mut self.buf
     }
 
-    /// Returns the next chunk of data from the stream
-    ///
-    /// Return `None` when there is no more buffered data; use [`Self::poll_read`].
-    pub fn take_chunk(&mut self, limit: usize) -> Option<Bytes> {
-        self.buf.take_chunk(limit)
-    }
-
     /// Returns true if there is remaining buffered data
-    pub fn has_remaining(&mut self) -> bool {
-        self.buf.has_remaining()
-    }
-
-    #[inline]
-    pub(crate) fn buf(&self) -> &BufList<Bytes> {
-        &self.buf
+    pub fn has_remaining(&self) -> bool {
+        if let Some(buf) = self.buf.as_ref() {
+            buf.has_remaining()
+        } else {
+            false
+        }
     }
 
     pub fn is_eos(&self) -> bool {
@@ -493,20 +522,24 @@ impl<B, S: RecvStream> BufRecvStream<S, B> {
     }
 }
 
-impl<S: RecvStream, B> RecvStream for BufRecvStream<S, B> {
-    type Buf = Bytes;
+impl<S, B, R> RecvStream for BufRecvStream<S, B, R>
+where
+    S: RecvStream<Buf = R>,
+    R: Buf,
+{
+    type Buf = R;
 
     fn poll_data(
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<Option<Self::Buf>, StreamErrorIncoming>> {
         // There is data buffered, return that immediately
-        if let Some(chunk) = self.buf.take_first_chunk() {
-            return Poll::Ready(Ok(Some(chunk)));
+        if self.has_remaining() {
+            return Poll::Ready(Ok(self.buf.take()));
         }
 
-        if let Some(mut data) = ready!(self.stream.poll_data(cx))? {
-            Poll::Ready(Ok(Some(data.copy_to_bytes(data.remaining()))))
+        if let Some(data) = ready!(self.stream.poll_data(cx))? {
+            Poll::Ready(Ok(Some(data)))
         } else {
             self.eos = true;
             Poll::Ready(Ok(None))
@@ -522,7 +555,7 @@ impl<S: RecvStream, B> RecvStream for BufRecvStream<S, B> {
     }
 }
 
-impl<S, B> SendStream<B> for BufRecvStream<S, B>
+impl<S, B, R> SendStream<B> for BufRecvStream<S, B, R>
 where
     B: Buf,
     S: SendStream<B>,
@@ -554,7 +587,7 @@ where
     }
 }
 
-impl<S, B> SendStreamUnframed<B> for BufRecvStream<S, B>
+impl<S, B, R> SendStreamUnframed<B> for BufRecvStream<S, B, R>
 where
     B: Buf,
     S: SendStreamUnframed<B>,
@@ -569,21 +602,22 @@ where
     }
 }
 
-impl<S, B> BidiStream<B> for BufRecvStream<S, B>
+impl<S, B, R> BidiStream<B> for BufRecvStream<S, B, R>
 where
+    S: BidiStream<B, RecvStream: RecvStream<Buf = R>> + RecvStream<Buf = R>,
     B: Buf,
-    S: BidiStream<B>,
+    R: Buf,
 {
-    type SendStream = BufRecvStream<S::SendStream, B>;
+    type SendStream = BufRecvStream<S::SendStream, B, R>;
 
-    type RecvStream = BufRecvStream<S::RecvStream, B>;
+    type RecvStream = BufRecvStream<S::RecvStream, B, R>;
 
     fn split(self) -> (Self::SendStream, Self::RecvStream) {
         let (send, recv) = self.stream.split();
         (
             BufRecvStream {
                 // Sending is not buffered
-                buf: BufList::new(),
+                buf: None,
                 eos: self.eos,
                 stream: send,
                 _marker: PhantomData,
@@ -598,10 +632,10 @@ where
     }
 }
 
-impl<S, B> futures_util::io::AsyncRead for BufRecvStream<S, B>
+impl<S, B, R> futures_util::io::AsyncRead for BufRecvStream<S, B, R>
 where
-    B: Buf,
-    S: RecvStream,
+    S: RecvStream<Buf = R>,
+    R: Buf,
 {
     fn poll_read(
         mut self: Pin<&mut Self>,
@@ -620,12 +654,10 @@ where
             }
         }
 
-        let chunk = p.buf_mut().take_chunk(buf.len());
-        if let Some(chunk) = chunk {
-            assert!(chunk.len() <= buf.len());
-            let len = chunk.len().min(buf.len());
+        if let Some(src_buf) = p.buf_mut() {
+            let len = src_buf.remaining().min(buf.len());
             // Write the subset into the destination
-            buf[..len].copy_from_slice(&chunk);
+            src_buf.copy_to_slice(&mut buf[0..len]);
             Poll::Ready(Ok(len))
         } else {
             Poll::Ready(Ok(0))
@@ -633,10 +665,10 @@ where
     }
 }
 
-impl<S, B> tokio::io::AsyncRead for BufRecvStream<S, B>
+impl<S, B, R> tokio::io::AsyncRead for BufRecvStream<S, B, R>
 where
-    B: Buf,
-    S: RecvStream,
+    S: RecvStream<Buf = R>,
+    R: Buf,
 {
     fn poll_read(
         mut self: Pin<&mut Self>,
@@ -655,19 +687,18 @@ where
             }
         }
 
-        let chunk = p.buf_mut().take_chunk(buf.remaining());
-        if let Some(chunk) = chunk {
-            assert!(chunk.len() <= buf.remaining());
+        if let Some(src_buf) = p.buf_mut() {
+            let chunk = src_buf.chunk();
+            let len = chunk.len().min(buf.remaining());
             // Write the subset into the destination
-            buf.put_slice(&chunk);
-            Poll::Ready(Ok(()))
-        } else {
-            Poll::Ready(Ok(()))
+            buf.put_slice(&chunk[..len]);
+            src_buf.advance(len);
         }
+        Poll::Ready(Ok(()))
     }
 }
 
-impl<S, B> futures_util::io::AsyncWrite for BufRecvStream<S, B>
+impl<S, B, R> futures_util::io::AsyncWrite for BufRecvStream<S, B, R>
 where
     B: Buf,
     S: SendStreamUnframed<B>,
@@ -691,7 +722,7 @@ where
     }
 }
 
-impl<S, B> tokio::io::AsyncWrite for BufRecvStream<S, B>
+impl<S, B, R> tokio::io::AsyncWrite for BufRecvStream<S, B, R>
 where
     B: Buf,
     S: SendStreamUnframed<B>,
@@ -722,6 +753,7 @@ fn convert_to_std_io_error(error: StreamErrorIncoming) -> std::io::Error {
 #[cfg(test)]
 mod tests {
     use crate::proto::coding::BufExt;
+    use bytes::Bytes;
 
     use super::*;
 

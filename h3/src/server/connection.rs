@@ -96,7 +96,10 @@ where
 {
     #[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
     /// Create a [`RequestResolver`] to handle an incoming request.
-    pub fn create_resolver(&self, stream: FrameStream<C::BidiStream, B>) -> RequestResolver<C, B> {
+    pub fn create_resolver(
+        &self,
+        stream: FrameStream<C::BidiStream, B, <C::BidiStream as RecvStream>::Buf>,
+    ) -> RequestResolver<C, B> {
         self.create_resolver_internal(stream)
     }
 
@@ -142,7 +145,7 @@ where
 
     fn create_resolver_internal(
         &self,
-        stream: FrameStream<C::BidiStream, B>,
+        stream: FrameStream<C::BidiStream, B, <C::BidiStream as RecvStream>::Buf>,
     ) -> RequestResolver<C, B> {
         RequestResolver {
             frame_stream: stream,
