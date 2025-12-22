@@ -33,6 +33,7 @@ use crate::{
     stream::{self},
 };
 
+use crate::quic::{BidiStream, RecvStream};
 #[cfg(feature = "tracing")]
 use tracing::{error, instrument};
 
@@ -41,29 +42,29 @@ use tracing::{error, instrument};
 /// The [`RequestStream`] struct is used to send and/or receive
 /// information from the client.
 /// After sending the final response, call [`RequestStream::finish`] to close the stream.
-pub struct RequestStream<S, B> {
-    pub(super) inner: crate::connection::RequestStream<S, B>,
+pub struct RequestStream<S, B, R> {
+    pub(super) inner: crate::connection::RequestStream<S, B, R>,
     pub(super) request_end: Arc<RequestEnd>,
 }
 
-impl<S, B> AsMut<crate::connection::RequestStream<S, B>> for RequestStream<S, B> {
-    fn as_mut(&mut self) -> &mut crate::connection::RequestStream<S, B> {
+impl<S, B, R> AsMut<crate::connection::RequestStream<S, B, R>> for RequestStream<S, B, R> {
+    fn as_mut(&mut self) -> &mut crate::connection::RequestStream<S, B, R> {
         &mut self.inner
     }
 }
 
-impl<S, B> ConnectionState for RequestStream<S, B> {
+impl<S, B, R> ConnectionState for RequestStream<S, B, R> {
     fn shared_state(&self) -> &SharedState {
         &self.inner.conn_state
     }
 }
 
-impl<S, B> CloseStream for RequestStream<S, B> {}
+impl<S, B, R> CloseStream for RequestStream<S, B, R> {}
 
-impl<S, B> RequestStream<S, B>
+impl<S, B, R> RequestStream<S, B, R>
 where
-    S: quic::RecvStream,
-    B: Buf,
+    S: quic::RecvStream<Buf = R>,
+    R: Buf,
 {
     /// Receive data sent from the client
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
@@ -105,7 +106,12 @@ where
     pub fn id(&self) -> StreamId {
         self.inner.stream.id()
     }
+}
 
+impl<S, B, R> RequestStream<S, B, R>
+where
+    S: quic::Is0rtt,
+{
     /// Check if this stream was opened during 0-RTT.
     ///
     /// See [RFC 8470 Section 5.2](https://www.rfc-editor.org/rfc/rfc8470.html#section-5.2).
@@ -114,22 +120,19 @@ where
     ///
     /// ```no_run
     /// # use h3::server::RequestStream;
-    /// # async fn example(mut stream: RequestStream<impl h3::quic::BidiStream<bytes::Bytes> + h3::quic::Is0rtt, bytes::Bytes>) {
+    /// # async fn example(mut stream: RequestStream<impl h3::quic::BidiStream<bytes::Bytes> + h3::quic::Is0rtt, bytes::Bytes, bytes::Bytes>) {
     /// if stream.is_0rtt() {
     ///     // Reject non-idempotent methods (e.g., POST, PUT, DELETE)
     ///     // to prevent replay attacks
     /// }
     /// # }
     /// ```
-    pub fn is_0rtt(&self) -> bool
-    where
-        S: quic::Is0rtt,
-    {
+    pub fn is_0rtt(&self) -> bool {
         self.inner.stream.is_0rtt()
     }
 }
 
-impl<S, B> RequestStream<S, B>
+impl<S, B, R> RequestStream<S, B, R>
 where
     S: quic::SendStream<B>,
     B: Buf,
@@ -218,18 +221,20 @@ where
     }
 }
 
-impl<S, B> RequestStream<S, B>
+impl<S, B, R> RequestStream<S, B, R>
 where
-    S: quic::BidiStream<B>,
     B: Buf,
+    R: Buf,
+    S: BidiStream<B> + RecvStream<Buf = R>,
+    <S as BidiStream<B>>::RecvStream: RecvStream<Buf = R>,
 {
     /// Splits the Request-Stream into send and receive.
     /// This can be used the send and receive data on different tasks.
     pub fn split(
         self,
     ) -> (
-        RequestStream<S::SendStream, B>,
-        RequestStream<S::RecvStream, B>,
+        RequestStream<S::SendStream, B, R>,
+        RequestStream<S::RecvStream, B, R>,
     ) {
         let (send, recv) = self.inner.split();
         (

@@ -1,20 +1,22 @@
 use std::collections::VecDeque;
 use std::io::IoSlice;
 
-use bytes::{Buf, Bytes};
+use bytes::Buf;
 
 #[derive(Debug)]
 pub(crate) struct BufList<T> {
     bufs: VecDeque<T>,
 }
 
-impl<T: Buf> BufList<T> {
+impl<T> BufList<T> {
     pub(crate) fn new() -> BufList<T> {
         BufList {
             bufs: VecDeque::new(),
         }
     }
+}
 
+impl<T: Buf> BufList<T> {
     #[inline]
     #[allow(dead_code)]
     pub(crate) fn push(&mut self, buf: T) {
@@ -29,34 +31,6 @@ impl<T: Buf> BufList<T> {
             index: 0,
             pos_front: 0,
         }
-    }
-}
-
-impl BufList<Bytes> {
-    pub fn take_first_chunk(&mut self) -> Option<Bytes> {
-        self.bufs.pop_front()
-    }
-
-    pub fn take_chunk(&mut self, max_len: usize) -> Option<Bytes> {
-        let chunk = self
-            .bufs
-            .front_mut()
-            .map(|chunk| chunk.split_to(usize::min(max_len, chunk.remaining())));
-
-        if let Some(front) = self.bufs.front() {
-            if front.remaining() == 0 {
-                let _ = self.bufs.pop_front();
-            }
-        }
-        chunk
-    }
-
-    pub fn push_bytes<T>(&mut self, buf: &mut T)
-    where
-        T: Buf,
-    {
-        debug_assert!(buf.has_remaining());
-        self.bufs.push_back(buf.copy_to_bytes(buf.remaining()))
     }
 }
 

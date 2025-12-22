@@ -27,6 +27,7 @@ use bytes::Buf;
 
 use tokio::sync::mpsc;
 
+use super::connection::Connection;
 use crate::{
     config::Config,
     connection::ConnectionInner,
@@ -34,8 +35,6 @@ use crate::{
     quic::{self},
     shared_state::SharedState,
 };
-
-use super::connection::Connection;
 
 /// Create a builder of HTTP/3 server connections
 ///

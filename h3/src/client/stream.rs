@@ -21,6 +21,7 @@ use std::{
     convert::TryFrom,
     task::{Context, Poll},
 };
+use crate::quic::{BidiStream, RecvStream};
 
 /// Manage request bodies transfer, response and trailers.
 ///
@@ -46,9 +47,10 @@ use std::{
 /// # use http::{Request, Response};
 /// # use bytes::Buf;
 /// # use tokio::io::AsyncWriteExt;
-/// # async fn doc<T,B>(mut req_stream: RequestStream<T, B>) -> Result<(), Box<dyn std::error::Error>>
+/// # async fn doc<T,B,R>(mut req_stream: RequestStream<T, B, R>) -> Result<(), Box<dyn std::error::Error>>
 /// # where
-/// #     T: quic::RecvStream,
+/// #     T: quic::RecvStream<Buf=R>,
+/// #     R: Buf,
 /// # {
 /// // Prepare the HTTP request to send to the server
 /// let request = Request::get("https://www.example.com/").body(())?;
@@ -74,21 +76,22 @@ use std::{
 /// [`recv_trailers()`]: #method.recv_trailers
 /// [`finish()`]: #method.finish
 /// [`stop_sending()`]: #method.stop_sending
-pub struct RequestStream<S, B> {
-    pub(super) inner: connection::RequestStream<S, B>,
+pub struct RequestStream<S, B, R> {
+    pub(super) inner: connection::RequestStream<S, B, R>,
 }
 
-impl<S, B> ConnectionState for RequestStream<S, B> {
+impl<S, B, R> ConnectionState for RequestStream<S, B, R> {
     fn shared_state(&self) -> &SharedState {
         &self.inner.conn_state
     }
 }
 
-impl<S, B> CloseStream for RequestStream<S, B> {}
+impl<S, B, R> CloseStream for RequestStream<S, B, R> {}
 
-impl<S, B> RequestStream<S, B>
+impl<S, B, R> RequestStream<S, B, R>
 where
-    S: quic::RecvStream,
+    S: quic::RecvStream<Buf = R>,
+    R: Buf,
 {
     /// Receive the HTTP/3 response
     ///
@@ -232,7 +235,7 @@ where
     }
 }
 
-impl<S, B> RequestStream<S, B>
+impl<S, B, R> RequestStream<S, B, R>
 where
     S: quic::SendStream<B>,
     B: Buf,
@@ -275,17 +278,19 @@ where
     //# [QUIC-TRANSPORT].
 }
 
-impl<S, B> RequestStream<S, B>
+impl<S, B, R> RequestStream<S, B, R>
 where
-    S: quic::BidiStream<B>,
+    S: BidiStream<B> + RecvStream<Buf = R>,
+    <S as BidiStream<B>>::RecvStream: RecvStream<Buf = R>,
     B: Buf,
+    R: Buf,
 {
     /// Split this stream into two halves that can be driven independently.
     pub fn split(
         self,
     ) -> (
-        RequestStream<S::SendStream, B>,
-        RequestStream<S::RecvStream, B>,
+        RequestStream<S::SendStream, B, R>,
+        RequestStream<S::RecvStream, B, R>,
     ) {
         let (send, recv) = self.inner.split();
         (RequestStream { inner: send }, RequestStream { inner: recv })

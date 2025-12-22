@@ -13,10 +13,10 @@ use crate::{
     quic_traits::DatagramConnectionExt,
 };
 
-impl<B, C> HandleDatagramsExt<C, B> for Connection<C, B>
+impl<C, B> HandleDatagramsExt<C, B> for Connection<C, B>
 where
-    B: Buf,
     C: quic::Connection<B> + DatagramConnectionExt<B>,
+    B: Buf,
 {
     /// Get the datagram sender
     fn get_datagram_sender(

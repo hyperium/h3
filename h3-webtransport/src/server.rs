@@ -50,7 +50,7 @@ where
     session_id: SessionId,
     /// The underlying HTTP/3 connection
     server_conn: Mutex<Connection<C, B>>,
-    connect_stream: RequestStream<C::BidiStream, B>,
+    connect_stream: RequestStream<C::BidiStream, B, <C::BidiStream as quic::RecvStream>::Buf>,
     opener: Mutex<C::OpenStreams>,
     /// Shared State
     ///
@@ -80,7 +80,7 @@ where
     /// TODO: is the API or the user responsible for validating the CONNECT request?
     pub async fn accept(
         request: Request<()>,
-        mut stream: RequestStream<C::BidiStream, B>,
+        mut stream: RequestStream<C::BidiStream, B, <C::BidiStream as quic::RecvStream>::Buf>,
         mut conn: Connection<C, B>,
     ) -> Result<Self, StreamError> {
         let shared = conn.inner.shared.clone();
@@ -250,13 +250,17 @@ where
 
 /// Streams are opened, but the initial webtransport header has not been sent
 type PendingStreams<C, B> = (
-    BidiStream<<C as quic::OpenStreams<B>>::BidiStream, B>,
+    BidiStream<
+        <C as quic::OpenStreams<B>>::BidiStream,
+        B,
+        <<C as OpenStreams<B>>::BidiStream as quic::RecvStream>::Buf,
+    >,
     WriteBuf<&'static [u8]>,
 );
 
 /// Streams are opened, but the initial webtransport header has not been sent
-type PendingUniStreams<C, B> = (
-    SendStream<<C as quic::OpenStreams<B>>::SendStream, B>,
+type PendingUniStreams<C, B, R> = (
+    SendStream<<C as quic::OpenStreams<B>>::SendStream, B, R>,
     WriteBuf<&'static [u8]>,
 );
 
@@ -288,7 +292,8 @@ where
     B: Buf,
     C::BidiStream: SendStreamUnframed<B>,
 {
-    type Output = Result<BidiStream<C::BidiStream, B>, StreamError>;
+    type Output =
+        Result<BidiStream<C::BidiStream, B, <C::BidiStream as quic::RecvStream>::Buf>, StreamError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut p = self.project();
@@ -322,7 +327,7 @@ pin_project! {
     /// Opens a unidirectional stream
     pub struct OpenUni<'a, C: quic::Connection<B>, B:Buf> {
         opener: &'a Mutex<C::OpenStreams>,
-        stream: Option<PendingUniStreams<C, B>>,
+        stream: Option<PendingUniStreams<C, B, <C::BidiStream as quic::RecvStream>::Buf>>,
         // Future for opening a uni stream
         session_id: SessionId,
         stream_handler: WTransportStreamHandler
@@ -335,7 +340,8 @@ where
     B: Buf,
     C::SendStream: SendStreamUnframed<B>,
 {
-    type Output = Result<SendStream<C::SendStream, B>, StreamError>;
+    type Output =
+        Result<SendStream<C::SendStream, B, <C::BidiStream as quic::RecvStream>::Buf>, StreamError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut p = self.project();
@@ -372,11 +378,17 @@ where
 #[allow(clippy::large_enum_variant)]
 pub enum AcceptedBi<C: quic::Connection<B>, B: Buf> {
     /// An incoming bidirectional stream
-    BidiStream(SessionId, BidiStream<C::BidiStream, B>),
+    BidiStream(
+        SessionId,
+        BidiStream<C::BidiStream, B, <C::BidiStream as quic::RecvStream>::Buf>,
+    ),
     /// An incoming HTTP/3 request, passed through a webtransport session.
     ///
     /// This makes it possible to respond to multiple CONNECT requests
-    Request(Request<()>, RequestStream<C::BidiStream, B>),
+    Request(
+        Request<()>,
+        RequestStream<C::BidiStream, B, <C::BidiStream as quic::RecvStream>::Buf>,
+    ),
 }
 
 /// Future for [`WebTransportSession::accept_uni`]
@@ -393,7 +405,13 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    type Output = Result<Option<(SessionId, RecvStream<C::RecvStream, B>)>, ConnectionError>;
+    type Output = Result<
+        Option<(
+            SessionId,
+            RecvStream<C::RecvStream, B, <C::RecvStream as quic::RecvStream>::Buf>,
+        )>,
+        ConnectionError,
+    >;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut conn = self.conn.lock().unwrap();

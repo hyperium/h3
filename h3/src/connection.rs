@@ -10,9 +10,7 @@ use futures_util::{future, ready};
 use http::HeaderMap;
 use stream::WriteBuf;
 
-#[cfg(feature = "tracing")]
-use tracing::{instrument, warn};
-
+use crate::quic::BidiStream;
 use crate::{
     config::Config,
     error::{
@@ -35,6 +33,8 @@ use crate::{
     stream::{self, AcceptRecvStream, AcceptedRecvStream, BufRecvStream, UniStreamHeader},
     webtransport::SessionId,
 };
+#[cfg(feature = "tracing")]
+use tracing::{instrument, warn};
 
 #[allow(missing_docs)]
 pub struct AcceptedStreams<C, B>
@@ -43,7 +43,10 @@ where
     B: Buf,
 {
     #[allow(missing_docs)]
-    pub wt_uni_streams: Vec<(SessionId, BufRecvStream<C::RecvStream, B>)>,
+    pub wt_uni_streams: Vec<(
+        SessionId,
+        BufRecvStream<C::RecvStream, B, <C::RecvStream as RecvStream>::Buf>,
+    )>,
 }
 
 impl<B, C> Default for AcceptedStreams<C, B>
@@ -79,7 +82,7 @@ where
     /// TODO: breaking encapsulation just to see if we can get this to work, will fix before merging
     pub conn: C,
     control_send: C::SendStream,
-    control_recv: Option<FrameStream<C::RecvStream, B>>,
+    control_recv: Option<FrameStream<C::RecvStream, B, <C::RecvStream as RecvStream>::Buf>>,
     qpack_streams: QpackStreams<C, B>,
     /// Buffers incoming uni/recv streams which have yet to be claimed.
     ///
@@ -807,18 +810,19 @@ where
 }
 
 #[allow(missing_docs)]
-pub struct RequestStream<S, B> {
-    pub(super) stream: FrameStream<S, B>,
+pub struct RequestStream<S, B, R> {
+    pub(super) stream: FrameStream<S, B, R>,
     pub(super) trailers: Option<Bytes>,
     pub(super) conn_state: Arc<SharedState>,
     pub(super) max_field_section_size: u64,
     send_grease_frame: bool,
+    _marker: PhantomData<B>,
 }
 
-impl<S, B> RequestStream<S, B> {
+impl<S, B, R> RequestStream<S, B, R> {
     #[allow(missing_docs)]
     pub fn new(
-        stream: FrameStream<S, B>,
+        stream: FrameStream<S, B, R>,
         max_field_section_size: u64,
         conn_state: Arc<SharedState>,
         grease: bool,
@@ -829,22 +833,20 @@ impl<S, B> RequestStream<S, B> {
             max_field_section_size,
             trailers: None,
             send_grease_frame: grease,
+            _marker: PhantomData,
         }
     }
 }
 
-impl<S, B> ConnectionState for RequestStream<S, B> {
+impl<S, B, R> ConnectionState for RequestStream<S, B, R> {
     fn shared_state(&self) -> &SharedState {
         &self.conn_state
     }
 }
 
-impl<S, B> CloseStream for RequestStream<S, B> {}
+impl<S, B, R> CloseStream for RequestStream<S, B, R> {}
 
-impl<S, B> RequestStream<S, B>
-where
-    S: quic::RecvStream,
-{
+impl<S: RecvStream<Buf = R>, B, R: Buf> RequestStream<S, B, R> {
     /// Receive some of the request body.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_recv_data(
@@ -1028,7 +1030,7 @@ where
     }
 }
 
-impl<S, B> RequestStream<S, B>
+impl<S, B, R> RequestStream<S, B, R>
 where
     S: quic::SendStream<B>,
     B: Buf,
@@ -1115,17 +1117,18 @@ where
     }
 }
 
-impl<S, B> RequestStream<S, B>
+impl<S, B, R> RequestStream<S, B, R>
 where
-    S: quic::BidiStream<B>,
+    S: BidiStream<B, RecvStream: RecvStream<Buf = R>> + RecvStream<Buf = R>,
     B: Buf,
+    R: Buf,
 {
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub(crate) fn split(
         self,
     ) -> (
-        RequestStream<S::SendStream, B>,
-        RequestStream<S::RecvStream, B>,
+        RequestStream<S::SendStream, B, R>,
+        RequestStream<S::RecvStream, B, R>,
     ) {
         let (send, recv) = self.stream.split();
 
@@ -1136,6 +1139,7 @@ where
                 conn_state: self.conn_state.clone(),
                 max_field_section_size: 0,
                 send_grease_frame: self.send_grease_frame,
+                _marker: PhantomData,
             },
             RequestStream {
                 stream: recv,
@@ -1143,6 +1147,7 @@ where
                 conn_state: self.conn_state,
                 max_field_section_size: self.max_field_section_size,
                 send_grease_frame: self.send_grease_frame,
+                _marker: PhantomData,
             },
         )
     }

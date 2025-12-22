@@ -39,7 +39,10 @@ pub fn init_tracing() {
 /// Only use this for testing purposes.
 async fn get_stream_blocking<C: quic::Connection<B>, B: Buf>(
     incoming: &mut crate::server::Connection<C, B>,
-) -> Option<(Request<()>, crate::server::RequestStream<C::BidiStream, B>)> {
+) -> Option<(
+    Request<()>,
+    crate::server::RequestStream<C::BidiStream, B, <C::BidiStream as quic::RecvStream>::Buf>,
+)> {
     let request_resolver = incoming.accept().await.ok()??;
     let (request, stream) = request_resolver.resolve_request().await.ok()?;
     Some((request, stream))

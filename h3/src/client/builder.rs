@@ -28,7 +28,7 @@ pub async fn new<C, O>(
 ) -> Result<(Connection<C, Bytes>, SendRequest<O, Bytes>), ConnectionError>
 where
     C: quic::Connection<Bytes, OpenStreams = O>,
-    O: quic::OpenStreams<Bytes>,
+    O: quic::OpenStreams<Bytes, BidiStream: quic::RecvStream<Buf = Bytes>>,
 {
     //= https://www.rfc-editor.org/rfc/rfc9114#section-3.3
     //= type=implication

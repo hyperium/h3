@@ -35,7 +35,7 @@ where
 {
     #[doc(hidden)]
     // TODO: make this private
-    pub frame_stream: FrameStream<C::BidiStream, B>,
+    pub frame_stream: FrameStream<C::BidiStream, B, <C::BidiStream as quic::RecvStream>::Buf>,
     pub(super) request_end_send: UnboundedSender<StreamId>,
     pub(super) send_grease_frame: bool,
     pub(super) max_field_section_size: u64,
@@ -69,7 +69,13 @@ where
     #[allow(clippy::type_complexity)]
     pub async fn resolve_request(
         mut self,
-    ) -> Result<(Request<()>, RequestStream<C::BidiStream, B>), StreamError> {
+    ) -> Result<
+        (
+            Request<()>,
+            RequestStream<C::BidiStream, B, <C::BidiStream as quic::RecvStream>::Buf>,
+        ),
+        StreamError,
+    > {
         let frame = std::future::poll_fn(|cx| self.frame_stream.poll_next(cx)).await;
         let req = self.accept_with_frame(frame)?;
         req.resolve().await
@@ -168,19 +174,19 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
-    request_stream: RequestStream<C::BidiStream, B>,
+    request_stream: RequestStream<C::BidiStream, B, <C::BidiStream as quic::RecvStream>::Buf>,
     // Ok or `REQUEST_HEADER_FIELDS_TO_LARGE` which needs to be sent
     decoded: Result<qpack::Decoded, u64>,
     max_field_section_size: u64,
 }
 
-impl<B, C> ResolvedRequest<C, B>
+impl<C, B> ResolvedRequest<C, B>
 where
     C: quic::Connection<B>,
     B: Buf,
 {
     pub fn new(
-        request_stream: RequestStream<C::BidiStream, B>,
+        request_stream: RequestStream<C::BidiStream, B, <C::BidiStream as quic::RecvStream>::Buf>,
         decoded: Result<qpack::Decoded, u64>,
         max_field_section_size: u64,
     ) -> Self {
@@ -196,7 +202,13 @@ where
     #[allow(clippy::type_complexity)]
     pub async fn resolve(
         mut self,
-    ) -> Result<(Request<()>, RequestStream<C::BidiStream, B>), StreamError> {
+    ) -> Result<
+        (
+            Request<()>,
+            RequestStream<C::BidiStream, B, <C::BidiStream as quic::RecvStream>::Buf>,
+        ),
+        StreamError,
+    > {
         let fields = match self.decoded {
             Ok(v) => v.fields,
             Err(cancel_size) => {
