@@ -1,6 +1,9 @@
 use std::{path::PathBuf, sync::Arc};
 
 use futures::future;
+use h3::error::{ConnectionError, StreamError};
+use rustls::pki_types::CertificateDer;
+use rustls_native_certs::CertificateResult;
 use structopt::StructOpt;
 use tokio::io::AsyncWriteExt;
 use tracing::{error, info};
@@ -61,29 +64,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // load CA certificates stored in the system
     let mut roots = rustls::RootCertStore::empty();
-    match rustls_native_certs::load_native_certs() {
-        Ok(certs) => {
-            for cert in certs {
-                if let Err(e) = roots.add(&rustls::Certificate(cert.0)) {
-                    error!("failed to parse trust anchor: {}", e);
-                }
-            }
+    let CertificateResult { certs, errors, .. } = rustls_native_certs::load_native_certs();
+    for cert in certs {
+        if let Err(e) = roots.add(cert) {
+            error!("failed to parse trust anchor: {}", e);
         }
-        Err(e) => {
-            error!("couldn't load any default trust roots: {}", e);
-        }
-    };
+    }
+    for e in errors {
+        error!("couldn't load default trust roots: {}", e);
+    }
 
     // load certificate of CA who issues the server certificate
     // NOTE that this should be used for dev only
-    if let Err(e) = roots.add(&rustls::Certificate(std::fs::read(opt.ca)?)) {
+    if let Err(e) = roots.add(CertificateDer::from(std::fs::read(opt.ca)?)) {
         error!("failed to parse trust anchor: {}", e);
     }
 
     let mut tls_config = rustls::ClientConfig::builder()
-        .with_safe_default_cipher_suites()
-        .with_safe_default_kx_groups()
-        .with_protocol_versions(&[&rustls::version::TLS13])?
         .with_root_certificates(roots)
         .with_no_client_auth();
 
@@ -99,7 +96,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut client_endpoint = h3_quinn::quinn::Endpoint::client("[::]:0".parse().unwrap())?;
 
-    let client_config = quinn::ClientConfig::new(Arc::new(tls_config));
+    let client_config = quinn::ClientConfig::new(Arc::new(
+        quinn::crypto::rustls::QuicClientConfig::try_from(tls_config)?,
+    ));
     client_endpoint.set_default_client_config(client_config);
 
     let conn = client_endpoint.connect(addr, auth.host())?.await?;
@@ -116,8 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut driver, mut send_request) = h3::client::new(quinn_conn).await?;
 
     let drive = async move {
-        future::poll_fn(|cx| driver.poll_close(cx)).await?;
-        Ok::<(), Box<dyn std::error::Error>>(())
+        return Err::<(), ConnectionError>(future::poll_fn(|cx| driver.poll_close(cx)).await);
     };
 
     // In the following block, we want to take ownership of `send_request`:
@@ -129,7 +127,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let request = async move {
         info!("sending request ...");
 
-        let req = http::Request::builder().uri(uri).body(())?;
+        let req = http::Request::builder().uri(uri).body(()).unwrap();
 
         // sending request results in a bidirectional stream,
         // which is also used for receiving response
@@ -149,16 +147,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // receiving potential response body
         while let Some(mut chunk) = stream.recv_data().await? {
             let mut out = tokio::io::stdout();
-            out.write_all_buf(&mut chunk).await?;
-            out.flush().await?;
+            out.write_all_buf(&mut chunk).await.unwrap();
+            out.flush().await.unwrap();
         }
 
-        Ok::<_, Box<dyn std::error::Error>>(())
+        Ok::<_, StreamError>(())
     };
 
     let (req_res, drive_res) = tokio::join!(request, drive);
-    req_res?;
-    drive_res?;
+
+    if let Err(err) = req_res {
+        if err.is_h3_no_error() {
+            info!("connection closed with H3_NO_ERROR");
+        } else {
+            error!("request failed: {:?}", err);
+        }
+        error!("request failed: {:?}", err);
+    }
+    if let Err(err) = drive_res {
+        if err.is_h3_no_error() {
+            info!("connection closed with H3_NO_ERROR");
+        } else {
+            error!("connection closed with error: {:?}", err);
+            return Err(err.into());
+        }
+    }
 
     // wait for the connection to be closed before exiting
     client_endpoint.wait_idle().await;

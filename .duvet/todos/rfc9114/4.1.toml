@@ -42,19 +42,7 @@ final response to the same request.
 
 [[TODO]]
 quote = '''
-After sending a request, a client MUST
-close the stream for sending.
-'''
-
-[[TODO]]
-quote = '''
 Unless using the CONNECT method (see
 Section 4.4), clients MUST NOT make stream closure dependent on
 receiving a response to their request.
-'''
-
-[[TODO]]
-quote = '''
-After sending a final
-response, the server MUST close the stream for sending.
 '''

@@ -1,31 +1,42 @@
 use bytes::Buf;
 use futures_util::future;
 use http::{HeaderMap, Response};
+use quic::StreamId;
+#[cfg(feature = "tracing")]
+use tracing::instrument;
 
 use crate::{
-    connection::{self, ConnectionState, SharedStateRef},
-    error::{Code, Error, ErrorLevel},
+    connection::{self},
+    error::{
+        connection_error_creators::{CloseStream, HandleFrameStreamErrorOnRequestStream},
+        internal_error::InternalConnectionError,
+        Code, StreamError,
+    },
     proto::{frame::Frame, headers::Header},
     qpack,
     quic::{self},
+    shared_state::{ConnectionState, SharedState},
 };
-use std::convert::TryFrom;
+use std::{
+    convert::TryFrom,
+    task::{Context, Poll},
+};
 
 /// Manage request bodies transfer, response and trailers.
 ///
-/// Once a request has been sent via [`send_request()`], a response can be awaited by calling
-/// [`recv_response()`]. A body for this request can be sent with [`send_data()`], then the request
-/// shall be completed by either sending trailers with [`send_trailers()`], or [`finish()`].
+/// Once a request has been sent via [`crate::client::SendRequest::send_request()`], a response can be awaited by calling
+/// [`RequestStream::recv_response()`]. A body for this request can be sent with [`RequestStream::send_data()`], then the request
+/// shall be completed by either sending trailers with  [`RequestStream::finish()`].
 ///
-/// After receiving the response's headers, it's body can be read by [`recv_data()`] until it returns
-/// `None`. Then the trailers will eventually be available via [`recv_trailers()`].
+/// After receiving the response's headers, it's body can be read by [`RequestStream::recv_data()`] until it returns
+/// `None`. Then the trailers will eventually be available via [`RequestStream::recv_trailers()`].
 ///
 /// TODO: If data is polled before the response has been received, an error will be thrown.
 ///
 /// TODO: If trailers are polled but the body hasn't been fully received, an UNEXPECT_FRAME error will be
 /// thrown
 ///
-/// Whenever the client wants to cancel this request, it can call [`stop_sending()`], which will
+/// Whenever the client wants to cancel this request, it can call [`RequestStream::stop_sending()`], which will
 /// put an end to any transfer concerning it.
 ///
 /// # Examples
@@ -68,10 +79,12 @@ pub struct RequestStream<S, B> {
 }
 
 impl<S, B> ConnectionState for RequestStream<S, B> {
-    fn shared_state(&self) -> &SharedStateRef {
+    fn shared_state(&self) -> &SharedState {
         &self.inner.conn_state
     }
 }
+
+impl<S, B> CloseStream for RequestStream<S, B> {}
 
 impl<S, B> RequestStream<S, B>
 where
@@ -82,15 +95,19 @@ where
     /// This should be called before trying to receive any data with [`recv_data()`].
     ///
     /// [`recv_data()`]: #method.recv_data
-    pub async fn recv_response(&mut self) -> Result<Response<()>, Error> {
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub async fn recv_response(&mut self) -> Result<Response<()>, StreamError> {
         let mut frame = future::poll_fn(|cx| self.inner.stream.poll_next(cx))
             .await
-            .map_err(|e| self.maybe_conn_err(e))?
+            .map_err(|e| self.handle_frame_stream_error_on_request_stream(e))?
             .ok_or_else(|| {
-                Code::H3_GENERAL_PROTOCOL_ERROR.with_reason(
-                    "Did not receive response headers",
-                    ErrorLevel::ConnectionError,
-                )
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+                //# Receipt of an invalid sequence of frames MUST be treated as a
+                //# connection error of type H3_FRAME_UNEXPECTED.
+                self.handle_connection_error_on_stream(InternalConnectionError::new(
+                    Code::H3_FRAME_UNEXPECTED,
+                    "Stream finished without receiving response headers".to_string(),
+                ))
             })?;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.5
@@ -113,24 +130,52 @@ where
                 //# the message header it will accept on an individual HTTP message.
                 Err(qpack::DecoderError::HeaderTooLong(cancel_size)) => {
                     self.inner.stop_sending(Code::H3_REQUEST_CANCELLED);
-                    return Err(Error::header_too_big(
-                        cancel_size,
-                        self.inner.max_field_section_size,
-                    ));
+                    return Err(StreamError::HeaderTooBig {
+                        actual_size: cancel_size,
+                        max_size: self.inner.max_field_section_size,
+                    });
                 }
                 Ok(decoded) => decoded,
-                Err(e) => return Err(e.into()),
+                Err(_e) => {
+                    return Err(
+                        self.handle_connection_error_on_stream(InternalConnectionError {
+                            code: Code::QPACK_DECOMPRESSION_FAILED,
+                            message: "Failed to decode headers".to_string(),
+                        }),
+                    )
+                }
             }
         } else {
-            return Err(Code::H3_FRAME_UNEXPECTED.with_reason(
-                "First response frame is not headers",
-                ErrorLevel::ConnectionError,
-            ));
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+            //# Receipt of an invalid sequence of frames MUST be treated as a
+            //# connection error of type H3_FRAME_UNEXPECTED.
+
+            return Err(
+                self.handle_connection_error_on_stream(InternalConnectionError::new(
+                    Code::H3_FRAME_UNEXPECTED,
+                    "First response frame is not headers".to_string(),
+                )),
+            );
         };
 
         let qpack::Decoded { fields, .. } = decoded;
 
-        let (status, headers) = Header::try_from(fields)?.into_response_parts()?;
+        let (status, headers) = Header::try_from(fields)
+            .map_err(|_e| {
+                self.inner.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
+                StreamError::StreamError {
+                    code: Code::H3_MESSAGE_ERROR,
+                    reason: "Received malformed header".to_string(),
+                }
+            })?
+            .into_response_parts()
+            .map_err(|_e| {
+                self.inner.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
+                StreamError::StreamError {
+                    code: Code::H3_MESSAGE_ERROR,
+                    reason: "Received malformed header".to_string(),
+                }
+            })?;
         let mut resp = Response::new(());
         *resp.status_mut() = status;
         *resp.headers_mut() = headers;
@@ -141,26 +186,49 @@ where
 
     /// Receive some of the request body.
     // TODO what if called before recv_response ?
-    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
-        self.inner.recv_data().await
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, StreamError> {
+        future::poll_fn(|cx| self.poll_recv_data(cx)).await
+    }
+
+    /// Receive request body
+    pub fn poll_recv_data(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<impl Buf>, StreamError>> {
+        self.inner.poll_recv_data(cx)
     }
 
     /// Receive an optional set of trailers for the response.
-    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
-        let res = self.inner.recv_trailers().await;
-        if let Err(ref e) = res {
-            if e.is_header_too_big() {
-                self.inner.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
-            }
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, StreamError> {
+        future::poll_fn(|cx| self.poll_recv_trailers(cx)).await
+    }
+
+    /// Poll receive an optional set of trailers for the response.
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub fn poll_recv_trailers(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<HeaderMap>, StreamError>> {
+        let res = self.inner.poll_recv_trailers(cx);
+        if let Poll::Ready(Err(StreamError::HeaderTooBig { .. })) = &res {
+            self.inner.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
         }
         res
     }
 
     /// Tell the peer to stop sending into the underlying QUIC stream
-    pub fn stop_sending(&mut self, error_code: crate::error::Code) {
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub fn stop_sending(&mut self, error_code: Code) {
         // TODO take by value to prevent any further call as this request is cancelled
         // rename `cancel()` ?
         self.inner.stream.stop_sending(error_code)
+    }
+
+    /// Returns the underlying stream id
+    pub fn id(&self) -> StreamId {
+        self.inner.stream.id()
     }
 }
 
@@ -170,25 +238,31 @@ where
     B: Buf,
 {
     /// Send some data on the request body.
-    pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub async fn send_data(&mut self, buf: B) -> Result<(), StreamError> {
         self.inner.send_data(buf).await
+    }
+
+    /// Stop a stream with an error code
+    ///
+    /// The code can be [`Code::H3_NO_ERROR`].
+    pub fn stop_stream(&mut self, error_code: Code) {
+        self.inner.stop_stream(error_code);
     }
 
     /// Send a set of trailers to end the request.
     ///
-    /// Either [`RequestStream::finish`] or
-    /// [`RequestStream::send_trailers`] must be called to finalize a
-    /// request.
-    pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
+    /// [`RequestStream::finish()`] must be called to finalize a request.
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), StreamError> {
         self.inner.send_trailers(trailers).await
     }
 
     /// End the request without trailers.
     ///
-    /// Either [`RequestStream::finish`] or
-    /// [`RequestStream::send_trailers`] must be called to finalize a
-    /// request.
-    pub async fn finish(&mut self) -> Result<(), Error> {
+    /// [`RequestStream::finish()`] must be called to finalize a request.
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub async fn finish(&mut self) -> Result<(), StreamError> {
         self.inner.finish().await
     }
 

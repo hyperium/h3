@@ -21,7 +21,7 @@
 //! }
 //! ```
 
-use std::{collections::HashSet, result::Result};
+use std::{collections::HashSet, result::Result, sync::Arc};
 
 use bytes::Buf;
 
@@ -29,9 +29,10 @@ use tokio::sync::mpsc;
 
 use crate::{
     config::Config,
-    connection::{ConnectionInner, SharedStateRef},
-    error::Error,
+    connection::ConnectionInner,
+    error::ConnectionError,
     quic::{self},
+    shared_state::SharedState,
 };
 
 use super::connection::Connection;
@@ -57,6 +58,8 @@ impl Builder {
         }
     }
 
+    // Not public API, just used in unit tests
+    #[doc(hidden)]
     #[cfg(test)]
     pub fn send_settings(&mut self, value: bool) -> &mut Self {
         self.config.send_settings = value;
@@ -87,7 +90,7 @@ impl Builder {
     ///
     ///
     /// **Server**:
-    /// Supporting for webtransport also requires setting `enable_connect` `enable_datagram`
+    /// Supporting for webtransport also requires setting `enable_extended_connect` `enable_datagram`
     /// and `max_webtransport_sessions`.
     #[inline]
     pub fn enable_webtransport(&mut self, value: bool) -> &mut Self {
@@ -95,8 +98,8 @@ impl Builder {
         self
     }
 
-    /// Enables the CONNECT protocol
-    pub fn enable_connect(&mut self, value: bool) -> &mut Self {
+    /// Enables the extended CONNECT protocol required for various HTTP/3 extensions.
+    pub fn enable_extended_connect(&mut self, value: bool) -> &mut Self {
         self.config.settings.enable_extended_connect = value;
         self
     }
@@ -120,14 +123,16 @@ impl Builder {
     /// Build an HTTP/3 connection from a QUIC connection
     ///
     /// This method creates a [`Connection`] instance with the settings in the [`Builder`].
-    pub async fn build<C, B>(&self, conn: C) -> Result<Connection<C, B>, Error>
+    pub async fn build<C, B>(&self, conn: C) -> Result<Connection<C, B>, ConnectionError>
     where
         C: quic::Connection<B>,
         B: Buf,
     {
         let (sender, receiver) = mpsc::unbounded_channel();
+        let shared = SharedState::default();
+
         Ok(Connection {
-            inner: ConnectionInner::new(conn, SharedStateRef::default(), self.config).await?,
+            inner: ConnectionInner::new(conn, Arc::new(shared), self.config).await?,
             max_field_section_size: self.config.settings.max_field_section_size,
             request_end_send: sender,
             request_end_recv: receiver,

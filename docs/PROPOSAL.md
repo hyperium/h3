@@ -5,7 +5,7 @@ This describes an effort to provide HTTP/3 support for the [hyper.rs](http://hyp
 
 ## 1. Goals
 
-What would be the goals of this effort, and what wouldn’t be.
+What would be the goals of this effort, and what wouldn't be.
 
 - Provide a standalone HTTP/3 crate.
     - This is similar to what we did with `h2`. This allows folks that want more control over HTTP/3 specifically to be able to do so. Or people may wish to reduce their dependencies to the bare minimum, and thus don’t want to include crates supporting HTTP/1 and 2 (like `hyper` does).

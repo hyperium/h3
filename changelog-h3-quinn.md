@@ -1,3 +1,22 @@
+### v0.0.10 (2025-05-06)
+* use new h3 error types
+* use new datagram traits
+
+### v0.0.9 (2025-03-18)
+* fix private field usage from quinn
+
+### v0.0.8 (2025-03-15)
+* avoid copying data when sending
+* new datagram feature
+
+### v0.0.7 (2024-07-01)
+* Consolidate quic trait redundancy
+* make types Sync
+* new tracing feature
+
+### v0.0.6 (2024-05-20)
+* use quinn 0.11
+
 ### v0.0.5 (2024-01-24)
 
 * Update to `http` v1.

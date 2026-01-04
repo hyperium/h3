@@ -18,8 +18,10 @@ use std::{
     time::Duration,
 };
 
-use bytes::Bytes;
-use rustls::{Certificate, PrivateKey};
+use bytes::{Buf, Bytes};
+use http::Request;
+use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
 use crate::quic;
 use h3_quinn::{quinn::TransportConfig, Connection};
@@ -32,11 +34,21 @@ pub fn init_tracing() {
         .try_init();
 }
 
-#[derive(Clone)]
+/// This accepts an incoming request. After the bidirectional stream is started it will not poll the
+/// connection or receive further requests until the first headers are received.
+/// Only use this for testing purposes.
+async fn get_stream_blocking<C: quic::Connection<B>, B: Buf>(
+    incoming: &mut crate::server::Connection<C, B>,
+) -> Option<(Request<()>, crate::server::RequestStream<C::BidiStream, B>)> {
+    let request_resolver = incoming.accept().await.ok()??;
+    let (request, stream) = request_resolver.resolve_request().await.ok()?;
+    Some((request, stream))
+}
+
 pub struct Pair {
     port: u16,
-    cert: Certificate,
-    key: PrivateKey,
+    cert: CertificateDer<'static>,
+    key: PrivateKeyDer<'static>,
     config: Arc<TransportConfig>,
 }
 
@@ -63,18 +75,20 @@ impl Pair {
     }
 
     pub fn server_inner(&mut self) -> h3_quinn::Endpoint {
-        let mut crypto = rustls::ServerConfig::builder()
-            .with_safe_default_cipher_suites()
-            .with_safe_default_kx_groups()
-            .with_protocol_versions(&[&rustls::version::TLS13])
-            .unwrap()
-            .with_no_client_auth()
-            .with_single_cert(vec![self.cert.clone()], self.key.clone())
-            .unwrap();
+        let mut crypto = rustls::ServerConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_protocol_versions(&[&rustls::version::TLS13])
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(vec![self.cert.clone()], self.key.clone_key())
+        .unwrap();
         crypto.max_early_data_size = u32::MAX;
         crypto.alpn_protocols = vec![b"h3".to_vec()];
 
-        let mut server_config = h3_quinn::quinn::ServerConfig::with_crypto(Arc::new(crypto));
+        let mut server_config = h3_quinn::quinn::ServerConfig::with_crypto(Arc::new(
+            QuicServerConfig::try_from(crypto).unwrap(),
+        ));
         server_config.transport = self.config.clone();
         let endpoint =
             h3_quinn::quinn::Endpoint::server(server_config, "[::]:0".parse().unwrap()).unwrap();
@@ -97,18 +111,20 @@ impl Pair {
             .unwrap();
 
         let mut root_cert_store = rustls::RootCertStore::empty();
-        root_cert_store.add(&self.cert).unwrap();
-        let mut crypto = rustls::ClientConfig::builder()
-            .with_safe_default_cipher_suites()
-            .with_safe_default_kx_groups()
-            .with_protocol_versions(&[&rustls::version::TLS13])
-            .unwrap()
-            .with_root_certificates(root_cert_store)
-            .with_no_client_auth();
+        root_cert_store.add(self.cert.clone()).unwrap();
+        let mut crypto = rustls::ClientConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_protocol_versions(&[&rustls::version::TLS13])
+        .unwrap()
+        .with_root_certificates(root_cert_store)
+        .with_no_client_auth();
         crypto.enable_early_data = true;
         crypto.alpn_protocols = vec![b"h3".to_vec()];
 
-        let client_config = h3_quinn::quinn::ClientConfig::new(Arc::new(crypto));
+        let client_config = h3_quinn::quinn::ClientConfig::new(Arc::new(
+            QuicClientConfig::try_from(crypto).unwrap(),
+        ));
 
         let mut client_endpoint =
             h3_quinn::quinn::Endpoint::client("[::]:0".parse().unwrap()).unwrap();
@@ -135,9 +151,10 @@ impl Server {
     }
 }
 
-pub fn build_certs() -> (Certificate, PrivateKey) {
+pub fn build_certs() -> (CertificateDer<'static>, PrivateKeyDer<'static>) {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
-    let key = PrivateKey(cert.serialize_private_key_der());
-    let cert = Certificate(cert.serialize_der().unwrap());
-    (cert, key)
+    (
+        cert.cert.into(),
+        PrivateKeyDer::Pkcs8(cert.signing_key.serialize_der().into()),
+    )
 }

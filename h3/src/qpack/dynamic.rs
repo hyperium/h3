@@ -258,11 +258,11 @@ impl DynamicTable {
         DynamicTable::default()
     }
 
-    pub fn decoder(&self, base: usize) -> DynamicTableDecoder {
+    pub fn decoder(&self, base: usize) -> DynamicTableDecoder<'_> {
         DynamicTableDecoder { table: self, base }
     }
 
-    pub fn encoder(&mut self, stream_id: u64) -> DynamicTableEncoder {
+    pub fn encoder(&mut self, stream_id: u64) -> DynamicTableEncoder<'_> {
         for (idx, field) in self.fields.iter().enumerate() {
             self.name_map
                 .insert(field.name.clone(), self.vas.index(idx).unwrap());
@@ -667,7 +667,7 @@ mod tests {
 
         assert_eq!(table.fields.len(), 1);
         assert_eq!(
-            table.fields.get(0),
+            table.fields.front(),
             Some(&HeaderField::new("Name-Large", "Value-Large"))
         );
     }
@@ -736,7 +736,7 @@ mod tests {
         insert_fields(&mut table, vec![HeaderField::new("Name-C", "Value-C")]);
 
         assert_eq!(
-            table.fields.get(0),
+            table.fields.front(),
             Some(&HeaderField::new("Name-B", "Value-B"))
         );
         assert_eq!(
@@ -1042,7 +1042,7 @@ mod tests {
             assert_eq!(table.track_map.get(&1), Some(&1));
         }
         let track_blocks = table.track_blocks;
-        let block = track_blocks.get(&stream_id).unwrap().get(0).unwrap();
+        let block = track_blocks.get(&stream_id).unwrap().front().unwrap();
         assert_eq!(block.get(&1), Some(&1));
         assert_eq!(block.get(&2), Some(&1));
         assert_eq!(block.get(&3), Some(&1));

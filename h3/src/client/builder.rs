@@ -3,17 +3,16 @@
 use std::{
     marker::PhantomData,
     sync::{atomic::AtomicUsize, Arc},
-    task::Poll,
 };
 
 use bytes::{Buf, Bytes};
-use futures_util::future;
 
 use crate::{
     config::Config,
-    connection::{ConnectionInner, SharedStateRef},
-    error::Error,
+    connection::ConnectionInner,
+    error::ConnectionError,
     quic::{self},
+    shared_state::SharedState,
 };
 
 use super::connection::{Connection, SendRequest};
@@ -24,7 +23,9 @@ pub fn builder() -> Builder {
 }
 
 /// Create a new HTTP/3 client with default settings
-pub async fn new<C, O>(conn: C) -> Result<(Connection<C, Bytes>, SendRequest<O, Bytes>), Error>
+pub async fn new<C, O>(
+    conn: C,
+) -> Result<(Connection<C, Bytes>, SendRequest<O, Bytes>), ConnectionError>
 where
     C: quic::Connection<Bytes, OpenStreams = O>,
     O: quic::OpenStreams<Bytes>,
@@ -69,6 +70,8 @@ impl Builder {
         }
     }
 
+    // Not public API, just used in unit tests
+    #[doc(hidden)]
     #[cfg(test)]
     pub fn send_settings(&mut self, value: bool) -> &mut Self {
         self.config.send_settings = value;
@@ -94,36 +97,52 @@ impl Builder {
         self
     }
 
+    /// Indicates that the client supports HTTP/3 datagrams
+    ///
+    /// See: <https://www.rfc-editor.org/rfc/rfc9297#section-2.1.1>
+    pub fn enable_datagram(&mut self, enabled: bool) -> &mut Self {
+        self.config.settings.enable_datagram = enabled;
+        self
+    }
+
+    /// Enables the extended CONNECT protocol required for various HTTP/3 extensions.
+    pub fn enable_extended_connect(&mut self, value: bool) -> &mut Self {
+        self.config.settings.enable_extended_connect = value;
+        self
+    }
+
     /// Create a new HTTP/3 client from a `quic` connection
     pub async fn build<C, O, B>(
         &mut self,
         quic: C,
-    ) -> Result<(Connection<C, B>, SendRequest<O, B>), Error>
+    ) -> Result<(Connection<C, B>, SendRequest<O, B>), ConnectionError>
     where
         C: quic::Connection<B, OpenStreams = O>,
         O: quic::OpenStreams<B>,
         B: Buf,
     {
         let open = quic.opener();
-        let conn_state = SharedStateRef::default();
+        let shared = SharedState::default();
 
-        let conn_waker = Some(future::poll_fn(|cx| Poll::Ready(cx.waker().clone())).await);
+        let conn_state = Arc::new(shared);
+
+        let inner = ConnectionInner::new(quic, conn_state.clone(), self.config).await?;
+        let send_request = SendRequest {
+            open,
+            conn_state,
+            max_field_section_size: self.config.settings.max_field_section_size,
+            sender_count: Arc::new(AtomicUsize::new(1)),
+            send_grease_frame: self.config.send_grease,
+            _buf: PhantomData,
+        };
 
         Ok((
             Connection {
-                inner: ConnectionInner::new(quic, conn_state.clone(), self.config).await?,
+                inner,
                 sent_closing: None,
                 recv_closing: None,
             },
-            SendRequest {
-                open,
-                conn_state,
-                conn_waker,
-                max_field_section_size: self.config.settings.max_field_section_size,
-                sender_count: Arc::new(AtomicUsize::new(1)),
-                send_grease_frame: self.config.send_grease,
-                _buf: PhantomData,
-            },
+            send_request,
         ))
     }
 }

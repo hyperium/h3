@@ -8,11 +8,11 @@ on:
 env:
   RUST_BACKTRACE: 1
   toolchain_style: stable
-  toolchain_msrv: 1.63
-  toolchain_h3_quinn_msrv: 1.63
-  toolchain_doc: nightly-2023-10-21
+  toolchain_msrv: 1.74.1
+  toolchain_h3_quinn_msrv: 1.74.1
+  toolchain_doc: nightly-2025-04-02
   toolchain_lint: stable
-  toolchain_fuzz: nightly-2023-10-21
+  toolchain_fuzz: nightly-2025-04-02
 
 jobs:
   ci-pass:
@@ -26,6 +26,8 @@ jobs:
       - test
       - doc
       - fuzz
+      - examples
+      - compliance
     steps:
       - run: exit 0
 
@@ -33,98 +35,83 @@ jobs:
     name: Check Style
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
       - name: Install Rust ${{ env.toolchain_style }}
-        uses: actions-rs/toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          profile: minimal
           toolchain: ${{ env.toolchain_style }}
-          override: true
           components: rustfmt
-      - uses: Swatinem/rust-cache@v2
-      - name: cargo fmt --all -- --check
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+      - run: cargo fmt --all -- --check
 
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
       - name: Install Rust ${{ env.toolchain_lint }}
-        uses: actions-rs/toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          profile: minimal
           toolchain: ${{ env.toolchain_lint }}
-          override: true
           components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - name: cargo clippy
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
+      - run: cargo clippy
 
   msrv:
     name: Check MSRV
     needs: [style]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
       - name: Install Rust ${{ env.toolchain_msrv }}
-        uses: actions-rs/toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          profile: minimal
           toolchain: ${{ env.toolchain_msrv }}
-          override: true
-      - uses: Swatinem/rust-cache@v2
-      - name: cargo check -p h3
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
-          args: -p h3
+      - run: cargo check -p h3
 
   msrv_h3_quinn:
     name: Check MSRV of `h3-quinn`
     needs: [style]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
       - name: Install Rust ${{ env.toolchain_h3_quinn_msrv }}
-        uses: actions-rs/toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          profile: minimal
           toolchain: ${{ env.toolchain_h3_quinn_msrv }}
-          override: true
-      - uses: Swatinem/rust-cache@v2
-      - name: cargo check -p h3-quinn
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
-          args: -p h3-quinn
+      - run: cargo check -p h3-quinn
 
   test:
-    name: Test ${{ matrix.toolchain }} ${{ matrix.os }}
+    name: Test ${{ matrix.toolchain }} ${{ matrix.os }} ${{ matrix.target }}
     needs: [style]
     strategy:
       matrix:
         os: [ubuntu-latest]
         toolchain: [stable, beta]
+        features: [i-implement-a-third-party-backend-and-opt-into-breaking-changes, tracing, 'tracing,i-implement-a-third-party-backend-and-opt-into-breaking-changes']
+        target: [x86_64-unknown-linux-gnu]
+        include:
+          # Add a 32-bit target test configuration
+          - os: ubuntu-latest
+            toolchain: stable
+            features: i-implement-a-third-party-backend-and-opt-into-breaking-changes
+            target: i686-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
+      # Add this step for 32-bit build support
+      - name: Install 32-bit development libraries
+        if: matrix.target == 'i686-unknown-linux-gnu'
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib libc6-dev-i386
       - name: Install Rust ${{ matrix.toolchain }}
-        uses: actions-rs/toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          profile: minimal
           toolchain: ${{ matrix.toolchain }}
-          override: true
-      - uses: Swatinem/rust-cache@v2
-      - name: cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
+          target: ${{ matrix.target }}
+      - run: cargo test --features ${{ matrix.features }} --target ${{ matrix.target }}
+        env:  #[cfg(feature = "datagram")] unexpected `cfg` condition value: `datagram`
+          RUSTFLAGS: "-A unexpected_cfgs"
       - name: h3Spec
         run: ./ci/h3spec.sh
         if: matrix.toolchain == 'stable'
@@ -134,54 +121,52 @@ jobs:
     needs: [test]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
       - name: Install Rust ${{ env.toolchain_doc }}
-        uses: actions-rs/toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          profile: minimal
           toolchain: ${{ env.toolchain_doc }}
-          override: true
-      - uses: Swatinem/rust-cache@v2
-      - name: cargo rustdoc -p h3 -- -D intra-doc-link-resolution-failure
-        uses: actions-rs/cargo@v1
-        with:
-          command: rustdoc
-          args: -p h3 -- -D intra-doc-link-resolution-failure
+      - run: cargo rustdoc -p h3 -- -D intra-doc-link-resolution-failure
 
   fuzz:
     name: Fuzz test
     needs: [test]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
       - name: Install Rust ${{ env.toolchain_fuzz }}
-        uses: actions-rs/toolchain@v1
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          profile: minimal
           toolchain: ${{ env.toolchain_fuzz }}
-          override: true
-      - uses: Swatinem/rust-cache@v2
       - name: Install cargo-fuzz
         uses: camshaft/install@v1
         with:
           crate: cargo-fuzz
-      - name: cargo fuzz run fuzz_varint -- -runs=1
-        uses: actions-rs/cargo@v1
-        with:
-          command: fuzz
-          args: run fuzz_varint -- -runs=1
+      - run: cargo fuzz run fuzz_varint -- -runs=1
 
   compliance:
     name: Compliance report
     needs: [test]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
           fetch-depth: 0
       - name: Generate compliance report
         uses: ./.github/actions/compliance
         with:
-          extract-script: ${{ github.workspace }}/ci/compliance/extract.sh
           report-script: ${{ github.workspace }}/ci/compliance/report.sh
+
+  examples:
+    name: Run Examples
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+      - name: Run server and client examples test
+        run: ./ci/example_test.sh

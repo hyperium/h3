@@ -3,6 +3,7 @@ use std::{
     convert::TryInto,
     fmt::{self, Debug},
 };
+#[cfg(feature = "tracing")]
 use tracing::trace;
 
 use crate::webtransport::SessionId;
@@ -86,7 +87,9 @@ impl Frame<PayloadLen> {
         //
         // See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-4.2
         if ty == FrameType::WEBTRANSPORT_BI_STREAM {
+            #[cfg(feature = "tracing")]
             tracing::trace!("webtransport frame");
+
             return Ok(Frame::WebTransportStream(SessionId::decode(buf)?));
         }
 
@@ -103,7 +106,10 @@ impl Frame<PayloadLen> {
         }
 
         let mut payload = buf.take(len as usize);
+
+        #[cfg(feature = "tracing")]
         trace!("frame ty: {:?}", ty);
+
         let frame = match ty {
             FrameType::HEADERS => Ok(Frame::Headers(payload.copy_to_bytes(len as usize))),
             FrameType::SETTINGS => Ok(Frame::Settings(Settings::decode(&mut payload)?)),
@@ -111,6 +117,10 @@ impl Frame<PayloadLen> {
             FrameType::PUSH_PROMISE => Ok(Frame::PushPromise(PushPromise::decode(&mut payload)?)),
             FrameType::GOAWAY => Ok(Frame::Goaway(VarInt::decode(&mut payload)?)),
             FrameType::MAX_PUSH_ID => Ok(Frame::MaxPushId(payload.get_var()?.try_into()?)),
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
+            //# These frame
+            //# types MUST NOT be sent, and their receipt MUST be treated as a
+            //# connection error of type H3_FRAME_UNEXPECTED.
             FrameType::H2_PRIORITY
             | FrameType::H2_PING
             | FrameType::H2_WINDOW_UPDATE
@@ -118,14 +128,18 @@ impl Frame<PayloadLen> {
             FrameType::WEBTRANSPORT_BI_STREAM | FrameType::DATA => unreachable!(),
             _ => {
                 buf.advance(len as usize);
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
+                //# Endpoints MUST
+                //# NOT consider these frames to have any meaning upon receipt.
                 Err(FrameError::UnknownFrame(ty.0))
             }
         };
 
-        if let Ok(frame) = &frame {
+        if let Ok(_frame) = &frame {
+            #[cfg(feature = "tracing")]
             trace!(
                 "got frame {:?}, len: {}, remaining: {}",
-                frame,
+                _frame,
                 len,
                 buf.remaining()
             );
@@ -536,7 +550,11 @@ impl Settings {
                 //# H3_SETTINGS_ERROR.
                 settings.insert(identifier, value)?;
             } else {
-                tracing::warn!("Unsupported setting: {:#x?}", identifier);
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.1
+                //# Endpoints MUST NOT consider such settings to have
+                //# any meaning upon receipt.
+                #[cfg(feature = "tracing")]
+                tracing::debug!("Unsupported setting: {:#x?}", identifier);
             }
         }
         Ok(settings)
@@ -559,7 +577,7 @@ impl fmt::Display for SettingsError {
         match self {
             SettingsError::Exceeded => write!(
                 f,
-                "max settings number exeeded, check for duplicate entries"
+                "max settings number exceeded, check for duplicate entries"
             ),
             SettingsError::Malformed => write!(f, "malformed settings frame"),
             SettingsError::Repeated(id) => write!(f, "got setting 0x{:x} twice", id.0),

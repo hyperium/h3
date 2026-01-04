@@ -3,15 +3,16 @@
 use bytes::Buf;
 
 use crate::{
-    connection::{ConnectionState, SharedStateRef},
-    ext::Datagram,
-    quic::{self, RecvDatagramExt},
-    Error,
+    error::{
+        connection_error_creators::CloseStream, internal_error::InternalConnectionError, Code,
+        StreamError,
+    },
+    quic::{self},
+    shared_state::{ConnectionState, SharedState},
 };
-use pin_project_lite::pin_project;
 
-use super::connection::{Connection, RequestEnd};
-use std::{marker::PhantomData, sync::Arc};
+use super::connection::RequestEnd;
+use std::sync::Arc;
 
 use std::{
     option::Option,
@@ -20,25 +21,26 @@ use std::{
 };
 
 use bytes::BytesMut;
-use futures_util::{future::Future, ready};
+use futures_util::future;
 use http::{response, HeaderMap, Response};
 
 use quic::StreamId;
 
 use crate::{
-    error::Code,
     proto::{frame::Frame, headers::Header},
     qpack,
     quic::SendStream as _,
     stream::{self},
 };
 
-use tracing::error;
+#[cfg(feature = "tracing")]
+use tracing::{error, instrument};
 
 /// Manage request and response transfer for an incoming request
 ///
 /// The [`RequestStream`] struct is used to send and/or receive
 /// information from the client.
+/// After sending the final response, call [`RequestStream::finish`] to close the stream.
 pub struct RequestStream<S, B> {
     pub(super) inner: crate::connection::RequestStream<S, B>,
     pub(super) request_end: Arc<RequestEnd>,
@@ -51,10 +53,12 @@ impl<S, B> AsMut<crate::connection::RequestStream<S, B>> for RequestStream<S, B>
 }
 
 impl<S, B> ConnectionState for RequestStream<S, B> {
-    fn shared_state(&self) -> &SharedStateRef {
+    fn shared_state(&self) -> &SharedState {
         &self.inner.conn_state
     }
 }
+
+impl<S, B> CloseStream for RequestStream<S, B> {}
 
 impl<S, B> RequestStream<S, B>
 where
@@ -62,31 +66,66 @@ where
     B: Buf,
 {
     /// Receive data sent from the client
-    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, Error> {
-        self.inner.recv_data().await
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, StreamError> {
+        future::poll_fn(|cx| self.poll_recv_data(cx)).await
     }
 
     /// Poll for data sent from the client
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_recv_data(
         &mut self,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<Option<impl Buf>, Error>> {
+    ) -> Poll<Result<Option<impl Buf>, StreamError>> {
         self.inner.poll_recv_data(cx)
     }
 
     /// Receive an optional set of trailers for the request
-    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, Error> {
-        self.inner.recv_trailers().await
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub async fn recv_trailers(&mut self) -> Result<Option<HeaderMap>, StreamError> {
+        future::poll_fn(|cx| self.poll_recv_trailers(cx)).await
+    }
+
+    /// Poll for an optional set of trailers for the request
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub fn poll_recv_trailers(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<HeaderMap>, StreamError>> {
+        self.inner.poll_recv_trailers(cx)
     }
 
     /// Tell the peer to stop sending into the underlying QUIC stream
-    pub fn stop_sending(&mut self, error_code: crate::error::Code) {
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub fn stop_sending(&mut self, error_code: Code) {
         self.inner.stream.stop_sending(error_code)
     }
 
     /// Returns the underlying stream id
     pub fn id(&self) -> StreamId {
         self.inner.stream.id()
+    }
+
+    /// Check if this stream was opened during 0-RTT.
+    ///
+    /// See [RFC 8470 Section 5.2](https://www.rfc-editor.org/rfc/rfc8470.html#section-5.2).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use h3::server::RequestStream;
+    /// # async fn example(mut stream: RequestStream<impl h3::quic::BidiStream<bytes::Bytes> + h3::quic::Is0rtt, bytes::Bytes>) {
+    /// if stream.is_0rtt() {
+    ///     // Reject non-idempotent methods (e.g., POST, PUT, DELETE)
+    ///     // to prevent replay attacks
+    /// }
+    /// # }
+    /// ```
+    pub fn is_0rtt(&self) -> bool
+    where
+        S: quic::Is0rtt,
+    {
+        self.inner.stream.is_0rtt()
     }
 }
 
@@ -99,7 +138,7 @@ where
     ///
     /// This should be called before trying to send any data with
     /// [`RequestStream::send_data`].
-    pub async fn send_response(&mut self, resp: Response<()>) -> Result<(), Error> {
+    pub async fn send_response(&mut self, resp: Response<()>) -> Result<(), StreamError> {
         let (parts, _) = resp.into_parts();
         let response::Parts {
             status, headers, ..
@@ -107,33 +146,40 @@ where
         let headers = Header::response(status, headers);
 
         let mut block = BytesMut::new();
-        let mem_size = qpack::encode_stateless(&mut block, headers)?;
+        let mem_size = qpack::encode_stateless(&mut block, headers).map_err(|_e| {
+            self.handle_connection_error_on_stream(InternalConnectionError {
+                code: Code::H3_INTERNAL_ERROR,
+                message: "Failed to encode headers".to_string(),
+            })
+        })?;
 
-        let max_mem_size = self
-            .inner
-            .conn_state
-            .read("send_response")
-            .peer_config
-            .max_field_section_size;
+        let max_mem_size = self.inner.settings().max_field_section_size;
 
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
         //# An implementation that
         //# has received this parameter SHOULD NOT send an HTTP message header
         //# that exceeds the indicated size, as the peer will likely refuse to
         //# process it.
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4.2
+        //# An HTTP implementation MUST NOT send frames or requests that would be
+        //# invalid based on its current understanding of the peer's settings.
+
         if mem_size > max_mem_size {
-            return Err(Error::header_too_big(mem_size, max_mem_size));
+            return Err(StreamError::HeaderTooBig {
+                actual_size: mem_size,
+                max_size: max_mem_size,
+            });
         }
 
         stream::write(&mut self.inner.stream, Frame::Headers(block.freeze()))
             .await
-            .map_err(|e| self.maybe_conn_err(e))?;
+            .map_err(|e| self.handle_quic_stream_error(e))?;
 
         Ok(())
     }
 
     /// Send some data on the response body.
-    pub async fn send_data(&mut self, buf: B) -> Result<(), Error> {
+    pub async fn send_data(&mut self, buf: B) -> Result<(), StreamError> {
         self.inner.send_data(buf).await
     }
 
@@ -146,19 +192,15 @@ where
 
     /// Send a set of trailers to end the response.
     ///
-    /// Either [`RequestStream::finish`] or
-    /// [`RequestStream::send_trailers`] must be called to finalize a
-    /// request.
-    pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), Error> {
+    /// [`RequestStream::finish`] must be called to finalize a request.
+    pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), StreamError> {
         self.inner.send_trailers(trailers).await
     }
 
     /// End the response without trailers.
     ///
-    /// Either [`RequestStream::finish`] or
-    /// [`RequestStream::send_trailers`] must be called to finalize a
-    /// request.
-    pub async fn finish(&mut self) -> Result<(), Error> {
+    /// [`RequestStream::finish`] must be called to finalize a request.
+    pub async fn finish(&mut self) -> Result<(), StreamError> {
         self.inner.finish().await
     }
 
@@ -205,39 +247,12 @@ where
 
 impl Drop for RequestEnd {
     fn drop(&mut self) {
-        if let Err(e) = self.request_end.send(self.stream_id) {
+        if let Err(_error) = self.request_end.send(self.stream_id) {
+            #[cfg(feature = "tracing")]
             error!(
                 "failed to notify connection of request end: {} {}",
-                self.stream_id, e
+                self.stream_id, _error
             );
-        }
-    }
-}
-
-pin_project! {
-    /// Future for [`Connection::read_datagram`]
-    pub struct ReadDatagram<'a, C, B>
-    where
-            C: quic::Connection<B>,
-            B: Buf,
-        {
-            pub(super) conn: &'a mut Connection<C, B>,
-            pub(super) _marker: PhantomData<B>,
-        }
-}
-
-impl<'a, C, B> Future for ReadDatagram<'a, C, B>
-where
-    C: quic::Connection<B> + RecvDatagramExt,
-    B: Buf,
-{
-    type Output = Result<Option<Datagram<C::Buf>>, Error>;
-
-    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        tracing::trace!("poll: read_datagram");
-        match ready!(self.conn.inner.conn.poll_accept_datagram(cx))? {
-            Some(v) => Poll::Ready(Ok(Some(Datagram::decode(v)?))),
-            None => Poll::Ready(Ok(None)),
         }
     }
 }

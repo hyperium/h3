@@ -22,7 +22,7 @@ impl<T: Buf> BufList<T> {
         self.bufs.push_back(buf);
     }
 
-    pub fn cursor(&self) -> Cursor<T> {
+    pub fn cursor(&self) -> Cursor<'_, T> {
         Cursor {
             buf: self,
             pos_total: 0,

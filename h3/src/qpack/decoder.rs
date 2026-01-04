@@ -1,6 +1,7 @@
 use bytes::{Buf, BufMut};
 use std::{convert::TryInto, fmt, io::Cursor, num::TryFromIntError};
 
+#[cfg(feature = "tracing")]
 use tracing::trace;
 
 use super::{
@@ -25,7 +26,7 @@ use super::{
 use super::{prefix_int, prefix_string};
 
 #[derive(Debug, PartialEq)]
-pub enum Error {
+pub enum DecoderError {
     InvalidInteger(prefix_int::Error),
     InvalidString(prefix_string::Error),
     InvalidIndex(vas::Error),
@@ -39,22 +40,22 @@ pub enum Error {
     BufSize(TryFromIntError),
 }
 
-impl std::error::Error for Error {}
+impl std::error::Error for DecoderError {}
 
-impl std::fmt::Display for Error {
+impl std::fmt::Display for DecoderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::InvalidInteger(e) => write!(f, "invalid integer: {}", e),
-            Error::InvalidString(e) => write!(f, "invalid string: {:?}", e),
-            Error::InvalidIndex(e) => write!(f, "invalid dynamic index: {:?}", e),
-            Error::DynamicTable(e) => write!(f, "dynamic table error: {:?}", e),
-            Error::InvalidStaticIndex(i) => write!(f, "unknown static index: {}", i),
-            Error::UnknownPrefix(p) => write!(f, "unknown instruction code: 0x{}", p),
-            Error::MissingRefs(n) => write!(f, "missing {} refs to decode bloc", n),
-            Error::BadBaseIndex(i) => write!(f, "out of bounds base index: {}", i),
-            Error::UnexpectedEnd => write!(f, "unexpected end"),
-            Error::HeaderTooLong(_) => write!(f, "header too long"),
-            Error::BufSize(_) => write!(f, "number in buffer wrong size"),
+            DecoderError::InvalidInteger(e) => write!(f, "invalid integer: {}", e),
+            DecoderError::InvalidString(e) => write!(f, "invalid string: {:?}", e),
+            DecoderError::InvalidIndex(e) => write!(f, "invalid dynamic index: {:?}", e),
+            DecoderError::DynamicTable(e) => write!(f, "dynamic table error: {:?}", e),
+            DecoderError::InvalidStaticIndex(i) => write!(f, "unknown static index: {}", i),
+            DecoderError::UnknownPrefix(p) => write!(f, "unknown instruction code: 0x{}", p),
+            DecoderError::MissingRefs(n) => write!(f, "missing {} refs to decode bloc", n),
+            DecoderError::BadBaseIndex(i) => write!(f, "out of bounds base index: {}", i),
+            DecoderError::UnexpectedEnd => write!(f, "unexpected end"),
+            DecoderError::HeaderTooLong(_) => write!(f, "header too long"),
+            DecoderError::BufSize(_) => write!(f, "number in buffer wrong size"),
         }
     }
 }
@@ -84,12 +85,12 @@ pub struct Decoder {
 impl Decoder {
     // Decode field lines received on Request of Push stream.
     // https://www.rfc-editor.org/rfc/rfc9204.html#name-field-line-representations
-    pub fn decode_header<T: Buf>(&self, buf: &mut T) -> Result<Decoded, Error> {
+    pub fn decode_header<T: Buf>(&self, buf: &mut T) -> Result<Decoded, DecoderError> {
         let (required_ref, base) = HeaderPrefix::decode(buf)?
             .get(self.table.total_inserted(), self.table.max_mem_size())?;
 
         if required_ref > self.table.total_inserted() {
-            return Err(Error::MissingRefs(required_ref));
+            return Err(DecoderError::MissingRefs(required_ref));
         }
 
         let decoder_table = self.table.decoder(base);
@@ -114,11 +115,13 @@ impl Decoder {
         &mut self,
         read: &mut R,
         write: &mut W,
-    ) -> Result<usize, Error> {
+    ) -> Result<usize, DecoderError> {
         let inserted_on_start = self.table.total_inserted();
 
         while let Some(instruction) = self.parse_instruction(read)? {
+            #[cfg(feature = "tracing")]
             trace!("instruction {:?}", instruction);
+
             match instruction {
                 Instruction::Insert(field) => self.table.put(field)?,
                 Instruction::TableSizeUpdate(size) => {
@@ -135,7 +138,7 @@ impl Decoder {
         Ok(self.table.total_inserted())
     }
 
-    fn parse_instruction<R: Buf>(&self, read: &mut R) -> Result<Option<Instruction>, Error> {
+    fn parse_instruction<R: Buf>(&self, read: &mut R) -> Result<Option<Instruction>, DecoderError> {
         if read.remaining() < 1 {
             return Ok(None);
         }
@@ -143,7 +146,7 @@ impl Decoder {
         let mut buf = Cursor::new(read.chunk());
         let first = buf.chunk()[0];
         let instruction = match EncoderInstruction::decode(first) {
-            EncoderInstruction::Unknown => return Err(Error::UnknownPrefix(first)),
+            EncoderInstruction::Unknown => return Err(DecoderError::UnknownPrefix(first)),
             EncoderInstruction::DynamicTableSizeUpdate => {
                 DynamicTableSizeUpdate::decode(&mut buf)?.map(|x| Instruction::TableSizeUpdate(x.0))
             }
@@ -177,7 +180,7 @@ impl Decoder {
     fn parse_header_field<R: Buf>(
         table: &DynamicTableDecoder,
         buf: &mut R,
-    ) -> Result<HeaderField, Error> {
+    ) -> Result<HeaderField, DecoderError> {
         let first = buf.chunk()[0];
         let field = match HeaderBlockField::decode(first) {
             HeaderBlockField::Indexed => match Indexed::decode(buf)? {
@@ -204,7 +207,7 @@ impl Decoder {
                 let literal = Literal::decode(buf)?;
                 HeaderField::new(literal.name, literal.value)
             }
-            _ => return Err(Error::UnknownPrefix(first)),
+            _ => return Err(DecoderError::UnknownPrefix(first)),
         };
         Ok(field)
     }
@@ -212,25 +215,27 @@ impl Decoder {
 
 // Decode field lines received on Request or Push stream.
 // https://www.rfc-editor.org/rfc/rfc9204.html#name-field-line-representations
-pub fn decode_stateless<T: Buf>(buf: &mut T, max_size: u64) -> Result<Decoded, Error> {
+pub fn decode_stateless<T: Buf>(buf: &mut T, max_size: u64) -> Result<Decoded, DecoderError> {
     let (required_ref, _base) = HeaderPrefix::decode(buf)?.get(0, 0)?;
 
     if required_ref > 0 {
-        return Err(Error::MissingRefs(required_ref));
+        return Err(DecoderError::MissingRefs(required_ref));
     }
 
     let mut mem_size = 0;
     let mut fields = Vec::new();
     while buf.has_remaining() {
         let field = match HeaderBlockField::decode(buf.chunk()[0]) {
-            HeaderBlockField::IndexedWithPostBase => return Err(Error::MissingRefs(0)),
-            HeaderBlockField::LiteralWithPostBaseNameRef => return Err(Error::MissingRefs(0)),
+            HeaderBlockField::IndexedWithPostBase => return Err(DecoderError::MissingRefs(0)),
+            HeaderBlockField::LiteralWithPostBaseNameRef => {
+                return Err(DecoderError::MissingRefs(0))
+            }
             HeaderBlockField::Indexed => match Indexed::decode(buf)? {
                 Indexed::Static(index) => StaticTable::get(index)?.clone(),
-                Indexed::Dynamic(_) => return Err(Error::MissingRefs(0)),
+                Indexed::Dynamic(_) => return Err(DecoderError::MissingRefs(0)),
             },
             HeaderBlockField::LiteralWithNameRef => match LiteralWithNameRef::decode(buf)? {
-                LiteralWithNameRef::Dynamic { .. } => return Err(Error::MissingRefs(0)),
+                LiteralWithNameRef::Dynamic { .. } => return Err(DecoderError::MissingRefs(0)),
                 LiteralWithNameRef::Static { index, value } => {
                     StaticTable::get(index)?.with_value(value)
                 }
@@ -239,12 +244,12 @@ pub fn decode_stateless<T: Buf>(buf: &mut T, max_size: u64) -> Result<Decoded, E
                 let literal = Literal::decode(buf)?;
                 HeaderField::new(literal.name, literal.value)
             }
-            _ => return Err(Error::UnknownPrefix(buf.chunk()[0])),
+            _ => return Err(DecoderError::UnknownPrefix(buf.chunk()[0])),
         };
         mem_size += field.mem_size() as u64;
         // Cancel decoding if the header is considered too big
         if mem_size > max_size {
-            return Err(Error::HeaderTooLong(mem_size));
+            return Err(DecoderError::HeaderTooLong(mem_size));
         }
         fields.push(field);
     }
@@ -280,58 +285,58 @@ impl fmt::Debug for Instruction {
     }
 }
 
-impl From<prefix_int::Error> for Error {
+impl From<prefix_int::Error> for DecoderError {
     fn from(e: prefix_int::Error) -> Self {
         match e {
-            prefix_int::Error::UnexpectedEnd => Error::UnexpectedEnd,
-            e => Error::InvalidInteger(e),
+            prefix_int::Error::UnexpectedEnd => DecoderError::UnexpectedEnd,
+            e => DecoderError::InvalidInteger(e),
         }
     }
 }
 
-impl From<prefix_string::Error> for Error {
+impl From<prefix_string::Error> for DecoderError {
     fn from(e: prefix_string::Error) -> Self {
         match e {
-            prefix_string::Error::UnexpectedEnd => Error::UnexpectedEnd,
-            e => Error::InvalidString(e),
+            prefix_string::Error::UnexpectedEnd => DecoderError::UnexpectedEnd,
+            e => DecoderError::InvalidString(e),
         }
     }
 }
 
-impl From<vas::Error> for Error {
+impl From<vas::Error> for DecoderError {
     fn from(e: vas::Error) -> Self {
-        Error::InvalidIndex(e)
+        DecoderError::InvalidIndex(e)
     }
 }
 
-impl From<StaticError> for Error {
+impl From<StaticError> for DecoderError {
     fn from(e: StaticError) -> Self {
         match e {
-            StaticError::Unknown(i) => Error::InvalidStaticIndex(i),
+            StaticError::Unknown(i) => DecoderError::InvalidStaticIndex(i),
         }
     }
 }
 
-impl From<DynamicTableError> for Error {
+impl From<DynamicTableError> for DecoderError {
     fn from(e: DynamicTableError) -> Self {
-        Error::DynamicTable(e)
+        DecoderError::DynamicTable(e)
     }
 }
 
-impl From<ParseError> for Error {
+impl From<ParseError> for DecoderError {
     fn from(e: ParseError) -> Self {
         match e {
-            ParseError::Integer(x) => Error::InvalidInteger(x),
-            ParseError::String(x) => Error::InvalidString(x),
-            ParseError::InvalidPrefix(p) => Error::UnknownPrefix(p),
-            ParseError::InvalidBase(b) => Error::BadBaseIndex(b),
+            ParseError::Integer(x) => DecoderError::InvalidInteger(x),
+            ParseError::String(x) => DecoderError::InvalidString(x),
+            ParseError::InvalidPrefix(p) => DecoderError::UnknownPrefix(p),
+            ParseError::InvalidBase(b) => DecoderError::BadBaseIndex(b),
         }
     }
 }
 
-impl From<TryFromIntError> for Error {
+impl From<TryFromIntError> for DecoderError {
     fn from(error: TryFromIntError) -> Self {
-        Error::BufSize(error)
+        DecoderError::BufSize(error)
     }
 }
 
@@ -351,7 +356,7 @@ mod tests {
             crate::proto::headers::Header::trailer(trailers),
         );
         let result = decode_stateless(&mut buf, 2);
-        assert_eq!(result, Err(Error::HeaderTooLong(44)));
+        assert_eq!(result, Err(DecoderError::HeaderTooLong(44)));
     }
 
     /**
@@ -394,7 +399,7 @@ mod tests {
         let mut enc = Cursor::new(&buf);
         let mut decoder = Decoder::from(build_table_with_size(0));
         let res = decoder.on_encoder_recv(&mut enc, &mut vec![]);
-        assert_eq!(res, Err(Error::InvalidStaticIndex(3000)));
+        assert_eq!(res, Err(DecoderError::InvalidStaticIndex(3000)));
     }
 
     /**
@@ -413,9 +418,9 @@ mod tests {
         let res = decoder.on_encoder_recv(&mut enc, &mut dec);
         assert_eq!(
             res,
-            Err(Error::DynamicTable(DynamicTableError::BadRelativeIndex(
-                3000
-            )))
+            Err(DecoderError::DynamicTable(
+                DynamicTableError::BadRelativeIndex(3000)
+            ))
         );
 
         assert!(dec.is_empty());
@@ -562,7 +567,10 @@ mod tests {
         HeaderPrefix::new(8, 8, 10, TABLE_SIZE).encode(&mut buf);
 
         let mut read = Cursor::new(&buf);
-        assert_eq!(decoder.decode_header(&mut read), Err(Error::MissingRefs(8)));
+        assert_eq!(
+            decoder.decode_header(&mut read),
+            Err(DecoderError::MissingRefs(8))
+        );
     }
 
     fn field(n: usize) -> HeaderField {

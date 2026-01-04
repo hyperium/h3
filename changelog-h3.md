@@ -1,3 +1,30 @@
+### v0.0.8 (2025-05-06)
+* fix integer overflow when parsing qpack prefixed integers
+* introduce new user facing error types 
+* introduce new quic traits facing error types
+* `server::Connection::accept` now returns a  `RequestResolver` instead of direct resolving the request to avoid head of line blocking
+* h3-datagram traits cleanup
+* some fixes in error handling 
+
+### v0.0.7 (2025-03-13)
+* Expose poll_recv_trailers APIs
+* Avoiding extra allocation for shared error
+* Added .id() for client RequestStream
+* move datagram to separate crate
+* Client ability to stop streams with error code
+* Add extended CONNECT setting for client conn
+
+### v0.0.6 (2024-07-01)
+* Consolidate quic trait redundancy
+* start qpack streams 
+* send grease stream in the background
+* new tracing feature
+
+### v0.0.5 (2024-05-20)
+* add `poll_recv_data()` for server
+* use 2021 edition
+* some cleanups
+
 ### v0.0.4 (2024-01-24)
 
 * Update to `http` v1.0

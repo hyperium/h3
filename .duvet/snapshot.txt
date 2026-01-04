@@ -1,0 +1,867 @@
+SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
+  SECTION: [Discovering an HTTP/3 Endpoint](#section-3.1)
+    TEXT[!MUST,exception]: Upon receiving a
+    TEXT[!MUST,exception]:    server certificate in the TLS handshake, the client MUST verify that
+    TEXT[!MUST,exception]:    the certificate is an acceptable match for the URI's origin server
+    TEXT[!MUST,exception]:    using the process described in Section 4.3.4 of [HTTP].
+    TEXT[!MUST,exception]: If the
+    TEXT[!MUST,exception]:    certificate cannot be verified with respect to the URI's origin
+    TEXT[!MUST,exception]:    server, the client MUST NOT consider the server authoritative for
+    TEXT[!MUST,exception]:    that origin.
+    TEXT[!MAY,exception]:    A client MAY attempt access to a resource with an "https" URI by
+    TEXT[!MAY,exception]:    resolving the host identifier to an IP address, establishing a QUIC
+    TEXT[!MAY,exception]:    connection to that address on the indicated port (including
+    TEXT[!MAY,exception]:    validation of the server certificate as described above), and sending
+    TEXT[!MAY,exception]:    an HTTP/3 request message targeting the URI to the server over that
+    TEXT[!MAY,exception]:    secured connection.
+    TEXT[!SHOULD,exception]:    Connectivity problems (e.g., blocking UDP) can result in a failure to
+    TEXT[!SHOULD,exception]:    establish a QUIC connection; clients SHOULD attempt to use TCP-based
+    TEXT[!SHOULD,exception]:    versions of HTTP in this case.
+    TEXT[!MAY,exception]:    Servers MAY serve HTTP/3 on any UDP port; an alternative service
+    TEXT[!MAY,exception]:    advertisement always includes an explicit port, and URIs contain
+    TEXT[!MAY,exception]:    either an explicit port or a default port associated with the scheme.
+
+  SECTION: [HTTP Alternative Services](#section-3.1.1)
+    TEXT[!MAY,exception]:    On receipt of an Alt-Svc record indicating HTTP/3 support, a client
+    TEXT[!MAY,exception]:    MAY attempt to establish a QUIC connection to the indicated host and
+    TEXT[!MAY,exception]:    port; if this connection is successful, the client can send HTTP
+    TEXT[!MAY,exception]:    requests using the mapping described in this document.
+
+  SECTION: [Other Schemes](#section-3.1.2)
+    TEXT[!MUST,exception]:    Prior to making requests for an origin whose scheme is not "https",
+    TEXT[!MUST,exception]:    the client MUST ensure the server is willing to serve that scheme.
+
+  SECTION: [Connection Establishment](#section-3.2)
+    TEXT[!MAY,exception]: The use
+    TEXT[!MAY,exception]:    of other QUIC transport versions with HTTP/3 MAY be defined by future
+    TEXT[!MAY,exception]:    specifications.
+    TEXT[!MUST,exception]: HTTP/3 clients MUST support a mechanism to indicate the
+    TEXT[!MUST,exception]:    target host to the server during the TLS handshake.
+    TEXT[!MUST,exception]: If the server is
+    TEXT[!MUST,exception]:    identified by a domain name ([DNS-TERMS]), clients MUST send the
+    TEXT[!MUST,exception]:    Server Name Indication (SNI; [RFC6066]) TLS extension unless an
+    TEXT[!MUST,exception]:    alternative mechanism to indicate the target host is used.
+    TEXT[exception]:    During connection establishment, HTTP/3 support is indicated by
+    TEXT[exception]:    selecting the ALPN token "h3" in the TLS handshake.
+    TEXT[!MAY,exception]: Support for
+    TEXT[!MAY,exception]:    other application-layer protocols MAY be offered in the same
+    TEXT[!MAY,exception]:    handshake.
+    TEXT[!MUST,implementation,test]: After the QUIC connection is
+    TEXT[!MUST,implementation,test]:    established, a SETTINGS frame MUST be sent by each endpoint as the
+    TEXT[!MUST,implementation,test]:    initial frame of their respective HTTP control stream.
+
+  SECTION: [Connection Reuse](#section-3.3)
+    TEXT[!MAY,exception]:    Once a connection to a server endpoint exists, this connection MAY be
+    TEXT[!MAY,exception]:    reused for requests with multiple different URI authority components.
+    TEXT[!MUST,exception]:    To use an existing connection for a new origin, clients MUST validate
+    TEXT[!MUST,exception]:    the certificate presented by the server for the new origin server
+    TEXT[!MUST,exception]:    using the process described in Section 4.3.4 of [HTTP].
+    TEXT[!MUST,exception]:    If the certificate is not acceptable with regard to the new origin
+    TEXT[!MUST,exception]:    for any reason, the connection MUST NOT be reused and a new
+    TEXT[!MUST,exception]:    connection SHOULD be established for the new origin.
+    TEXT[!SHOULD,exception]: If the reason
+    TEXT[!SHOULD,exception]:    the certificate cannot be verified might apply to other origins
+    TEXT[!SHOULD,exception]:    already associated with the connection, the client SHOULD revalidate
+    TEXT[!SHOULD,exception]:    the server certificate for those origins.
+    TEXT[!SHOULD,implication]:    Clients SHOULD NOT open more than one HTTP/3 connection to a given IP
+    TEXT[!SHOULD,implication]:    address and UDP port, where the IP address and port might be derived
+    TEXT[!SHOULD,implication]:    from a URI, a selected alternative service ([ALTSVC]), a configured
+    TEXT[!SHOULD,implication]:    proxy, or name resolution of any of these.
+    TEXT[!SHOULD,exception]: A client MAY open
+    TEXT[!SHOULD,exception]:    multiple HTTP/3 connections to the same IP address and UDP port using
+    TEXT[!SHOULD,exception]:    different transport or TLS configurations but SHOULD avoid creating
+    TEXT[!SHOULD,exception]:    multiple connections with the same configuration.
+    TEXT[!SHOULD,implementation]: When either endpoint chooses to close the HTTP/3
+    TEXT[!SHOULD,implementation]:    connection, the terminating endpoint SHOULD first send a GOAWAY frame
+    TEXT[!SHOULD,implementation]:    (Section 5.2) so that both endpoints can reliably determine whether
+    TEXT[!SHOULD,implementation]:    previously sent frames have been processed and gracefully complete or
+    TEXT[!SHOULD,implementation]:    terminate any necessary remaining tasks.
+
+  SECTION: [HTTP Message Framing](#section-4.1)
+    TEXT[!MUST,implication]:    client MUST send only a single request on a given stream.
+    TEXT[!MUST,todo]:    On a given stream, receipt of multiple requests or receipt of an
+    TEXT[!MUST,todo]:    additional HTTP response following a final HTTP response MUST be
+    TEXT[!MUST,todo]:    treated as malformed.
+    TEXT[!MUST,implementation,test]:    Receipt of an invalid sequence of frames MUST be treated as a
+    TEXT[!MUST,implementation,test]:    connection error of type H3_FRAME_UNEXPECTED.
+    TEXT[!MAY,todo]:    A server MAY send one or more PUSH_PROMISE frames before, after, or
+    TEXT[!MAY,todo]:    interleaved with the frames of a response message.
+    TEXT[!MUST,todo]: PUSH_PROMISE frames are not permitted on push streams;
+    TEXT[!MUST,todo]:    a pushed response that includes PUSH_PROMISE frames MUST be treated
+    TEXT[!MUST,todo]:    as a connection error of type H3_FRAME_UNEXPECTED.
+    TEXT[!MAY,todo]:    Frames of unknown types (Section 9), including reserved frames
+    TEXT[!MAY,todo]:    (Section 7.2.8) MAY be sent on a request or push stream before,
+    TEXT[!MAY,todo]:    after, or interleaved with other frames described in this section.
+    TEXT[!MUST,todo]:    Transfer codings (see Section 7 of [HTTP/1.1]) are not defined for
+    TEXT[!MUST,todo]:    HTTP/3; the Transfer-Encoding header field MUST NOT be used.
+    TEXT[!MAY,todo]:    A response MAY consist of multiple messages when and only when one or
+    TEXT[!MAY,todo]:    more interim responses (1xx; see Section 15.2 of [HTTP]) precede a
+    TEXT[!MAY,todo]:    final response to the same request.
+    TEXT[!MUST,exception]: After sending a request, a client MUST
+    TEXT[!MUST,exception]:    close the stream for sending.
+    TEXT[!MUST,todo]: Unless using the CONNECT method (see
+    TEXT[!MUST,todo]:    Section 4.4), clients MUST NOT make stream closure dependent on
+    TEXT[!MUST,todo]:    receiving a response to their request.
+    TEXT[!MUST,exception]: After sending a final
+    TEXT[!MUST,exception]:    response, the server MUST close the stream for sending.
+    TEXT[!SHOULD,exception]: Because some messages are large or unbounded, endpoints
+    TEXT[!SHOULD,exception]:    SHOULD begin processing partial HTTP messages once enough of the
+    TEXT[!SHOULD,exception]:    message has been received to make progress.
+    TEXT[!SHOULD,implementation]: If a client-initiated
+    TEXT[!SHOULD,implementation]:    stream terminates without enough of the HTTP message to provide a
+    TEXT[!SHOULD,implementation]:    complete response, the server SHOULD abort its response stream with
+    TEXT[!SHOULD,implementation]:    the error code H3_REQUEST_INCOMPLETE.
+    TEXT[!MAY,exception]: When the server does
+    TEXT[!MAY,exception]:    not need to receive the remainder of the request, it MAY abort
+    TEXT[!MAY,exception]:    reading the request stream, send a complete response, and cleanly
+    TEXT[!MAY,exception]:    close the sending part of the stream.
+    TEXT[!SHOULD,exception]: The error code H3_NO_ERROR
+    TEXT[!SHOULD,exception]:    SHOULD be used when requesting that the client stop sending on the
+    TEXT[!SHOULD,exception]:    request stream.
+    TEXT[!MUST,exception]: Clients MUST NOT discard complete responses as a
+    TEXT[!MUST,exception]:    result of having their request terminated abruptly, though clients
+    TEXT[!MUST,exception]:    can always discard responses at their discretion for other reasons.
+    TEXT[!SHOULD,exception]:    If the server sends a partial or complete response but does not abort
+    TEXT[!SHOULD,exception]:    reading the request, clients SHOULD continue sending the content of
+    TEXT[!SHOULD,exception]:    the request and close the stream normally.
+
+  SECTION: [Request Cancellation and Rejection](#section-4.1.1)
+    TEXT[!MAY,exception]:    Once a request stream has been opened, the request MAY be cancelled
+    TEXT[!MAY,exception]:    by either endpoint.
+    TEXT[!SHOULD,exception]: When possible, it is RECOMMENDED that servers
+    TEXT[!SHOULD,exception]:    send an HTTP response with an appropriate status code rather than
+    TEXT[!SHOULD,exception]:    cancelling a request it has already begun processing.
+    TEXT[!SHOULD,todo]:    Implementations SHOULD cancel requests by abruptly terminating any
+    TEXT[!SHOULD,todo]:    directions of a stream that are still open.
+    TEXT[todo]:   To do so, an
+    TEXT[todo]:    implementation resets the sending parts of streams and aborts reading
+    TEXT[todo]:    on the receiving parts of streams; see Section 2.4 of
+    TEXT[todo]:    [QUIC-TRANSPORT].
+    TEXT[exception]:    When the server cancels a request without performing any application
+    TEXT[exception]:    processing, the request is considered "rejected".
+    TEXT[!SHOULD,exception]: The server SHOULD
+    TEXT[!SHOULD,exception]:    abort its response stream with the error code H3_REQUEST_REJECTED.
+    TEXT[!MUST,exception]:    Servers MUST NOT use the H3_REQUEST_REJECTED error code for requests
+    TEXT[!MUST,exception]:    that were partially or fully processed.
+    TEXT[!SHOULD,exception]: When a server abandons a
+    TEXT[!SHOULD,exception]:    response after partial processing, it SHOULD abort its response
+    TEXT[!SHOULD,exception]:    stream with the error code H3_REQUEST_CANCELLED.
+    TEXT[!SHOULD,exception]:    Client SHOULD use the error code H3_REQUEST_CANCELLED to cancel
+    TEXT[!SHOULD,exception]:    requests.
+    TEXT[!MAY,exception]: Upon receipt of this error code, a server MAY abruptly
+    TEXT[!MAY,exception]:    terminate the response using the error code H3_REQUEST_REJECTED if no
+    TEXT[!MAY,exception]:    processing was performed.
+    TEXT[!MUST,todo]: Clients MUST NOT use the
+    TEXT[!MUST,todo]:    H3_REQUEST_REJECTED error code, except when a server has requested
+    TEXT[!MUST,todo]:    closure of the request stream with this error code.
+    TEXT[!MAY,exception]:    If a stream is cancelled after receiving a complete response, the
+    TEXT[!MAY,exception]:    client MAY ignore the cancellation and use the response.
+    TEXT[!SHOULD,todo]: However, if
+    TEXT[!SHOULD,todo]:    a stream is cancelled after receiving a partial response, the
+    TEXT[!SHOULD,todo]:    response SHOULD NOT be used.
+    TEXT[!SHOULD,exception]: Only idempotent actions such as GET,
+    TEXT[!SHOULD,exception]:    PUT, or DELETE can be safely retried; a client SHOULD NOT
+    TEXT[!SHOULD,exception]:    automatically retry a request with a non-idempotent method unless it
+    TEXT[!SHOULD,exception]:    has some means to know that the request semantics are idempotent
+    TEXT[!SHOULD,exception]:    independent of the method or some means to detect that the original
+    TEXT[!SHOULD,exception]:    request was never applied.
+
+  SECTION: [Malformed Requests and Responses](#section-4.1.2)
+    TEXT[!MUST,exception]:    Intermediaries that process HTTP requests or responses (i.e., any
+    TEXT[!MUST,exception]:    intermediary not acting as a tunnel) MUST NOT forward a malformed
+    TEXT[!MUST,exception]:    request or response.
+    TEXT[!MUST,implementation,todo]: Malformed requests or responses that are
+    TEXT[!MUST,implementation,todo]:    detected MUST be treated as a stream error of type H3_MESSAGE_ERROR.
+    TEXT[!MAY,todo]:    For malformed requests, a server MAY send an HTTP response indicating
+    TEXT[!MAY,todo]:    the error prior to closing or resetting the stream.
+    TEXT[!MUST,todo]: Clients MUST NOT
+    TEXT[!MUST,todo]:    accept a malformed response.
+
+  SECTION: [HTTP Fields](#section-4.2)
+    TEXT[!MUST,todo]: Characters in field names MUST be
+    TEXT[!MUST,todo]:    converted to lowercase prior to their encoding.
+    TEXT[!MUST,implication]: A request or
+    TEXT[!MUST,implication]:    response containing uppercase characters in field names MUST be
+    TEXT[!MUST,implication]:    treated as malformed.
+    TEXT[!MUST,todo]: An endpoint MUST NOT generate
+    TEXT[!MUST,todo]:    an HTTP/3 field section containing connection-specific fields; any
+    TEXT[!MUST,todo]:    message containing connection-specific fields MUST be treated as
+    TEXT[!MUST,todo]:    malformed.
+    TEXT[!MUST,todo]:    The only exception to this is the TE header field, which MAY be
+    TEXT[!MUST,todo]:    present in an HTTP/3 request header; when it is, it MUST NOT contain
+    TEXT[!MUST,todo]:    any value other than "trailers".
+    TEXT[!MUST,exception]:    An intermediary transforming an HTTP/1.x message to HTTP/3 MUST
+    TEXT[!MUST,exception]:    remove connection-specific header fields as discussed in
+    TEXT[!MUST,exception]:    Section 7.6.1 of [HTTP], or their messages will be treated by other
+    TEXT[!MUST,exception]:    HTTP/3 endpoints as malformed.
+
+  SECTION: [Field Compression](#section-4.2.1)
+    TEXT[!MAY,todo]:    To allow for better compression efficiency, the Cookie header field
+    TEXT[!MAY,todo]:    ([COOKIES]) MAY be split into separate field lines, each with one or
+    TEXT[!MAY,todo]:    more cookie-pairs, before compression.
+    TEXT[!MUST,todo]: If a decompressed field
+    TEXT[!MUST,todo]:    section contains multiple cookie field lines, these MUST be
+    TEXT[!MUST,todo]:    concatenated into a single byte string using the two-byte delimiter
+    TEXT[!MUST,todo]:    of "; " (ASCII 0x3b, 0x20) before being passed into a context other
+    TEXT[!MUST,todo]:    than HTTP/2 or HTTP/3, such as an HTTP/1.1 connection, or a generic
+    TEXT[!MUST,todo]:    HTTP server application.
+
+  SECTION: [Header Size Constraints](#section-4.2.2)
+    TEXT[!MAY,implementation,test]:    An HTTP/3 implementation MAY impose a limit on the maximum size of
+    TEXT[!MAY,implementation,test]:    the message header it will accept on an individual HTTP message.
+    TEXT[!SHOULD,implementation,test]: An implementation that
+    TEXT[!SHOULD,implementation,test]:    has received this parameter SHOULD NOT send an HTTP message header
+    TEXT[!SHOULD,implementation,test]:    that exceeds the indicated size, as the peer will likely refuse to
+    TEXT[!SHOULD,implementation,test]:    process it.
+
+  SECTION: [HTTP Control Data](#section-4.3)
+    TEXT[!MUST,implication]: Endpoints MUST NOT
+    TEXT[!MUST,implication]:    generate pseudo-header fields other than those defined in this
+    TEXT[!MUST,implication]:    document.
+    TEXT[!MUST,implication]: Pseudo-header fields defined for requests MUST NOT appear
+    TEXT[!MUST,implication]:    in responses; pseudo-header fields defined for responses MUST NOT
+    TEXT[!MUST,implication]:    appear in requests.
+    TEXT[!MUST,implementation]: Pseudo-header fields MUST NOT appear in trailer
+    TEXT[!MUST,implementation]:    sections.
+    TEXT[!MUST,todo]: Endpoints MUST treat a request or response that contains
+    TEXT[!MUST,todo]:    undefined or invalid pseudo-header fields as malformed.
+    TEXT[!MUST,implementation]:    All pseudo-header fields MUST appear in the header section before
+    TEXT[!MUST,implementation]:    regular header fields.
+    TEXT[!MUST,todo]: Any request or response that contains a
+    TEXT[!MUST,todo]:    pseudo-header field that appears in a header section after a regular
+    TEXT[!MUST,todo]:    header field MUST be treated as malformed.
+
+  SECTION: [Request Pseudo-Header Fields](#section-4.3.1)
+    TEXT[!MUST,todo]: The authority MUST NOT include the
+    TEXT[!MUST,todo]:       deprecated userinfo subcomponent for URIs of scheme "http" or
+    TEXT[!MUST,todo]:       "https".
+    TEXT[!MUST,exception]:       To ensure that the HTTP/1.1 request line can be reproduced
+    TEXT[!MUST,exception]:       accurately, this pseudo-header field MUST be omitted when
+    TEXT[!MUST,exception]:       translating from an HTTP/1.1 request that has a request target in
+    TEXT[!MUST,exception]:       a method-specific form; see Section 7.1 of [HTTP].
+    TEXT[!SHOULD,todo]: Clients that
+    TEXT[!SHOULD,todo]:       generate HTTP/3 requests directly SHOULD use the :authority
+    TEXT[!SHOULD,todo]:       pseudo-header field instead of the Host header field.
+    TEXT[!MUST,exception]: An
+    TEXT[!MUST,exception]:       intermediary that converts an HTTP/3 request to HTTP/1.1 MUST
+    TEXT[!MUST,exception]:       create a Host field if one is not present in a request by copying
+    TEXT[!MUST,exception]:       the value of the :authority pseudo-header field.
+    TEXT[!MUST,implication]:       This pseudo-header field MUST NOT be empty for "http" or "https"
+    TEXT[!MUST,implication]:       URIs; "http" or "https" URIs that do not contain a path component
+    TEXT[!MUST,implication]:       MUST include a value of / (ASCII 0x2f).
+    TEXT[!MUST,implication]:    All HTTP/3 requests MUST include exactly one value for the :method,
+    TEXT[!MUST,implication]:    :scheme, and :path pseudo-header fields, unless the request is a
+    TEXT[!MUST,implication]:    CONNECT request; see Section 4.4.
+    TEXT[!MUST,implementation,test]:    If the :scheme pseudo-header field identifies a scheme that has a
+    TEXT[!MUST,implementation,test]:    mandatory authority component (including "http" and "https"), the
+    TEXT[!MUST,implementation,test]:    request MUST contain either an :authority pseudo-header field or a
+    TEXT[!MUST,implementation,test]:    Host header field.
+    TEXT[!MUST,implementation,test]: If these fields are present, they MUST NOT be
+    TEXT[!MUST,implementation,test]:    empty.
+    TEXT[!MUST,implementation,test]: If both fields are present, they MUST contain the same value.
+    TEXT[!MUST,todo]:    If the scheme does not have a mandatory authority component and none
+    TEXT[!MUST,todo]:    is provided in the request target, the request MUST NOT contain the
+    TEXT[!MUST,todo]:    :authority pseudo-header or Host header fields.
+
+  SECTION: [Response Pseudo-Header Fields](#section-4.3.2)
+    TEXT[implication]:    For responses, a single ":status" pseudo-header field is defined that
+    TEXT[implication]:    carries the HTTP status code; see Section 15 of [HTTP].
+    TEXT[!MUST,implication]: This pseudo-
+    TEXT[!MUST,implication]:    header field MUST be included in all responses; otherwise, the
+    TEXT[!MUST,implication]:    response is malformed (see Section 4.1.2).
+
+  SECTION: [The CONNECT Method](#section-4.4)
+    TEXT[!MUST,todo]:    A CONNECT request MUST be constructed as follows:
+    TEXT[todo]:    *  The :method pseudo-header field is set to "CONNECT"
+    TEXT[todo]:    *  The :scheme and :path pseudo-header fields are omitted
+    TEXT[todo]:    *  The :authority pseudo-header field contains the host and port to
+    TEXT[todo]:       connect to (equivalent to the authority-form of the request-target
+    TEXT[todo]:       of CONNECT requests; see Section 7.1 of [HTTP]).
+    TEXT[todo]:    Once the CONNECT method has completed, only DATA frames are permitted
+    TEXT[todo]:    to be sent on the stream.
+    TEXT[!MAY,todo]: Extension frames MAY be used if
+    TEXT[!MAY,todo]:    specifically permitted by the definition of the extension.
+    TEXT[!MUST,todo]: Receipt
+    TEXT[!MUST,todo]:    of any other known frame type MUST be treated as a connection error
+    TEXT[!MUST,todo]:    of type H3_FRAME_UNEXPECTED.
+    TEXT[!SHOULD,exception,todo]: TCP connections that remain half closed in a single
+    TEXT[!SHOULD,exception,todo]:    direction are not invalid, but are often handled poorly by servers,
+    TEXT[!SHOULD,exception,todo]:    so clients SHOULD NOT close a stream for sending while they still
+    TEXT[!SHOULD,exception,todo]:    expect to receive data from the target of the CONNECT.
+    TEXT[!MUST,todo]:    Correspondingly, if a proxy detects an error with the stream or the
+    TEXT[!MUST,todo]:    QUIC connection, it MUST close the TCP connection.
+    TEXT[!MUST,todo]: If the proxy
+    TEXT[!MUST,todo]:    detects that the client has reset the stream or aborted reading from
+    TEXT[!MUST,todo]:    the stream, it MUST close the TCP connection.
+    TEXT[!SHOULD,todo]: If the stream is reset
+    TEXT[!SHOULD,todo]:    or reading is aborted by the client, a proxy SHOULD perform the same
+    TEXT[!SHOULD,todo]:    operation on the other direction in order to ensure that both
+    TEXT[!SHOULD,todo]:    directions of the stream are cancelled.
+    TEXT[!SHOULD,exception]: In all these cases, if the
+    TEXT[!SHOULD,exception]:    underlying TCP implementation permits it, the proxy SHOULD send a TCP
+    TEXT[!SHOULD,exception]:    segment with the RST bit set.
+    TEXT[!SHOULD,todo]:    Since CONNECT creates a tunnel to an arbitrary server, proxies that
+    TEXT[!SHOULD,todo]:    support CONNECT SHOULD restrict its use to a set of known ports or a
+    TEXT[!SHOULD,todo]:    list of safe request targets; see Section 9.3.6 of [HTTP] for more
+    TEXT[!SHOULD,todo]:    details.
+
+  SECTION: [Server Push](#section-4.6)
+    TEXT[!SHOULD,todo]: A server SHOULD use push IDs sequentially, beginning from
+    TEXT[!SHOULD,todo]:    zero.
+    TEXT[!MUST,todo]: A client MUST treat receipt of a push stream as a connection
+    TEXT[!MUST,todo]:    error of type H3_ID_ERROR when no MAX_PUSH_ID frame has been sent or
+    TEXT[!MUST,todo]:    when the stream references a push ID that is greater than the maximum
+    TEXT[!MUST,todo]:    push ID.
+    TEXT[!MUST,todo]: When the
+    TEXT[!MUST,todo]:    same push ID is promised on multiple request streams, the
+    TEXT[!MUST,todo]:    decompressed request field sections MUST contain the same fields in
+    TEXT[!MUST,todo]:    the same order, and both the name and the value in each field MUST be
+    TEXT[!MUST,todo]:    identical.
+    TEXT[todo]:    Not all requests can be pushed.
+    TEXT[!MAY,todo]: A server MAY push requests that have
+    TEXT[!MAY,todo]:    the following properties:
+    TEXT[todo]:    *  cacheable; see Section 9.2.3 of [HTTP]
+    TEXT[todo]:    *  safe; see Section 9.2.1 of [HTTP]
+    TEXT[todo]:    *  does not include request content or a trailer section
+    TEXT[!MUST,todo]:    The server MUST include a value in the :authority pseudo-header field
+    TEXT[!MUST,todo]:    for which the server is authoritative.
+    TEXT[!MUST,exception]: If the client has not yet
+    TEXT[!MUST,exception]:    validated the connection for the origin indicated by the pushed
+    TEXT[!MUST,exception]:    request, it MUST perform the same verification process it would do
+    TEXT[!MUST,exception]:    before sending a request for that origin on the connection; see
+    TEXT[!MUST,exception]:    Section 3.3.
+    TEXT[!MUST,exception]: If this verification fails, the client MUST NOT
+    TEXT[!MUST,exception]:    consider the server authoritative for that origin.
+    TEXT[!SHOULD,todo]:    Clients SHOULD send a CANCEL_PUSH frame upon receipt of a
+    TEXT[!SHOULD,todo]:    PUSH_PROMISE frame carrying a request that is not cacheable, is not
+    TEXT[!SHOULD,todo]:    known to be safe, that indicates the presence of request content, or
+    TEXT[!SHOULD,todo]:    for which it does not consider the server authoritative.
+    TEXT[!MUST,todo]: Any
+    TEXT[!MUST,todo]:    corresponding responses MUST NOT be used or cached.
+    TEXT[!MAY,exception]: These
+    TEXT[!MAY,exception]:    associations do not affect the operation of the protocol, but they
+    TEXT[!MAY,exception]:    MAY be considered by user agents when deciding how to use pushed
+    TEXT[!MAY,exception]:    resources.
+    TEXT[!SHOULD,todo]: The server SHOULD send PUSH_PROMISE frames
+    TEXT[!SHOULD,todo]:    prior to sending HEADERS or DATA frames that reference the promised
+    TEXT[!SHOULD,todo]:    responses.
+    TEXT[todo]:   This reduces the chance that a client requests a resource
+    TEXT[todo]:    that will be pushed by the server.
+    TEXT[!SHOULD,todo]: Clients SHOULD abort reading and discard data
+    TEXT[!SHOULD,todo]:    already read from push streams if no corresponding PUSH_PROMISE frame
+    TEXT[!SHOULD,todo]:    is processed in a reasonable amount of time.
+    TEXT[!MUST,exception]:    Pushed responses that are not cacheable MUST NOT be stored by any
+    TEXT[!MUST,exception]:    HTTP cache.
+    TEXT[!MAY,exception]: They MAY be made available to the application
+    TEXT[!MAY,exception]:    separately.
+
+  SECTION: [Idle Connections](#section-5.1)
+    TEXT[!SHOULD,todo]: HTTP/3 implementations will need to open a new HTTP/3
+    TEXT[!SHOULD,todo]:    connection for new requests if the existing connection has been idle
+    TEXT[!SHOULD,todo]:    for longer than the idle timeout negotiated during the QUIC
+    TEXT[!SHOULD,todo]:    handshake, and they SHOULD do so if approaching the idle timeout; see
+    TEXT[!SHOULD,todo]:    Section 10.1 of [QUIC-TRANSPORT].
+    TEXT[!MAY,exception]: A gateway MAY
+    TEXT[!MAY,exception]:    maintain connections in anticipation of need rather than incur the
+    TEXT[!MAY,exception]:    latency cost of connection establishment to servers.
+    TEXT[!SHOULD,todo]: Servers SHOULD
+    TEXT[!SHOULD,todo]:    NOT actively keep connections open.
+
+  SECTION: [Connection Shutdown](#section-5.2)
+    TEXT[exception]: The server sends a client-
+    TEXT[exception]:    initiated bidirectional stream ID; the client sends a push ID.
+    TEXT[exception]:    Requests or pushes with the indicated identifier or greater are
+    TEXT[exception]:    rejected (Section 4.1.1) by the sender of the GOAWAY.
+    TEXT[!MAY,exception]: This
+    TEXT[!MAY,exception]:    identifier MAY be zero if no requests or pushes were processed.
+    TEXT[!SHOULD,todo]: Upon sending a GOAWAY frame, the endpoint
+    TEXT[!SHOULD,todo]:    SHOULD explicitly cancel (see Sections 4.1.1 and 7.2.3) any requests
+    TEXT[!SHOULD,todo]:    or pushes that have identifiers greater than or equal to the one
+    TEXT[!SHOULD,todo]:    indicated, in order to clean up transport state for the affected
+    TEXT[!SHOULD,todo]:    streams.
+    TEXT[!SHOULD,todo]: The endpoint SHOULD continue to do so as more requests or
+    TEXT[!SHOULD,todo]:    pushes arrive.
+    TEXT[!MUST,todo]:    Endpoints MUST NOT initiate new requests or promise new pushes on the
+    TEXT[!MUST,todo]:    connection after receipt of a GOAWAY frame from the peer.
+    TEXT[!MAY,exception]: Clients
+    TEXT[!MAY,exception]:    MAY establish a new connection to send additional requests.
+    TEXT[!MAY,todo]:       Servers MAY reject individual requests on streams below the
+    TEXT[!MAY,todo]:       indicated ID if these requests were not processed.
+    TEXT[!SHOULD,exception]:    Servers SHOULD send a GOAWAY frame when the closing of a connection
+    TEXT[!SHOULD,exception]:    is known in advance, even if the advance notice is small, so that the
+    TEXT[!SHOULD,exception]:    remote peer can know whether or not a request has been partially
+    TEXT[!SHOULD,exception]:    processed.
+    TEXT[!MUST,implementation]:    An endpoint MAY send multiple GOAWAY frames indicating different
+    TEXT[!MUST,implementation]:    identifiers, but the identifier in each frame MUST NOT be greater
+    TEXT[!MUST,implementation]:    than the identifier in any previous frame, since clients might
+    TEXT[!MUST,implementation]:    already have retried unprocessed requests on another HTTP connection.
+    TEXT[!MUST,implementation]:    Receiving a GOAWAY containing a larger identifier than previously
+    TEXT[!MUST,implementation]:    received MUST be treated as a connection error of type H3_ID_ERROR.
+    TEXT[!MAY,implementation]: Like the server,
+    TEXT[!MAY,implementation]:    the client MAY send subsequent GOAWAY frames so long as the specified
+    TEXT[!MAY,implementation]:    push ID is no greater than any previously sent value.
+    TEXT[!MAY,exception]:    Once all accepted requests and pushes have been processed, the
+    TEXT[!MAY,exception]:    endpoint can permit the connection to become idle, or it MAY initiate
+    TEXT[!MAY,exception]:    an immediate closure of the connection.
+    TEXT[!SHOULD,todo]: An endpoint that completes a
+    TEXT[!SHOULD,todo]:    graceful shutdown SHOULD use the H3_NO_ERROR error code when closing
+    TEXT[!SHOULD,todo]:    the connection.
+
+  SECTION: [Immediate Application Closure](#section-5.3)
+    TEXT[!MAY,todo]:    Before closing the connection, a GOAWAY frame MAY be sent to allow
+    TEXT[!MAY,todo]:    the client to retry some requests.
+    TEXT[todo]:   Including the GOAWAY frame in the
+    TEXT[todo]:    same packet as the QUIC CONNECTION_CLOSE frame improves the chances
+    TEXT[todo]:    of the frame being received by clients.
+
+  SECTION: [Transport Closure](#section-5.4)
+    TEXT[!MUST,exception]:    If a connection terminates without a GOAWAY frame, clients MUST
+    TEXT[!MUST,exception]:    assume that any request that was sent, whether in whole or in part,
+    TEXT[!MUST,exception]:    might have been processed.
+
+  SECTION: [Bidirectional Streams](#section-6.1)
+    TEXT[!SHOULD,todo]: In order to
+    TEXT[!SHOULD,todo]:    permit these streams to open, an HTTP/3 server SHOULD configure non-
+    TEXT[!SHOULD,todo]:    zero minimum values for the number of permitted streams and the
+    TEXT[!SHOULD,todo]:    initial stream flow-control window.
+    TEXT[!SHOULD,todo]: So as to not unnecessarily limit
+    TEXT[!SHOULD,todo]:    parallelism, at least 100 request streams SHOULD be permitted at a
+    TEXT[!SHOULD,todo]:    time.
+    TEXT[!MUST,implementation,test]: Clients MUST treat
+    TEXT[!MUST,implementation,test]:    receipt of a server-initiated bidirectional stream as a connection
+    TEXT[!MUST,implementation,test]:    error of type H3_STREAM_CREATION_ERROR unless such an extension has
+    TEXT[!MUST,implementation,test]:    been negotiated.
+
+  SECTION: [Unidirectional Streams](#section-6.2)
+    TEXT[exception]:    Each endpoint needs to create at least one unidirectional stream for
+    TEXT[exception]:    the HTTP control stream.  QPACK requires two additional
+    TEXT[exception]:    unidirectional streams, and other extensions might require further
+    TEXT[exception]:    streams.
+    TEXT[!MUST,exception]: Therefore, the transport parameters sent by both clients
+    TEXT[!MUST,exception]:    and servers MUST allow the peer to create at least three
+    TEXT[!MUST,exception]:    unidirectional streams.
+    TEXT[!SHOULD,exception]: These transport parameters SHOULD also
+    TEXT[!SHOULD,exception]:    provide at least 1,024 bytes of flow-control credit to each
+    TEXT[!SHOULD,exception]:    unidirectional stream.
+    TEXT[!SHOULD,implementation]:    Endpoints SHOULD create the HTTP control stream as well as the
+    TEXT[!SHOULD,implementation]:    unidirectional streams required by mandatory extensions (such as the
+    TEXT[!SHOULD,implementation]:    QPACK encoder and decoder streams) first, and then create additional
+    TEXT[!SHOULD]:    streams as allowed by their peer.
+    TEXT[!MUST,implementation]: Recipients of unknown stream types MUST
+    TEXT[!MUST,implementation]:    either abort reading of the stream or discard incoming data without
+    TEXT[!MUST,implementation]:    further processing.
+    TEXT[!SHOULD,implementation]: If reading is aborted, the recipient SHOULD use
+    TEXT[!SHOULD,implementation]:    the H3_STREAM_CREATION_ERROR error code or a reserved error code
+    TEXT[!SHOULD,implementation]:    (Section 8.1).
+    TEXT[!MUST,implication]: The recipient MUST NOT consider unknown stream types
+    TEXT[!MUST,implication]:    to be a connection error of any kind.
+    TEXT[!SHOULD]:    As certain stream types can affect connection state, a recipient
+    TEXT[!SHOULD]:    SHOULD NOT discard data from incoming unidirectional streams prior to
+    TEXT[!SHOULD]:    reading the stream type.
+    TEXT[!MAY,todo]:    Implementations MAY send stream types before knowing whether the peer
+    TEXT[!MAY,todo]:    supports them.
+    TEXT[!MUST,todo]: However, stream types that could modify the state or
+    TEXT[!MUST,todo]:    semantics of existing protocol components, including QPACK or other
+    TEXT[!MUST,todo]:    extensions, MUST NOT be sent until the peer is known to support them.
+    TEXT[!MUST,implementation,todo]: A receiver MUST tolerate unidirectional streams being
+    TEXT[!MUST,implementation,todo]:    closed or reset prior to the reception of the unidirectional stream
+    TEXT[!MUST,implementation,todo]:    header.
+
+  SECTION: [Control Streams](#section-6.2.1)
+    TEXT[!MUST,implementation]:    Each side MUST initiate a single control stream at the beginning of
+    TEXT[!MUST,implementation]:    the connection and send its SETTINGS frame as the first frame on this
+    TEXT[!MUST,implementation]:    stream.
+    TEXT[!MUST,implementation,test]: If the first frame of the control stream is any other frame
+    TEXT[!MUST,implementation,test]:    type, this MUST be treated as a connection error of type
+    TEXT[!MUST,implementation,test]:    H3_MISSING_SETTINGS.
+    TEXT[!MUST,implementation,test]: Only one control stream per peer is permitted;
+    TEXT[!MUST,implementation,test]:    receipt of a second stream claiming to be a control stream MUST be
+    TEXT[!MUST,implementation,test]:    treated as a connection error of type H3_STREAM_CREATION_ERROR.
+    TEXT[!MUST,implication]: The
+    TEXT[!MUST,implication]:    sender MUST NOT close the control stream, and the receiver MUST NOT
+    TEXT[!MUST,implication]:    request that the sender close the control stream.
+    TEXT[!MUST,implementation,test]: If either control
+    TEXT[!MUST,implementation,test]:    stream is closed at any point, this MUST be treated as a connection
+    TEXT[!MUST,implementation,test]:    error of type H3_CLOSED_CRITICAL_STREAM.
+    TEXT[!SHOULD,exception]:    Because the contents of the control stream are used to manage the
+    TEXT[!SHOULD,exception]:    behavior of other streams, endpoints SHOULD provide enough flow-
+    TEXT[!SHOULD,exception]:    control credit to keep the peer's control stream from becoming
+    TEXT[!SHOULD,exception]:    blocked.
+
+  SECTION: [Push Streams](#section-6.2.2)
+    TEXT[!MUST,todo]:    Only servers can push; if a server receives a client-initiated push
+    TEXT[!MUST,todo]:    stream, this MUST be treated as a connection error of type
+    TEXT[!MUST,todo]:    H3_STREAM_CREATION_ERROR.
+    TEXT[!SHOULD,todo]:    A client SHOULD NOT abort reading on a push stream prior to reading
+    TEXT[!SHOULD,todo]:    the push stream header, as this could lead to disagreement between
+    TEXT[!SHOULD,todo]:    client and server on which push IDs have already been consumed.
+    TEXT[!MUST,todo]:    Each push ID MUST only be used once in a push stream header.
+    TEXT[!MUST,todo]: If a
+    TEXT[!MUST,todo]:    client detects that a push stream header includes a push ID that was
+    TEXT[!MUST,todo]:    used in another push stream header, the client MUST treat this as a
+    TEXT[!MUST,todo]:    connection error of type H3_ID_ERROR.
+
+  SECTION: [Reserved Stream Types](#section-6.2.3)
+    TEXT[implementation]:    Stream types of the format 0x1f * N + 0x21 for non-negative integer
+    TEXT[implementation]:    values of N are reserved to exercise the requirement that unknown
+    TEXT[implementation]:    types be ignored.  These streams have no semantics, and they can be
+    TEXT[implementation]:    sent when application-layer padding is desired.
+    TEXT[!MAY,implementation]: They MAY also be
+    TEXT[!MAY,implementation]:    sent on connections where no data is currently being transferred.
+    TEXT[!MUST,implication]:    Endpoints MUST NOT consider these streams to have any meaning upon
+    TEXT[!MUST,implication]:    receipt.
+    TEXT[!MAY,implication]: When sending a reserved stream type,
+    TEXT[!MAY,implication]:    the implementation MAY either terminate the stream cleanly or reset
+    TEXT[!MAY,implication]:    it.
+    TEXT[!SHOULD,exception]: When resetting the stream, either the H3_NO_ERROR error code or
+    TEXT[!SHOULD,exception]:    a reserved error code (Section 8.1) SHOULD be used.
+
+  SECTION: [Frame Layout](#section-7.1)
+    TEXT[!MUST,todo]:    Each frame's payload MUST contain exactly the fields identified in
+    TEXT[!MUST,todo]:    its description.
+    TEXT[!MUST,implementation,test]: A frame payload that contains additional bytes
+    TEXT[!MUST,implementation,test]:    after the identified fields or a frame payload that terminates before
+    TEXT[!MUST,implementation,test]:    the end of the identified fields MUST be treated as a connection
+    TEXT[!MUST,implementation,test]:    error of type H3_FRAME_ERROR.
+    TEXT[!MUST]: In particular, redundant length
+    TEXT[!MUST]:    encodings MUST be verified to be self-consistent; see Section 10.8.
+    TEXT[!MUST,implementation]:    When a stream terminates cleanly, if the last frame on the stream was
+    TEXT[!MUST,implementation]:    truncated, this MUST be treated as a connection error of type
+    TEXT[!MUST,implementation]:    H3_FRAME_ERROR.
+
+  SECTION: [DATA](#section-7.2.1)
+    TEXT[!MUST,implication]:    DATA frames MUST be associated with an HTTP request or response.
+    TEXT[!MUST,implementation,test]: If
+    TEXT[!MUST,implementation,test]:    a DATA frame is received on a control stream, the recipient MUST
+    TEXT[!MUST,implementation,test]:    respond with a connection error of type H3_FRAME_UNEXPECTED.
+
+  SECTION: [HEADERS](#section-7.2.2)
+    TEXT[!MUST,implementation]:    If a HEADERS frame is received on a control stream, the recipient
+    TEXT[!MUST,implementation]:    MUST respond with a connection error of type H3_FRAME_UNEXPECTED.
+
+  SECTION: [CANCEL_PUSH](#section-7.2.3)
+    TEXT[todo]:    When a client sends a CANCEL_PUSH frame, it is indicating that it
+    TEXT[todo]:    does not wish to receive the promised resource.
+    TEXT[!SHOULD,todo]: The server SHOULD
+    TEXT[!SHOULD,todo]:    abort sending the resource, but the mechanism to do so depends on the
+    TEXT[!SHOULD,todo]:    state of the corresponding push stream.
+    TEXT[!SHOULD,todo]: If the push stream is
+    TEXT[!SHOULD,todo]:    open, the server SHOULD abruptly terminate that stream.
+    TEXT[!MAY,todo]: If the push
+    TEXT[!MAY,todo]:    stream has already ended, the server MAY still abruptly terminate the
+    TEXT[!MAY,todo]:    stream or MAY take no action.
+    TEXT[!SHOULD,todo]: Regardless of
+    TEXT[!SHOULD,todo]:    whether a push stream has been opened, a server SHOULD send a
+    TEXT[!SHOULD,todo]:    CANCEL_PUSH frame when it determines that promise will not be
+    TEXT[!SHOULD,todo]:    fulfilled.
+    TEXT[!SHOULD,todo]: A client SHOULD NOT send a CANCEL_PUSH frame
+    TEXT[!SHOULD,todo]:    when it has already received a corresponding push stream.
+    TEXT[todo]: A push
+    TEXT[todo]:    stream could arrive after a client has sent a CANCEL_PUSH frame,
+    TEXT[todo]:    because a server might not have processed the CANCEL_PUSH.
+    TEXT[!SHOULD,todo]: The
+    TEXT[!SHOULD,todo]:    client SHOULD abort reading the stream with an error code of
+    TEXT[!SHOULD,todo]:    H3_REQUEST_CANCELLED.
+    TEXT[!MUST,implementation,test]: Receiving a
+    TEXT[!MUST,implementation,test]:    CANCEL_PUSH frame on a stream other than the control stream MUST be
+    TEXT[!MUST,implementation,test]:    treated as a connection error of type H3_FRAME_UNEXPECTED.
+    TEXT[!MUST,todo]: If a CANCEL_PUSH frame is received that
+    TEXT[!MUST,todo]:    references a push ID greater than currently allowed on the
+    TEXT[!MUST,todo]:    connection, this MUST be treated as a connection error of type
+    TEXT[!MUST,todo]:    H3_ID_ERROR.
+    TEXT[!MUST,todo]: If a server receives a CANCEL_PUSH frame for a push
+    TEXT[!MUST,todo]:    ID that has not yet been mentioned by a PUSH_PROMISE frame, this MUST
+    TEXT[!MUST,todo]:    be treated as a connection error of type H3_ID_ERROR.
+
+  SECTION: [SETTINGS](#section-7.2.4)
+    TEXT[!MUST,implementation]: A SETTINGS frame MUST be sent as the first frame of
+    TEXT[!MUST,implementation]:    each control stream (see Section 6.2.1) by each peer, and it MUST NOT
+    TEXT[!MUST,implementation]:    be sent subsequently.
+    TEXT[!MUST,implementation]: If an endpoint receives a second SETTINGS
+    TEXT[!MUST,implementation]:    frame on the control stream, the endpoint MUST respond with a
+    TEXT[!MUST,implementation]:    connection error of type H3_FRAME_UNEXPECTED.
+    TEXT[!MUST,implication]:    SETTINGS frames MUST NOT be sent on any stream other than the control
+    TEXT[!MUST,implication]:    stream.
+    TEXT[!MUST,implementation,test]: If an endpoint receives a SETTINGS frame on a different
+    TEXT[!MUST,implementation,test]:    stream, the endpoint MUST respond with a connection error of type
+    TEXT[!MUST,implementation,test]:    H3_FRAME_UNEXPECTED.
+    TEXT[!MUST,implementation]:    The same setting identifier MUST NOT occur more than once in the
+    TEXT[!MUST,implementation]:    SETTINGS frame.
+    TEXT[!MAY]: A receiver MAY treat the presence of duplicate
+    TEXT[!MAY]:    setting identifiers as a connection error of type H3_SETTINGS_ERROR.
+    TEXT[!MUST]:    An implementation MUST ignore any parameter with an identifier it
+    TEXT[!MUST]:    does not understand.
+
+  SECTION: [Defined SETTINGS Parameters](#section-7.2.4.1)
+    TEXT[implementation]:    Setting identifiers of the format 0x1f * N + 0x21 for non-negative
+    TEXT[implementation]:    integer values of N are reserved to exercise the requirement that
+    TEXT[implementation]:    unknown identifiers be ignored.  Such settings have no defined
+    TEXT[implementation]:    meaning.
+    TEXT[!SHOULD,implementation]: Endpoints SHOULD include at least one such setting in their
+    TEXT[!SHOULD,implementation]:    SETTINGS frame.
+    TEXT[!MUST,implementation]: Endpoints MUST NOT consider such settings to have
+    TEXT[!MUST,implementation]:    any meaning upon receipt.
+    TEXT[implementation]:    Setting identifiers that were defined in [HTTP/2] where there is no
+    TEXT[implementation]:    corresponding HTTP/3 setting have also been reserved
+    TEXT[implementation]:    (Section 11.2.2).
+    TEXT[!MUST,implementation]: These reserved settings MUST NOT be sent, and
+    TEXT[!MUST,implementation]:    their receipt MUST be treated as a connection error of type
+    TEXT[!MUST,implementation]:    H3_SETTINGS_ERROR.
+
+  SECTION: [Initialization](#section-7.2.4.2)
+    TEXT[!MUST,implementation,todo]:    An HTTP implementation MUST NOT send frames or requests that would be
+    TEXT[!MUST,implementation,todo]:    invalid based on its current understanding of the peer's settings.
+    TEXT[!SHOULD,implementation,todo]: Each endpoint SHOULD use
+    TEXT[!SHOULD,implementation,todo]:    these initial values to send messages before the peer's SETTINGS
+    TEXT[!SHOULD,implementation,todo]:    frame has arrived, as packets carrying the settings can be lost or
+    TEXT[!SHOULD,implementation,todo]:    delayed.
+    TEXT[!MUST,implication]: Endpoints MUST NOT require any data to be received from
+    TEXT[!MUST,implication]:    the peer prior to sending the SETTINGS frame; settings MUST be sent
+    TEXT[!MUST,implication]:    as soon as the transport is ready to send data.
+    TEXT[!SHOULD,todo]: Clients SHOULD
+    TEXT[!SHOULD,todo]:    NOT wait indefinitely for SETTINGS to arrive before sending requests,
+    TEXT[!SHOULD,todo]:    but they SHOULD process received datagrams in order to increase the
+    TEXT[!SHOULD,todo]:    likelihood of processing SETTINGS before sending the first request.
+    TEXT[todo]:    When a 0-RTT QUIC connection is being used, the initial value of each
+    TEXT[todo]:    server setting is the value used in the previous session.
+    TEXT[!SHOULD,todo]: Clients
+    TEXT[!SHOULD,todo]:    SHOULD store the settings the server provided in the HTTP/3
+    TEXT[!SHOULD,todo]:    connection where resumption information was provided, but they MAY
+    TEXT[!SHOULD,todo]:    opt not to store settings in certain cases (e.g., if the session
+    TEXT[!SHOULD,todo]:    ticket is received before the SETTINGS frame).
+    TEXT[!MUST,todo]: A client MUST comply
+    TEXT[!MUST,todo]:    with stored settings -- or default values if no values are stored --
+    TEXT[!MUST,todo]:    when attempting 0-RTT.
+    TEXT[!MUST,todo]: Once a server has provided new settings,
+    TEXT[!MUST,todo]:    clients MUST comply with those values.
+    TEXT[!MUST,todo]: If the
+    TEXT[!MUST,todo]:    server cannot determine that the settings remembered by a client are
+    TEXT[!MUST,todo]:    compatible with its current settings, it MUST NOT accept 0-RTT data.
+    TEXT[todo]:    Remembered settings are compatible if a client complying with those
+    TEXT[todo]:    settings would not violate the server's current settings.
+    TEXT[!MAY,todo]:    A server MAY accept 0-RTT and subsequently provide different settings
+    TEXT[!MAY,todo]:    in its SETTINGS frame.
+    TEXT[!MUST,todo]: If 0-RTT data is accepted by the server, its
+    TEXT[!MUST,todo]:    SETTINGS frame MUST NOT reduce any limits or alter any values that
+    TEXT[!MUST,todo]:    might be violated by the client with its 0-RTT data.
+    TEXT[!MUST,todo]: The server MUST
+    TEXT[!MUST,todo]:    include all settings that differ from their default values.
+    TEXT[!MUST,todo]: If a
+    TEXT[!MUST,todo]:    server accepts 0-RTT but then sends settings that are not compatible
+    TEXT[!MUST,todo]:    with the previously specified settings, this MUST be treated as a
+    TEXT[!MUST,todo]:    connection error of type H3_SETTINGS_ERROR.
+    TEXT[!MUST,todo]: If a server accepts
+    TEXT[!MUST,todo]:    0-RTT but then sends a SETTINGS frame that omits a setting value that
+    TEXT[!MUST,todo]:    the client understands (apart from reserved setting identifiers) that
+    TEXT[!MUST,todo]:    was previously specified to have a non-default value, this MUST be
+    TEXT[!MUST,todo]:    treated as a connection error of type H3_SETTINGS_ERROR.
+
+  SECTION: [PUSH_PROMISE](#section-7.2.5)
+    TEXT[!MUST,todo]:    A server MUST NOT use a push ID that is larger than the client has
+    TEXT[!MUST,todo]:    provided in a MAX_PUSH_ID frame (Section 7.2.7).
+    TEXT[!MUST,todo]: A client MUST treat
+    TEXT[!MUST,todo]:    receipt of a PUSH_PROMISE frame that contains a larger push ID than
+    TEXT[!MUST,todo]:    the client has advertised as a connection error of H3_ID_ERROR.
+    TEXT[!MAY,todo]:    A server MAY use the same push ID in multiple PUSH_PROMISE frames.
+    TEXT[!MUST,todo]:    If so, the decompressed request header sets MUST contain the same
+    TEXT[!MUST,todo]:    fields in the same order, and both the name and the value in each
+    TEXT[!MUST,todo]:    field MUST be exact matches.
+    TEXT[!SHOULD,todo]: Clients SHOULD compare the request
+    TEXT[!SHOULD,todo]:    header sections for resources promised multiple times.
+    TEXT[!MUST,todo]: If a client
+    TEXT[!MUST,todo]:    receives a push ID that has already been promised and detects a
+    TEXT[!MUST,todo]:    mismatch, it MUST respond with a connection error of type
+    TEXT[!MUST,todo]:    H3_GENERAL_PROTOCOL_ERROR.
+    TEXT[!SHOULD,todo]: If the decompressed field sections match
+    TEXT[!SHOULD,todo]:    exactly, the client SHOULD associate the pushed content with each
+    TEXT[!SHOULD,todo]:    stream on which a PUSH_PROMISE frame was received.
+    TEXT[todo]:    Allowing duplicate references to the same push ID is primarily to
+    TEXT[todo]:    reduce duplication caused by concurrent requests.
+    TEXT[!SHOULD,todo]: A server SHOULD
+    TEXT[!SHOULD,todo]:    avoid reusing a push ID over a long period.
+    TEXT[!MUST,implementation]:    If a PUSH_PROMISE frame is received on the control stream, the client
+    TEXT[!MUST,implementation]:    MUST respond with a connection error of type H3_FRAME_UNEXPECTED.
+    TEXT[!MUST,todo]:    A client MUST NOT send a PUSH_PROMISE frame.
+    TEXT[!MUST,implementation]: A server MUST treat the
+    TEXT[!MUST,implementation]:    receipt of a PUSH_PROMISE frame as a connection error of type
+    TEXT[!MUST,implementation]:    H3_FRAME_UNEXPECTED.
+
+  SECTION: [GOAWAY](#section-7.2.6)
+    TEXT[implementation]:    The GOAWAY frame is always sent on the control stream.  In the
+    TEXT[implementation]:    server-to-client direction, it carries a QUIC stream ID for a client-
+    TEXT[implementation]:    initiated bidirectional stream encoded as a variable-length integer.
+    TEXT[!MUST,implementation,test]:    A client MUST treat receipt of a GOAWAY frame containing a stream ID
+    TEXT[!MUST,implementation,test]:    of any other type as a connection error of type H3_ID_ERROR.
+    TEXT[!MUST,implementation,test]: A client MUST treat a GOAWAY frame on a stream other than
+    TEXT[!MUST,implementation,test]:    the control stream as a connection error of type H3_FRAME_UNEXPECTED.
+
+  SECTION: [MAX_PUSH_ID](#section-7.2.7)
+    TEXT[implementation,test]:    The MAX_PUSH_ID frame is always sent on the control stream.
+    TEXT[!MUST,implementation,test]: Receipt
+    TEXT[!MUST,implementation,test]:    of a MAX_PUSH_ID frame on any other stream MUST be treated as a
+    TEXT[!MUST,implementation,test]:    connection error of type H3_FRAME_UNEXPECTED.
+    TEXT[!MUST,todo]:    A server MUST NOT send a MAX_PUSH_ID frame.
+    TEXT[!MUST,implementation]: A client MUST treat the
+    TEXT[!MUST,implementation]:    receipt of a MAX_PUSH_ID frame as a connection error of type
+    TEXT[!MUST,implementation]:    H3_FRAME_UNEXPECTED.
+    TEXT[!MUST,todo]: A MAX_PUSH_ID frame cannot reduce the maximum push
+    TEXT[!MUST,todo]:    ID; receipt of a MAX_PUSH_ID frame that contains a smaller value than
+    TEXT[!MUST,todo]:    previously received MUST be treated as a connection error of type
+    TEXT[!MUST,todo]:    H3_ID_ERROR.
+
+  SECTION: [Reserved Frame Types](#section-7.2.8)
+    TEXT[implication]:    Frame types of the format 0x1f * N + 0x21 for non-negative integer
+    TEXT[implication]:    values of N are reserved to exercise the requirement that unknown
+    TEXT[implication]:    types be ignored (Section 9).
+    TEXT[!MAY,implication]: These frames have no semantics, and
+    TEXT[!MAY,implication]:    they MAY be sent on any stream where frames are allowed to be sent.
+    TEXT[!MUST,implementation,todo]: Endpoints MUST
+    TEXT[!MUST,implementation,todo]:    NOT consider these frames to have any meaning upon receipt.
+    TEXT[todo]:    Frame types that were used in HTTP/2 where there is no corresponding
+    TEXT[todo]:    HTTP/3 frame have also been reserved (Section 11.2.1).
+    TEXT[!MUST,implementation,todo]: These frame
+    TEXT[!MUST,implementation,todo]:    types MUST NOT be sent, and their receipt MUST be treated as a
+    TEXT[!MUST,implementation,todo]:    connection error of type H3_FRAME_UNEXPECTED.
+
+  SECTION: [Error Handling](#section-8)
+    TEXT[!MAY,todo]:    An endpoint MAY choose to treat a stream error as a connection error
+    TEXT[!MAY,todo]:    under certain circumstances, closing the entire connection in
+    TEXT[!MAY,todo]:    response to a condition on a single stream.
+    TEXT[!MUST,todo]:    Because new error codes can be defined without negotiation (see
+    TEXT[!MUST,todo]:    Section 9), use of an error code in an unexpected context or receipt
+    TEXT[!MUST,todo]:    of an unknown error code MUST be treated as equivalent to
+    TEXT[!MUST,todo]:    H3_NO_ERROR.
+
+  SECTION: [HTTP/3 Error Codes](#section-8.1)
+    TEXT[todo]:    Error codes of the format 0x1f * N + 0x21 for non-negative integer
+    TEXT[todo]:    values of N are reserved to exercise the requirement that unknown
+    TEXT[todo]:    error codes be treated as equivalent to H3_NO_ERROR (Section 9).
+    TEXT[!SHOULD,todo]:    Implementations SHOULD select an error code from this space with some
+    TEXT[!SHOULD,todo]:    probability when they would have sent H3_NO_ERROR.
+
+  SECTION: [Extensions to HTTP/3](#section-9)
+    TEXT[!MUST,todo]:    Implementations MUST ignore unknown or unsupported values in all
+    TEXT[!MUST,todo]:    extensible protocol elements.
+    TEXT[!MUST,todo]: Implementations MUST discard data or
+    TEXT[!MUST,todo]:    abort reading on unidirectional streams that have unknown or
+    TEXT[!MUST,todo]:    unsupported types.
+    TEXT[!SHOULD,todo]: However, where a known frame type is required to be in
+    TEXT[!SHOULD,todo]:    a specific location, such as the SETTINGS frame as the first frame of
+    TEXT[!SHOULD,todo]:    the control stream (see Section 6.2.1), an unknown frame type does
+    TEXT[!SHOULD,todo]:    not satisfy that requirement and SHOULD be treated as an error.
+    TEXT[!MUST,exception]:    Extensions that could change the semantics of existing protocol
+    TEXT[!MUST,exception]:    components MUST be negotiated before being used.
+    TEXT[!MUST,exception]: If a setting is used for extension negotiation, the default
+    TEXT[!MUST,exception]:    value MUST be defined in such a fashion that the extension is
+    TEXT[!MUST,exception]:    disabled if the setting is omitted.
+
+  SECTION: [Intermediary-Encapsulation Attacks](#section-10.3)
+    TEXT[!MUST,implementation]:    Requests or responses containing invalid field names MUST be treated
+    TEXT[!MUST,implementation]:    as malformed.
+    TEXT[!MUST,implementation]: Any request or response that contains a
+    TEXT[!MUST,implementation]:    character not permitted in a field value MUST be treated as
+    TEXT[!MUST,implementation]:    malformed.
+
+  SECTION: [Cacheability of Pushed Responses](#section-10.4)
+    TEXT[!MUST,exception]:    Where multiple tenants share space on the same server, that server
+    TEXT[!MUST,exception]:    MUST ensure that tenants are not able to push representations of
+    TEXT[!MUST,exception]:    resources that they do not have authority over.
+
+  SECTION: [Denial-of-Service Considerations](#section-10.5)
+    TEXT[!SHOULD,todo]: A client that accepts server push SHOULD limit the number
+    TEXT[!SHOULD,todo]:    of push IDs it issues at a time.
+    TEXT[todo]:    All these features -- i.e., server push, unknown protocol elements,
+    TEXT[todo]:    field compression -- have legitimate uses.  These features become a
+    TEXT[todo]:    burden only when they are used unnecessarily or to excess.
+    TEXT[todo]:    An endpoint that does not monitor such behavior exposes itself to a
+    TEXT[todo]:    risk of denial-of-service attack.
+    TEXT[!SHOULD,todo]: Implementations SHOULD track the
+    TEXT[!SHOULD,todo]:    use of these features and set limits on their use.
+    TEXT[!MAY,todo]: An endpoint MAY
+    TEXT[!MAY,todo]:    treat activity that is suspicious as a connection error of type
+    TEXT[!MAY,todo]:    H3_EXCESSIVE_LOAD, but false positives will result in disrupting
+    TEXT[!MAY,todo]:    valid connections and requests.
+
+  SECTION: [Limits on Field Section Size](#section-10.5.1)
+    TEXT[todo]:    An endpoint can use the SETTINGS_MAX_FIELD_SECTION_SIZE
+    TEXT[todo]:    (Section 4.2.2) setting to advise peers of limits that might apply on
+    TEXT[todo]:    the size of field sections.
+    TEXT[!MAY,todo]: This setting is only advisory, so
+    TEXT[!MAY,todo]:    endpoints MAY choose to send field sections that exceed this limit
+    TEXT[!MAY,todo]:    and risk having the request or response being treated as malformed.
+
+  SECTION: [Use of Compression](#section-10.6)
+    TEXT[!MUST,exception]:    Implementations communicating on a secure channel MUST NOT compress
+    TEXT[!MUST,exception]:    content that includes both confidential and attacker-controlled data
+    TEXT[!MUST,exception]:    unless separate compression contexts are used for each source of
+    TEXT[!MUST,exception]:    data.
+    TEXT[!MUST,exception]: Compression MUST NOT be used if the source of data cannot be
+    TEXT[!MUST,exception]:    reliably determined.
+
+  SECTION: [Frame Parsing](#section-10.8)
+    TEXT[!MUST,todo]: An implementation MUST ensure that the length of a
+    TEXT[!MUST,todo]:    frame exactly matches the length of the fields it contains.
+
+  SECTION: [Early Data](#section-10.9)
+    TEXT[todo]:    The use of 0-RTT with HTTP/3 creates an exposure to replay attack.
+    TEXT[!MUST,todo]:    The anti-replay mitigations in [HTTP-REPLAY] MUST be applied when
+    TEXT[!MUST,todo]:    using HTTP/3 with 0-RTT.
+
+  SECTION: [Frame Types](#section-11.2.1)
+    TEXT[!SHOULD,exception]: If an entry is present in
+    TEXT[!SHOULD,exception]:    only one registry, every effort SHOULD be made to avoid assigning the
+    TEXT[!SHOULD,exception]:    corresponding value to an unrelated operation.
+    TEXT[!MAY,exception]: Expert reviewers MAY
+    TEXT[!MAY,exception]:    reject unrelated registrations that would conflict with the same
+    TEXT[!MAY,exception]:    value in the corresponding registry.
+    TEXT[!MUST,exception]:    In addition to common fields as described in Section 11.2, permanent
+    TEXT[!MUST,exception]:    registrations in this registry MUST include the following field:
+    TEXT[exception]:    Frame Type:  A name or label for the frame type.
+    TEXT[!MUST,exception]:    Specifications of frame types MUST include a description of the frame
+    TEXT[!MUST,exception]:    layout and its semantics, including any parts of the frame that are
+    TEXT[!MUST,exception]:    conditionally present.
+    TEXT[!MUST,exception]:    Each code of the format 0x1f * N + 0x21 for non-negative integer
+    TEXT[!MUST,exception]:    values of N (that is, 0x21, 0x40, ..., through 0x3ffffffffffffffe)
+    TEXT[!MUST,exception]:    MUST NOT be assigned by IANA and MUST NOT appear in the listing of
+    TEXT[!MUST,exception]:    assigned values.
+
+  SECTION: [Settings Parameters](#section-11.2.2)
+    TEXT[!SHOULD,exception]: If an entry is present in only one registry, every
+    TEXT[!SHOULD,exception]:    effort SHOULD be made to avoid assigning the corresponding value to
+    TEXT[!SHOULD,exception]:    an unrelated operation.
+    TEXT[!MAY,exception]: Expert reviewers MAY reject unrelated
+    TEXT[!MAY,exception]:    registrations that would conflict with the same value in the
+    TEXT[!MAY,exception]:    corresponding registry.
+    TEXT[!MUST,exception]:    In addition to common fields as described in Section 11.2, permanent
+    TEXT[!MUST,exception]:    registrations in this registry MUST include the following fields:
+    TEXT[exception]:    Setting Name:  A symbolic name for the setting.  Specifying a setting
+    TEXT[exception]:       name is optional.
+    TEXT[exception]:    Default:  The value of the setting unless otherwise indicated.  A
+    TEXT[!SHOULD,exception]:       default SHOULD be the most restrictive possible value.
+    TEXT[!MUST,exception]:    Each code of the format 0x1f * N + 0x21 for non-negative integer
+    TEXT[!MUST,exception]:    values of N (that is, 0x21, 0x40, ..., through 0x3ffffffffffffffe)
+    TEXT[!MUST,exception]:    MUST NOT be assigned by IANA and MUST NOT appear in the listing of
+    TEXT[!MUST,exception]:    assigned values.
+
+  SECTION: [Error Codes](#section-11.2.3)
+    TEXT[!MAY,exception]:    Use of values that are registered in the "HTTP/2 Error Code" registry
+    TEXT[!MAY,exception]:    is discouraged, and expert reviewers MAY reject such registrations.
+    TEXT[!MUST,exception]: Permanent registrations in
+    TEXT[!MUST,exception]:    this registry MUST include the following field:
+    TEXT[exception]:    Name:  A name for the error code.
+    TEXT[!MUST,exception]:    Each code of the format 0x1f * N + 0x21 for non-negative integer
+    TEXT[!MUST,exception]:    values of N (that is, 0x21, 0x40, ..., through 0x3ffffffffffffffe)
+    TEXT[!MUST,exception]:    MUST NOT be assigned by IANA and MUST NOT appear in the listing of
+    TEXT[!MUST,exception]:    assigned values.
+
+  SECTION: [Stream Types](#section-11.2.4)
+    TEXT[!MUST,exception]:    In addition to common fields as described in Section 11.2, permanent
+    TEXT[!MUST,exception]:    registrations in this registry MUST include the following fields:
+    TEXT[exception]:    Stream Type:  A name or label for the stream type.
+    TEXT[!MUST,exception]:    Specifications for permanent registrations MUST include a description
+    TEXT[!MUST,exception]:    of the stream type, including the layout and semantics of the stream
+    TEXT[!MUST,exception]:    contents.
+    TEXT[!MUST,exception]:    Each code of the format 0x1f * N + 0x21 for non-negative integer
+    TEXT[!MUST,exception]:    values of N (that is, 0x21, 0x40, ..., through 0x3ffffffffffffffe)
+    TEXT[!MUST,exception]:    MUST NOT be assigned by IANA and MUST NOT appear in the listing of
+    TEXT[!MUST,exception]:    assigned values.

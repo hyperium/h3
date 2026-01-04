@@ -43,6 +43,10 @@ impl StreamType {
     pub fn grease() -> Self {
         StreamType(fastrand::u64(0..0x210842108421083) * 0x1f + 0x21)
     }
+
+    pub fn from_value(value: u64) -> Self {
+        StreamType(value)
+    }
 }
 
 impl Decode for StreamType {
@@ -134,7 +138,8 @@ impl StreamId {
         }
     }
 
-    pub(crate) fn into_inner(self) -> u64 {
+    #[allow(missing_docs)]
+    pub fn into_inner(self) -> u64 {
         self.0
     }
 }
