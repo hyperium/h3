@@ -354,6 +354,7 @@ pub struct RecvStream {
     stream: Option<quinn::RecvStream>,
     read_chunk_fut: ReadChunkFuture,
     is_0rtt: bool,
+    pending_stop: Option<VarInt>,
 }
 
 type ReadChunkFuture = ReusableBoxFuture<
@@ -372,6 +373,7 @@ impl RecvStream {
             // Should only allocate once the first time it's used
             read_chunk_fut: ReusableBoxFuture::new(async { unreachable!() }),
             is_0rtt,
+            pending_stop: None,
         }
     }
 }
@@ -391,7 +393,10 @@ impl quic::RecvStream for RecvStream {
             })
         };
 
-        let (stream, chunk) = ready!(self.read_chunk_fut.poll(cx));
+        let (mut stream, chunk) = ready!(self.read_chunk_fut.poll(cx));
+        if let Some(error_code) = self.pending_stop.take() {
+            let _ = stream.stop(error_code);
+        }
         self.stream = Some(stream);
         Poll::Ready(Ok(chunk
             .map_err(convert_read_error_to_stream_error)?
@@ -400,11 +405,12 @@ impl quic::RecvStream for RecvStream {
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn stop_sending(&mut self, error_code: u64) {
-        self.stream
-            .as_mut()
-            .unwrap()
-            .stop(VarInt::from_u64(error_code).expect("invalid error_code"))
-            .ok();
+        let error_code = VarInt::from_u64(error_code).expect("invalid error_code");
+        if let Some(stream) = self.stream.as_mut() {
+            let _ = stream.stop(error_code);
+        } else {
+            self.pending_stop = Some(error_code);
+        }
     }
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
