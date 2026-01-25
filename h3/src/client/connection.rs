@@ -13,6 +13,7 @@ use http::request;
 #[cfg(feature = "tracing")]
 use tracing::{info, instrument, trace};
 
+use super::stream::RequestStream;
 use crate::{
     connection::{self, ConnectionInner},
     error::{
@@ -26,8 +27,6 @@ use crate::{
     shared_state::{ConnectionState, SharedState},
     stream::{self, BufRecvStream},
 };
-
-use super::stream::RequestStream;
 
 /// HTTP/3 request sender
 ///
@@ -60,7 +59,7 @@ use super::stream::RequestStream;
 /// let request = Request::get("https://www.example.com/").body(())?;
 ///
 /// // Send the request to the server
-/// let mut req_stream: RequestStream<_, _> = send_request.send_request(request).await?;
+/// let mut req_stream: RequestStream<_, _, _> = send_request.send_request(request).await?;
 /// // Don't forget to end up the request by finishing the send stream.
 /// req_stream.finish().await?;
 /// // Receive the response
@@ -147,7 +146,10 @@ where
     pub async fn send_request(
         &mut self,
         req: http::Request<()>,
-    ) -> Result<RequestStream<T::BidiStream, B>, StreamError> {
+    ) -> Result<
+        RequestStream<T::BidiStream, B, <T::BidiStream as quic::RecvStream>::Buf>,
+        StreamError,
+    > {
         if let Some(error) = self.check_peer_connection_closing() {
             return Err(error);
         };
@@ -294,6 +296,7 @@ where
 /// #    C: quic::Connection<B> + Send + 'static,
 /// #    C::SendStream: Send + 'static,
 /// #    C::RecvStream: Send + 'static,
+/// #    <C::RecvStream as quic::RecvStream>::Buf: Send + 'static,
 /// #    B: Buf + Send + 'static,
 /// # {
 /// // Run the driver on a different task
@@ -319,6 +322,7 @@ where
 /// #    C: quic::Connection<B> + Send + 'static,
 /// #    C::SendStream: Send + 'static,
 /// #    C::RecvStream: Send + 'static,
+/// #    <C::RecvStream as quic::RecvStream>::Buf: Send + 'static,
 /// #    B: Buf + Send + 'static,
 /// # {
 /// // Prepare a channel to stop the driver thread

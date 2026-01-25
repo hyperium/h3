@@ -966,10 +966,11 @@ where
     request_stream.recv_response().await
 }
 
-async fn response<S, B>(mut stream: server::RequestStream<S, B>)
+async fn response<S, B, R>(mut stream: server::RequestStream<S, B, R>)
 where
-    S: quic::RecvStream + SendStream<B>,
+    S: quic::RecvStream<Buf = R> + SendStream<B>,
     B: Buf,
+    R: Buf,
 {
     stream
         .send_response(
