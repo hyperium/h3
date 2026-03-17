@@ -92,6 +92,9 @@ fn convert_h3_error_to_datagram_error(
         ConnectionErrorIncoming::ApplicationClose { error_code } => {
             h3_datagram::ConnectionErrorIncoming::ApplicationClose { error_code }
         }
+        ConnectionErrorIncoming::ConnectionClosed { error_code } => {
+            h3_datagram::ConnectionErrorIncoming::ConnectionClosed { error_code }
+        }
         ConnectionErrorIncoming::Timeout => h3_datagram::ConnectionErrorIncoming::Timeout,
         ConnectionErrorIncoming::InternalError(err) => {
             h3_datagram::ConnectionErrorIncoming::InternalError(err)
