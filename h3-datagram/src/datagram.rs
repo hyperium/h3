@@ -33,18 +33,25 @@ where
 
     /// Decodes a datagram frame from the QUIC datagram
     pub fn decode(mut buf: B) -> Result<Self, InternalConnectionError> {
+        //= https://www.rfc-editor.org/rfc/rfc9297#section-2.1
+        //# Receipt of a QUIC DATAGRAM frame whose payload is too short to allow
+        //# parsing the Quarter Stream ID field MUST be treated as an HTTP/3
+        //# connection error of type H3_DATAGRAM_ERROR (0x33).
         let q_stream_id = VarInt::decode(&mut buf).map_err(|_| {
             InternalConnectionError::new(Code::H3_DATAGRAM_ERROR, "invalid stream id".to_string())
         })?;
 
         //= https://www.rfc-editor.org/rfc/rfc9297#section-2.1
-        // Quarter Stream ID: A variable-length integer that contains the value of the client-initiated bidirectional
-        // stream that this datagram is associated with divided by four (the division by four stems
-        // from the fact that HTTP requests are sent on client-initiated bidirectional streams,
-        // which have stream IDs that are divisible by four). The largest legal QUIC stream ID
-        // value is 262-1, so the largest legal value of the Quarter Stream ID field is 260-1.
-        // Receipt of an HTTP/3 Datagram that includes a larger value MUST be treated as an HTTP/3
-        // connection error of type H3_DATAGRAM_ERROR (0x33).
+        //# Quarter Stream ID:  A variable-length integer that contains the value
+        //# of the client-initiated bidirectional stream that this datagram is
+        //# associated with divided by four (the division by four stems from
+        //# the fact that HTTP requests are sent on client-initiated
+        //# bidirectional streams, which have stream IDs that are divisible by
+        //# four).  The largest legal QUIC stream ID value is 2^62-1, so the
+        //# largest legal value of the Quarter Stream ID field is 2^60-1.
+        //# Receipt of an HTTP/3 Datagram that includes a larger value MUST be
+        //# treated as an HTTP/3 connection error of type H3_DATAGRAM_ERROR
+        //# (0x33).
         let stream_id = StreamId::try_from(u64::from(q_stream_id) * 4).map_err(|_| {
             InternalConnectionError::new(Code::H3_DATAGRAM_ERROR, "invalid stream id".to_string())
         })?;

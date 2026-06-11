@@ -185,6 +185,10 @@ mod tests {
         }
     }
 
+    //= https://www.rfc-editor.org/rfc/rfc9297#section-2.1.1
+    //= type=test
+    //# QUIC DATAGRAM frames MUST NOT be sent until the SETTINGS_H3_DATAGRAM
+    //# setting has been both sent and received with a value of 1.
     #[test]
     fn refuses_send_when_datagrams_not_negotiated() {
         let mut s = sender::create(Arc::new(SharedState::default()));
@@ -195,6 +199,10 @@ mod tests {
         assert_eq!(s.handler.calls, 0);
     }
 
+    //= https://www.rfc-editor.org/rfc/rfc9297#section-2.1.1
+    //= type=test
+    //# QUIC DATAGRAM frames MUST NOT be sent until the SETTINGS_H3_DATAGRAM
+    //# setting has been both sent and received with a value of 1.
     #[test]
     fn sends_when_datagrams_negotiated() {
         let mut s = {
