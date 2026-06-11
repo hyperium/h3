@@ -14,7 +14,7 @@ use stream::WriteBuf;
 use tracing::{instrument, warn};
 
 use crate::{
-    config::Config,
+    config::{Config, Settings},
     error::{
         connection_error_creators::{
             CloseRawQuicConnection, CloseStream, HandleFrameStreamErrorOnRequestStream,
@@ -579,14 +579,19 @@ where
                     ),
                 )));
             }
-            Ok(Some(Frame::Settings(settings))) => {
+            Ok(Some(Frame::Settings(peer_settings))) => {
                 if !self.got_peer_settings {
                     // Received settings frame
-
                     self.got_peer_settings = true;
-                    self.set_settings((&settings).into());
 
-                    Frame::Settings(settings)
+                    //= https://www.rfc-editor.org/rfc/rfc9297#section-2.1.1
+                    //# QUIC DATAGRAM frames MUST NOT be sent until the SETTINGS_H3_DATAGRAM
+                    //# setting has been both sent and received with a value of 1.
+                    let mut negotiated = Settings::from(&peer_settings);
+                    negotiated.enable_datagram &= self.config.settings.enable_datagram;
+                    self.set_settings(negotiated);
+
+                    Frame::Settings(peer_settings)
                 } else {
                     //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
                     //# If an endpoint receives a second SETTINGS

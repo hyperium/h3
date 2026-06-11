@@ -40,6 +40,16 @@ where
 {
     /// Sends a datagram
     pub fn send_datagram(&mut self, data: B) -> Result<(), SendDatagramError> {
+        //= https://www.rfc-editor.org/rfc/rfc9297#section-2.1.1
+        //# QUIC DATAGRAM frames MUST NOT be sent until the SETTINGS_H3_DATAGRAM
+        //# setting has been both sent and received with a value of 1.
+        //
+        // `settings()` holds the negotiated value: the peer's advertisement
+        // ANDed with our own (see the SETTINGS handling in `h3::connection`).
+        if !self.settings().enable_datagram() {
+            return Err(SendDatagramError::NotAvailable);
+        }
+
         let encoded_datagram = Datagram::new(self.stream_id, data);
         match self.handler.send_datagram(encoded_datagram.encode()) {
             Ok(()) => Ok(()),
