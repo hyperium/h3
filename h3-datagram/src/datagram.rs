@@ -72,7 +72,7 @@ where
         let varint = VarInt::from(self.stream_id) / 4;
         varint.encode(&mut buffer.as_mut_slice());
         EncodedDatagram {
-            stream_id: [0; VarInt::MAX_SIZE],
+            stream_id: buffer,
             len: varint.size(),
             pos: 0,
             payload: self.payload,
@@ -122,5 +122,25 @@ where
             cnt -= advanced;
         }
         self.payload.advance(cnt);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::Bytes;
+
+    #[test]
+    fn encode_decode_roundtrips_stream_id() {
+        for raw_id in [0, 1, 100] {
+            let stream_id = StreamId::try_from(raw_id).unwrap();
+
+            let mut encoded = Datagram::new(stream_id, Bytes::from_static(b"payload")).encode();
+            let wire = encoded.copy_to_bytes(encoded.remaining());
+            let decoded = Datagram::decode(wire).unwrap();
+
+            assert_eq!(decoded.stream_id(), stream_id);
+            assert_eq!(decoded.into_payload(), Bytes::from_static(b"payload"));
+        }
     }
 }
