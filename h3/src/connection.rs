@@ -845,7 +845,7 @@ impl<S, B> RequestStream<S, B>
 where
     S: quic::RecvStream,
 {
-    /// Receive some of the request body.
+    /// Receive some of the request/response body.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_recv_data(
         &mut self,
