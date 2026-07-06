@@ -184,14 +184,18 @@ where
         Ok(resp)
     }
 
-    /// Receive some of the request body.
+    /// Receive some of the response body.
+    ///
+    /// This returns a chunk of the response body, or `None` if the response body is finished.
     // TODO what if called before recv_response ?
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn recv_data(&mut self) -> Result<Option<impl Buf>, StreamError> {
         future::poll_fn(|cx| self.poll_recv_data(cx)).await
     }
 
-    /// Receive request body
+    /// Receive some of the response body.
+    ///
+    /// This returns a chunk of the response body, or `None` if the response body is finished.
     pub fn poll_recv_data(
         &mut self,
         cx: &mut Context<'_>,
