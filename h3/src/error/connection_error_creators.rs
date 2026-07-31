@@ -197,6 +197,22 @@ where
             FrameStreamError::Proto(frame_error) => self.handle_connection_error_on_stream(
                 InternalConnectionError::got_frame_error(frame_error),
             ),
+            // A HEADERS limit is per message: rejecting one request must not
+            // close unrelated streams on the same connection.
+            FrameStreamError::PayloadTooLarge {
+                frame_type: 0x1,
+                actual_size,
+                max_size,
+            } => StreamError::HeaderTooBig {
+                actual_size,
+                max_size,
+            },
+            FrameStreamError::PayloadTooLarge { .. } => {
+                self.handle_connection_error_on_stream(InternalConnectionError::new(
+                    Code::H3_EXCESSIVE_LOAD,
+                    "frame declared a payload larger than this endpoint will buffer".to_string(),
+                ))
+            }
             FrameStreamError::UnexpectedEnd => {
                 self.handle_connection_error_on_stream(InternalConnectionError::new(
                     Code::H3_FRAME_ERROR,

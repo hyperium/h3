@@ -112,7 +112,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(conn) => {
                     info!("new connection established");
 
-                    let mut h3_conn = h3::server::Connection::new(h3_quinn::Connection::new(conn))
+                    let mut h3_conn = h3::server::builder()
+                        .max_field_section_size(1024 * 16)
+                        .build(h3_quinn::Connection::new(conn))
                         .await
                         .unwrap();
 

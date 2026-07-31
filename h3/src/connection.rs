@@ -565,6 +565,22 @@ where
                     ),
                 )));
             }
+            Err(FrameStreamError::PayloadTooLarge {
+                frame_type: _ty,
+                actual_size: _actual,
+                max_size: _max,
+            }) => {
+                // Unlike a request stream, there is no message to reject here:
+                // every frame the control stream may legitimately carry is tens
+                // of bytes, and the stream itself is critical.
+                return Poll::Ready(Err(self.handle_connection_error(
+                    InternalConnectionError::new(
+                        Code::H3_EXCESSIVE_LOAD,
+                        "control frame declared a payload larger than this endpoint will buffer"
+                            .to_string(),
+                    ),
+                )));
+            }
             Err(FrameStreamError::Proto(frame_error)) => {
                 return Poll::Ready(Err(self.handle_connection_error(
                     InternalConnectionError::got_frame_error(frame_error),
@@ -858,9 +874,18 @@ where
         if !self.stream.has_data() {
             match ready!(self.stream.poll_next(cx)) {
                 Err(frame_stream_error) => {
+                    if matches!(
+                        frame_stream_error,
+                        FrameStreamError::PayloadTooLarge {
+                            frame_type: 0x1,
+                            ..
+                        }
+                    ) {
+                        self.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
+                    }
                     return Poll::Ready(Err(
                         self.handle_frame_stream_error_on_request_stream(frame_stream_error)
-                    ))
+                    ));
                 }
                 Ok(None) => return Poll::Ready(Ok(None)),
                 Ok(Some(Frame::Headers(encoded))) => {
@@ -919,9 +944,18 @@ where
         } else {
             match ready!(self.stream.poll_next(cx)) {
                 Err(frame_stream_error) => {
+                    if matches!(
+                        frame_stream_error,
+                        FrameStreamError::PayloadTooLarge {
+                            frame_type: 0x1,
+                            ..
+                        }
+                    ) {
+                        self.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
+                    }
                     return Poll::Ready(Err(
                         self.handle_frame_stream_error_on_request_stream(frame_stream_error)
-                    ))
+                    ));
                 }
                 Ok(None) => return Poll::Ready(Ok(None)),
                 Ok(Some(Frame::Headers(encoded))) => encoded,
@@ -967,9 +1001,18 @@ where
 
             match self.stream.poll_next(cx) {
                 Poll::Ready(Err(frame_stream_error)) => {
+                    if matches!(
+                        frame_stream_error,
+                        FrameStreamError::PayloadTooLarge {
+                            frame_type: 0x1,
+                            ..
+                        }
+                    ) {
+                        self.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
+                    }
                     return Poll::Ready(Err(
                         self.handle_frame_stream_error_on_request_stream(frame_stream_error)
-                    ))
+                    ));
                 }
                 Poll::Ready(Ok(Some(trailing_frame))) => {
                     // Received a known frame after trailers -> fail.
