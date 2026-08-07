@@ -70,33 +70,33 @@ where
         );
 
         loop {
-            let end = self.try_recv(cx)?;
-
-            return match self.decoder.decode(self.stream.buf_mut())? {
+            match self.decoder.decode(self.stream.buf_mut())? {
                 Some(Frame::Data(PayloadLen(len))) => {
                     self.remaining_data = len;
-                    Poll::Ready(Ok(Some(Frame::Data(PayloadLen(len)))))
+                    return Poll::Ready(Ok(Some(Frame::Data(PayloadLen(len)))));
                 }
                 frame @ Some(Frame::WebTransportStream(_)) => {
                     self.remaining_data = usize::MAX;
-                    Poll::Ready(Ok(frame))
+                    return Poll::Ready(Ok(frame));
                 }
-                Some(frame) => Poll::Ready(Ok(Some(frame))),
-                None => match end {
-                    // Received a chunk but frame is incomplete, poll until we get `Pending`.
-                    Poll::Ready(false) => continue,
-                    Poll::Pending => Poll::Pending,
-                    Poll::Ready(true) => {
-                        if self.stream.buf_mut().has_remaining() {
-                            // Reached the end of receive stream, but there is still some data:
-                            // The frame is incomplete.
-                            Poll::Ready(Err(FrameStreamError::UnexpectedEnd))
-                        } else {
-                            Poll::Ready(Ok(None))
-                        }
+                Some(frame) => return Poll::Ready(Ok(Some(frame))),
+                None => {}
+            }
+
+            match self.try_recv(cx)? {
+                // Received a chunk but the frame is incomplete, poll until we get `Pending`.
+                Poll::Ready(false) => continue,
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(true) => {
+                    if self.stream.buf_mut().has_remaining() {
+                        // Reached the end of receive stream, but there is still some data:
+                        // The frame is incomplete.
+                        return Poll::Ready(Err(FrameStreamError::UnexpectedEnd));
+                    } else {
+                        return Poll::Ready(Ok(None));
                     }
-                },
-            };
+                }
+            }
         }
     }
 
@@ -320,7 +320,7 @@ mod tests {
     use assert_matches::assert_matches;
     use bytes::{BufMut, Bytes, BytesMut};
     use futures_util::future::poll_fn;
-    use std::collections::VecDeque;
+    use std::{cell::Cell, collections::VecDeque, rc::Rc};
 
     use crate::proto::{coding::Encode, frame::FrameType, varint::VarInt};
 
@@ -434,6 +434,46 @@ mod tests {
             Ok(Some(b)) if b.remaining() == 4
         );
         assert_poll_matches!(|cx| stream.poll_next(cx), Ok(Some(Frame::Headers(_))));
+    }
+
+    #[tokio::test]
+    async fn poll_next_applies_backpressure_before_reading_more_chunks() {
+        const CHUNK_COUNT: usize = 64;
+        const FRAMES_PER_CHUNK: usize = 16;
+        const FRAME_PAYLOAD_SIZE: usize = 1024;
+
+        let mut encoded_chunk = BytesMut::new();
+        let payload = Bytes::from(vec![0_u8; FRAME_PAYLOAD_SIZE]);
+        for _ in 0..FRAMES_PER_CHUNK {
+            Frame::headers(payload.clone()).encode_with_payload(&mut encoded_chunk);
+        }
+        let encoded_chunk = encoded_chunk.freeze();
+        let max_buffered = encoded_chunk.len();
+
+        let mut recv = FakeRecv::default();
+        for _ in 0..CHUNK_COUNT {
+            recv.chunk(encoded_chunk.clone());
+        }
+        let transport_polls = recv.poll_count.clone();
+
+        let mut stream: FrameStream<_, ()> = FrameStream::new(BufRecvStream::new(recv));
+
+        // Model a consumer that processes one frame per wake while the
+        // transport can provide chunks containing many complete frames.
+        for _ in 0..CHUNK_COUNT {
+            assert_poll_matches!(|cx| stream.poll_next(cx), Ok(Some(Frame::Headers(_))));
+        }
+
+        let buffered = stream.stream.buf().remaining();
+        assert!(
+            buffered <= max_buffered,
+            "frame buffering grew past one transport chunk: {buffered} > {max_buffered}"
+        );
+        assert_eq!(
+            transport_polls.get(),
+            CHUNK_COUNT.div_ceil(FRAMES_PER_CHUNK),
+            "transport was polled while complete frames were still buffered"
+        );
     }
 
     #[tokio::test]
@@ -595,6 +635,7 @@ mod tests {
     #[derive(Default)]
     struct FakeRecv {
         chunks: VecDeque<Bytes>,
+        poll_count: Rc<Cell<usize>>,
     }
 
     impl FakeRecv {
@@ -611,6 +652,7 @@ mod tests {
             &mut self,
             _: &mut Context<'_>,
         ) -> Poll<Result<Option<Self::Buf>, StreamErrorIncoming>> {
+            self.poll_count.set(self.poll_count.get() + 1);
             Poll::Ready(Ok(self.chunks.pop_front()))
         }
 
