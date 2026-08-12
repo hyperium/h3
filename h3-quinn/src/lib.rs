@@ -353,6 +353,7 @@ where
 pub struct RecvStream {
     stream: Option<quinn::RecvStream>,
     read_chunk_fut: ReadChunkFuture,
+    id: StreamId,
     is_0rtt: bool,
     pending_stop: Option<VarInt>,
 }
@@ -367,11 +368,15 @@ type ReadChunkFuture = ReusableBoxFuture<
 
 impl RecvStream {
     fn new(stream: quinn::RecvStream) -> Self {
+        let id = u64::from(stream.id())
+            .try_into()
+            .expect("invalid stream id");
         let is_0rtt = stream.is_0rtt();
         Self {
             stream: Some(stream),
             // Should only allocate once the first time it's used
             read_chunk_fut: ReusableBoxFuture::new(async { unreachable!() }),
+            id,
             is_0rtt,
             pending_stop: None,
         }
@@ -415,9 +420,7 @@ impl quic::RecvStream for RecvStream {
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn recv_id(&self) -> StreamId {
-        let num: u64 = self.stream.as_ref().unwrap().id().into();
-
-        num.try_into().expect("invalid stream id")
+        self.id
     }
 }
 
