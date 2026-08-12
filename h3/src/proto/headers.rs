@@ -206,10 +206,25 @@ impl TryFrom<Vec<HeaderField>> for Header {
     fn try_from(headers: Vec<HeaderField>) -> Result<Self, Self::Error> {
         let mut fields = HeaderMap::with_capacity(headers.len());
         let mut pseudo = Pseudo::default();
+        let mut regular_field_seen = false;
 
         for field in headers.into_iter() {
             let (name, value) = field.into_inner();
             match Field::parse(name, value)? {
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3
+                //# Any request or response that contains a
+                //# pseudo-header field that appears in a header section after a regular
+                //# header field MUST be treated as malformed.
+                Field::Method(_)
+                | Field::Scheme(_)
+                | Field::Authority(_)
+                | Field::Path(_)
+                | Field::Status(_)
+                | Field::Protocol(_)
+                    if regular_field_seen =>
+                {
+                    return Err(HeaderError::PseudoAfterRegularField)
+                }
                 Field::Method(m) => {
                     pseudo.method = Some(m);
                     pseudo.len += 1;
@@ -231,6 +246,7 @@ impl TryFrom<Vec<HeaderField>> for Header {
                     pseudo.len += 1;
                 }
                 Field::Header((n, v)) => {
+                    regular_field_seen = true;
                     fields.append(n, v);
                 }
                 Field::Protocol(p) => {
@@ -304,6 +320,9 @@ impl Field {
                     .map_err(|_| HeaderError::invalid_value(name, value))?,
             ),
             b":protocol" => Field::Protocol(try_value(name, value)?),
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3
+            //# Endpoints MUST treat a request or response that contains
+            //# undefined or invalid pseudo-header fields as malformed.
             _ => return Err(HeaderError::invalid_name(name)),
         })
     }
@@ -446,6 +465,7 @@ pub enum HeaderError {
     MissingStatus,
     MissingAuthority,
     ContradictedAuthority,
+    PseudoAfterRegularField,
 }
 
 impl HeaderError {
@@ -482,6 +502,12 @@ impl fmt::Display for HeaderError {
             HeaderError::MissingAuthority => write!(f, "missing authority"),
             HeaderError::ContradictedAuthority => {
                 write!(f, "uri and authority field are in contradiction")
+            }
+            HeaderError::PseudoAfterRegularField => {
+                write!(
+                    f,
+                    "pseudo-header field appears after a regular header field"
+                )
             }
         }
     }
@@ -640,6 +666,34 @@ mod tests {
                 name: std::borrow::Cow::Borrowed(b"other-header"),
                 value: std::borrow::Cow::Borrowed(b"other-header-value")
             },]
+        );
+    }
+
+    #[test]
+    fn rejects_undefined_pseudo_header() {
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3
+        //= type=test
+        //# Endpoints MUST treat a request or response that contains
+        //# undefined or invalid pseudo-header fields as malformed.
+        assert_matches!(
+            Header::try_from(vec![(b":unknown", b"value").into()]),
+            Err(HeaderError::InvalidHeaderName(_))
+        );
+    }
+
+    #[test]
+    fn rejects_pseudo_header_after_regular_header() {
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3
+        //= type=test
+        //# Any request or response that contains a
+        //# pseudo-header field that appears in a header section after a regular
+        //# header field MUST be treated as malformed.
+        assert_matches!(
+            Header::try_from(vec![
+                (b"regular", b"value").into(),
+                (b":method", b"GET").into(),
+            ]),
+            Err(HeaderError::PseudoAfterRegularField)
         );
     }
 }

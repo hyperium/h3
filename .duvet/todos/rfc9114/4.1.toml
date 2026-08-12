@@ -22,13 +22,6 @@ as a connection error of type H3_FRAME_UNEXPECTED.
 
 [[TODO]]
 quote = '''
-Frames of unknown types (Section 9), including reserved frames
-(Section 7.2.8) MAY be sent on a request or push stream before,
-after, or interleaved with other frames described in this section.
-'''
-
-[[TODO]]
-quote = '''
 Transfer codings (see Section 7 of [HTTP/1.1]) are not defined for
 HTTP/3; the Transfer-Encoding header field MUST NOT be used.
 '''
