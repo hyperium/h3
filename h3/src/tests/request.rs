@@ -1105,9 +1105,11 @@ async fn request_valid_header_trailer() {
     .await;
 }
 
-// Frames of unknown types (Section 9), including reserved frames (Section
-// 7.2.8) MAY be sent on a request or push stream before, after, or interleaved
-// with other frames described in this section.
+//= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+//= type=test
+//# Frames of unknown types (Section 9), including reserved frames
+//# (Section 7.2.8) MAY be sent on a request or push stream before,
+//# after, or interleaved with other frames described in this section.
 
 #[tokio::test]
 async fn request_valid_unknown_frame_before() {
