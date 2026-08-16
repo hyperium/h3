@@ -6,8 +6,9 @@ use super::{codes::Code, internal_error::InternalConnectionError};
 /// This enum represents the closure of a connection because of an a closed quic connection
 /// This can be either from this endpoint because of a violation of the protocol or from the remote endpoint
 ///
-/// When the code [`Code::H3_NO_ERROR`] is used bei this peer or the remote peer, the connection is closed without an error
-/// according to the [h3 spec](https://www.rfc-editor.org/rfc/rfc9114.html#name-http-3-error-codes)
+/// When the code [`Code::H3_NO_ERROR`] (0x100) or QUIC NO_ERROR (0x0) is used by this peer or the remote peer,
+/// the connection is closed without an error according to the [HTTP/3 spec](https://www.rfc-editor.org/rfc/rfc9114.html#name-http-3-error-codes)
+/// and [QUIC spec](https://www.rfc-editor.org/rfc/rfc9000.html#section-20.1)
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum ConnectionError {
@@ -35,8 +36,14 @@ pub enum ConnectionError {
     Timeout,
 }
 
+/// QUIC transport NO_ERROR per RFC 9000 Section 20.1
+const QUIC_NO_ERROR: u64 = 0;
+
 impl ConnectionError {
-    /// Returns if the error is H3_NO_ERROR local or remote
+    /// Returns if the error is H3_NO_ERROR or QUIC NO_ERROR (graceful close)
+    ///
+    /// This includes both HTTP/3 graceful shutdown (H3_NO_ERROR = 0x100) and
+    /// QUIC transport graceful shutdown (NO_ERROR = 0x0)
     pub fn is_h3_no_error(&self) -> bool {
         match self {
             ConnectionError::Local {
@@ -47,7 +54,7 @@ impl ConnectionError {
                     },
             } => true,
             ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose { error_code })
-                if *error_code == Code::H3_NO_ERROR.value() =>
+                if *error_code == Code::H3_NO_ERROR.value() || *error_code == QUIC_NO_ERROR =>
             {
                 true
             }
