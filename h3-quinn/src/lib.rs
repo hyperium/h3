@@ -506,10 +506,10 @@ where
     }
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    fn poll_finish(
-        &mut self,
-        _cx: &mut task::Context<'_>,
-    ) -> Poll<Result<(), StreamErrorIncoming>> {
+    fn poll_finish(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), StreamErrorIncoming>> {
+        // Flush whatever `send_data` buffered before sending FIN, otherwise the tail of the
+        // last frame is dropped and the peer sees a truncated stream.
+        ready!(self.poll_ready(cx))?;
         Poll::Ready(
             self.stream
                 .finish()
