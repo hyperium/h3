@@ -40,6 +40,16 @@ where
 {
     /// Sends a datagram
     pub fn send_datagram(&mut self, data: B) -> Result<(), SendDatagramError> {
+        //= https://www.rfc-editor.org/rfc/rfc9297#section-2.1.1
+        //# QUIC DATAGRAM frames MUST NOT be sent until the SETTINGS_H3_DATAGRAM
+        //# setting has been both sent and received with a value of 1.
+        //
+        // `settings()` holds the negotiated value: the peer's advertisement
+        // ANDed with our own (see the SETTINGS handling in `h3::connection`).
+        if !self.settings().enable_datagram() {
+            return Err(SendDatagramError::NotAvailable);
+        }
+
         let encoded_datagram = Datagram::new(self.stream_id, data);
         match self.handler.send_datagram(encoded_datagram.encode()) {
             Ok(()) => Ok(()),
@@ -137,3 +147,75 @@ impl Display for SendDatagramError {
 }
 
 impl Error for SendDatagramError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::datagram::EncodedDatagram;
+    use h3::proto::frame;
+
+    use bytes::Bytes;
+
+    mod sender {
+        use super::*;
+
+        pub fn create(shared: Arc<SharedState>) -> DatagramSender<CountingSender, Bytes> {
+            DatagramSender {
+                handler: CountingSender::default(),
+                _marker: PhantomData,
+                shared_state: shared,
+                stream_id: StreamId::try_from(0u64).unwrap(),
+            }
+        }
+
+        #[derive(Default)]
+        pub struct CountingSender {
+            pub calls: usize,
+        }
+
+        impl SendDatagram<Bytes> for CountingSender {
+            fn send_datagram<T: Into<EncodedDatagram<Bytes>>>(
+                &mut self,
+                _data: T,
+            ) -> Result<(), SendDatagramErrorIncoming> {
+                self.calls += 1;
+                Ok(())
+            }
+        }
+    }
+
+    //= https://www.rfc-editor.org/rfc/rfc9297#section-2.1.1
+    //= type=test
+    //# QUIC DATAGRAM frames MUST NOT be sent until the SETTINGS_H3_DATAGRAM
+    //# setting has been both sent and received with a value of 1.
+    #[test]
+    fn refuses_send_when_datagrams_not_negotiated() {
+        let mut s = sender::create(Arc::new(SharedState::default()));
+        let res = s.send_datagram(Bytes::from_static(b"hi"));
+
+        assert!(res.is_err());
+        assert!(matches!(res.unwrap_err(), SendDatagramError::NotAvailable));
+        assert_eq!(s.handler.calls, 0);
+    }
+
+    //= https://www.rfc-editor.org/rfc/rfc9297#section-2.1.1
+    //= type=test
+    //# QUIC DATAGRAM frames MUST NOT be sent until the SETTINGS_H3_DATAGRAM
+    //# setting has been both sent and received with a value of 1.
+    #[test]
+    fn sends_when_datagrams_negotiated() {
+        let mut s = {
+            let mut settings = frame::Settings::default();
+            settings.insert(frame::SettingId::H3_DATAGRAM, 1).unwrap();
+
+            let shared_settings = Arc::new(SharedState::default());
+            shared_settings.set_settings((&settings).into());
+
+            sender::create(shared_settings)
+        };
+
+        s.send_datagram(Bytes::from_static(b"hi")).unwrap();
+        assert_eq!(s.handler.calls, 1, "should delegate to the QUIC backend");
+    }
+}
