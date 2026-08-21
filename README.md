@@ -28,7 +28,7 @@ Get more information about this tool in the [contributing][] document.
 [duvet crate]: https://crates.io/crates/duvet
 [spec]: https://www.rfc-editor.org/rfc/rfc9114
 [report]: https://hyper.rs/h3/ci/compliance/report.html#/
-[contributing]: CONTRIBUTING.md
+[contributing]: docs/CONTRIBUTING.md
 
 ## Features
 
