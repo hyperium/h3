@@ -96,7 +96,7 @@ where
 {
     #[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
     /// Create a [`RequestResolver`] to handle an incoming request.
-    pub fn create_resolver(&self, stream: FrameStream<C::BidiStream, B>) -> RequestResolver<C, B> {
+    pub fn create_resolver(&mut self, stream: FrameStream<C::BidiStream, B>) -> RequestResolver<C, B> {
         self.create_resolver_internal(stream)
     }
 
@@ -133,21 +133,21 @@ where
         };
 
         let resolver = self.create_resolver_internal(stream);
-
-        // send the grease frame only once
-        self.inner.send_grease_frame = false;
-
+        
         Ok(Some(resolver))
     }
 
     fn create_resolver_internal(
-        &self,
+        &mut self,
         stream: FrameStream<C::BidiStream, B>,
     ) -> RequestResolver<C, B> {
+        let send_grease_frame = self.inner.send_grease_frame;
+        // send the grease frame only once per connection
+        self.inner.send_grease_frame = false;
         RequestResolver {
             frame_stream: stream,
             request_end_send: self.request_end_send.clone(),
-            send_grease_frame: self.inner.send_grease_frame,
+            send_grease_frame,
             max_field_section_size: self.max_field_section_size,
             shared: self.inner.shared.clone(),
         }
