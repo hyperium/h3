@@ -29,6 +29,28 @@ impl Header {
         fields: HeaderMap,
         ext: Extensions,
     ) -> Result<Self, HeaderError> {
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
+        //# An endpoint MUST NOT generate
+        //# an HTTP/3 field section containing connection-specific fields; any
+        //# message containing connection-specific fields MUST be treated as
+        //# malformed.
+        for (name, val) in &fields {
+            let name_bytes = name.as_str().as_bytes();
+            if is_connection_specific(name_bytes) {
+                return Err(HeaderError::ConnectionSpecificHeader(name.as_str().into()));
+            }
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
+            //# The only exception to this is the TE header field, which MAY be
+            //# present in an HTTP/3 request header; when it is, it MUST NOT contain
+            //# any value other than "trailers".
+            if name_bytes == b"te" {
+                let val_bytes = trim_ascii_whitespace(val.as_bytes());
+                if !val_bytes.eq_ignore_ascii_case(b"trailers") {
+                    return Err(HeaderError::InvalidTeHeader);
+                }
+            }
+        }
+
         match (uri.authority(), fields.get("host")) {
             (None, None) => Err(HeaderError::MissingAuthority),
             (Some(a), Some(h)) if a.as_str() != h => Err(HeaderError::ContradictedAuthority),
@@ -39,21 +61,43 @@ impl Header {
         }
     }
 
-    pub fn response(status: StatusCode, fields: HeaderMap) -> Self {
-        Self {
+    pub fn response(status: StatusCode, fields: HeaderMap) -> Result<Self, HeaderError> {
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
+        //# An endpoint MUST NOT generate
+        //# an HTTP/3 field section containing connection-specific fields; any
+        //# message containing connection-specific fields MUST be treated as
+        //# malformed.
+        for (name, _) in &fields {
+            let name_bytes = name.as_str().as_bytes();
+            if is_connection_specific(name_bytes) || name_bytes == b"te" {
+                return Err(HeaderError::ConnectionSpecificHeader(name.as_str().into()));
+            }
+        }
+        Ok(Self {
             pseudo: Pseudo::response(status),
             fields,
-        }
+        })
     }
 
-    pub fn trailer(fields: HeaderMap) -> Self {
-        Self {
+    pub fn trailer(fields: HeaderMap) -> Result<Self, HeaderError> {
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
+        //# An endpoint MUST NOT generate
+        //# an HTTP/3 field section containing connection-specific fields; any
+        //# message containing connection-specific fields MUST be treated as
+        //# malformed.
+        for (name, _) in &fields {
+            let name_bytes = name.as_str().as_bytes();
+            if is_connection_specific(name_bytes) || name_bytes == b"te" {
+                return Err(HeaderError::ConnectionSpecificHeader(name.as_str().into()));
+            }
+        }
+        Ok(Self {
             //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3
             //# Pseudo-header fields MUST NOT appear in trailer
             //# sections.
             pseudo: Pseudo::default(),
             fields,
-        }
+        })
     }
 
     pub fn into_request_parts(
@@ -105,6 +149,14 @@ impl Header {
     }
 
     pub fn into_response_parts(self) -> Result<(StatusCode, HeaderMap), HeaderError> {
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
+        //# The only exception to this is the TE header field, which MAY be
+        //# present in an HTTP/3 request header; when it is, it MUST NOT contain
+        //# any value other than "trailers".
+        if self.fields.contains_key("te") {
+            return Err(HeaderError::ConnectionSpecificHeader("te".into()));
+        }
+
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3.2
         //= type=implication
         //# For responses, a single ":status" pseudo-header field is defined that
@@ -115,6 +167,23 @@ impl Header {
             self.pseudo.status.ok_or(HeaderError::MissingStatus)?,
             self.fields,
         ))
+    }
+
+    pub fn into_trailer_parts(self) -> Result<HeaderMap, HeaderError> {
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3
+        //# Pseudo-header fields MUST NOT appear in trailer
+        //# sections.
+        if self.pseudo.len() > 0 {
+            return Err(HeaderError::PseudoInTrailer);
+        }
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
+        //# The only exception to this is the TE header field, which MAY be
+        //# present in an HTTP/3 request header; when it is, it MUST NOT contain
+        //# any value other than "trailers".
+        if self.fields.contains_key("te") {
+            return Err(HeaderError::ConnectionSpecificHeader("te".into()));
+        }
+        Ok(self.fields)
     }
 
     pub fn into_fields(self) -> HeaderMap {
@@ -204,7 +273,7 @@ impl Iterator for HeaderIter {
 impl TryFrom<Vec<HeaderField>> for Header {
     type Error = HeaderError;
     fn try_from(headers: Vec<HeaderField>) -> Result<Self, Self::Error> {
-        let mut fields = HeaderMap::with_capacity(headers.len());
+        let mut fields: HeaderMap = HeaderMap::with_capacity(headers.len());
         let mut pseudo = Pseudo::default();
         let mut regular_field_seen = false;
 
@@ -247,7 +316,33 @@ impl TryFrom<Vec<HeaderField>> for Header {
                 }
                 Field::Header((n, v)) => {
                     regular_field_seen = true;
-                    fields.append(n, v);
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.1
+                    //# If a decompressed field
+                    //# section contains multiple cookie field lines, these MUST be
+                    //# concatenated into a single byte string using the two-byte delimiter
+                    //# of "; " (ASCII 0x3b, 0x20) before being passed into a context other
+                    //# than HTTP/2 or HTTP/3, such as an HTTP/1.1 connection, or a generic
+                    //# HTTP server application.
+                    if n == header::COOKIE {
+                        match fields.entry(header::COOKIE) {
+                            header::Entry::Occupied(mut entry) => {
+                                let mut joined = Vec::with_capacity(
+                                    entry.get().as_bytes().len() + 2 + v.as_bytes().len(),
+                                );
+                                joined.extend_from_slice(entry.get().as_bytes());
+                                joined.extend_from_slice(b"; ");
+                                joined.extend_from_slice(v.as_bytes());
+                                let new_value = HeaderValue::from_bytes(&joined)
+                                    .map_err(|_| HeaderError::invalid_value(&n, v.as_bytes()))?;
+                                entry.insert(new_value);
+                            }
+                            header::Entry::Vacant(entry) => {
+                                entry.insert(v);
+                            }
+                        }
+                    } else {
+                        fields.append(n, v);
+                    }
                 }
                 Field::Protocol(p) => {
                     pseudo.protocol = Some(p);
@@ -297,8 +392,34 @@ impl Field {
         //# treated as malformed.
 
         if name[0] != b':' {
+            let header_name = HeaderName::from_lowercase(name)
+                .map_err(|_| HeaderError::invalid_name(name))?;
+
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
+            //# An endpoint MUST NOT generate
+            //# an HTTP/3 field section containing connection-specific fields; any
+            //# message containing connection-specific fields MUST be treated as
+            //# malformed.
+            let name_bytes = header_name.as_str().as_bytes();
+            if is_connection_specific(name_bytes) {
+                return Err(HeaderError::ConnectionSpecificHeader(
+                    header_name.as_str().to_owned(),
+                ));
+            }
+
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
+            //# The only exception to this is the TE header field, which MAY be
+            //# present in an HTTP/3 request header; when it is, it MUST NOT contain
+            //# any value other than "trailers".
+            if name_bytes == b"te" {
+                let val_bytes = trim_ascii_whitespace(value.as_ref());
+                if !val_bytes.eq_ignore_ascii_case(b"trailers") {
+                    return Err(HeaderError::InvalidTeHeader);
+                }
+            }
+
             return Ok(Field::Header((
-                HeaderName::from_lowercase(name).map_err(|_| HeaderError::invalid_name(name))?,
+                header_name,
                 HeaderValue::from_bytes(value.as_ref())
                     .map_err(|_| HeaderError::invalid_value(name, value))?,
             )));
@@ -456,6 +577,25 @@ impl Pseudo {
     }
 }
 
+fn is_connection_specific(name: &[u8]) -> bool {
+    matches!(
+        name,
+        b"connection" | b"keep-alive" | b"proxy-connection" | b"transfer-encoding" | b"upgrade"
+    )
+}
+
+fn trim_ascii_whitespace(bytes: &[u8]) -> &[u8] {
+    let mut start = 0;
+    while start < bytes.len() && (bytes[start] == b' ' || bytes[start] == b'\t') {
+        start += 1;
+    }
+    let mut end = bytes.len();
+    while end > start && (bytes[end - 1] == b' ' || bytes[end - 1] == b'\t') {
+        end -= 1;
+    }
+    &bytes[start..end]
+}
+
 #[derive(Debug)]
 pub enum HeaderError {
     InvalidHeaderName(String),
@@ -466,6 +606,9 @@ pub enum HeaderError {
     MissingAuthority,
     ContradictedAuthority,
     PseudoAfterRegularField,
+    ConnectionSpecificHeader(String),
+    InvalidTeHeader,
+    PseudoInTrailer,
 }
 
 impl HeaderError {
@@ -508,6 +651,15 @@ impl fmt::Display for HeaderError {
                     f,
                     "pseudo-header field appears after a regular header field"
                 )
+            }
+            HeaderError::ConnectionSpecificHeader(h) => {
+                write!(f, "connection-specific header not permitted: {}", h)
+            }
+            HeaderError::InvalidTeHeader => {
+                write!(f, "te header field may only contain 'trailers'")
+            }
+            HeaderError::PseudoInTrailer => {
+                write!(f, "pseudo-header field appears in trailer section")
             }
         }
     }
@@ -694,6 +846,158 @@ mod tests {
                 (b":method", b"GET").into(),
             ]),
             Err(HeaderError::PseudoAfterRegularField)
+        );
+    }
+
+    #[test]
+    fn rejects_connection_specific_headers() {
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
+        //= type=test
+        //# An endpoint MUST NOT generate
+        //# an HTTP/3 field section containing connection-specific fields; any
+        //# message containing connection-specific fields MUST be treated as
+        //# malformed.
+        for name in &[
+            "connection",
+            "keep-alive",
+            "proxy-connection",
+            "transfer-encoding",
+            "upgrade",
+        ] {
+            assert_matches!(
+                Header::try_from(vec![
+                    (b":method", b"GET").into(),
+                    (b":scheme", b"https").into(),
+                    (b":authority", b"example.com").into(),
+                    (b":path", b"/").into(),
+                    (name.as_bytes(), b"foo").into(),
+                ]),
+                Err(HeaderError::ConnectionSpecificHeader(_))
+            );
+
+            let mut map = HeaderMap::new();
+            map.insert(
+                HeaderName::from_static(name),
+                HeaderValue::from_static("foo"),
+            );
+            assert_matches!(
+                Header::request(
+                    Method::GET,
+                    Uri::from_static("https://example.com/"),
+                    map.clone(),
+                    Extensions::new()
+                ),
+                Err(HeaderError::ConnectionSpecificHeader(_))
+            );
+            assert_matches!(
+                Header::response(StatusCode::OK, map.clone()),
+                Err(HeaderError::ConnectionSpecificHeader(_))
+            );
+            assert_matches!(
+                Header::trailer(map),
+                Err(HeaderError::ConnectionSpecificHeader(_))
+            );
+        }
+    }
+
+    #[test]
+    fn validates_te_header() {
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
+        //= type=test
+        //# The only exception to this is the TE header field, which MAY be
+        //# present in an HTTP/3 request header; when it is, it MUST NOT contain
+        //# any value other than "trailers".
+
+        // Valid: "trailers" in request
+        assert!(Header::try_from(vec![
+            (b":method", b"GET").into(),
+            (b":scheme", b"https").into(),
+            (b":authority", b"example.com").into(),
+            (b":path", b"/").into(),
+            (b"te", b"trailers").into(),
+        ])
+        .is_ok());
+
+        // Valid with whitespace and mixed casing
+        assert!(Header::try_from(vec![
+            (b":method", b"GET").into(),
+            (b":scheme", b"https").into(),
+            (b":authority", b"example.com").into(),
+            (b":path", b"/").into(),
+            (b"te", b" Trailers ").into(),
+        ])
+        .is_ok());
+
+        // Invalid: TE with value other than trailers in request
+        assert_matches!(
+            Header::try_from(vec![
+                (b":method", b"GET").into(),
+                (b":scheme", b"https").into(),
+                (b":authority", b"example.com").into(),
+                (b":path", b"/").into(),
+                (b"te", b"gzip").into(),
+            ]),
+            Err(HeaderError::InvalidTeHeader)
+        );
+
+        // Invalid: TE in response
+        let header = Header::try_from(vec![
+            (b":status", b"200").into(),
+            (b"te", b"trailers").into(),
+        ])
+        .unwrap();
+        assert_matches!(
+            header.into_response_parts(),
+            Err(HeaderError::ConnectionSpecificHeader(_))
+        );
+
+        // Invalid: TE in trailers
+        let header = Header::try_from(vec![(b"te", b"trailers").into()]).unwrap();
+        assert_matches!(
+            header.into_trailer_parts(),
+            Err(HeaderError::ConnectionSpecificHeader(_))
+        );
+    }
+
+    #[test]
+    fn concatenates_multiple_cookie_headers() {
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.1
+        //= type=test
+        //# If a decompressed field
+        //# section contains multiple cookie field lines, these MUST be
+        //# concatenated into a single byte string using the two-byte delimiter
+        //# of "; " (ASCII 0x3b, 0x20) before being passed into a context other
+        //# than HTTP/2 or HTTP/3, such as an HTTP/1.1 connection, or a generic
+        //# HTTP server application.
+        let header = Header::try_from(vec![
+            (b":method", b"GET").into(),
+            (b":scheme", b"https").into(),
+            (b":authority", b"example.com").into(),
+            (b":path", b"/").into(),
+            (b"cookie", b"a=b").into(),
+            (b"cookie", b"c=d").into(),
+            (b"cookie", b"e=f").into(),
+        ])
+        .unwrap();
+
+        let (_, _, _, fields) = header.into_request_parts().unwrap();
+        assert_eq!(fields.get(header::COOKIE).unwrap(), "a=b; c=d; e=f");
+    }
+
+    #[test]
+    fn rejects_pseudo_headers_in_trailers() {
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3
+        //= type=test
+        //# Pseudo-header fields MUST NOT appear in trailer
+        //# sections.
+        let header = Header::try_from(vec![
+            (b":status", b"200").into(),
+            (b"some-trailer", b"value").into(),
+        ])
+        .unwrap();
+        assert_matches!(
+            header.into_trailer_parts(),
+            Err(HeaderError::PseudoInTrailer)
         );
     }
 }

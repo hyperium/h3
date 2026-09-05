@@ -147,7 +147,12 @@ where
         let response::Parts {
             status, headers, ..
         } = parts;
-        let headers = Header::response(status, headers);
+        let headers = Header::response(status, headers).map_err(|e| {
+            StreamError::StreamError {
+                code: Code::H3_MESSAGE_ERROR,
+                reason: format!("malformed response headers: {}", e),
+            }
+        })?;
 
         let mut block = BytesMut::new();
         let mem_size = qpack::encode_stateless(&mut block, headers).map_err(|_e| {

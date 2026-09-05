@@ -183,13 +183,13 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[!MUST,implication]: A request or
     TEXT[!MUST,implication]:    response containing uppercase characters in field names MUST be
     TEXT[!MUST,implication]:    treated as malformed.
-    TEXT[!MUST,todo]: An endpoint MUST NOT generate
-    TEXT[!MUST,todo]:    an HTTP/3 field section containing connection-specific fields; any
-    TEXT[!MUST,todo]:    message containing connection-specific fields MUST be treated as
-    TEXT[!MUST,todo]:    malformed.
-    TEXT[!MUST,todo]:    The only exception to this is the TE header field, which MAY be
-    TEXT[!MUST,todo]:    present in an HTTP/3 request header; when it is, it MUST NOT contain
-    TEXT[!MUST,todo]:    any value other than "trailers".
+    TEXT[!MUST,implementation,test]: An endpoint MUST NOT generate
+    TEXT[!MUST,implementation,test]:    an HTTP/3 field section containing connection-specific fields; any
+    TEXT[!MUST,implementation,test]:    message containing connection-specific fields MUST be treated as
+    TEXT[!MUST,implementation,test]:    malformed.
+    TEXT[!MUST,implementation,test]:    The only exception to this is the TE header field, which MAY be
+    TEXT[!MUST,implementation,test]:    present in an HTTP/3 request header; when it is, it MUST NOT contain
+    TEXT[!MUST,implementation,test]:    any value other than "trailers".
     TEXT[!MUST,exception]:    An intermediary transforming an HTTP/1.x message to HTTP/3 MUST
     TEXT[!MUST,exception]:    remove connection-specific header fields as discussed in
     TEXT[!MUST,exception]:    Section 7.6.1 of [HTTP], or their messages will be treated by other
@@ -199,12 +199,12 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[!MAY,todo]:    To allow for better compression efficiency, the Cookie header field
     TEXT[!MAY,todo]:    ([COOKIES]) MAY be split into separate field lines, each with one or
     TEXT[!MAY,todo]:    more cookie-pairs, before compression.
-    TEXT[!MUST,todo]: If a decompressed field
-    TEXT[!MUST,todo]:    section contains multiple cookie field lines, these MUST be
-    TEXT[!MUST,todo]:    concatenated into a single byte string using the two-byte delimiter
-    TEXT[!MUST,todo]:    of "; " (ASCII 0x3b, 0x20) before being passed into a context other
-    TEXT[!MUST,todo]:    than HTTP/2 or HTTP/3, such as an HTTP/1.1 connection, or a generic
-    TEXT[!MUST,todo]:    HTTP server application.
+    TEXT[!MUST,implementation,test]: If a decompressed field
+    TEXT[!MUST,implementation,test]:    section contains multiple cookie field lines, these MUST be
+    TEXT[!MUST,implementation,test]:    concatenated into a single byte string using the two-byte delimiter
+    TEXT[!MUST,implementation,test]:    of "; " (ASCII 0x3b, 0x20) before being passed into a context other
+    TEXT[!MUST,implementation,test]:    than HTTP/2 or HTTP/3, such as an HTTP/1.1 connection, or a generic
+    TEXT[!MUST,implementation,test]:    HTTP server application.
 
   SECTION: [Header Size Constraints](#section-4.2.2)
     TEXT[!MAY,implementation,test]:    An HTTP/3 implementation MAY impose a limit on the maximum size of
@@ -221,8 +221,8 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[!MUST,implication]: Pseudo-header fields defined for requests MUST NOT appear
     TEXT[!MUST,implication]:    in responses; pseudo-header fields defined for responses MUST NOT
     TEXT[!MUST,implication]:    appear in requests.
-    TEXT[!MUST,implementation]: Pseudo-header fields MUST NOT appear in trailer
-    TEXT[!MUST,implementation]:    sections.
+    TEXT[!MUST,implementation,test]: Pseudo-header fields MUST NOT appear in trailer
+    TEXT[!MUST,implementation,test]:    sections.
     TEXT[!MUST,implementation,test]: Endpoints MUST treat a request or response that contains
     TEXT[!MUST,implementation,test]:    undefined or invalid pseudo-header fields as malformed.
     TEXT[!MUST,implementation]:    All pseudo-header fields MUST appear in the header section before
