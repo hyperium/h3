@@ -1027,7 +1027,14 @@ where
                         reason: "malformed request".to_string(),
                     }
                 })?
-                .into_fields(),
+                .into_trailer_parts()
+                .map_err(|_e| {
+                    self.stop_sending(Code::H3_MESSAGE_ERROR);
+                    StreamError::StreamError {
+                        code: Code::H3_MESSAGE_ERROR,
+                        reason: "malformed trailer".to_string(),
+                    }
+                })?,
         )))
     }
 
@@ -1063,8 +1070,14 @@ where
         //# converted to lowercase prior to their encoding.
         let mut block = BytesMut::new();
 
+        let header = Header::trailer(trailers).map_err(|e| {
+            StreamError::StreamError {
+                code: Code::H3_MESSAGE_ERROR,
+                reason: format!("malformed trailers: {}", e),
+            }
+        })?;
         let mem_size =
-            qpack::encode_stateless(&mut block, Header::trailer(trailers)).map_err(|_e| {
+            qpack::encode_stateless(&mut block, header).map_err(|_e| {
                 self.handle_connection_error_on_stream(InternalConnectionError {
                     code: Code::H3_INTERNAL_ERROR,
                     message: "Failed to encode trailers".to_string(),
