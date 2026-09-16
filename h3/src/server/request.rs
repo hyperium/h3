@@ -3,7 +3,6 @@ use std::{convert::TryFrom, sync::Arc};
 use bytes::Buf;
 use http::{Request, StatusCode};
 
-use tokio::sync::mpsc::UnboundedSender;
 #[cfg(feature = "tracing")]
 use tracing::instrument;
 
@@ -20,7 +19,7 @@ use crate::{
         headers::Header,
     },
     qpack,
-    quic::{self, SendStream, StreamId},
+    quic::{self, SendStream},
     shared_state::{ConnectionState, SharedState},
 };
 
@@ -36,7 +35,7 @@ where
     #[doc(hidden)]
     // TODO: make this private
     pub frame_stream: FrameStream<C::BidiStream, B>,
-    pub(super) request_end_send: UnboundedSender<StreamId>,
+    pub(super) request_end: Arc<RequestEnd>,
     pub(super) send_grease_frame: bool,
     pub(super) max_field_section_size: u64,
     pub(super) shared: Arc<SharedState>,
@@ -65,6 +64,10 @@ where
     B: Buf,
 {
     /// Returns a future to await the request headers and return a `Request` object
+    ///
+    /// This does not impose a header read deadline. Callers can use their runtime's
+    /// timeout mechanism. Dropping the resolver or cancelling this future releases
+    /// its entry in the connection's ongoing request tracking.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     #[allow(clippy::type_complexity)]
     pub async fn resolve_request(
@@ -143,10 +146,7 @@ where
         };
 
         let request_stream = RequestStream {
-            request_end: Arc::new(RequestEnd {
-                request_end: self.request_end_send.clone(),
-                stream_id: self.frame_stream.send_id(),
-            }),
+            request_end: self.request_end,
             inner: connection::RequestStream::new(
                 self.frame_stream,
                 self.max_field_section_size,
