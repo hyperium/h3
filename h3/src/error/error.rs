@@ -1,5 +1,5 @@
 //! This is the public facing error types for the h3 crate
-use crate::quic::ConnectionErrorIncoming;
+use crate::quic::{ConnectionErrorIncoming, QUIC_NO_ERROR};
 
 use super::{codes::Code, internal_error::InternalConnectionError};
 
@@ -48,6 +48,11 @@ impl ConnectionError {
             } => true,
             ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose { error_code })
                 if *error_code == Code::H3_NO_ERROR.value() =>
+            {
+                true
+            }
+            ConnectionError::Remote(ConnectionErrorIncoming::ConnectionClosed { error_code })
+                if *error_code == QUIC_NO_ERROR =>
             {
                 true
             }

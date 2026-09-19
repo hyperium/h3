@@ -112,16 +112,41 @@ fn convert_connection_error(e: quinn::ConnectionError) -> h3::quic::ConnectionEr
                 error_code: application_close.error_code.into(),
             }
         }
+        quinn::ConnectionError::ConnectionClosed(connection_close) => {
+            ConnectionErrorIncoming::ConnectionClosed {
+                error_code: connection_close.error_code.into(),
+            }
+        }
         quinn::ConnectionError::TimedOut => ConnectionErrorIncoming::Timeout,
 
         error @ quinn::ConnectionError::VersionMismatch
         | error @ quinn::ConnectionError::Reset
         | error @ quinn::ConnectionError::LocallyClosed
         | error @ quinn::ConnectionError::CidsExhausted
-        | error @ quinn::ConnectionError::TransportError(_)
-        | error @ quinn::ConnectionError::ConnectionClosed(_) => {
+        | error @ quinn::ConnectionError::TransportError(_) => {
             ConnectionErrorIncoming::Undefined(Arc::new(error))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::convert_connection_error;
+    use h3::quic::ConnectionErrorIncoming;
+    use quinn::{ConnectionClose, ConnectionError, TransportErrorCode};
+
+    #[test]
+    fn connection_closed_is_mapped_to_structured_variant() {
+        let error = ConnectionError::ConnectionClosed(ConnectionClose {
+            error_code: TransportErrorCode::NO_ERROR,
+            frame_type: None,
+            reason: Default::default(),
+        });
+
+        assert!(matches!(
+            convert_connection_error(error),
+            ConnectionErrorIncoming::ConnectionClosed { error_code: 0 }
+        ));
     }
 }
 
