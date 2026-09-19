@@ -96,7 +96,10 @@ where
 {
     #[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
     /// Create a [`RequestResolver`] to handle an incoming request.
-    pub fn create_resolver(&mut self, stream: FrameStream<C::BidiStream, B>) -> RequestResolver<C, B> {
+    pub fn create_resolver(
+        &mut self,
+        stream: FrameStream<C::BidiStream, B>,
+    ) -> RequestResolver<C, B> {
         self.create_resolver_internal(stream)
     }
 
@@ -133,7 +136,7 @@ where
         };
 
         let resolver = self.create_resolver_internal(stream);
-        
+
         Ok(Some(resolver))
     }
 
