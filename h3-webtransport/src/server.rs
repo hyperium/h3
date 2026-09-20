@@ -17,7 +17,7 @@ use h3::{
     frame::FrameStream,
     proto::frame::Frame,
     quic::{self, OpenStreams, WriteBuf},
-    server::{Connection, RequestStream},
+    server::{Connection, RequestResolver, RequestStream},
     ConnectionState, SharedState,
 };
 use h3::{
@@ -177,45 +177,22 @@ where
         }
     }
 
-    /// Accepts an incoming bidirectional stream or request
-    pub async fn accept_bi(&self) -> Result<Option<AcceptedBi<C, B>>, StreamError> {
+    /// Accepts an incoming bidirectional stream.
+    ///
+    /// The returned resolver reads the first frame to determine whether the stream contains a
+    /// WebTransport bidirectional stream or an HTTP/3 request.
+    pub async fn accept_bi(&self) -> Result<Option<BiStreamResolver<C, B>>, ConnectionError> {
         let stream = poll_fn(|cx| {
             let mut conn = self.server_conn.lock().unwrap();
             conn.poll_accept_request_stream(cx)
         })
-        .await;
+        .await?;
 
-        let stream = match stream {
-            Ok(Some(s)) => FrameStream::new(BufRecvStream::new(s)),
-            Ok(None) => {
-                // FIXME: is proper HTTP GoAway shutdown required?
-                return Ok(None);
-            }
-            Err(err) => return Err(StreamError::ConnectionError(err)),
-        };
-
-        let mut resolver = { self.server_conn.lock().unwrap().create_resolver(stream) };
-        // Read the first frame.
-        //
-        // This will determine if it is a webtransport bi-stream or a request stream
-        let frame = poll_fn(|cx| resolver.frame_stream.poll_next(cx)).await;
-
-        match frame {
-            Ok(None) => Ok(None),
-            Ok(Some(Frame::WebTransportStream(session_id))) => {
-                // Take the stream out of the framed reader and split it in half like Paul Allen
-                let stream = resolver.frame_stream.into_inner();
-                Ok(Some(AcceptedBi::BidiStream(
-                    session_id,
-                    BidiStream::new(stream),
-                )))
-            }
-            // Make the underlying HTTP/3 connection handle the rest
-            frame => {
-                let (req, resp) = resolver.accept_with_frame(frame)?.resolve().await?;
-                Ok(Some(AcceptedBi::Request(req, resp)))
-            }
-        }
+        Ok(stream.map(|stream| {
+            let stream = FrameStream::new(BufRecvStream::new(stream));
+            let resolver = self.server_conn.lock().unwrap().create_resolver(stream);
+            BiStreamResolver { resolver }
+        }))
     }
 
     /// Open a new bidirectional stream
@@ -245,6 +222,39 @@ where
     /// Returns the session id
     pub fn session_id(&self) -> SessionId {
         self.session_id
+    }
+}
+
+/// Resolves an accepted bidirectional stream as either WebTransport or HTTP/3.
+pub struct BiStreamResolver<C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    resolver: RequestResolver<C, B>,
+}
+
+impl<C, B> BiStreamResolver<C, B>
+where
+    C: quic::Connection<B>,
+    B: Buf,
+{
+    /// Reads the first frame and classifies the accepted stream.
+    pub async fn resolve(mut self) -> Result<AcceptedBi<C, B>, StreamError> {
+        let frame = poll_fn(|cx| self.resolver.frame_stream.poll_next(cx)).await;
+
+        match frame {
+            Ok(Some(Frame::WebTransportStream(session_id))) => {
+                // Take the stream out of the framed reader and split it in half like Paul Allen
+                let stream = self.resolver.frame_stream.into_inner();
+                Ok(AcceptedBi::BidiStream(session_id, BidiStream::new(stream)))
+            }
+            // Make the underlying HTTP/3 connection handle the rest
+            frame => {
+                let (req, resp) = self.resolver.accept_with_frame(frame)?.resolve().await?;
+                Ok(AcceptedBi::Request(req, resp))
+            }
+        }
     }
 }
 
