@@ -406,6 +406,7 @@ impl SettingId {
                 | SettingId::ENABLE_CONNECT_PROTOCOL
                 | SettingId::ENABLE_WEBTRANSPORT
                 | SettingId::WEBTRANSPORT_MAX_SESSIONS
+                | SettingId::WT_MAX_SESSIONS
                 | SettingId::H3_DATAGRAM,
         )
     }
@@ -455,6 +456,9 @@ setting_identifiers! {
     H3_SETTING_ENABLE_DATAGRAM_CHROME_SPECIFIC= 0xFFD277,
 
     WEBTRANSPORT_MAX_SESSIONS = 0x2b603743,
+    // RFC-track codepoint (draft-ietf-webtrans-http3 draft-07+); WebKit
+    // requires this one and ignores the legacy pair above.
+    WT_MAX_SESSIONS = 0xc671706a,
 }
 
 const SETTINGS_LEN: usize = 8;

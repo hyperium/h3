@@ -50,12 +50,21 @@ impl From<&frame::Settings> for Settings {
             max_field_section_size: settings
                 .get(frame::SettingId::MAX_HEADER_LIST_SIZE)
                 .unwrap_or(defaults.max_field_section_size),
+            // A peer signals WebTransport support with either the legacy
+            // draft-02 boolean or the RFC-track WT_MAX_SESSIONS (> 0 means
+            // supported); WebKit sends only the latter.
             enable_webtransport: settings
                 .get(frame::SettingId::ENABLE_WEBTRANSPORT)
                 .map(|value| value != 0)
+                .or_else(|| {
+                    settings
+                        .get(frame::SettingId::WT_MAX_SESSIONS)
+                        .map(|value| value != 0)
+                })
                 .unwrap_or(defaults.enable_webtransport),
             max_webtransport_sessions: settings
-                .get(frame::SettingId::WEBTRANSPORT_MAX_SESSIONS)
+                .get(frame::SettingId::WT_MAX_SESSIONS)
+                .or_else(|| settings.get(frame::SettingId::WEBTRANSPORT_MAX_SESSIONS))
                 .unwrap_or(defaults.max_webtransport_sessions),
             enable_datagram: settings
                 .get(frame::SettingId::H3_DATAGRAM)
@@ -129,6 +138,9 @@ impl TryFrom<Config> for frame::Settings {
             frame::SettingId::WEBTRANSPORT_MAX_SESSIONS,
             max_webtransport_sessions,
         )?;
+        // Advertise the RFC-track codepoint alongside the legacy pair:
+        // Chrome accepts either dialect, WebKit requires this one.
+        settings.insert(frame::SettingId::WT_MAX_SESSIONS, max_webtransport_sessions)?;
 
         Ok(settings)
     }
