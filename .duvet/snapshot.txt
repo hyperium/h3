@@ -89,9 +89,9 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[!MUST,todo]: PUSH_PROMISE frames are not permitted on push streams;
     TEXT[!MUST,todo]:    a pushed response that includes PUSH_PROMISE frames MUST be treated
     TEXT[!MUST,todo]:    as a connection error of type H3_FRAME_UNEXPECTED.
-    TEXT[!MAY,todo]:    Frames of unknown types (Section 9), including reserved frames
-    TEXT[!MAY,todo]:    (Section 7.2.8) MAY be sent on a request or push stream before,
-    TEXT[!MAY,todo]:    after, or interleaved with other frames described in this section.
+    TEXT[!MAY,implementation,test]:    Frames of unknown types (Section 9), including reserved frames
+    TEXT[!MAY,implementation,test]:    (Section 7.2.8) MAY be sent on a request or push stream before,
+    TEXT[!MAY,implementation,test]:    after, or interleaved with other frames described in this section.
     TEXT[!MUST,todo]:    Transfer codings (see Section 7 of [HTTP/1.1]) are not defined for
     TEXT[!MUST,todo]:    HTTP/3; the Transfer-Encoding header field MUST NOT be used.
     TEXT[!MAY,todo]:    A response MAY consist of multiple messages when and only when one or
@@ -170,12 +170,12 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[!MUST,exception]:    Intermediaries that process HTTP requests or responses (i.e., any
     TEXT[!MUST,exception]:    intermediary not acting as a tunnel) MUST NOT forward a malformed
     TEXT[!MUST,exception]:    request or response.
-    TEXT[!MUST,implementation,todo]: Malformed requests or responses that are
-    TEXT[!MUST,implementation,todo]:    detected MUST be treated as a stream error of type H3_MESSAGE_ERROR.
+    TEXT[!MUST,implementation]: Malformed requests or responses that are
+    TEXT[!MUST,implementation]:    detected MUST be treated as a stream error of type H3_MESSAGE_ERROR.
     TEXT[!MAY,todo]:    For malformed requests, a server MAY send an HTTP response indicating
     TEXT[!MAY,todo]:    the error prior to closing or resetting the stream.
-    TEXT[!MUST,todo]: Clients MUST NOT
-    TEXT[!MUST,todo]:    accept a malformed response.
+    TEXT[!MUST,implementation,todo]: Clients MUST NOT
+    TEXT[!MUST,implementation,todo]:    accept a malformed response.
 
   SECTION: [HTTP Fields](#section-4.2)
     TEXT[!MUST,todo]: Characters in field names MUST be
@@ -223,13 +223,13 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[!MUST,implication]:    appear in requests.
     TEXT[!MUST,implementation]: Pseudo-header fields MUST NOT appear in trailer
     TEXT[!MUST,implementation]:    sections.
-    TEXT[!MUST,todo]: Endpoints MUST treat a request or response that contains
-    TEXT[!MUST,todo]:    undefined or invalid pseudo-header fields as malformed.
+    TEXT[!MUST,implementation,test]: Endpoints MUST treat a request or response that contains
+    TEXT[!MUST,implementation,test]:    undefined or invalid pseudo-header fields as malformed.
     TEXT[!MUST,implementation]:    All pseudo-header fields MUST appear in the header section before
     TEXT[!MUST,implementation]:    regular header fields.
-    TEXT[!MUST,todo]: Any request or response that contains a
-    TEXT[!MUST,todo]:    pseudo-header field that appears in a header section after a regular
-    TEXT[!MUST,todo]:    header field MUST be treated as malformed.
+    TEXT[!MUST,implementation,test]: Any request or response that contains a
+    TEXT[!MUST,implementation,test]:    pseudo-header field that appears in a header section after a regular
+    TEXT[!MUST,implementation,test]:    header field MUST be treated as malformed.
 
   SECTION: [Request Pseudo-Header Fields](#section-4.3.1)
     TEXT[!MUST,todo]: The authority MUST NOT include the
@@ -463,9 +463,9 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[!MUST,todo]: However, stream types that could modify the state or
     TEXT[!MUST,todo]:    semantics of existing protocol components, including QPACK or other
     TEXT[!MUST,todo]:    extensions, MUST NOT be sent until the peer is known to support them.
-    TEXT[!MUST,implementation,todo]: A receiver MUST tolerate unidirectional streams being
-    TEXT[!MUST,implementation,todo]:    closed or reset prior to the reception of the unidirectional stream
-    TEXT[!MUST,implementation,todo]:    header.
+    TEXT[!MUST,implementation]: A receiver MUST tolerate unidirectional streams being
+    TEXT[!MUST,implementation]:    closed or reset prior to the reception of the unidirectional stream
+    TEXT[!MUST,implementation]:    header.
 
   SECTION: [Control Streams](#section-6.2.1)
     TEXT[!MUST,implementation]:    Each side MUST initiate a single control stream at the beginning of
@@ -715,13 +715,11 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[implication]:    types be ignored (Section 9).
     TEXT[!MAY,implication]: These frames have no semantics, and
     TEXT[!MAY,implication]:    they MAY be sent on any stream where frames are allowed to be sent.
-    TEXT[!MUST,implementation,todo]: Endpoints MUST
-    TEXT[!MUST,implementation,todo]:    NOT consider these frames to have any meaning upon receipt.
-    TEXT[todo]:    Frame types that were used in HTTP/2 where there is no corresponding
-    TEXT[todo]:    HTTP/3 frame have also been reserved (Section 11.2.1).
-    TEXT[!MUST,implementation,todo]: These frame
-    TEXT[!MUST,implementation,todo]:    types MUST NOT be sent, and their receipt MUST be treated as a
-    TEXT[!MUST,implementation,todo]:    connection error of type H3_FRAME_UNEXPECTED.
+    TEXT[!MUST,implementation]: Endpoints MUST
+    TEXT[!MUST,implementation]:    NOT consider these frames to have any meaning upon receipt.
+    TEXT[!MUST,implementation]: These frame
+    TEXT[!MUST,implementation]:    types MUST NOT be sent, and their receipt MUST be treated as a
+    TEXT[!MUST,implementation]:    connection error of type H3_FRAME_UNEXPECTED.
 
   SECTION: [Error Handling](#section-8)
     TEXT[!MAY,todo]:    An endpoint MAY choose to treat a stream error as a connection error
@@ -742,9 +740,9 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
   SECTION: [Extensions to HTTP/3](#section-9)
     TEXT[!MUST,todo]:    Implementations MUST ignore unknown or unsupported values in all
     TEXT[!MUST,todo]:    extensible protocol elements.
-    TEXT[!MUST,todo]: Implementations MUST discard data or
-    TEXT[!MUST,todo]:    abort reading on unidirectional streams that have unknown or
-    TEXT[!MUST,todo]:    unsupported types.
+    TEXT[!MUST,implementation]: Implementations MUST discard data or
+    TEXT[!MUST,implementation]:    abort reading on unidirectional streams that have unknown or
+    TEXT[!MUST,implementation]:    unsupported types.
     TEXT[!SHOULD,todo]: However, where a known frame type is required to be in
     TEXT[!SHOULD,todo]:    a specific location, such as the SETTINGS frame as the first frame of
     TEXT[!SHOULD,todo]:    the control stream (see Section 6.2.1), an unknown frame type does

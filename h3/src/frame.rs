@@ -243,6 +243,10 @@ impl FrameDecoder {
 
             match decoded {
                 Err(frame::FrameError::UnknownFrame(_ty)) => {
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+                    //# Frames of unknown types (Section 9), including reserved frames
+                    //# (Section 7.2.8) MAY be sent on a request or push stream before,
+                    //# after, or interleaved with other frames described in this section.
                     //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
                     //# Endpoints MUST
                     //# NOT consider these frames to have any meaning upon receipt.

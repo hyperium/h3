@@ -160,6 +160,12 @@ where
 
         let qpack::Decoded { fields, .. } = decoded;
 
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1.2
+        //# Malformed requests or responses that are
+        //# detected MUST be treated as a stream error of type H3_MESSAGE_ERROR.
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1.2
+        //# Clients MUST NOT
+        //# accept a malformed response.
         let (status, headers) = Header::try_from(fields)
             .map_err(|_e| {
                 self.inner.stream.stop_sending(Code::H3_REQUEST_CANCELLED);

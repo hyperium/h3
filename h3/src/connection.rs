@@ -473,6 +473,10 @@ where
                 //# Endpoints MUST NOT consider these streams to have any meaning upon
                 //# receipt.
                 AcceptedRecvStream::Unknown(mut stream) => {
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-9
+                    //# Implementations MUST discard data or
+                    //# abort reading on unidirectional streams that have unknown or
+                    //# unsupported types.
                     //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
                     //# Recipients of unknown stream types MUST
                     //# either abort reading of the stream or discard incoming data without
@@ -1011,6 +1015,12 @@ where
         Poll::Ready(Ok(Some(
             Header::try_from(fields)
                 .map_err(|_e| {
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1.2
+                    //# Malformed requests or responses that are
+                    //# detected MUST be treated as a stream error of type H3_MESSAGE_ERROR.
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1.2
+                    //# Clients MUST NOT
+                    //# accept a malformed response.
                     self.stop_sending(Code::H3_MESSAGE_ERROR);
                     StreamError::StreamError {
                         code: Code::H3_MESSAGE_ERROR,
