@@ -1,4 +1,4 @@
-use std::{hint::black_box, time::Duration};
+use std::{future::Future, hint::black_box, pin::pin, task::Poll, time::Duration};
 
 use assert_matches::assert_matches;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -1587,4 +1587,78 @@ where
         // Stream closes with no error
         assert_matches!(server_result_stream, Ok(()));
     }
+}
+
+/// A `send_data` future that is dropped before it completes (a `timeout` or `select!` cancelling
+/// it) leaves the rest of the frame buffered in the transport. The next write on that stream, and
+/// `finish`, must flush it instead of treating the stream as misused and closing the connection.
+#[tokio::test]
+async fn finish_after_cancelled_send_data_keeps_connection_open() {
+    init_tracing();
+    let mut pair = Pair::default();
+    let mut server = pair.server();
+
+    // Larger than the peer's initial stream receive window, so one poll cannot write all of it.
+    const BODY_LEN: usize = 4 * 1024 * 1024;
+
+    let client_fut = async {
+        let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
+        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let req_fut = async move {
+            let mut request_stream = client
+                .send_request(Request::get("http://localhost/big").body(()).unwrap())
+                .await
+                .expect("request");
+
+            let response = request_stream.recv_response().await.expect("recv response");
+            assert_eq!(response.status(), StatusCode::OK);
+
+            let mut received = 0;
+            while let Some(chunk) = request_stream.recv_data().await.expect("recv data") {
+                received += chunk.remaining();
+            }
+            assert_eq!(received, BODY_LEN);
+        };
+        tokio::join!(req_fut, drive_fut)
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming_req = server::Connection::new(conn).await.unwrap();
+
+        let (_request, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
+        request_stream
+            .send_response(
+                Response::builder()
+                    .status(200)
+                    .body(())
+                    .expect("build response"),
+            )
+            .await
+            .expect("send_response");
+
+        // Poll `send_data` exactly once and then drop it, like a cancelled `timeout` would.
+        {
+            let mut send = pin!(request_stream.send_data(Bytes::from(vec![0u8; BODY_LEN])));
+            future::poll_fn(|cx| match send.as_mut().poll(cx) {
+                Poll::Pending => Poll::Ready(()),
+                Poll::Ready(res) => panic!("send_data completed in a single poll: {res:?}"),
+            })
+            .await;
+        }
+
+        // The rest of the body is still buffered. This is the first stream on the connection, so
+        // `finish` also writes a grease frame first; both must flush rather than fail.
+        request_stream.finish().await.expect("finish");
+
+        assert_matches!(
+            incoming_req.accept().await.err().unwrap(),
+            ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{error_code: code, ..})
+            if code == Code::H3_NO_ERROR.value()
+        );
+    };
+
+    tokio::join!(server_fut, client_fut);
 }

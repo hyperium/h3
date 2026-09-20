@@ -982,3 +982,41 @@ where
         .unwrap();
     stream.finish().await.unwrap();
 }
+
+/// `poll_finish` must flush whatever `send_data` handed to the transport before it sends `FIN`.
+/// Otherwise the tail of the last frame is silently dropped and the peer sees a truncated stream.
+#[tokio::test]
+async fn h3_quinn_finish_flushes_buffered_data() {
+    init_tracing();
+    let mut pair = Pair::default();
+    let server = pair.server_inner();
+
+    let server_fut = async {
+        let conn = server.accept().await.unwrap().await.unwrap();
+        let (_send, mut recv) = conn.accept_bi().await.expect("accept_bi");
+        recv.read_to_end(usize::MAX).await.expect("read_to_end")
+    };
+
+    let client_fut = async {
+        let mut client = pair.client().await;
+        let mut stream = future::poll_fn(|cx| {
+            <h3_quinn::Connection as quic::OpenStreams<Bytes>>::poll_open_bidi(&mut client, cx)
+        })
+        .await
+        .expect("open_bidi");
+        // `send_data` only hands the frame to the transport; nothing is on the wire yet.
+        stream
+            .send_data(Frame::Data(Bytes::from_static(b"payload")))
+            .expect("send_data");
+        // Finish right away, without a `poll_ready` in between.
+        future::poll_fn(|cx| stream.poll_finish(cx))
+            .await
+            .expect("finish");
+        // Keep the connection alive until the server has read everything.
+        (client, stream)
+    };
+
+    let (received, _client) = tokio::join!(server_fut, client_fut);
+    // DATA frame: type 0x00, length 7, then the payload.
+    assert_eq!(received, b"\x00\x07payload");
+}
