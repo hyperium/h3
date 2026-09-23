@@ -1423,7 +1423,7 @@ fn request_encode<B: BufMut>(buf: &mut B, req: http::Request<()>) {
 }
 
 fn trailers_encode<B: BufMut>(buf: &mut B, fields: HeaderMap) {
-    let headers = Header::trailer(fields);
+    let headers = Header::trailer(fields).unwrap();
     let mut block = BytesMut::new();
     qpack::encode_stateless(&mut block, headers).unwrap();
     Frame::headers(block).encode_with_payload(buf);
