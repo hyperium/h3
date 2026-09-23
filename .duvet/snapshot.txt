@@ -863,3 +863,168 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[!MUST,exception]:    values of N (that is, 0x21, 0x40, ..., through 0x3ffffffffffffffe)
     TEXT[!MUST,exception]:    MUST NOT be assigned by IANA and MUST NOT appear in the listing of
     TEXT[!MUST,exception]:    assigned values.
+
+SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9297
+  SECTION: [HTTP Datagrams](#section-2)
+    TEXT[!MUST]:    HTTP Datagrams MUST only be sent with an association to an HTTP
+    TEXT[!MUST]:    request that explicitly supports them.
+    TEXT[!MUST]:    If an HTTP Datagram is received and it is associated with a request
+    TEXT[!MUST]:    that has no known semantics for HTTP Datagrams, the receiver MUST
+    TEXT[!MUST]:    terminate the request.
+    TEXT[!MUST]: If HTTP/3 is in use, the request stream MUST
+    TEXT[!MUST]:    be aborted with H3_DATAGRAM_ERROR (0x33).
+    TEXT[!MAY]: HTTP extensions MAY
+    TEXT[!MAY]:    override these requirements by defining a negotiation mechanism and
+    TEXT[!MAY]:    semantics for HTTP Datagrams.
+
+  SECTION: [HTTP/3 Datagrams](#section-2.1)
+    TEXT[implementation]:    Quarter Stream ID:  A variable-length integer that contains the value
+    TEXT[implementation]:       of the client-initiated bidirectional stream that this datagram is
+    TEXT[implementation]:       associated with divided by four (the division by four stems from
+    TEXT[implementation]:       the fact that HTTP requests are sent on client-initiated
+    TEXT[implementation]:       bidirectional streams, which have stream IDs that are divisible by
+    TEXT[implementation]:       four).  The largest legal QUIC stream ID value is 2^62-1, so the
+    TEXT[implementation]:       largest legal value of the Quarter Stream ID field is 2^60-1.
+    TEXT[!MUST,implementation]:       Receipt of an HTTP/3 Datagram that includes a larger value MUST be
+    TEXT[!MUST,implementation]:       treated as an HTTP/3 connection error of type H3_DATAGRAM_ERROR
+    TEXT[!MUST,implementation]:       (0x33).
+    TEXT[!MUST,implementation]:    Receipt of a QUIC DATAGRAM frame whose payload is too short to allow
+    TEXT[!MUST,implementation]:    parsing the Quarter Stream ID field MUST be treated as an HTTP/3
+    TEXT[!MUST,implementation]:    connection error of type H3_DATAGRAM_ERROR (0x33).
+    TEXT[!MUST]:    HTTP/3 Datagrams MUST NOT be sent unless the corresponding stream's
+    TEXT[!MUST]:    send side is open.
+    TEXT[!MUST]: If a datagram is received after the corresponding
+    TEXT[!MUST]:    stream's receive side is closed, the received datagrams MUST be
+    TEXT[!MUST]:    silently dropped.
+    TEXT[!MUST]:    If an HTTP/3 Datagram is received and its Quarter Stream ID field
+    TEXT[!MUST]:    maps to a stream that has not yet been created, the receiver SHALL
+    TEXT[!MUST]:    either drop that datagram silently or buffer it temporarily (on the
+    TEXT[!MUST]:    order of a round trip) while awaiting the creation of the
+    TEXT[!MUST]:    corresponding stream.
+    TEXT[!SHOULD]:    If an HTTP/3 Datagram is received and its Quarter Stream ID field
+    TEXT[!SHOULD]:    maps to a stream that cannot be created due to client-initiated
+    TEXT[!SHOULD]:    bidirectional stream limits, it SHOULD be treated as an HTTP/3
+    TEXT[!SHOULD]:    connection error of type H3_ID_ERROR.
+    TEXT[!MAY]:    Future extensions MAY define how to prioritize datagrams and MAY
+    TEXT[!MAY]:    define signaling to allow communicating prioritization preferences.
+
+  SECTION: [The SETTINGS_H3_DATAGRAM HTTP/3 Setting](#section-2.1.1)
+    TEXT[!MUST]:    The value of the SETTINGS_H3_DATAGRAM setting MUST be either 0 or 1.
+    TEXT[!MUST]: If the SETTINGS_H3_DATAGRAM setting is
+    TEXT[!MUST]:    received with a value that is neither 0 nor 1, the receiver MUST
+    TEXT[!MUST]:    terminate the connection with error H3_SETTINGS_ERROR.
+    TEXT[!MUST,implementation,test]:    QUIC DATAGRAM frames MUST NOT be sent until the SETTINGS_H3_DATAGRAM
+    TEXT[!MUST,implementation,test]:    setting has been both sent and received with a value of 1.
+    TEXT[!MAY]:    When clients use 0-RTT, they MAY store the value of the server's
+    TEXT[!MAY]:    SETTINGS_H3_DATAGRAM setting.
+    TEXT[!MUST]: When servers decide to accept
+    TEXT[!MUST]:    0-RTT data, they MUST send a SETTINGS_H3_DATAGRAM setting greater
+    TEXT[!MUST]:    than or equal to the value they sent to the client in the connection
+    TEXT[!MUST]:    where they sent them the NewSessionTicket message.
+    TEXT[!MUST]: If a client
+    TEXT[!MUST]:    stores the value of the SETTINGS_H3_DATAGRAM setting with their 0-RTT
+    TEXT[!MUST]:    state, they MUST validate that the new value of the
+    TEXT[!MUST]:    SETTINGS_H3_DATAGRAM setting sent by the server in the handshake is
+    TEXT[!MUST]:    greater than or equal to the stored value; if not, the client MUST
+    TEXT[!MUST]:    terminate the connection with error H3_SETTINGS_ERROR.
+    TEXT[!SHOULD]:    It is RECOMMENDED that implementations that support receiving HTTP/3
+    TEXT[!SHOULD]:    Datagrams always send the SETTINGS_H3_DATAGRAM setting with a value
+    TEXT[!SHOULD]:    of 1, even if the application does not intend to use HTTP/3
+    TEXT[!SHOULD]:    Datagrams.
+
+  SECTION: [The Capsule Protocol](#section-3.2)
+    TEXT[!SHOULD]:    Because new protocols or extensions might define new Capsule Types,
+    TEXT[!SHOULD]:    intermediaries that wish to allow for future extensibility SHOULD
+    TEXT[!SHOULD]:    forward Capsules without modification unless the definition of the
+    TEXT[!SHOULD]:    Capsule Type in use specifies additional intermediary processing.
+    TEXT[!SHOULD]: In
+    TEXT[!SHOULD]:    particular, intermediaries SHOULD forward Capsules with an unknown
+    TEXT[!SHOULD]:    Capsule Type without modification.
+    TEXT[!MUST]:    Endpoints that receive a Capsule with an unknown Capsule Type MUST
+    TEXT[!MUST]:    silently drop that Capsule and skip over it to parse the next
+    TEXT[!MUST]:    Capsule.
+    TEXT[!MAY]: A future extension MAY
+    TEXT[!MAY]:       define a new Capsule Type to carry HTTP content.
+    TEXT[!MUST]:    The Capsule Protocol MUST NOT be used with messages that contain
+    TEXT[!MUST]:    Content-Length, Content-Type, or Transfer-Encoding header fields.
+    TEXT[!MUST]:    Additionally, HTTP status codes 204 (No Content), 205 (Reset
+    TEXT[!MUST]:    Content), and 206 (Partial Content) MUST NOT be sent on responses
+    TEXT[!MUST]:    that use the Capsule Protocol.
+    TEXT[!MUST]: A receiver that observes a violation
+    TEXT[!MUST]:    of these requirements MUST treat the HTTP message as malformed.
+    TEXT[!SHOULD]: This approach SHOULD be avoided because it can consume
+    TEXT[!SHOULD]:    flow control in underlying layers, and that might lead to deadlocks
+    TEXT[!SHOULD]:    if the Capsule data exhausts the flow control window.
+
+  SECTION: [Error Handling](#section-3.3)
+    TEXT[!MUST]:    When a receiver encounters an error processing the Capsule Protocol,
+    TEXT[!MUST]:    the receiver MUST treat it as if it had received a malformed or
+    TEXT[!MUST]:    incomplete HTTP message.
+    TEXT[!MUST]:    Each Capsule's payload MUST contain exactly the fields identified in
+    TEXT[!MUST]:    its description.
+    TEXT[!MUST]: A Capsule payload that contains additional bytes
+    TEXT[!MUST]:    after the identified fields or a Capsule payload that terminates
+    TEXT[!MUST]:    before the end of the identified fields MUST be treated as it if were
+    TEXT[!MUST]:    a malformed or incomplete message.
+    TEXT[!MUST]: In particular, redundant length
+    TEXT[!MUST]:    encodings MUST be verified to be self-consistent.
+    TEXT[!MUST]:    If the receive side of a stream carrying Capsules is terminated
+    TEXT[!MUST]:    cleanly (for example, in HTTP/3 this is defined as receiving a QUIC
+    TEXT[!MUST]:    STREAM frame with the FIN bit set) and the last Capsule on the stream
+    TEXT[!MUST]:    was truncated, this MUST be treated as if it were a malformed or
+    TEXT[!MUST]:    incomplete message.
+
+  SECTION: [The Capsule-Protocol Header Field](#section-3.4)
+    TEXT[!MUST]: Its value MUST be a Boolean; any
+    TEXT[!MUST]:    other value type MUST be handled as if the field were not present by
+    TEXT[!MUST]:    recipients (for example, if this field is included multiple times,
+    TEXT[!MUST]:    its type will become a List and the field will be ignored).
+    TEXT[!MUST]:    Receivers MUST ignore unknown parameters.
+    TEXT[!MAY]:    Intermediaries MAY use this header field to allow processing of HTTP
+    TEXT[!MAY]:    Datagrams for unknown HTTP upgrade tokens.
+    TEXT[!MUST]:    The Capsule-Protocol header field MUST NOT be used on HTTP responses
+    TEXT[!MUST]:    with a status code that is both different from 101 (Switching
+    TEXT[!MUST]:    Protocols) and outside the 2xx (Successful) range.
+    TEXT[!SHOULD]:    When using the Capsule Protocol, HTTP endpoints SHOULD send the
+    TEXT[!SHOULD]:    Capsule-Protocol header field to simplify intermediary processing.
+    TEXT[!MAY]:    Definitions of new HTTP upgrade tokens that use the Capsule Protocol
+    TEXT[!MAY]:    MAY alter this recommendation.
+
+  SECTION: [The DATAGRAM Capsule](#section-3.5)
+    TEXT[!MAY]: In
+    TEXT[!MAY]:    other words, an intermediary MAY send a DATAGRAM Capsule to forward
+    TEXT[!MAY]:    an HTTP Datagram that was received in a QUIC DATAGRAM frame and vice
+    TEXT[!MAY]:    versa.
+    TEXT[!MUST]: Intermediaries MUST NOT perform this re-encoding unless they
+    TEXT[!MUST]:    have identified the use of the Capsule Protocol on the corresponding
+    TEXT[!MUST]:    request stream; see Section 3.2.
+    TEXT[!SHOULD]:    If an intermediary receives an HTTP Datagram in a QUIC DATAGRAM frame
+    TEXT[!SHOULD]:    and is forwarding it on a connection that supports QUIC DATAGRAM
+    TEXT[!SHOULD]:    frames, the intermediary SHOULD NOT convert that HTTP Datagram to a
+    TEXT[!SHOULD]:    DATAGRAM Capsule.
+    TEXT[!SHOULD]: If the HTTP Datagram is too large to fit in a
+    TEXT[!SHOULD]:    DATAGRAM frame (for example, because the Path MTU (PMTU) of that QUIC
+    TEXT[!SHOULD]:    connection is too low or if the maximum UDP payload size advertised
+    TEXT[!SHOULD]:    on that connection is too low), the intermediary SHOULD drop the HTTP
+    TEXT[!SHOULD]:    Datagram instead of converting it to a DATAGRAM Capsule.
+    TEXT[!SHOULD]:    Implementations SHOULD take those limits into account when parsing
+    TEXT[!SHOULD]:    DATAGRAM Capsules.
+    TEXT[!SHOULD]: If an incoming DATAGRAM Capsule has a length that
+    TEXT[!SHOULD]:    is known to be so large as to not be usable, the implementation
+    TEXT[!SHOULD]:    SHOULD discard the Capsule without buffering its contents into
+    TEXT[!SHOULD]:    memory.
+    TEXT[!SHOULD]: This SHOULD be avoided, because it can
+    TEXT[!SHOULD]:    cause flow control problems; see Section 3.2.
+    TEXT[!SHOULD]: However, new HTTP extensions that
+    TEXT[!SHOULD]:    wish to use HTTP Datagrams SHOULD use the Capsule Protocol, as
+    TEXT[!SHOULD]:    failing to do so will make it harder for the HTTP extension to
+    TEXT[!SHOULD]:    support versions of HTTP other than HTTP/3 and will prevent
+    TEXT[!SHOULD]:    interoperability with intermediaries that only support the Capsule
+    TEXT[!SHOULD]:    Protocol.
+
+  SECTION: [Capsule Types](#section-5.4)
+    TEXT[!MUST]: In addition to those common fields, all
+    TEXT[!MUST]:    registrations in this registry MUST include a "Capsule Type" field
+    TEXT[!MUST]:    that contains a short name or label for the Capsule Type.
+    TEXT[!MUST]: These values MUST NOT be assigned by IANA
+    TEXT[!MUST]:    and MUST NOT appear in the listing of assigned values.
