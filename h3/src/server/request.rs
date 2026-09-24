@@ -125,6 +125,16 @@ where
                 );
             }
             Err(e) => {
+                if matches!(
+                    e,
+                    FrameStreamError::PayloadTooLarge {
+                        frame_type: 0x1,
+                        ..
+                    }
+                ) {
+                    self.frame_stream.stop_sending(Code::H3_REQUEST_CANCELLED);
+                    self.frame_stream.reset(Code::H3_REQUEST_CANCELLED.value());
+                }
                 return Err(self.handle_frame_stream_error_on_request_stream(e));
             }
         };

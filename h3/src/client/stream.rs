@@ -12,6 +12,7 @@ use crate::{
         internal_error::InternalConnectionError,
         Code, StreamError,
     },
+    frame::FrameStreamError,
     proto::{frame::Frame, headers::Header},
     qpack,
     quic::{self},
@@ -97,8 +98,17 @@ where
     /// [`recv_data()`]: #method.recv_data
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn recv_response(&mut self) -> Result<Response<()>, StreamError> {
-        let mut frame = future::poll_fn(|cx| self.inner.stream.poll_next(cx))
-            .await
+        let frame = future::poll_fn(|cx| self.inner.stream.poll_next(cx)).await;
+        if matches!(
+            frame,
+            Err(FrameStreamError::PayloadTooLarge {
+                frame_type: 0x1,
+                ..
+            })
+        ) {
+            self.inner.stop_sending(Code::H3_REQUEST_CANCELLED);
+        }
+        let mut frame = frame
             .map_err(|e| self.handle_frame_stream_error_on_request_stream(e))?
             .ok_or_else(|| {
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1

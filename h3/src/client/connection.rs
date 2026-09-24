@@ -216,7 +216,11 @@ where
 
         let request_stream = RequestStream {
             inner: connection::RequestStream::new(
-                FrameStream::new(BufRecvStream::new(stream)),
+                FrameStream::new_with_max_buffered_frame(
+                    BufRecvStream::new(stream),
+                    self.max_field_section_size
+                        .max(crate::frame::DEFAULT_MAX_BUFFERED_FRAME),
+                ),
                 self.max_field_section_size,
                 self.conn_state.clone(),
                 self.send_grease_frame,
