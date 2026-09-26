@@ -295,9 +295,16 @@ async fn handle_session_and_echo_all_inbound_messages(
                 tokio::spawn( async move { log_result!(echo_stream(send, stream).await); });
             }
             stream = session.accept_bi() => {
-                if let Some(server::AcceptedBi::BidiStream(_, stream)) = stream? {
-                    let (send, recv) = quic::BidiStream::split(stream);
-                    tokio::spawn( async move { log_result!(echo_stream(send, recv).await); });
+                if let Some(resolver) = stream? {
+                    tokio::spawn(async move {
+                        log_result!(async move {
+                            if let server::AcceptedBi::BidiStream(_, stream) = resolver.resolve().await? {
+                                let (send, recv) = quic::BidiStream::split(stream);
+                                echo_stream(send, recv).await?;
+                            }
+                            Ok::<_, anyhow::Error>(())
+                        }.await);
+                    });
                 }
             }
             else => {

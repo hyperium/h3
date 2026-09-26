@@ -70,49 +70,33 @@ where
         );
 
         loop {
-            // Hoist the QUIC error out of `?` so that any bytes pulled
-            // into `self.stream.buf_mut()` on prior wakes get one last
-            // chance through the decoder. Without this hoist, a
-            // CONNECTION_CLOSE frame coalesced with stream data in the
-            // same recv batch wins the race and discards a fully-
-            // decodable HEADERS frame.
-            let (end, pending_quic_err) = match self.try_recv(cx) {
-                Poll::Ready(Ok(end)) => (Poll::Ready(end), None),
-                Poll::Pending => (Poll::Pending, None),
-                Poll::Ready(Err(e)) => (Poll::Ready(true), Some(e)),
-            };
-
-            return match self.decoder.decode(self.stream.buf_mut())? {
+            match self.decoder.decode(self.stream.buf_mut())? {
                 Some(Frame::Data(PayloadLen(len))) => {
                     self.remaining_data = len;
-                    Poll::Ready(Ok(Some(Frame::Data(PayloadLen(len)))))
+                    return Poll::Ready(Ok(Some(Frame::Data(PayloadLen(len)))));
                 }
                 frame @ Some(Frame::WebTransportStream(_)) => {
                     self.remaining_data = usize::MAX;
-                    Poll::Ready(Ok(frame))
+                    return Poll::Ready(Ok(frame));
                 }
-                Some(frame) => Poll::Ready(Ok(Some(frame))),
-                None => match (end, pending_quic_err) {
-                    // Decoder couldn't make progress on buffered bytes
-                    // and the underlying QUIC stream errored: surface
-                    // the cached error now. Fixed-point: this branch
-                    // terminates the loop because we consume the cached
-                    // error in the same iteration we observed it.
-                    (_, Some(err)) => Poll::Ready(Err(err)),
-                    // Received a chunk but frame is incomplete, poll until we get `Pending`.
-                    (Poll::Ready(false), None) => continue,
-                    (Poll::Pending, None) => Poll::Pending,
-                    (Poll::Ready(true), None) => {
-                        if self.stream.buf_mut().has_remaining() {
-                            // Reached the end of receive stream, but there is still some data:
-                            // The frame is incomplete.
-                            Poll::Ready(Err(FrameStreamError::UnexpectedEnd))
-                        } else {
-                            Poll::Ready(Ok(None))
-                        }
+                Some(frame) => return Poll::Ready(Ok(Some(frame))),
+                None => {}
+            }
+
+            match self.try_recv(cx)? {
+                // Received a chunk but the frame is incomplete, poll until we get `Pending`.
+                Poll::Ready(false) => continue,
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(true) => {
+                    if self.stream.buf_mut().has_remaining() {
+                        // Reached the end of receive stream, but there is still some data:
+                        // The frame is incomplete.
+                        return Poll::Ready(Err(FrameStreamError::UnexpectedEnd));
+                    } else {
+                        return Poll::Ready(Ok(None));
                     }
-                },
-            };
+                }
+            }
         }
     }
 
@@ -128,32 +112,23 @@ where
             return Poll::Ready(Ok(None));
         };
 
-        // Mirror the hoist from poll_next: a QUIC-level error must not
-        // discard already-buffered body bytes for the current frame.
-        let (end, pending_quic_err) = match self.try_recv(cx) {
-            Poll::Ready(Ok(end)) => (end, None),
-            Poll::Ready(Err(e)) => (true, Some(e)),
-            Poll::Pending => (false, None),
+        let end = match self.try_recv(cx) {
+            Poll::Ready(Ok(end)) => end,
+            Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+            Poll::Pending => false,
         };
         let data = self.stream.buf_mut().take_chunk(self.remaining_data);
 
-        match (data, end, pending_quic_err) {
-            // No more buffered body and QUIC errored: surface the error.
-            (None, _, Some(err)) => Poll::Ready(Err(err)),
-            (None, true, None) => Poll::Ready(Ok(None)),
-            (None, false, None) => Poll::Pending,
-            // Partial body for the current frame and the underlying
-            // stream / connection ended: caller MUST treat this as
-            // truncation. Same shape as the existing `Poll::Ready(true)`
-            // branch below — extended to also cover the QUIC error case.
-            (Some(d), end_or_err, pending)
-                if (end_or_err || pending.is_some())
-                    && d.remaining() < self.remaining_data
+        match (data, end) {
+            (None, true) => Poll::Ready(Ok(None)),
+            (None, false) => Poll::Pending,
+            (Some(d), true)
+                if d.remaining() < self.remaining_data
                     && !self.stream.buf_mut().has_remaining() =>
             {
                 Poll::Ready(Err(FrameStreamError::UnexpectedEnd))
             }
-            (Some(d), _, _) => {
+            (Some(d), _) => {
                 self.remaining_data -= d.remaining();
                 Poll::Ready(Ok(Some(d)))
             }
@@ -268,6 +243,10 @@ impl FrameDecoder {
 
             match decoded {
                 Err(frame::FrameError::UnknownFrame(_ty)) => {
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+                    //# Frames of unknown types (Section 9), including reserved frames
+                    //# (Section 7.2.8) MAY be sent on a request or push stream before,
+                    //# after, or interleaved with other frames described in this section.
                     //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
                     //# Endpoints MUST
                     //# NOT consider these frames to have any meaning upon receipt.
@@ -345,10 +324,9 @@ mod tests {
     use assert_matches::assert_matches;
     use bytes::{BufMut, Bytes, BytesMut};
     use futures_util::future::poll_fn;
-    use std::collections::VecDeque;
+    use std::{cell::Cell, collections::VecDeque, rc::Rc};
 
     use crate::proto::{coding::Encode, frame::FrameType, varint::VarInt};
-    use crate::quic::ConnectionErrorIncoming;
 
     // Decoder
 
@@ -462,62 +440,43 @@ mod tests {
         assert_poll_matches!(|cx| stream.poll_next(cx), Ok(Some(Frame::Headers(_))));
     }
 
-    /// Regression: a QUIC CONNECTION_CLOSE that lands in the same recv
-    /// batch as a fully-decodable HEADERS frame must NOT discard the
-    /// frame. Pre-fix, `try_recv`'s `?` propagated the connection error
-    /// before `decoder.decode` got to consume the bytes already in
-    /// `BufRecvStream::buf`. Post-fix, the decoder runs once on the
-    /// buffered bytes and produces the frame; the error surfaces on
-    /// the next poll only if no frame can be parsed.
     #[tokio::test]
-    async fn poll_next_drains_buffered_headers_before_quic_close() {
+    async fn poll_next_applies_backpressure_before_reading_more_chunks() {
+        const CHUNK_COUNT: usize = 64;
+        const FRAMES_PER_CHUNK: usize = 16;
+        const FRAME_PAYLOAD_SIZE: usize = 1024;
+
+        let mut encoded_chunk = BytesMut::new();
+        let payload = Bytes::from(vec![0_u8; FRAME_PAYLOAD_SIZE]);
+        for _ in 0..FRAMES_PER_CHUNK {
+            Frame::headers(payload.clone()).encode_with_payload(&mut encoded_chunk);
+        }
+        let encoded_chunk = encoded_chunk.freeze();
+        let max_buffered = encoded_chunk.len();
+
         let mut recv = FakeRecv::default();
-        let mut buf = BytesMut::with_capacity(64);
-        Frame::headers(&b"header"[..]).encode_with_payload(&mut buf);
-        // Headers chunk is fully buffered, then poll_data signals a
-        // connection-level error on the next poll — exactly the
-        // shape produced by an io_uring-coalesced datagram with
-        // STREAM(FIN) + CONNECTION_CLOSE(H3_NO_ERROR).
-        recv.chunk_then_error(
-            buf.freeze(),
-            StreamErrorIncoming::ConnectionErrorIncoming {
-                connection_error: ConnectionErrorIncoming::ApplicationClose { error_code: 0x100 },
-            },
-        );
+        for _ in 0..CHUNK_COUNT {
+            recv.chunk(encoded_chunk.clone());
+        }
+        let transport_polls = recv.poll_count.clone();
+
         let mut stream: FrameStream<_, ()> = FrameStream::new(BufRecvStream::new(recv));
 
-        // First poll: drains buffered HEADERS frame instead of erroring.
-        assert_poll_matches!(|cx| stream.poll_next(cx), Ok(Some(Frame::Headers(_))));
-        // Second poll: nothing left to decode, error surfaces.
-        assert_poll_matches!(|cx| stream.poll_next(cx), Err(FrameStreamError::Quic(_)));
-    }
+        // Model a consumer that processes one frame per wake while the
+        // transport can provide chunks containing many complete frames.
+        for _ in 0..CHUNK_COUNT {
+            assert_poll_matches!(|cx| stream.poll_next(cx), Ok(Some(Frame::Headers(_))));
+        }
 
-    /// Regression: same shape as poll_next, but on the body path. A
-    /// connection error must not strand DATA frame body bytes that
-    /// were buffered before the error arrived.
-    #[tokio::test]
-    async fn poll_data_drains_buffered_body_before_quic_close() {
-        let mut recv = FakeRecv::default();
-        let mut buf = BytesMut::with_capacity(64);
-        Frame::Data(Bytes::from("body")).encode_with_payload(&mut buf);
-        recv.chunk_then_error(
-            buf.freeze(),
-            StreamErrorIncoming::ConnectionErrorIncoming {
-                connection_error: ConnectionErrorIncoming::ApplicationClose { error_code: 0x100 },
-            },
+        let buffered = stream.stream.buf().remaining();
+        assert!(
+            buffered <= max_buffered,
+            "frame buffering grew past one transport chunk: {buffered} > {max_buffered}"
         );
-        let mut stream: FrameStream<_, ()> = FrameStream::new(BufRecvStream::new(recv));
-
-        // First, poll_next gives us the DATA frame header.
-        assert_poll_matches!(
-            |cx| stream.poll_next(cx),
-            Ok(Some(Frame::Data(PayloadLen(4))))
-        );
-        // Then poll_data drains the body even though the underlying
-        // stream is now signaling a connection error.
-        assert_poll_matches!(
-            |cx| to_bytes(stream.poll_data(cx)),
-            Ok(Some(b)) if b.remaining() == 4
+        assert_eq!(
+            transport_polls.get(),
+            CHUNK_COUNT.div_ceil(FRAMES_PER_CHUNK),
+            "transport was polled while complete frames were still buffered"
         );
     }
 
@@ -680,23 +639,12 @@ mod tests {
     #[derive(Default)]
     struct FakeRecv {
         chunks: VecDeque<Bytes>,
-        pending_error: Option<StreamErrorIncoming>,
+        poll_count: Rc<Cell<usize>>,
     }
 
     impl FakeRecv {
         fn chunk(&mut self, buf: Bytes) -> &mut Self {
             self.chunks.push_back(buf);
-            self
-        }
-
-        /// Queue a chunk to be returned on a subsequent poll, followed
-        /// by a synthetic connection-level error. Models the recv batch
-        /// where stream data and CONNECTION_CLOSE land in the same
-        /// underlying read — the race this regression covers.
-        #[allow(dead_code)]
-        fn chunk_then_error(&mut self, buf: Bytes, err: StreamErrorIncoming) -> &mut Self {
-            self.chunks.push_back(buf);
-            self.pending_error = Some(err);
             self
         }
     }
@@ -708,13 +656,8 @@ mod tests {
             &mut self,
             _: &mut Context<'_>,
         ) -> Poll<Result<Option<Self::Buf>, StreamErrorIncoming>> {
-            if let Some(chunk) = self.chunks.pop_front() {
-                return Poll::Ready(Ok(Some(chunk)));
-            }
-            match self.pending_error.take() {
-                Some(err) => Poll::Ready(Err(err)),
-                None => Poll::Ready(Ok(None)),
-            }
+            self.poll_count.set(self.poll_count.get() + 1);
+            Poll::Ready(Ok(self.chunks.pop_front()))
         }
 
         fn stop_sending(&mut self, _: u64) {

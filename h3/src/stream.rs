@@ -34,6 +34,12 @@ where
     D: Into<WriteBuf<B>>,
     B: Buf,
 {
+    // This future is not cancel-safe: if a previous `write` was dropped between `send_data` and
+    // the completion of `poll_ready`, the transport still holds the rest of that buffer. Flush it
+    // first, so that `send_data` is never called while the stream is not ready. Transports treat
+    // that as a misuse and escalate it to closing the whole connection. When nothing is buffered,
+    // `poll_ready` is ready immediately.
+    future::poll_fn(|cx| stream.poll_ready(cx)).await?;
     stream.send_data(data)?;
     future::poll_fn(|cx| stream.poll_ready(cx)).await?;
 

@@ -72,7 +72,7 @@ where
         let varint = VarInt::from(self.stream_id) / 4;
         varint.encode(&mut buffer.as_mut_slice());
         EncodedDatagram {
-            stream_id: [0; VarInt::MAX_SIZE],
+            stream_id: buffer,
             len: varint.size(),
             pos: 0,
             payload: self.payload,
@@ -82,6 +82,25 @@ where
     /// Returns the datagram payload
     pub fn into_payload(self) -> B {
         self.payload
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Datagram;
+    use bytes::{Buf, Bytes};
+    use h3::quic::StreamId;
+
+    #[test]
+    fn encode_preserves_quarter_stream_id() {
+        let stream_id = StreamId::try_from(4).unwrap();
+        let payload = Bytes::from_static(b"payload");
+
+        let mut encoded = Datagram::new(stream_id, payload.clone()).encode();
+        let decoded = Datagram::decode(encoded.copy_to_bytes(encoded.remaining())).unwrap();
+
+        assert_eq!(decoded.stream_id(), stream_id);
+        assert_eq!(decoded.into_payload(), payload);
     }
 }
 

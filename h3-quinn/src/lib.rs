@@ -112,16 +112,41 @@ fn convert_connection_error(e: quinn::ConnectionError) -> h3::quic::ConnectionEr
                 error_code: application_close.error_code.into(),
             }
         }
+        quinn::ConnectionError::ConnectionClosed(connection_close) => {
+            ConnectionErrorIncoming::ConnectionClosed {
+                error_code: connection_close.error_code.into(),
+            }
+        }
         quinn::ConnectionError::TimedOut => ConnectionErrorIncoming::Timeout,
 
         error @ quinn::ConnectionError::VersionMismatch
         | error @ quinn::ConnectionError::Reset
         | error @ quinn::ConnectionError::LocallyClosed
         | error @ quinn::ConnectionError::CidsExhausted
-        | error @ quinn::ConnectionError::TransportError(_)
-        | error @ quinn::ConnectionError::ConnectionClosed(_) => {
+        | error @ quinn::ConnectionError::TransportError(_) => {
             ConnectionErrorIncoming::Undefined(Arc::new(error))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::convert_connection_error;
+    use h3::quic::ConnectionErrorIncoming;
+    use quinn::{ConnectionClose, ConnectionError, TransportErrorCode};
+
+    #[test]
+    fn connection_closed_is_mapped_to_structured_variant() {
+        let error = ConnectionError::ConnectionClosed(ConnectionClose {
+            error_code: TransportErrorCode::NO_ERROR,
+            frame_type: None,
+            reason: Default::default(),
+        });
+
+        assert!(matches!(
+            convert_connection_error(error),
+            ConnectionErrorIncoming::ConnectionClosed { error_code: 0 }
+        ));
     }
 }
 
@@ -353,6 +378,7 @@ where
 pub struct RecvStream {
     stream: Option<quinn::RecvStream>,
     read_chunk_fut: ReadChunkFuture,
+    id: StreamId,
     is_0rtt: bool,
     pending_stop: Option<VarInt>,
 }
@@ -367,11 +393,15 @@ type ReadChunkFuture = ReusableBoxFuture<
 
 impl RecvStream {
     fn new(stream: quinn::RecvStream) -> Self {
+        let id = u64::from(stream.id())
+            .try_into()
+            .expect("invalid stream id");
         let is_0rtt = stream.is_0rtt();
         Self {
             stream: Some(stream),
             // Should only allocate once the first time it's used
             read_chunk_fut: ReusableBoxFuture::new(async { unreachable!() }),
+            id,
             is_0rtt,
             pending_stop: None,
         }
@@ -415,9 +445,7 @@ impl quic::RecvStream for RecvStream {
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn recv_id(&self) -> StreamId {
-        let num: u64 = self.stream.as_ref().unwrap().id().into();
-
-        num.try_into().expect("invalid stream id")
+        self.id
     }
 }
 
@@ -503,10 +531,10 @@ where
     }
 
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
-    fn poll_finish(
-        &mut self,
-        _cx: &mut task::Context<'_>,
-    ) -> Poll<Result<(), StreamErrorIncoming>> {
+    fn poll_finish(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), StreamErrorIncoming>> {
+        // Flush whatever `send_data` buffered before sending FIN, otherwise the tail of the
+        // last frame is dropped and the peer sees a truncated stream.
+        ready!(self.poll_ready(cx))?;
         Poll::Ready(
             self.stream
                 .finish()
