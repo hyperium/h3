@@ -6,7 +6,8 @@
 use std::{
     convert::TryInto,
     future::Future,
-    pin::Pin,
+    pin::{pin, Pin},
+    slice,
     sync::Arc,
     task::{self, ready, Poll},
 };
@@ -496,7 +497,7 @@ fn convert_write_error_to_stream_error(error: quinn::WriteError) -> StreamErrorI
 /// Implements a [`quic::SendStream`] backed by a [`quinn::SendStream`].
 pub struct SendStream<B: Buf> {
     stream: quinn::SendStream,
-    writing: Option<WriteBuf<B>>,
+    writing: Option<(WriteBuf<B>, Bytes)>,
 }
 
 impl<B> SendStream<B>
@@ -517,12 +518,13 @@ where
 {
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> Poll<Result<(), StreamErrorIncoming>> {
-        if let Some(ref mut data) = self.writing {
-            while data.has_remaining() {
-                let stream = Pin::new(&mut self.stream);
-                let written = ready!(stream.poll_write(cx, data.chunk()))
+        if let Some((data, chunk)) = &mut self.writing {
+            while !chunk.is_empty() || data.has_remaining() {
+                if chunk.is_empty() {
+                    *chunk = data.copy_to_bytes(data.chunk().len());
+                }
+                ready!(pin!(self.stream.write_chunks(slice::from_mut(chunk))).poll(cx))
                     .map_err(convert_write_error_to_stream_error)?;
-                data.advance(written);
             }
         }
         // all data is written
@@ -563,7 +565,7 @@ where
                 ),
             });
         }
-        self.writing = Some(data.into());
+        self.writing = Some((data.into(), Bytes::new()));
         Ok(())
     }
 

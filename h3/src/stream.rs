@@ -4,7 +4,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use futures_util::{future, ready};
 use pin_project_lite::pin_project;
 use tokio::io::ReadBuf;
@@ -252,6 +252,18 @@ where
         if let Some(payload) = self.frame.as_mut().and_then(|f| f.payload_mut()) {
             payload.advance(cnt);
         }
+    }
+
+    fn copy_to_bytes(&mut self, len: usize) -> Bytes {
+        if self.len == self.pos {
+            if let Some(payload) = self.frame.as_mut().and_then(|f| f.payload_mut()) {
+                return payload.copy_to_bytes(len);
+            }
+        }
+        assert!(len <= self.remaining(), "`len` greater than remaining");
+        let mut ret = BytesMut::with_capacity(len);
+        ret.put(self.take(len));
+        ret.freeze()
     }
 }
 
@@ -790,5 +802,16 @@ mod tests {
 
         wbuf.advance(4);
         assert_eq!(wbuf.chunk(), b"ey");
+    }
+
+    #[test]
+    fn write_buf_copy_to_bytes_shares_payload_after_header() {
+        let payload = Bytes::from("hey");
+        let mut wbuf = WriteBuf::<Bytes>::from(Frame::Data(payload.clone()));
+
+        assert_eq!(wbuf.copy_to_bytes(3), &b"\x00\x03h"[..]);
+        let rest = wbuf.copy_to_bytes(2);
+        assert_eq!(rest, "ey");
+        assert_eq!(rest.as_ptr(), payload[1..].as_ptr());
     }
 }
