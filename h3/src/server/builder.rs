@@ -66,6 +66,21 @@ impl Builder {
         self
     }
 
+    /// Limits accepted extension streams buffered while waiting to be claimed by a consumer.
+    ///
+    /// The limit is shared across the connection and currently applies to WebTransport
+    /// unidirectional streams. Claimed streams no longer count towards this limit.
+    /// Excess streams are rejected using the extension's error code.
+    ///
+    /// Defaults to `usize::MAX`, effectively unlimited. Configure a finite limit when
+    /// enabling extensions that buffer incoming streams. A value of zero disables
+    /// buffering. This is a local resource limit and is not advertised to the peer
+    /// in HTTP/3 SETTINGS.
+    pub fn max_buffered_extension_streams(&mut self, value: usize) -> &mut Self {
+        self.config.max_buffered_extension_streams = value;
+        self
+    }
+
     /// Set the maximum header size this client is willing to accept
     ///
     /// See [header size constraints] section of the specification for details.
@@ -92,6 +107,9 @@ impl Builder {
     /// **Server**:
     /// Supporting for webtransport also requires setting `enable_extended_connect` `enable_datagram`
     /// and `max_webtransport_sessions`.
+    ///
+    /// Also configure [`max_buffered_extension_streams`](Self::max_buffered_extension_streams)
+    /// to bound streams awaiting a session. The default buffer limit is effectively unlimited.
     #[inline]
     pub fn enable_webtransport(&mut self, value: bool) -> &mut Self {
         self.config.settings.enable_webtransport = value;

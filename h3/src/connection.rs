@@ -460,12 +460,18 @@ where
                         )));
                     }
                 }
-                AcceptedRecvStream::WebTransportUni(id, s)
+                AcceptedRecvStream::WebTransportUni(id, mut s)
                     if self.config.settings.enable_webtransport =>
                 {
                     // Store until someone else picks it up, like a webtransport session which is
                     // not yet established.
-                    self.accepted_streams.wt_uni_streams.push((id, s))
+                    if self.accepted_streams.wt_uni_streams.len()
+                        >= self.config.max_buffered_extension_streams
+                    {
+                        s.stop_sending(Code::H3_WEBTRANSPORT_BUFFERED_STREAM_REJECTED.into());
+                    } else {
+                        self.accepted_streams.wt_uni_streams.push((id, s));
+                    }
                 }
 
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2.3

@@ -17,6 +17,9 @@ pub struct Config {
 
     /// HTTP/3 Settings
     pub settings: Settings,
+
+    /// Maximum number of extension streams buffered awaiting a consumer.
+    pub(crate) max_buffered_extension_streams: usize,
 }
 
 /// HTTP/3 Settings
@@ -76,6 +79,7 @@ impl TryFrom<Config> for frame::Settings {
 
         let Config {
             send_grease,
+            max_buffered_extension_streams: _,
             #[cfg(test)]
                 send_settings: _,
             settings:
@@ -171,6 +175,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             send_grease: true,
+            max_buffered_extension_streams: usize::MAX,
             #[cfg(test)]
             send_settings: true,
             settings: Default::default(),

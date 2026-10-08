@@ -1020,3 +1020,117 @@ async fn h3_quinn_finish_flushes_buffered_data() {
     // DATA frame: type 0x00, length 7, then the payload.
     assert_eq!(received, b"\x00\x07payload");
 }
+
+#[tokio::test]
+async fn buffered_extension_stream_limit() {
+    check_buffered_extension_stream_limit(2).await;
+}
+
+#[tokio::test]
+async fn buffered_extension_stream_limit_zero() {
+    check_buffered_extension_stream_limit(0).await;
+}
+
+#[test]
+fn buffered_extension_stream_limit_default() {
+    assert_eq!(
+        crate::config::Config::default().max_buffered_extension_streams,
+        usize::MAX
+    );
+}
+
+async fn check_buffered_extension_stream_limit(limit: usize) {
+    let mut pair = Pair::default();
+    let mut server = pair.server();
+    let (rejected_tx, rejected_rx) = oneshot::channel();
+    let (claimed_tx, claimed_rx) = oneshot::channel();
+    let (finished_tx, finished_rx) = oneshot::channel();
+
+    let server_fut = async {
+        let mut builder = server::builder();
+        builder
+            .enable_webtransport(true)
+            .max_buffered_extension_streams(limit);
+        let mut incoming = builder.build(server.next().await).await.unwrap();
+        // Drive stream classification until the peer observes rejection. No session exists.
+        tokio::select! {
+            result = rejected_rx => result.unwrap(),
+            _ = future::poll_fn(|cx| {
+                incoming.inner.poll_accept_recv(cx).unwrap();
+                assert!(incoming.inner.accepted_streams_mut().wt_uni_streams.len() <= limit);
+                std::task::Poll::<()>::Pending
+            }) => unreachable!(),
+        }
+        let streams = &mut incoming.inner.accepted_streams_mut().wt_uni_streams;
+        assert_eq!(streams.len(), limit);
+        // Claiming streams releases the shared budget.
+        while streams.pop().is_some() {}
+        claimed_tx.send(()).unwrap();
+        if limit > 0 {
+            future::poll_fn(|cx| {
+                incoming.inner.poll_accept_recv(cx).unwrap();
+                let streams = &incoming.inner.accepted_streams_mut().wt_uni_streams;
+                if streams.len() == 1 {
+                    // A different session ID uses the same buffer budget.
+                    assert_eq!(
+                        streams[0].0,
+                        crate::webtransport::SessionId::from_varint(VarInt(68))
+                    );
+                    std::task::Poll::Ready(())
+                } else {
+                    std::task::Poll::Pending
+                }
+            })
+            .await;
+        }
+        finished_tx.send(()).unwrap();
+    };
+    let client_fut = async {
+        let conn = pair.client_inner().await;
+        // Keep a valid HTTP/3 control stream open throughout the test.
+        let mut control = conn.open_uni().await.unwrap();
+        control.write_all(b"\x00\x04\x00").await.unwrap();
+        for i in 0..limit {
+            let mut stream = conn.open_uni().await.unwrap();
+            // Valid two-byte stream type and session ID, followed by FIN.
+            stream
+                .write_all(&[0x40, 0x54, 0x40, 64 + (i % 16) as u8 * 4])
+                .await
+                .unwrap();
+            stream.finish().unwrap();
+        }
+        // Leave excess streams open so STOP_SENDING's exact error is observable.
+        for _ in 0..3 {
+            let mut excess = conn.open_uni().await.unwrap();
+            excess.write_all(b"\x40\x54\x40\x60").await.unwrap();
+            // Keep data arriving while the header parser resolves both integers.
+            // Observe the peer's STOP_SENDING through the next write.
+            loop {
+                match excess.write_all(&[0]).await {
+                    Ok(()) => tokio::task::yield_now().await,
+                    Err(quinn::WriteError::Stopped(code)) => {
+                        assert_eq!(
+                            code.into_inner(),
+                            Code::H3_WEBTRANSPORT_BUFFERED_STREAM_REJECTED.value()
+                        );
+                        break;
+                    }
+                    Err(err) => panic!("unexpected write error: {err}"),
+                }
+            }
+        }
+        rejected_tx.send(()).unwrap();
+        claimed_rx.await.unwrap();
+        if limit > 0 {
+            let mut stream = conn.open_uni().await.unwrap();
+            stream.write_all(b"\x40\x54\x40\x44").await.unwrap();
+            stream.finish().unwrap();
+        }
+        finished_rx.await.unwrap();
+    };
+    tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::join!(server_fut, client_fut);
+    })
+    .await
+    .expect("extension stream limit test timed out");
+}
