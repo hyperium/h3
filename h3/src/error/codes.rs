@@ -67,6 +67,10 @@ macro_rules! codes {
 }
 
 codes! {
+    /// A WebTransport stream was rejected because the extension stream buffer is full.
+    /// See: <https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3-02#section-4.5>
+    (0x3994bd84, H3_WEBTRANSPORT_BUFFERED_STREAM_REJECTED);
+
     /// Datagram or capsule parse error
     /// See: <https://www.rfc-editor.org/rfc/rfc9297#section-5.2>
     (0x33, H3_DATAGRAM_ERROR);
