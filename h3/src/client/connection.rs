@@ -226,6 +226,19 @@ where
         self.send_grease_frame = false;
         Ok(request_stream)
     }
+
+    /// Returns the origins the server announced with ORIGIN frames so far, in
+    /// no particular order.
+    ///
+    /// See [`Connection::received_origins`].
+    pub fn received_origins(&self) -> Vec<String> {
+        self.conn_state.received_origins()
+    }
+
+    /// Returns whether the server announced `origin` with an ORIGIN frame.
+    pub fn has_received_origin(&self, origin: &str) -> bool {
+        self.conn_state.has_received_origin(origin)
+    }
 }
 
 impl<T, B> Clone for SendRequest<T, B>
@@ -379,6 +392,24 @@ where
     C: quic::Connection<B>,
     B: Buf,
 {
+    /// Returns the origins the server announced with ORIGIN frames so far, in
+    /// no particular order.
+    ///
+    /// # Note
+    ///
+    /// Origins are only added while the connection is polled. At most 256
+    /// distinct origins are kept, further ones are ignored.
+    pub fn received_origins(&self) -> Vec<String> {
+        self.inner.shared_state().received_origins()
+    }
+
+    /// Returns whether the server announced `origin` with an ORIGIN frame.
+    ///
+    /// See [`received_origins`](Connection::received_origins).
+    pub fn has_received_origin(&self, origin: &str) -> bool {
+        self.inner.shared_state().has_received_origin(origin)
+    }
+
     /// Initiate a graceful shutdown, accepting `max_push` potentially in-flight server pushes
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn shutdown(&mut self, _max_push: usize) -> Result<(), ConnectionError> {
@@ -419,6 +450,18 @@ where
                 Ok(Frame::Settings(_)) => {
                     #[cfg(feature = "tracing")]
                     trace!("Got settings");
+                }
+
+                Ok(Frame::Origin(payload)) => {
+                    //= https://www.rfc-editor.org/rfc/rfc9412#section-2.1
+                    //# ASCII-Origin:  An OPTIONAL sequence of characters containing the
+                    //# ASCII serialization of an origin ([RFC6454], Section 6.2) that the
+                    //# sender asserts this connection is or could be authoritative for.
+                    #[cfg(feature = "tracing")]
+                    trace!("Got origin frame, {} bytes", payload.len());
+                    self.inner
+                        .shared_state()
+                        .add_received_origins(Frame::<bytes::Bytes>::parse_origins(&payload));
                 }
 
                 Ok(Frame::Goaway(id)) => {

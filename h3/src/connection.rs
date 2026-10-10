@@ -323,6 +323,16 @@ where
         Ok(conn_inner)
     }
 
+    /// Sends an ORIGIN frame on the control stream
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub async fn send_origins<I, S>(&mut self, origins: I) -> Result<(), ConnectionError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        self.write_control(Frame::from_origins(origins)).await
+    }
+
     /// Send GOAWAY with specified max_id, iff max_id is smaller than the previous one.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn shutdown<T>(
@@ -349,7 +359,12 @@ where
         //# (Section 5.2) so that both endpoints can reliably determine whether
         //# previously sent frames have been processed and gracefully complete or
         //# terminate any necessary remaining tasks.
-        match stream::write(&mut self.control_send, Frame::Goaway(max_id.into())).await {
+        self.write_control(Frame::Goaway(max_id.into())).await
+    }
+
+    /// Writes a frame to the control stream
+    async fn write_control(&mut self, frame: Frame<B>) -> Result<(), ConnectionError> {
+        match stream::write(&mut self.control_send, frame).await {
             Ok(()) => Ok(()),
             Err(StreamErrorIncoming::ConnectionErrorIncoming { connection_error }) => {
                 Err(self.handle_connection_error(connection_error))
@@ -620,7 +635,8 @@ where
             Ok(Some(
                 frame @ Frame::Goaway(_)
                 | frame @ Frame::CancelPush(_)
-                | frame @ Frame::MaxPushId(_),
+                | frame @ Frame::MaxPushId(_)
+                | frame @ Frame::Origin(_),
             )) => {
                 // handle these frames in client/server imples
                 frame

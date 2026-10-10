@@ -863,3 +863,13 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[!MUST,exception]:    values of N (that is, 0x21, 0x40, ..., through 0x3ffffffffffffffe)
     TEXT[!MUST,exception]:    MUST NOT be assigned by IANA and MUST NOT appear in the listing of
     TEXT[!MUST,exception]:    assigned values.
+
+SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9412
+  SECTION: [The ORIGIN HTTP/3 Frame](#section-2)
+    TEXT[implication,test]: the ORIGIN frame is sent from servers to clients on the server's
+    TEXT[implication,test]:    control stream.
+
+  SECTION: [Frame Layout](#section-2.1)
+    TEXT[!MAY,implementation,test]:    ASCII-Origin:  An OPTIONAL sequence of characters containing the
+    TEXT[!MAY,implementation,test]:       ASCII serialization of an origin ([RFC6454], Section 6.2) that the
+    TEXT[!MAY,implementation,test]:       sender asserts this connection is or could be authoritative for.

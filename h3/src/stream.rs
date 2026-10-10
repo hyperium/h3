@@ -293,7 +293,13 @@ where
 
     pub fn into_stream(self) -> AcceptedRecvStream<S, B> {
         match self.ty.expect("Stream type not resolved yet") {
-            StreamType::CONTROL => AcceptedRecvStream::Control(FrameStream::new(self.stream)),
+            StreamType::CONTROL => {
+                //= https://www.rfc-editor.org/rfc/rfc9412#section-2
+                //= type=implication
+                //# the ORIGIN frame is sent from servers to clients on the server's
+                //# control stream.
+                AcceptedRecvStream::Control(FrameStream::new(self.stream).accept_origin_frames())
+            }
             StreamType::PUSH => AcceptedRecvStream::Push(FrameStream::new(self.stream)),
             StreamType::ENCODER => AcceptedRecvStream::Encoder(self.stream),
             StreamType::DECODER => AcceptedRecvStream::Decoder(self.stream),
