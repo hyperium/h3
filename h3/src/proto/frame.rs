@@ -52,6 +52,8 @@ pub enum Frame<B> {
     PushPromise(PushPromise),
     Goaway(VarInt),
     MaxPushId(PushId),
+    /// ORIGIN frame ([RFC 9412](https://www.rfc-editor.org/rfc/rfc9412)) with its encoded payload
+    Origin(Bytes),
     /// Describes the header for a webtransport stream.
     ///
     /// The payload is sent streaming until the stream is closed
@@ -117,6 +119,7 @@ impl Frame<PayloadLen> {
             FrameType::PUSH_PROMISE => Ok(Frame::PushPromise(PushPromise::decode(&mut payload)?)),
             FrameType::GOAWAY => Ok(Frame::Goaway(VarInt::decode(&mut payload)?)),
             FrameType::MAX_PUSH_ID => Ok(Frame::MaxPushId(payload.get_var()?.try_into()?)),
+            FrameType::ORIGIN => Ok(Frame::Origin(payload.copy_to_bytes(len as usize))),
             //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
             //# These frame
             //# types MUST NOT be sent, and their receipt MUST be treated as a
@@ -167,6 +170,10 @@ where
             Frame::CancelPush(id) => simple_frame_encode(FrameType::CANCEL_PUSH, (*id).into(), buf),
             Frame::Goaway(id) => simple_frame_encode(FrameType::GOAWAY, *id, buf),
             Frame::MaxPushId(id) => simple_frame_encode(FrameType::MAX_PUSH_ID, (*id).into(), buf),
+            Frame::Origin(f) => {
+                FrameType::ORIGIN.encode(buf);
+                buf.write_var(f.len() as u64);
+            }
             Frame::Grease => {
                 FrameType::grease().encode(buf);
                 buf.write_var(6);
@@ -181,6 +188,44 @@ where
     }
 }
 
+impl<B> Frame<B> {
+    /// The origins listed in an ORIGIN frame payload, invalid entries are skipped
+    pub(crate) fn parse_origins(mut payload: &[u8]) -> impl Iterator<Item = &str> {
+        std::iter::from_fn(move || {
+            while payload.len() >= 2 {
+                let len = u16::from_be_bytes([payload[0], payload[1]]) as usize;
+                if payload.len() < 2 + len {
+                    break;
+                }
+                let entry = &payload[2..2 + len];
+                payload = &payload[2 + len..];
+                if entry.is_ascii() {
+                    return std::str::from_utf8(entry).ok();
+                }
+            }
+            None
+        })
+    }
+
+    /// An ORIGIN frame listing `origins`, entries that can't be encoded are left out
+    pub(crate) fn from_origins<I, S>(origins: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut payload = bytes::BytesMut::new();
+        for origin in origins {
+            let origin = origin.as_ref();
+            if !origin.is_ascii() || origin.len() > u16::MAX as usize {
+                continue;
+            }
+            payload.put_u16(origin.len() as u16);
+            payload.put_slice(origin.as_bytes());
+        }
+        Frame::Origin(payload.freeze())
+    }
+}
+
 impl<B> Frame<B>
 where
     B: Buf,
@@ -190,6 +235,7 @@ where
             Frame::Data(f) => Some(f),
             Frame::Headers(f) => Some(f),
             Frame::PushPromise(f) => Some(&f.encoded),
+            Frame::Origin(f) => Some(f),
             _ => None,
         }
     }
@@ -199,6 +245,7 @@ where
             Frame::Data(f) => Some(f),
             Frame::Headers(f) => Some(f),
             Frame::PushPromise(f) => Some(&mut f.encoded),
+            Frame::Origin(f) => Some(f),
             _ => None,
         }
     }
@@ -217,7 +264,7 @@ where
                     b.advance(pos)
                 }
             }
-            Frame::Headers(b) => buf.put_slice(b),
+            Frame::Headers(b) | Frame::Origin(b) => buf.put_slice(b),
             _ => (),
         }
     }
@@ -233,6 +280,7 @@ impl fmt::Debug for Frame<PayloadLen> {
             Frame::PushPromise(frame) => write!(f, "PushPromise({})", frame.id),
             Frame::Goaway(id) => write!(f, "GoAway({})", id),
             Frame::MaxPushId(id) => write!(f, "MaxPushId({})", id),
+            Frame::Origin(payload) => write!(f, "Origin({} bytes)", payload.len()),
             Frame::Grease => write!(f, "Grease()"),
             Frame::WebTransportStream(session) => write!(f, "WebTransportStream({:?})", session),
         }
@@ -252,6 +300,7 @@ where
             Frame::PushPromise(frame) => write!(f, "PushPromise({})", frame.id),
             Frame::Goaway(id) => write!(f, "GoAway({})", id),
             Frame::MaxPushId(id) => write!(f, "MaxPushId({})", id),
+            Frame::Origin(payload) => write!(f, "Origin({} bytes)", payload.len()),
             Frame::Grease => write!(f, "Grease()"),
             Frame::WebTransportStream(_) => write!(f, "WebTransportStream()"),
         }
@@ -272,6 +321,7 @@ impl<T, U> PartialEq<Frame<T>> for Frame<U> {
             Frame::PushPromise(x) => matches!(other, Frame::PushPromise(y) if x == y),
             Frame::Goaway(x) => matches!(other, Frame::Goaway(y) if x == y),
             Frame::MaxPushId(x) => matches!(other, Frame::MaxPushId(y) if x == y),
+            Frame::Origin(x) => matches!(other, Frame::Origin(y) if x == y),
             Frame::Grease => matches!(other, Frame::Grease),
             Frame::WebTransportStream(x) => {
                 matches!(other, Frame::WebTransportStream(y) if x == y)
@@ -307,6 +357,8 @@ frame_types! {
     H2_WINDOW_UPDATE = 0x8,
     H2_CONTINUATION = 0x9,
     MAX_PUSH_ID = 0xD,
+    // RFC 9412
+    ORIGIN = 0xC,
     // Reserved frame types
     WEBTRANSPORT_BI_STREAM = 0x41,
 }
@@ -655,6 +707,38 @@ mod tests {
         let mut read = Cursor::new(&buf);
         let decoded = Frame::decode(&mut read).unwrap();
         assert_eq!(check_frame, decoded);
+    }
+
+    //= https://www.rfc-editor.org/rfc/rfc9412#section-2.1
+    //= type=test
+    //# ASCII-Origin:  An OPTIONAL sequence of characters containing the
+    //# ASCII serialization of an origin ([RFC6454], Section 6.2) that the
+    //# sender asserts this connection is or could be authoritative for.
+    #[test]
+    fn origin_frame() {
+        let mut buf = Vec::new();
+        Frame::<Bytes>::from_origins([
+            "https://a.example",
+            "https://b.example:8443",
+            "https://ä.example",
+        ])
+        .encode_with_payload(&mut buf);
+
+        let mut want = vec![0x0c, 2 + 17 + 2 + 22];
+        want.extend_from_slice(&[0, 17]);
+        want.extend_from_slice(b"https://a.example");
+        want.extend_from_slice(&[0, 22]);
+        want.extend_from_slice(b"https://b.example:8443");
+        assert_eq!(buf, want);
+
+        let mut dec = &buf[..];
+        let Ok(Frame::Origin(payload)) = Frame::<PayloadLen>::decode(&mut dec) else {
+            panic!("expected an origin frame");
+        };
+        assert!(Frame::<Bytes>::parse_origins(&payload)
+            .eq(["https://a.example", "https://b.example:8443"]));
+        // truncated entry
+        assert_eq!(Frame::<Bytes>::parse_origins(&[0, 5, b'a']).count(), 0);
     }
 
     #[test]

@@ -41,6 +41,12 @@ impl<S, B> FrameStream<S, B> {
     pub fn into_inner(self) -> BufRecvStream<S, B> {
         self.stream
     }
+
+    /// Accepts ORIGIN frames instead of ignoring them
+    pub(crate) fn accept_origin_frames(mut self) -> Self {
+        self.decoder.accept_origin_frames = true;
+        self
+    }
 }
 
 impl<S, B> FrameStream<S, B>
@@ -215,6 +221,8 @@ where
 #[derive(Default)]
 pub struct FrameDecoder {
     expected: Option<usize>,
+    /// ORIGIN frames are ignored unless this is the control stream
+    accept_origin_frames: bool,
 }
 
 impl FrameDecoder {
@@ -264,6 +272,11 @@ impl FrameDecoder {
                 Ok(frame) => {
                     src.advance(pos);
                     self.expected = None;
+
+                    if matches!(frame, Frame::Origin(_)) && !self.accept_origin_frames {
+                        continue;
+                    }
+
                     return Ok(Some(frame));
                 }
                 // -------------- Map the error Values --------------
@@ -516,6 +529,31 @@ mod tests {
 
         // There is still data to consume, poll_next should panic
         let _ = poll_fn(|cx| stream.poll_next(cx)).await;
+    }
+
+    //= https://www.rfc-editor.org/rfc/rfc9412#section-2
+    //= type=test
+    //# the ORIGIN frame is sent from servers to clients on the server's
+    //# control stream.
+    #[tokio::test]
+    async fn origin_frame_only_on_control_stream() {
+        let encode = || {
+            let mut recv = FakeRecv::default();
+            let mut buf = BytesMut::with_capacity(64);
+            Frame::<Bytes>::from_origins(["https://a.example"]).encode_with_payload(&mut buf);
+            Frame::<Bytes>::Goaway(VarInt(2)).encode(&mut buf);
+            recv.chunk(buf.freeze());
+            recv
+        };
+
+        // ignored on any other stream
+        let mut stream: FrameStream<_, ()> = FrameStream::new(BufRecvStream::new(encode()));
+        assert_poll_matches!(|cx| stream.poll_next(cx), Ok(Some(Frame::Goaway(_))));
+
+        let mut stream: FrameStream<_, ()> =
+            FrameStream::new(BufRecvStream::new(encode())).accept_origin_frames();
+        assert_poll_matches!(|cx| stream.poll_next(cx), Ok(Some(Frame::Origin(_))));
+        assert_poll_matches!(|cx| stream.poll_next(cx), Ok(Some(Frame::Goaway(_))));
     }
 
     #[tokio::test]

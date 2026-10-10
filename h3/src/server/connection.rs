@@ -173,6 +173,18 @@ where
         self.inner.shutdown(&mut self.sent_closing, max_id).await
     }
 
+    /// Sends an ORIGIN frame to the client
+    ///
+    /// See [RFC 9412](https://www.rfc-editor.org/rfc/rfc9412) for more information.
+    #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    pub async fn send_origins<I, S>(&mut self, origins: I) -> Result<(), ConnectionError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        self.inner.send_origins(origins).await
+    }
+
     /// Accepts an incoming bidirectional stream.
     ///
     /// This could be either a *Request* or a *WebTransportBiStream*, the first frame's type
@@ -246,6 +258,8 @@ where
                 trace!("Got settings > {:?}", _setting);
             }
             &Frame::Goaway(id) => self.inner.process_goaway(&mut self.recv_closing, id)?,
+            // Only servers send ORIGIN frames, a client has no use for one
+            Frame::Origin(_) => {}
             _frame @ Frame::MaxPushId(_) | _frame @ Frame::CancelPush(_) => {
                 #[cfg(feature = "tracing")]
                 warn!("Control frame ignored {:?}", _frame);

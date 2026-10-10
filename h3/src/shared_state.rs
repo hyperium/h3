@@ -2,18 +2,24 @@
 
 use std::{
     borrow::Cow,
-    sync::{atomic::AtomicBool, OnceLock},
+    collections::HashSet,
+    sync::{atomic::AtomicBool, Mutex, OnceLock},
 };
 
 use futures_util::task::AtomicWaker;
 
 use crate::{config::Settings, error::internal_error::ErrorOrigin};
 
+/// The most origins kept from the ORIGIN frames of a peer
+const MAX_RECEIVED_ORIGINS: usize = 256;
+
 #[derive(Debug)]
 /// This struct represents the shared state of the h3 connection and the stream structs
 pub struct SharedState {
     /// The settings, sent by the peer
     settings: OnceLock<Settings>,
+    /// The origins announced by the peer in ORIGIN frames
+    origins: Mutex<HashSet<String>>,
     /// The connection error
     connection_error: OnceLock<ErrorOrigin>,
     /// The connection is closing
@@ -26,9 +32,45 @@ impl Default for SharedState {
     fn default() -> Self {
         Self {
             settings: OnceLock::new(),
+            origins: Mutex::new(HashSet::new()),
             connection_error: OnceLock::new(),
             closing: AtomicBool::new(false),
             waker: AtomicWaker::new(),
+        }
+    }
+}
+
+impl SharedState {
+    /// The origins announced by the peer so far
+    pub(crate) fn received_origins(&self) -> Vec<String> {
+        self.origins
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .cloned()
+            .collect()
+    }
+
+    /// Check if the peer announced `origin`
+    pub(crate) fn has_received_origin(&self, origin: &str) -> bool {
+        self.origins
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(origin)
+    }
+
+    /// Adds origins announced by the peer, at most `MAX_RECEIVED_ORIGINS` are kept
+    pub(crate) fn add_received_origins<I, S>(&self, origins: I)
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let mut received = self.origins.lock().unwrap_or_else(|e| e.into_inner());
+        for origin in origins {
+            if received.len() >= MAX_RECEIVED_ORIGINS {
+                break;
+            }
+            received.insert(origin.into());
         }
     }
 }
