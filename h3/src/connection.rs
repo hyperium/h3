@@ -855,7 +855,8 @@ where
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<impl Buf>, StreamError>> {
-        if !self.stream.has_data() {
+        // Empty DATA frames do not end the body.
+        while !self.stream.has_data() {
             match ready!(self.stream.poll_next(cx)) {
                 Err(frame_stream_error) => {
                     return Poll::Ready(Err(
