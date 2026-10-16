@@ -1092,6 +1092,27 @@ async fn request_valid_header_multiple_data_trailer() {
 }
 
 #[tokio::test]
+async fn request_valid_empty_data_frames() {
+    for with_trailers in [false, true] {
+        request_sequence_ok(|mut buf| {
+            request_encode(
+                &mut buf,
+                Request::post("http://localhost/salut").body(()).unwrap(),
+            );
+            for chunk in ["", "", "hello", "", "", " world", "", ""] {
+                Frame::Data(Bytes::from(chunk)).encode_with_payload(&mut buf);
+            }
+            if with_trailers {
+                let mut trailers = HeaderMap::new();
+                trailers.insert("trailer", "value".parse().unwrap());
+                trailers_encode(buf, trailers);
+            }
+        })
+        .await;
+    }
+}
+
+#[tokio::test]
 async fn request_valid_header_trailer() {
     request_sequence_ok(|mut buf| {
         request_encode(
