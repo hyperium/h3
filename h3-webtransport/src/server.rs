@@ -28,7 +28,7 @@ use h3_datagram::{
     datagram_handler::{DatagramReader, DatagramSender, HandleDatagramsExt},
     quic_traits,
 };
-use http::{Method, Request, Response, StatusCode};
+use http::{HeaderMap, HeaderValue, Method, Request, Response, StatusCode};
 
 use h3::webtransport::SessionId;
 use pin_project_lite::pin_project;
@@ -82,6 +82,7 @@ where
         request: Request<()>,
         mut stream: RequestStream<C::BidiStream, B>,
         mut conn: Connection<C, B>,
+        headers: HeaderMap,
     ) -> Result<Self, StreamError> {
         let shared = conn.inner.shared.clone();
 
@@ -127,12 +128,14 @@ where
 
         //= https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-3.3
         let response = if validate_wt_connect(&request) {
-            Response::builder()
-                // This is the only header that chrome cares about.
-                .header("sec-webtransport-http3-draft", "draft02")
-                .status(StatusCode::OK)
-                .body(())
-                .unwrap()
+            let mut response = Response::builder().status(StatusCode::OK).body(()).unwrap();
+            response.headers_mut().extend(headers);
+            // This is the only header that chrome cares about.
+            response.headers_mut().insert(
+                "sec-webtransport-http3-draft",
+                HeaderValue::from_static("draft02"),
+            );
+            response
         } else {
             Response::builder()
                 .status(StatusCode::BAD_REQUEST)
