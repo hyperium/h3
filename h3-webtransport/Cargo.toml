@@ -25,3 +25,10 @@ h3-datagram = { version = "0.0.2", path = "../h3-datagram" }
 version = "0.0.8"
 path = "../h3"
 features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes"]
+
+[dev-dependencies]
+h3-quinn = { path = "../h3-quinn", features = ["datagram"] }
+quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+rcgen = "0.14"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+tokio = { version = "1.28", features = ["macros", "rt", "time"] }
