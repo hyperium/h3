@@ -7,7 +7,7 @@ use std::{
 };
 
 use bytes::Buf;
-use futures_util::{future::poll_fn, ready, Future};
+use futures_util::{future::poll_fn, ready, task::AtomicWaker, Future};
 use h3::{
     error::{
         connection_error_creators::CloseStream, internal_error::InternalConnectionError, Code,
@@ -52,6 +52,9 @@ where
     server_conn: Mutex<Connection<C, B>>,
     connect_stream: RequestStream<C::BidiStream, B>,
     opener: Mutex<C::OpenStreams>,
+    /// Wakes up [`AcceptUni`], when another task (e.g., [`accept_bi`](Self::accept_bi)) resolved
+    /// the header of a unidirectional stream (a waker of a stream is replaced by the last poll).
+    uni_waker: AtomicWaker,
     /// Shared State
     ///
     /// Shared state is already in server_conn, but with this it is not necessary to lock the mutex
@@ -149,6 +152,7 @@ where
         Ok(Self {
             session_id,
             opener,
+            uni_waker: AtomicWaker::new(),
             server_conn: Mutex::new(conn),
             connect_stream: stream,
             shared,
@@ -174,6 +178,7 @@ where
     pub fn accept_uni(&self) -> AcceptUni<'_, C, B> {
         AcceptUni {
             conn: &self.server_conn,
+            waker: &self.uni_waker,
         }
     }
 
@@ -184,7 +189,13 @@ where
     pub async fn accept_bi(&self) -> Result<Option<BiStreamResolver<C, B>>, ConnectionError> {
         let stream = poll_fn(|cx| {
             let mut conn = self.server_conn.lock().unwrap();
-            conn.poll_accept_request_stream(cx)
+            let polled = conn.poll_accept_request_stream(cx);
+            // This also resolves the header of incoming unidirectional streams, which would only
+            // wake up this task and not the one of `accept_uni`.
+            if !conn.inner.accepted_streams_mut().wt_uni_streams.is_empty() {
+                self.uni_waker.wake();
+            }
+            polled
         })
         .await?;
 
@@ -396,6 +407,7 @@ where
     B: Buf,
 {
     conn: &'a Mutex<Connection<C, B>>,
+    waker: &'a AtomicWaker,
 }
 
 impl<'a, C, B> Future for AcceptUni<'a, C, B>
@@ -406,6 +418,8 @@ where
     type Output = Result<Option<(SessionId, RecvStream<C::RecvStream, B>)>, ConnectionError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // Before looking for streams, so that none is missed.
+        self.waker.register(cx.waker());
         let mut conn = self.conn.lock().unwrap();
         conn.inner.poll_accept_recv(cx)?;
 
