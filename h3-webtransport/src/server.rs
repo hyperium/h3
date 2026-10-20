@@ -31,6 +31,7 @@ use http::{Method, Request, Response, StatusCode};
 
 use h3::webtransport::SessionId;
 use pin_project_lite::pin_project;
+use tokio::sync::Mutex as AsyncMutex;
 
 use crate::stream::{BidiStream, SendStream};
 
@@ -52,13 +53,18 @@ where
 {
     // See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-2-3
     session_id: SessionId,
-    connect_stream: RequestStream<C::BidiStream, B>,
+    connect: AsyncMutex<SessionConnect<C::BidiStream, B>>,
     opener: Mutex<C::OpenStreams>,
     datagram_sender: Mutex<DatagramSender<C::SendDatagramHandler, B>>,
     /// Shared State
     ///
     /// Shared with the connection driver, without owning that driver.
     shared: Arc<SharedState>,
+}
+
+struct SessionConnect<S, B> {
+    stream: RequestStream<S, B>,
+    closed: Option<Result<(), Arc<StreamError>>>,
 }
 
 impl<C, B> ConnectionState for WebTransportSession<C, B>
@@ -91,7 +97,7 @@ where
     ) -> impl Future<Output = Result<Self, StreamError>> {
         let prepared = Self::prepare(stream, conn);
         async move {
-            let mut session = prepared?;
+            let session = prepared?;
             let valid = validate_wt_connect(&request);
             let mut response = Response::builder().status(if valid {
                 StatusCode::OK
@@ -101,16 +107,19 @@ where
             if valid {
                 response = response.header("sec-webtransport-http3-draft", "draft02");
             }
-            session
-                .connect_stream
-                .send_response(response.body(()).unwrap())
-                .await?;
-            if !valid {
-                session.connect_stream.finish().await?;
-                return Err(StreamError::StreamError {
-                    code: Code::H3_MESSAGE_ERROR,
-                    reason: "invalid WebTransport CONNECT request".into(),
-                });
+            {
+                let mut connect = session.connect.lock().await;
+                connect
+                    .stream
+                    .send_response(response.body(()).unwrap())
+                    .await?;
+                if !valid {
+                    connect.stream.finish().await?;
+                    return Err(StreamError::StreamError {
+                        code: Code::H3_MESSAGE_ERROR,
+                        reason: "invalid WebTransport CONNECT request".into(),
+                    });
+                }
             }
             Ok(session)
         }
@@ -168,7 +177,10 @@ where
         Ok(Self {
             session_id,
             opener,
-            connect_stream: stream,
+            connect: AsyncMutex::new(SessionConnect {
+                stream,
+                closed: None,
+            }),
             datagram_sender: Mutex::new(datagram_sender),
             shared,
         })
@@ -206,6 +218,39 @@ where
     /// Returns the session id
     pub fn session_id(&self) -> SessionId {
         self.session_id
+    }
+
+    /// Wait for the peer's CONNECT stream to end.
+    ///
+    /// Returns `Ok(())` on receive-side FIN, or the stream/connection error on
+    /// reset or connection loss. The terminal result is retained for subsequent
+    /// and concurrent callers; errors are shared because [`StreamError`] is not
+    /// cloneable. Cancellation leaves the CONNECT reader with the session, so
+    /// another call can continue waiting without losing framing state.
+    ///
+    /// This consumes and discards CONNECT body data without buffering a whole
+    /// body. It does not interpret capsules or expose their close codes. A
+    /// capsule without FIN is not reported as closure by this API.
+    ///
+    /// Keep driving [`WebTransportConnection`] independently. Waiting does not
+    /// borrow that driver, prevent outgoing session operations, or receive any
+    /// application streams or datagrams. GOAWAY alone does not complete this
+    /// future. Completion does not close the connection, cancel sibling sessions
+    /// or terminate admitted streams: their owner still decides how to drain.
+    pub async fn closed(&self) -> Result<(), Arc<StreamError>> {
+        let mut connect = self.connect.lock().await;
+        if let Some(result) = &connect.closed {
+            return result.clone();
+        }
+        let result = loop {
+            match connect.stream.recv_data().await {
+                Ok(Some(_)) => {}
+                Ok(None) => break Ok(()),
+                Err(error) => break Err(Arc::new(error)),
+            }
+        };
+        connect.closed = Some(result.clone());
+        result
     }
 }
 

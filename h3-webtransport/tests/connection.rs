@@ -276,3 +276,107 @@ async fn driver_routes_streams_and_datagrams_while_session_remains_separate() {
     assert_eq!(recv.read_to_end(1024).await.unwrap(), b"after GOAWAY");
     peer.close(0u32.into(), b"done");
 }
+
+#[tokio::test]
+async fn connect_fin_is_cancel_safe_and_does_not_end_admitted_work() {
+    let (_server, _client, peer, mut driver, _control) = pair().await;
+    let (mut connect, _recv) = request(&peer, true).await;
+    let (req, stream) = resolved_request(&mut driver).await;
+    let session = driver.accept_session(req, stream).await.unwrap();
+    assert!(session.closed().now_or_never().is_none());
+
+    // Cancelling the observer partway through a DATA frame retains the reader.
+    let mut data = BytesMut::new();
+    let payload = Bytes::from_static(b"ignored CONNECT body");
+    Frame::Data(payload.clone()).encode(&mut data);
+    data.extend_from_slice(&payload);
+    connect.write_all(&data[..3]).await.unwrap();
+    assert!(session.closed().now_or_never().is_none());
+    connect.write_all(&data[3..]).await.unwrap();
+
+    let (mut send, mut recv) = peer.open_bi().await.unwrap();
+    let mut header = BytesMut::new();
+    BidiStreamHeader::WebTransportBidi(session.session_id()).encode(&mut header);
+    send.write_all(&header).await.unwrap();
+    let mut admitted = match resolver(&mut driver).await.resolve().await.unwrap() {
+        AcceptedBi::BidiStream(_, stream) => stream,
+        _ => panic!("expected WT stream"),
+    };
+
+    driver.shutdown(0).await.unwrap();
+    assert!(session.closed().now_or_never().is_none());
+    connect.finish().unwrap();
+    let (first, second) = tokio::join!(session.closed(), session.closed());
+    first.unwrap();
+    second.unwrap();
+    session.closed().await.unwrap();
+
+    // Closure is an observation, not authority to abandon the owner's drain.
+    admitted.write_all(b"drained").await.unwrap();
+    admitted.shutdown().await.unwrap();
+    assert_eq!(recv.read_to_end(1024).await.unwrap(), b"drained");
+    peer.close(0u32.into(), b"done");
+}
+
+#[tokio::test]
+async fn connect_reset_is_retained_without_closing_sibling_sessions_or_http() {
+    let (_server, _client, peer, mut driver, _control) = pair().await;
+    let (mut connect, _recv) = request(&peer, true).await;
+    let (req, stream) = resolved_request(&mut driver).await;
+    let session = driver.accept_session(req, stream).await.unwrap();
+    let (_connect2, _recv2) = request(&peer, true).await;
+    let (req, stream) = resolved_request(&mut driver).await;
+    let sibling = driver.accept_session(req, stream).await.unwrap();
+
+    let observing = session.closed();
+    tokio::pin!(observing);
+    assert!(observing.as_mut().now_or_never().is_none());
+    session
+        .send_datagram(Bytes::from_static(b"while waiting"))
+        .unwrap();
+    let datagram = Datagram::decode(peer.read_datagram().await.unwrap()).unwrap();
+    assert_eq!(
+        h3_webtransport::SessionId::from(datagram.stream_id()),
+        session.session_id()
+    );
+
+    connect.reset(0x52u32.into()).unwrap();
+    let (first, second) = tokio::join!(observing, session.closed());
+    let first = first.unwrap_err();
+    assert!(
+        matches!(&*first, h3::error::StreamError::RemoteTerminate { code } if *code == h3::error::Code::from(0x52))
+    );
+    assert!(Arc::ptr_eq(&first, &second.unwrap_err()));
+    assert!(Arc::ptr_eq(&first, &session.closed().await.unwrap_err()));
+    assert!(sibling.closed().now_or_never().is_none());
+
+    let (_get, mut recv) = request(&peer, false).await;
+    let (_, mut stream) = resolved_request(&mut driver).await;
+    stream.send_response(Response::new(())).await.unwrap();
+    stream.finish().await.unwrap();
+    assert!(!recv.read_to_end(1024).await.unwrap().is_empty());
+    sibling
+        .send_datagram(Bytes::from_static(b"still alive"))
+        .unwrap();
+    let datagram = Datagram::decode(peer.read_datagram().await.unwrap()).unwrap();
+    assert_eq!(
+        h3_webtransport::SessionId::from(datagram.stream_id()),
+        sibling.session_id()
+    );
+    peer.close(0u32.into(), b"done");
+}
+
+#[tokio::test]
+async fn connection_loss_wakes_connect_observer_beside_the_driver() {
+    let (_server, _client, peer, mut driver, _control) = pair().await;
+    let (_connect, _recv) = request(&peer, true).await;
+    let (req, stream) = resolved_request(&mut driver).await;
+    let session = driver.accept_session(req, stream).await.unwrap();
+    assert!(session.closed().now_or_never().is_none());
+    peer.close(0u32.into(), b"done");
+    let (closed, _driver_end) = tokio::join!(session.closed(), driver.accept());
+    assert!(matches!(
+        &*closed.unwrap_err(),
+        h3::error::StreamError::ConnectionError(_)
+    ));
+}

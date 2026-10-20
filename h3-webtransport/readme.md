@@ -23,6 +23,12 @@ The connection driver and WebTransport sessions have separate lifetimes:
 - `session.open_bi()`, `session.open_uni()` and `session.send_datagram()` are
   bound to that session. `driver.shutdown(max_requests)` initiates HTTP/3
   GOAWAY; the caller still owns session tasks and their completion.
+- `session.closed().await` observes receive-side CONNECT FIN, reset or connection
+  loss independently of the driver and outgoing operations. It is cancel-safe;
+  concurrent/repeated waiters receive the retained result. It discards CONNECT
+  body data, without interpreting capsules or their close codes. GOAWAY alone
+  is not closure. The signal does not terminate admitted application streams:
+  their owner stops admission and retains its own graceful drain policy.
 
 The driver does not spawn tasks or buffer streams for applications. The caller
 owns concurrent resolvers, session admission, routing (including streams that
