@@ -1,12 +1,13 @@
 use anyhow::{Context, Result};
 use bytes::Bytes;
+use futures::StreamExt;
 use h3::{
     ext::Protocol,
     quic::{self},
     server::Connection,
 };
 use h3_quinn::quinn::{self, crypto::rustls::QuicServerConfig};
-use h3_webtransport::server::{self, WebTransportSession};
+use h3_webtransport::server::{self, IncomingStream, WebTransportConnection, WebTransportSession};
 use http::Method;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
@@ -121,21 +122,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .await
                         .unwrap();
 
-                    // tracing::info!("Establishing WebTransport session");
-                    // // 3. TODO: Conditionally, if the client indicated that this is a webtransport session, we should accept it here, else use regular h3.
-                    // // if this is a webtransport session, then h3 needs to stop handing the datagrams, bidirectional streams, and unidirectional streams and give them
-                    // // to the webtransport session.
-
                     if let Err(err) = handle_connection(h3_conn).await {
                         tracing::error!("Failed to handle connection: {err:?}");
                     }
-
-                    // let mut session: WebTransportSession<_, Bytes> =
-                    //     WebTransportSession::accept(h3_conn).await.unwrap();
-                    // tracing::info!("Finished establishing webtransport session");
-                    // // 4. Get datagrams, bidirectional streams, and unidirectional streams and wait for client requests here.
-                    // // h3_conn needs to hand over the datagrams, bidirectional streams, and unidirectional streams to the webtransport session.
-                    // let result = handle.await;
                 }
                 Err(err) => {
                     error!("accepting connection failed: {:?}", err);
@@ -151,62 +140,91 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn handle_connection(mut conn: Connection<h3_quinn::Connection, Bytes>) -> Result<()> {
-    // 3. TODO: Conditionally, if the client indicated that this is a webtransport session, we should accept it here, else use regular h3.
-    // if this is a webtransport session, then h3 needs to stop handing the datagrams, bidirectional streams, and unidirectional streams and give them
-    // to the webtransport session.
-
-    loop {
-        match conn.accept().await {
-            Ok(Some(resolver)) => {
-                // TODO: resolve request in a different task to not block the accept loop
-                let (req, stream) = match resolver.resolve_request().await {
-                    Ok(request) => request,
-                    Err(err) => {
-                        error!("error resolving request: {err:?}");
-                        continue;
-                    }
-                };
-                info!("new request: {:#?}", req);
-
-                let ext = req.extensions();
-                match req.method() {
-                    &Method::CONNECT if ext.get::<Protocol>() == Some(&Protocol::WEB_TRANSPORT) => {
-                        tracing::info!("Peer wants to initiate a webtransport session");
-
-                        tracing::info!("Handing over connection to WebTransport");
-                        let session = WebTransportSession::accept(req, stream, conn).await?;
-                        tracing::info!("Established webtransport session");
-                        // 4. Get datagrams, bidirectional streams, and unidirectional streams and wait for client requests here.
-                        // h3_conn needs to hand over the datagrams, bidirectional streams, and unidirectional streams to the webtransport session.
-                        handle_session_and_echo_all_inbound_messages(session).await?;
-
-                        return Ok(());
-                    }
-                    _ => {
-                        tracing::info!(?req, "Received request");
-                    }
-                }
-            }
-            // indicating no more streams to be received
-            Ok(None) => {
-                break;
-            }
-            Err(err) => {
-                error!("Connection errored with {}", err);
-                break;
-            }
-        }
-    }
-    Ok(())
-}
-
 macro_rules! log_result {
     ($expr:expr) => {
         if let Err(err) = $expr {
             tracing::error!("{err:?}");
         }
     };
+}
+
+async fn handle_connection(conn: Connection<h3_quinn::Connection, Bytes>) -> Result<()> {
+    type Session = WebTransportSession<h3_quinn::Connection, Bytes>;
+    let mut driver = WebTransportConnection::new(conn);
+    let mut datagrams = driver.datagram_reader();
+    let mut resolving = futures::stream::FuturesUnordered::new();
+    let mut accepting = futures::stream::FuturesUnordered::new();
+    let mut tasks = tokio::task::JoinSet::new();
+    let mut sessions: std::collections::HashMap<_, Arc<Session>> = std::collections::HashMap::new();
+
+    loop {
+        tokio::select! {
+            biased;
+            // Register completed sessions before processing their input streams.
+            Some(session) = accepting.next() => {
+                let session: Arc<Session> = Arc::new(session?);
+                let id = session.session_id();
+                sessions.insert(id, session.clone());
+                tasks.spawn(async move {
+                    open_bidi_test(session.open_bi().await?).await
+                });
+            }
+            incoming = driver.accept() => match incoming? {
+                Some(IncomingStream::Bidirectional(resolver)) => {
+                    resolving.push(resolver.resolve());
+                }
+                Some(IncomingStream::Unidirectional(id, stream)) => {
+                    if let Some(session) = sessions.get(&id).cloned() {
+                        tasks.spawn(async move {
+                            let send = session.open_uni().await?;
+                            echo_stream(send, stream).await
+                        });
+                    }
+                }
+                None => break,
+            },
+            Some(resolved) = resolving.next() => match resolved? {
+                server::AcceptedBi::Request(req, mut stream) => {
+                    if req.method() == Method::CONNECT
+                        && req.extensions().get::<Protocol>() == Some(&Protocol::WEB_TRANSPORT)
+                    {
+                        // The future owns only session resources; acceptance keeps running.
+                        accepting.push(driver.accept_session(req, stream));
+                    } else {
+                        tasks.spawn(async move {
+                            stream.send_response(http::Response::new(())).await?;
+                            stream.finish().await?;
+                            Ok(())
+                        });
+                    }
+                }
+                server::AcceptedBi::BidiStream(id, stream) => {
+                    if sessions.contains_key(&id) {
+                        let (send, recv) = quic::BidiStream::split(stream);
+                        tasks.spawn(echo_stream(send, recv));
+                    }
+                }
+            },
+            datagram = datagrams.read_datagram() => {
+                let datagram = datagram?;
+                let id = datagram.stream_id().into();
+                if let Some(session) = sessions.get(&id) {
+                    session.send_datagram(datagram.into_payload())?;
+                }
+            }
+            Some(result) = tasks.join_next() => {
+                log_result!(result?);
+            }
+        }
+    }
+    while let Some(session) = accepting.next().await {
+        let session = session?;
+        sessions.insert(session.session_id(), Arc::new(session));
+    }
+    while let Some(result) = tasks.join_next().await {
+        log_result!(result?);
+    }
+    Ok(())
 }
 
 async fn echo_stream<T, R>(send: T, recv: R) -> anyhow::Result<()>
@@ -256,64 +274,6 @@ where
     stream.read_to_end(&mut resp).await?;
 
     tracing::info!("Got response from client: {resp:?}");
-
-    Ok(())
-}
-
-/// This method will echo all inbound datagrams, unidirectional and bidirectional streams.
-async fn handle_session_and_echo_all_inbound_messages(
-    session: WebTransportSession<h3_quinn::Connection, Bytes>,
-) -> anyhow::Result<()> {
-    let session_id = session.session_id();
-
-    // This will open a bidirectional stream and send a message to the client right after connecting!
-    let stream = session.open_bi(session_id).await?;
-
-    tokio::spawn(async move { log_result!(open_bidi_test(stream).await) });
-
-    let mut datagram_reader = session.datagram_reader();
-    let mut datagram_sender = session.datagram_sender();
-
-    loop {
-        tokio::select! {
-            datagram = datagram_reader.read_datagram() => {
-                let datagram = match datagram {
-                    Ok(datagram) => datagram,
-                    Err(err) => {
-                        tracing::error!("Failed to read datagram: {err:?}");
-                        break;
-                    }
-                };
-                tracing::info!("Received datagram: {datagram:?}");
-                let datagram = datagram.into_payload();
-                datagram_sender.send_datagram(datagram)?;
-            }
-            uni_stream = session.accept_uni() => {
-                let (id, stream) = uni_stream?.unwrap();
-
-                let send = session.open_uni(id).await?;
-                tokio::spawn( async move { log_result!(echo_stream(send, stream).await); });
-            }
-            stream = session.accept_bi() => {
-                if let Some(resolver) = stream? {
-                    tokio::spawn(async move {
-                        log_result!(async move {
-                            if let server::AcceptedBi::BidiStream(_, stream) = resolver.resolve().await? {
-                                let (send, recv) = quic::BidiStream::split(stream);
-                                echo_stream(send, recv).await?;
-                            }
-                            Ok::<_, anyhow::Error>(())
-                        }.await);
-                    });
-                }
-            }
-            else => {
-                break
-            }
-        }
-    }
-
-    tracing::info!("Finished handling session");
 
     Ok(())
 }
