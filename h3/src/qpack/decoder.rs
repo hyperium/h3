@@ -343,7 +343,40 @@ impl From<TryFromIntError> for DecoderError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::DEFAULT_MAX_FIELD_SECTION_SIZE;
     use crate::qpack::tests::helpers::{build_table_with_size, TABLE_SIZE};
+
+    #[test]
+    fn default_limit_rejects_header_amplification_incrementally() {
+        // One wire byte referencing static entry 58
+        // (`strict-transport-security: ...; preload`) charges its
+        // full `mem_size()` against the decoding budget.
+        let amplified = Indexed::Static(58);
+        let mem_size = StaticTable::get(58).unwrap().mem_size() as u64;
+        // Twice what's needed to exceed the default limit, so
+        // decoding must stop before the end of the block.
+        let refs = 2 * (DEFAULT_MAX_FIELD_SECTION_SIZE / mem_size + 1);
+
+        // A stateless block: empty prefix, then only indexed references.
+        let mut encoded = bytes::BytesMut::new();
+        HeaderPrefix::new(0, 0, 0, 0).encode(&mut encoded);
+        for _ in 0..refs {
+            amplified.encode(&mut encoded);
+        }
+
+        let max_size = crate::config::Config::default()
+            .settings
+            .max_field_section_size;
+
+        assert!(matches!(
+            decode_stateless(&mut encoded, max_size),
+            Err(DecoderError::HeaderTooLong(_))
+        ));
+        assert!(
+            encoded.has_remaining(),
+            "must stop before decoding all fields"
+        );
+    }
 
     #[test]
     fn test_header_too_long() {
