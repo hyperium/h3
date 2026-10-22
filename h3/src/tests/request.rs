@@ -27,6 +27,117 @@ use super::h3_quinn;
 use super::{init_tracing, Pair};
 
 #[tokio::test]
+async fn default_limit_rejects_oversized_request_without_closing_connection() {
+    //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
+    //= type=test
+    //# An HTTP/3 implementation MAY impose a limit on the maximum size of
+    //# the message header it will accept on an individual HTTP message.
+    reject_oversized_request(false).await;
+}
+
+#[tokio::test]
+async fn large_limit_rejects_header_map_overflow_without_closing_connection() {
+    //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
+    //= type=test
+    //# An HTTP/3 implementation MAY impose a limit on the maximum size of
+    //# the message header it will accept on an individual HTTP message.
+    reject_oversized_request(true).await;
+}
+
+async fn reject_oversized_request(large_limit: bool) {
+    let mut pair = Pair::default();
+    let mut server = pair.server();
+    let (rejected_tx, rejected_rx) = tokio::sync::oneshot::channel();
+
+    let client_fut = async {
+        let connection = pair.client_inner().await;
+        let (mut driver, mut client) = client::new(h3_quinn::Connection::new(connection.clone()))
+            .await
+            .unwrap();
+        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let request_fut = async move {
+            // Bypass the client's outgoing header limit and HeaderMap to send
+            // an oversized, otherwise valid request over a real QUIC stream.
+            let mut fields: Vec<qpack::HeaderField> = Header::request(
+                http::Method::GET,
+                "https://localhost/".parse().unwrap(),
+                HeaderMap::new(),
+                http::Extensions::new(),
+            )
+            .unwrap()
+            .into_iter()
+            .collect();
+            fields.extend((0..32_768).map(|i| qpack::HeaderField::from((format!("x-{i}"), ""))));
+            let mut encoded = BytesMut::new();
+            qpack::encode_stateless(&mut encoded, fields).unwrap();
+            let mut frame = BytesMut::new();
+            Frame::<Bytes>::Headers(encoded.freeze()).encode_with_payload(&mut frame);
+            let (mut send, _recv) = connection.open_bi().await.unwrap();
+            send.write_all(&frame).await.unwrap();
+            send.finish().unwrap();
+            rejected_rx.await.unwrap();
+
+            let mut stream = client
+                .send_request(Request::get("https://localhost/").body(()).unwrap())
+                .await
+                .unwrap();
+            stream.finish().await.unwrap();
+            assert_eq!(
+                stream.recv_response().await.unwrap().status(),
+                StatusCode::OK
+            );
+        };
+        tokio::join!(request_fut, drive_fut);
+    };
+
+    let server_fut = async {
+        let mut builder = server::builder();
+        if large_limit {
+            builder.max_field_section_size(4 * 1024 * 1024);
+        }
+        let mut incoming = builder.build(server.next().await).await.unwrap();
+        let error = incoming
+            .accept()
+            .await
+            .unwrap()
+            .unwrap()
+            .resolve_request()
+            .await
+            .err()
+            .expect("oversized request must be rejected");
+        if large_limit {
+            assert_matches!(
+                error,
+                StreamError::StreamError {
+                    code: Code::H3_MESSAGE_ERROR,
+                    ..
+                }
+            );
+        } else {
+            assert_matches!(
+                error,
+                StreamError::HeaderTooBig {
+                    max_size: 65_536,
+                    ..
+                }
+            );
+        }
+        rejected_tx.send(()).unwrap();
+
+        let (_, mut stream) = get_stream_blocking(&mut incoming).await.unwrap();
+        stream.send_response(Response::new(())).await.unwrap();
+        stream.finish().await.unwrap();
+        let _ = incoming.accept().await;
+    };
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::join!(server_fut, client_fut);
+    })
+    .await
+    .expect("oversized request test timed out");
+}
+
+#[tokio::test]
 async fn get() {
     init_tracing();
     let mut pair = Pair::default();

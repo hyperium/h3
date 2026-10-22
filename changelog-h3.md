@@ -1,3 +1,22 @@
+### Unreleased
+
+* **Security**: mitigate QPACK header amplification attacks on HTTP/3 servers,
+  where a small encoded header block expands into an oversized decoded header
+  section (see ["Header Accordions"](https://foxio.io/blog/header-accordions-qpack-amplification-attacks-against-http-3-servers)):
+  * `max_field_section_size` now defaults to 64 KiB (`65536` bytes) instead of
+    unlimited. Decoded header sections are rejected incrementally while
+    decoding, requests exceeding the limit are answered with HTTP 431 and fail
+    with `StreamError::HeaderTooBig`. Use `client::Builder::max_field_section_size()`
+    or `server::Builder::max_field_section_size()` to configure it. Per RFC 9114
+    section 7.2.4.1, the default remains unlimited only when *parsing the peer's*
+    advertised setting.
+  * Converting a decoded header section into a `Header` no longer panics when it
+    exhausts `http::HeaderMap`'s internal capacity (32768 entries); it returns the
+    new `HeaderError::ExcessiveHeaders` variant instead, which is reported as a
+    stream error of type `H3_MESSAGE_ERROR` rather than crashing the connection.
+    This uses `HeaderMap::try_append`, which requires `http >= 1.1`; the minimum
+    version of the `http` dependency has been raised accordingly.
+
 ### v0.0.8 (2025-05-06)
 * fix integer overflow when parsing qpack prefixed integers
 * introduce new user facing error types 

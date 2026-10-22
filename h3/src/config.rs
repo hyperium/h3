@@ -2,6 +2,16 @@ use std::convert::TryFrom;
 
 use crate::proto::{frame, varint::VarInt};
 
+/// The default limit, in bytes, on the decoded size of a header section
+/// imposed by [`Config::default()`], as defined by the "Header Size
+/// Constraints" section of the specification: each field contributes its
+/// name and value lengths plus an overhead of 32 bytes. A finite limit
+/// protects against amplification attacks where a small QPACK-encoded
+/// block expands into a very large decoded section.
+///
+/// See: <https://www.rfc-editor.org/rfc/rfc9114.html#name-header-size-constraints>
+pub(crate) const DEFAULT_MAX_FIELD_SECTION_SIZE: u64 = 65_536;
+
 /// Configures the HTTP/3 connection
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
@@ -22,11 +32,14 @@ pub struct Config {
 /// HTTP/3 Settings
 #[derive(Debug, Clone, Copy)]
 pub struct Settings {
-    /// The MAX_FIELD_SECTION_SIZE in HTTP/3 refers to the maximum size of the dynamic table used in HPACK compression.
-    /// HPACK is the compression algorithm used in HTTP/3 to reduce the size of the header fields in HTTP requests and responses.
-
-    /// In HTTP/3, the MAX_FIELD_SECTION_SIZE is set to 12.
-    /// This means that the dynamic table used for HPACK compression can have a maximum size of 2^12 bytes, which is 4KB.
+    /// The maximum size of the header section (calculated as the uncompressed
+    /// size of the fields, including the length of the name and value in bytes
+    /// plus an overhead of 32 bytes for each field) that this endpoint is
+    /// willing to accept on an individual HTTP message.
+    ///
+    /// See [header size constraints] section of the specification for details.
+    ///
+    /// [header size constraints]: https://www.rfc-editor.org/rfc/rfc9114.html#name-header-size-constraints
     pub(crate) max_field_section_size: u64,
 
     /// https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-3.1
@@ -47,6 +60,8 @@ impl From<&frame::Settings> for Settings {
     fn from(settings: &frame::Settings) -> Self {
         let defaults: Self = Default::default();
         Self {
+            // SETTINGS_MAX_FIELD_SECTION_SIZE's default value is unlimited,
+            // as defined in RFC 9114 section 7.2.4.1
             max_field_section_size: settings
                 .get(frame::SettingId::MAX_HEADER_LIST_SIZE)
                 .unwrap_or(defaults.max_field_section_size),
@@ -173,7 +188,13 @@ impl Default for Config {
             send_grease: true,
             #[cfg(test)]
             send_settings: true,
-            settings: Default::default(),
+            settings: Settings {
+                //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
+                //# An HTTP/3 implementation MAY impose a limit on the maximum size of
+                //# the message header it will accept on an individual HTTP message.
+                max_field_section_size: DEFAULT_MAX_FIELD_SECTION_SIZE,
+                ..Settings::default()
+            },
         }
     }
 }

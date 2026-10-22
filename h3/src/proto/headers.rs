@@ -204,7 +204,10 @@ impl Iterator for HeaderIter {
 impl TryFrom<Vec<HeaderField>> for Header {
     type Error = HeaderError;
     fn try_from(headers: Vec<HeaderField>) -> Result<Self, Self::Error> {
-        let mut fields = HeaderMap::with_capacity(headers.len());
+        // `HeaderMap::with_capacity` panics when the requested capacity exceeds
+        // the map's internal limit; fall back to an empty map and let
+        // `try_append` reject oversized header sections with an error instead.
+        let mut fields = HeaderMap::try_with_capacity(headers.len()).unwrap_or_default();
         let mut pseudo = Pseudo::default();
         let mut regular_field_seen = false;
 
@@ -247,7 +250,12 @@ impl TryFrom<Vec<HeaderField>> for Header {
                 }
                 Field::Header((n, v)) => {
                     regular_field_seen = true;
-                    fields.append(n, v);
+                    // `HeaderMap::append` panics when the map has reached its
+                    // internal limit; surface it as an error so an oversized
+                    // header section cannot take down the connection.
+                    fields
+                        .try_append(n, v)
+                        .map_err(|_| HeaderError::ExcessiveHeaders)?;
                 }
                 Field::Protocol(p) => {
                     pseudo.protocol = Some(p);
@@ -466,6 +474,10 @@ pub enum HeaderError {
     MissingAuthority,
     ContradictedAuthority,
     PseudoAfterRegularField,
+    /// The decoded header section contains more fields than the underlying
+    /// `HeaderMap` is able to represent. Only reachable when the configured
+    /// `max_field_section_size` allows more fields than that limit.
+    ExcessiveHeaders,
 }
 
 impl HeaderError {
@@ -509,6 +521,12 @@ impl fmt::Display for HeaderError {
                     "pseudo-header field appears after a regular header field"
                 )
             }
+            HeaderError::ExcessiveHeaders => {
+                write!(
+                    f,
+                    "the number of header fields exceeds the maximum supported"
+                )
+            }
         }
     }
 }
@@ -517,6 +535,22 @@ impl fmt::Display for HeaderError {
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
+
+    #[test]
+    fn oversized_qpack_field_section_returns_error() {
+        // `http::HeaderMap` can hold at most `1 << 15` fields (see
+        // `try_with_capacity` in the http crate): one field per slot
+        // must fail with `ExcessiveHeaders`, not panic.
+        let fields = (0..(1 << 15)).map(|i| HeaderField::from((format!("x-{i}"), "")));
+        let mut encoded = bytes::BytesMut::new();
+        crate::qpack::encode_stateless(&mut encoded, fields).unwrap();
+        let decoded = crate::qpack::decode_stateless(&mut encoded, u64::MAX).unwrap();
+
+        assert_matches!(
+            Header::try_from(decoded.fields),
+            Err(HeaderError::ExcessiveHeaders)
+        );
+    }
 
     #[test]
     fn request_has_no_authority_nor_host() {
