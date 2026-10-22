@@ -14,7 +14,6 @@ use h3::{
         ConnectionError, StreamError,
     },
     ext::Protocol,
-    frame::FrameStream,
     proto::frame::Frame,
     quic::{self, OpenStreams, WriteBuf},
     server::{Connection, RequestResolver, RequestStream},
@@ -189,7 +188,6 @@ where
         .await?;
 
         Ok(stream.map(|stream| {
-            let stream = FrameStream::new(BufRecvStream::new(stream));
             let resolver = self.server_conn.lock().unwrap().create_resolver(stream);
             BiStreamResolver { resolver }
         }))

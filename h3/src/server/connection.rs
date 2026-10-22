@@ -97,10 +97,7 @@ where
 {
     #[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
     /// Create a [`RequestResolver`] to handle an incoming request.
-    pub fn create_resolver(
-        &mut self,
-        stream: FrameStream<C::BidiStream, B>,
-    ) -> RequestResolver<C, B> {
+    pub fn create_resolver(&mut self, stream: C::BidiStream) -> RequestResolver<C, B> {
         self.create_resolver_internal(stream)
     }
 
@@ -127,11 +124,7 @@ where
     pub async fn accept(&mut self) -> Result<Option<RequestResolver<C, B>>, ConnectionError> {
         // Accept the incoming stream
         let stream = match poll_fn(|cx| self.poll_accept_request_stream_internal(cx)).await? {
-            Some(s) => FrameStream::new_with_max_buffered_frame(
-                BufRecvStream::new(s),
-                self.max_field_section_size
-                    .max(crate::frame::DEFAULT_MAX_BUFFERED_FRAME),
-            ),
+            Some(s) => s,
             None => {
                 // We always send a last GoAway frame to the client, so it knows which was the last
                 // non-rejected request.
@@ -145,10 +138,9 @@ where
         Ok(Some(resolver))
     }
 
-    fn create_resolver_internal(
-        &mut self,
-        stream: FrameStream<C::BidiStream, B>,
-    ) -> RequestResolver<C, B> {
+    fn create_resolver_internal(&mut self, stream: C::BidiStream) -> RequestResolver<C, B> {
+        let stream =
+            FrameStream::new_for_request(BufRecvStream::new(stream), self.max_field_section_size);
         let send_grease_frame = self.inner.send_grease_frame;
         // send the grease frame only once per connection
         self.inner.send_grease_frame = false;

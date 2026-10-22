@@ -200,7 +200,7 @@ where
             // A HEADERS limit is per message: rejecting one request must not
             // close unrelated streams on the same connection.
             FrameStreamError::PayloadTooLarge {
-                frame_type: 0x1,
+                frame_type: crate::proto::frame::FrameType::HEADERS,
                 actual_size,
                 max_size,
             } => StreamError::HeaderTooBig {

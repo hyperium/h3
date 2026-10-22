@@ -1,4 +1,4 @@
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{buf::Take, Buf, BufMut, Bytes};
 use std::{
     convert::TryInto,
     fmt::{self, Debug},
@@ -19,7 +19,6 @@ use super::{
 pub enum FrameError {
     Malformed,
     UnsupportedFrame(u64), // Known frames that should generate an error
-    UnknownFrame(u64),     // Unknown frames that should be ignored
     InvalidFrameValue,
     Incomplete(usize),
     Settings(SettingsError),
@@ -31,17 +30,15 @@ pub enum FrameError {
     /// accumulated — which is the whole point. Every other error here can be
     /// reached only once the frame is in memory.
     TooLarge {
-        ty: u64,
+        ty: FrameType,
         len: u64,
         limit: u64,
     },
     /// An unknown frame type, reported *before* its payload has been read so
     /// the caller can discard it as it arrives.
     ///
-    /// Distinct from [`FrameError::UnknownFrame`], which is returned once the
-    /// payload is already buffered. RFC 9114 requires unknown frames to be
-    /// ignored; accumulating one in full in order to ignore it satisfies the
-    /// letter and not the substance.
+    /// RFC 9114 requires unknown frames to be ignored; accumulating one in
+    /// full in order to ignore it satisfies the letter and not the substance.
     SkipUnknown {
         ty: u64,
         len: u64,
@@ -55,7 +52,6 @@ impl fmt::Display for FrameError {
         match self {
             FrameError::Malformed => write!(f, "frame is malformed"),
             FrameError::UnsupportedFrame(c) => write!(f, "frame 0x{:x} is not allowed h3", c),
-            FrameError::UnknownFrame(c) => write!(f, "frame 0x{:x} ignored", c),
             FrameError::InvalidFrameValue => write!(f, "frame value is invalid"),
             FrameError::Incomplete(x) => write!(f, "internal error: frame incomplete {}", x),
             FrameError::Settings(x) => write!(f, "invalid settings: {}", x),
@@ -64,7 +60,7 @@ impl fmt::Display for FrameError {
             FrameError::TooLarge { ty, len, limit } => write!(
                 f,
                 "frame 0x{:x} declared {} bytes, over the {} byte ceiling",
-                ty, len, limit
+                ty.0, len, limit
             ),
             FrameError::SkipUnknown { ty, len } => {
                 write!(f, "frame 0x{:x} ignored, {} bytes skipped", ty, len)
@@ -154,14 +150,25 @@ impl Frame<PayloadLen> {
             return Err(FrameError::UnsupportedFrame(ty.0));
         }
 
-        // Unknown: to be ignored, and ignoring it must not mean storing it.
-        if !ty.is_buffered() {
-            return Err(FrameError::SkipUnknown { ty: ty.0, len });
-        }
+        // The parser for this type, chosen before anything is buffered: a type
+        // without one is unknown, to be ignored, and ignoring it must not mean
+        // storing it. This table is the one list of what gets buffered.
+        let parse: fn(&mut Take<&mut T>, usize) -> Result<Self, FrameError> = match ty {
+            FrameType::HEADERS => |p, len| Ok(Frame::Headers(p.copy_to_bytes(len))),
+            FrameType::SETTINGS => |p, _| Ok(Frame::Settings(Settings::decode(p)?)),
+            FrameType::CANCEL_PUSH => |p, _| Ok(Frame::CancelPush(p.get_var()?.try_into()?)),
+            FrameType::PUSH_PROMISE => |p, _| Ok(Frame::PushPromise(PushPromise::decode(p)?)),
+            FrameType::GOAWAY => |p, _| Ok(Frame::Goaway(VarInt::decode(p)?)),
+            FrameType::MAX_PUSH_ID => |p, _| Ok(Frame::MaxPushId(p.get_var()?.try_into()?)),
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
+            //# Endpoints MUST
+            //# NOT consider these frames to have any meaning upon receipt.
+            _ => return Err(FrameError::SkipUnknown { ty: ty.0, len }),
+        };
 
         if len > max_buffered {
             return Err(FrameError::TooLarge {
-                ty: ty.0,
+                ty,
                 len,
                 limit: max_buffered,
             });
@@ -176,30 +183,7 @@ impl Frame<PayloadLen> {
         #[cfg(feature = "tracing")]
         trace!("frame ty: {:?}", ty);
 
-        let frame = match ty {
-            FrameType::HEADERS => Ok(Frame::Headers(payload.copy_to_bytes(len as usize))),
-            FrameType::SETTINGS => Ok(Frame::Settings(Settings::decode(&mut payload)?)),
-            FrameType::CANCEL_PUSH => Ok(Frame::CancelPush(payload.get_var()?.try_into()?)),
-            FrameType::PUSH_PROMISE => Ok(Frame::PushPromise(PushPromise::decode(&mut payload)?)),
-            FrameType::GOAWAY => Ok(Frame::Goaway(VarInt::decode(&mut payload)?)),
-            FrameType::MAX_PUSH_ID => Ok(Frame::MaxPushId(payload.get_var()?.try_into()?)),
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
-            //# These frame
-            //# types MUST NOT be sent, and their receipt MUST be treated as a
-            //# connection error of type H3_FRAME_UNEXPECTED.
-            FrameType::H2_PRIORITY
-            | FrameType::H2_PING
-            | FrameType::H2_WINDOW_UPDATE
-            | FrameType::H2_CONTINUATION => Err(FrameError::UnsupportedFrame(ty.0)),
-            FrameType::WEBTRANSPORT_BI_STREAM | FrameType::DATA => unreachable!(),
-            _ => {
-                buf.advance(len as usize);
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
-                //# Endpoints MUST
-                //# NOT consider these frames to have any meaning upon receipt.
-                Err(FrameError::UnknownFrame(ty.0))
-            }
-        };
+        let frame = parse(&mut payload, len as usize);
 
         if let Ok(_frame) = &frame {
             #[cfg(feature = "tracing")]
@@ -382,29 +366,6 @@ impl FrameType {
     /// format within the range of the Varint implementation
     pub fn grease() -> Self {
         FrameType(fastrand::u64(0..0x210842108421083) * 0x1f + 0x21)
-    }
-
-    /// Whether parsing this type requires its whole payload in memory.
-    ///
-    /// The list is exactly the arms of the match in [`Frame::decode`] that read
-    /// from `payload`. `DATA` is absent because its body is streamed rather
-    /// than held, and `WEBTRANSPORT_BI_STREAM` because it carries no length at
-    /// all — both are handled before this is consulted.
-    ///
-    /// Kept beside the type list rather than derived from the match so that
-    /// adding a frame type to one and not the other is a compile-time
-    /// omission with a visible home, instead of a type that silently becomes
-    /// unbounded.
-    fn is_buffered(self) -> bool {
-        matches!(
-            self,
-            FrameType::HEADERS
-                | FrameType::SETTINGS
-                | FrameType::CANCEL_PUSH
-                | FrameType::PUSH_PROMISE
-                | FrameType::GOAWAY
-                | FrameType::MAX_PUSH_ID
-        )
     }
 
     /// The HTTP/2 types RFC 9114 §7.2.8 requires be treated as a connection
@@ -751,7 +712,7 @@ mod tests {
         assert_matches!(
             Frame::decode(&mut buf, 62),
             Err(FrameError::TooLarge {
-                ty: 1,
+                ty: FrameType::HEADERS,
                 len: 63,
                 limit: 62
             })

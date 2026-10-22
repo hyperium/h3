@@ -13,7 +13,7 @@ use crate::stream::{BufRecvStream, WriteBuf};
 use crate::{
     buf::BufList,
     proto::{
-        frame::{self, Frame, PayloadLen},
+        frame::{self, Frame, FrameType, PayloadLen},
         stream::StreamId,
     },
     quic::{BidiStream, RecvStream, SendStream},
@@ -29,23 +29,30 @@ pub struct FrameStream<S, B> {
 
 impl<S, B> FrameStream<S, B> {
     pub fn new(stream: BufRecvStream<S, B>) -> Self {
-        Self::new_with_max_buffered_frame(stream, DEFAULT_MAX_BUFFERED_FRAME)
+        Self {
+            stream,
+            decoder: FrameDecoder::default(),
+            remaining_data: 0,
+        }
     }
 
-    /// `max_buffered_frame` is a memory bound, not a policy limit: it must not
-    /// be tighter than what this endpoint has advertised it will accept, or a
+    /// A request stream's decoder, whose buffer ceiling is raised to cover
+    /// `max_field_section_size`, the limit this endpoint advertises.
+    ///
+    /// The ceiling is a memory bound, not a policy limit: it must not be
+    /// tighter than what this endpoint has advertised it will accept, or a
     /// field section would be refused from its encoded length before QPACK can
     /// report the uncompressed size that [`RFC 9114 §4.2.2`] is written in
     /// terms of, and that a peer needs in order to retry.
     ///
     /// [`RFC 9114 §4.2.2`]: https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
-    pub(crate) fn new_with_max_buffered_frame(
+    pub(crate) fn new_for_request(
         stream: BufRecvStream<S, B>,
-        max_buffered_frame: u64,
+        max_field_section_size: u64,
     ) -> Self {
         Self {
             stream,
-            decoder: FrameDecoder::new(max_buffered_frame),
+            decoder: FrameDecoder::new(max_field_section_size.max(DEFAULT_MAX_BUFFERED_FRAME)),
             remaining_data: 0,
         }
     }
@@ -246,15 +253,19 @@ pub struct FrameDecoder {
     skipping: u64,
     /// See [`DEFAULT_MAX_BUFFERED_FRAME`].
     max_buffered: u64,
+    /// The frame refused over the ceiling, as (type, declared length, ceiling).
+    ///
+    /// Refused once, refused for good: what follows on the stream is the
+    /// payload that was declined, not frames, so it is discarded as it arrives
+    /// and every further poll reports the same error. Without this a byte of
+    /// that payload could be read as a SETTINGS or reserved frame header and
+    /// turn a per-stream rejection into a connection error.
+    refused: Option<(FrameType, u64, u64)>,
 }
 
 impl Default for FrameDecoder {
     fn default() -> Self {
-        Self {
-            expected: None,
-            skipping: 0,
-            max_buffered: DEFAULT_MAX_BUFFERED_FRAME,
-        }
+        Self::new(DEFAULT_MAX_BUFFERED_FRAME)
     }
 }
 
@@ -264,6 +275,7 @@ impl FrameDecoder {
             expected: None,
             skipping: 0,
             max_buffered,
+            refused: None,
         }
     }
 
@@ -275,6 +287,15 @@ impl FrameDecoder {
         &mut self,
         src: &mut BufList<B>,
     ) -> Result<Option<Frame<PayloadLen>>, FrameStreamError> {
+        if let Some((ty, len, limit)) = self.refused {
+            src.advance(src.remaining());
+            return Err(FrameStreamError::PayloadTooLarge {
+                frame_type: ty,
+                actual_size: len,
+                max_size: limit,
+            });
+        }
+
         // Decode in a loop since we ignore unknown frames, and there may be
         // other frames already in our BufList.
         loop {
@@ -326,17 +347,13 @@ impl FrameDecoder {
                     self.skipping = len;
                     continue;
                 }
-                Err(frame::FrameError::TooLarge {
-                    ty: _ty,
-                    len: _len,
-                    limit: _limit,
-                }) => {
+                Err(frame::FrameError::TooLarge { ty, len, limit }) => {
                     #[cfg(feature = "tracing")]
                     trace!(
-                        "frame type {:#x} declared {} bytes, over the {} ceiling",
-                        _ty,
-                        _len,
-                        _limit
+                        "frame type {:?} declared {} bytes, over the {} ceiling",
+                        ty,
+                        len,
+                        limit
                     );
 
                     // Nothing of this frame was accumulated, and what came
@@ -344,19 +361,12 @@ impl FrameDecoder {
                     // is about to tear the stream down anyway.
                     src.advance(src.remaining());
                     self.expected = None;
+                    self.refused = Some((ty, len, limit));
                     return Err(FrameStreamError::PayloadTooLarge {
-                        frame_type: _ty,
-                        actual_size: _len,
-                        max_size: _limit,
+                        frame_type: ty,
+                        actual_size: len,
+                        max_size: limit,
                     });
-                }
-                Err(frame::FrameError::UnknownFrame(_ty)) => {
-                    #[cfg(feature = "tracing")]
-                    trace!("ignore unknown frame type {:#x}", _ty);
-
-                    src.advance(pos);
-                    self.expected = None;
-                    continue;
                 }
                 Err(frame::FrameError::Incomplete(min)) => {
                     self.expected = Some(min);
@@ -409,7 +419,7 @@ pub enum FrameStreamError {
     /// decoder's ceiling. The owner decides from the frame context whether
     /// this is a message-level rejection or a connection error.
     PayloadTooLarge {
-        frame_type: u64,
+        frame_type: FrameType,
         actual_size: u64,
         max_size: u64,
     },
@@ -438,6 +448,26 @@ mod tests {
     use crate::proto::{coding::Encode, frame::FrameType, varint::VarInt};
 
     // Decoder
+
+    #[test]
+    fn refused_frame_poisons_the_decoder() {
+        let mut decoder = FrameDecoder::new(62);
+        let mut buf = BufList::new();
+        // HEADERS declaring 63 bytes, over the ceiling.
+        buf.push(&[1u8, 63][..]);
+        assert_matches!(
+            decoder.decode(&mut buf),
+            Err(FrameStreamError::PayloadTooLarge { .. })
+        );
+        // What arrives next is the refused payload, not frames: these bytes
+        // would otherwise parse as an empty SETTINGS frame.
+        buf.push(&[4u8, 0][..]);
+        assert_matches!(
+            decoder.decode(&mut buf),
+            Err(FrameStreamError::PayloadTooLarge { .. })
+        );
+        assert!(!buf.has_remaining());
+    }
 
     #[test]
     fn one_frame() {
@@ -698,13 +728,16 @@ mod tests {
         let mut recv = FakeRecv::default();
         // HEADERS declares 63 bytes and sends no payload.
         recv.chunk(Bytes::from_static(&[1, 63]));
-        let mut stream: FrameStream<_, ()> =
-            FrameStream::new_with_max_buffered_frame(BufRecvStream::new(recv), 62);
+        let mut stream: FrameStream<_, ()> = FrameStream {
+            stream: BufRecvStream::new(recv),
+            decoder: FrameDecoder::new(62),
+            remaining_data: 0,
+        };
 
         assert_poll_matches!(
             |cx| stream.poll_next(cx),
             Err(FrameStreamError::PayloadTooLarge {
-                frame_type: 1,
+                frame_type: FrameType::HEADERS,
                 actual_size: 63,
                 max_size: 62
             })
