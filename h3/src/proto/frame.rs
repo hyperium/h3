@@ -1,4 +1,4 @@
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{buf::Take, Buf, BufMut, Bytes};
 use std::{
     convert::TryInto,
     fmt::{self, Debug},
@@ -19,12 +19,30 @@ use super::{
 pub enum FrameError {
     Malformed,
     UnsupportedFrame(u64), // Known frames that should generate an error
-    UnknownFrame(u64),     // Unknown frames that should be ignored
     InvalidFrameValue,
     Incomplete(usize),
     Settings(SettingsError),
     InvalidStreamId(InvalidStreamId),
     InvalidPushId(InvalidPushId),
+    /// A buffered frame declared a payload larger than the configured ceiling.
+    ///
+    /// Returned from the declared length alone, before any of the payload is
+    /// accumulated — which is the whole point. Every other error here can be
+    /// reached only once the frame is in memory.
+    TooLarge {
+        ty: FrameType,
+        len: u64,
+        limit: u64,
+    },
+    /// An unknown frame type, reported *before* its payload has been read so
+    /// the caller can discard it as it arrives.
+    ///
+    /// RFC 9114 requires unknown frames to be ignored; accumulating one in
+    /// full in order to ignore it satisfies the letter and not the substance.
+    SkipUnknown {
+        ty: u64,
+        len: u64,
+    },
 }
 
 impl std::error::Error for FrameError {}
@@ -34,12 +52,19 @@ impl fmt::Display for FrameError {
         match self {
             FrameError::Malformed => write!(f, "frame is malformed"),
             FrameError::UnsupportedFrame(c) => write!(f, "frame 0x{:x} is not allowed h3", c),
-            FrameError::UnknownFrame(c) => write!(f, "frame 0x{:x} ignored", c),
             FrameError::InvalidFrameValue => write!(f, "frame value is invalid"),
             FrameError::Incomplete(x) => write!(f, "internal error: frame incomplete {}", x),
             FrameError::Settings(x) => write!(f, "invalid settings: {}", x),
             FrameError::InvalidStreamId(x) => write!(f, "{}", x),
             FrameError::InvalidPushId(x) => write!(f, "{}", x),
+            FrameError::TooLarge { ty, len, limit } => write!(
+                f,
+                "frame 0x{:x} declared {} bytes, over the {} byte ceiling",
+                ty.0, len, limit
+            ),
+            FrameError::SkipUnknown { ty, len } => {
+                write!(f, "frame 0x{:x} ignored, {} bytes skipped", ty, len)
+            }
         }
     }
 }
@@ -79,7 +104,22 @@ impl Frame<PayloadLen> {
     pub const MAX_ENCODED_SIZE: usize = VarInt::MAX_SIZE * 7;
 
     /// Decodes a Frame from the stream according to <https://www.rfc-editor.org/rfc/rfc9114#section-7.1>
-    pub fn decode<T: Buf>(buf: &mut T) -> Result<Self, FrameError> {
+    ///
+    /// `max_buffered` bounds the declared payload length of a frame this
+    /// function has to hold in memory to parse. It is checked against the
+    /// length field, before the caller is ever told to accumulate — which is
+    /// the difference that matters. Previously the completeness check came
+    /// first, so a peer declaring a large `HEADERS` had its payload buffered in
+    /// full before `max_field_section_size` could reject it, and a peer
+    /// declaring a large *unknown* frame had it buffered in full before it
+    /// could be ignored. Neither was bounded by flow control: the caller
+    /// consumes each chunk as it arrives, which is what releases the credit for
+    /// the next one.
+    ///
+    /// `DATA` is unaffected. Its payload is never held here — the frame carries
+    /// only a length and the body is streamed — so the ceiling does not apply
+    /// to it and request bodies keep whatever bound their reader already has.
+    pub fn decode<T: Buf>(buf: &mut T, max_buffered: u64) -> Result<Self, FrameError> {
         let remaining = buf.remaining();
         let ty = FrameType::decode(buf).map_err(|_| FrameError::Incomplete(remaining + 1))?;
 
@@ -101,6 +141,39 @@ impl Frame<PayloadLen> {
             return Ok(Frame::Data((len as usize).into()));
         }
 
+        // Everything below is decided from the type and the declared length
+        // alone, before anything asks the caller to hold a payload.
+
+        // A reserved HTTP/2 type is a connection error whatever it carries, so
+        // reading what it carries is pure cost.
+        if ty.is_reserved() {
+            return Err(FrameError::UnsupportedFrame(ty.0));
+        }
+
+        // The parser for this type, chosen before anything is buffered: a type
+        // without one is unknown, to be ignored, and ignoring it must not mean
+        // storing it. This table is the one list of what gets buffered.
+        let parse: fn(&mut Take<&mut T>, usize) -> Result<Self, FrameError> = match ty {
+            FrameType::HEADERS => |p, len| Ok(Frame::Headers(p.copy_to_bytes(len))),
+            FrameType::SETTINGS => |p, _| Ok(Frame::Settings(Settings::decode(p)?)),
+            FrameType::CANCEL_PUSH => |p, _| Ok(Frame::CancelPush(p.get_var()?.try_into()?)),
+            FrameType::PUSH_PROMISE => |p, _| Ok(Frame::PushPromise(PushPromise::decode(p)?)),
+            FrameType::GOAWAY => |p, _| Ok(Frame::Goaway(VarInt::decode(p)?)),
+            FrameType::MAX_PUSH_ID => |p, _| Ok(Frame::MaxPushId(p.get_var()?.try_into()?)),
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
+            //# Endpoints MUST
+            //# NOT consider these frames to have any meaning upon receipt.
+            _ => return Err(FrameError::SkipUnknown { ty: ty.0, len }),
+        };
+
+        if len > max_buffered {
+            return Err(FrameError::TooLarge {
+                ty,
+                len,
+                limit: max_buffered,
+            });
+        }
+
         if buf.remaining() < len as usize {
             return Err(FrameError::Incomplete(2 + len as usize));
         }
@@ -110,30 +183,7 @@ impl Frame<PayloadLen> {
         #[cfg(feature = "tracing")]
         trace!("frame ty: {:?}", ty);
 
-        let frame = match ty {
-            FrameType::HEADERS => Ok(Frame::Headers(payload.copy_to_bytes(len as usize))),
-            FrameType::SETTINGS => Ok(Frame::Settings(Settings::decode(&mut payload)?)),
-            FrameType::CANCEL_PUSH => Ok(Frame::CancelPush(payload.get_var()?.try_into()?)),
-            FrameType::PUSH_PROMISE => Ok(Frame::PushPromise(PushPromise::decode(&mut payload)?)),
-            FrameType::GOAWAY => Ok(Frame::Goaway(VarInt::decode(&mut payload)?)),
-            FrameType::MAX_PUSH_ID => Ok(Frame::MaxPushId(payload.get_var()?.try_into()?)),
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
-            //# These frame
-            //# types MUST NOT be sent, and their receipt MUST be treated as a
-            //# connection error of type H3_FRAME_UNEXPECTED.
-            FrameType::H2_PRIORITY
-            | FrameType::H2_PING
-            | FrameType::H2_WINDOW_UPDATE
-            | FrameType::H2_CONTINUATION => Err(FrameError::UnsupportedFrame(ty.0)),
-            FrameType::WEBTRANSPORT_BI_STREAM | FrameType::DATA => unreachable!(),
-            _ => {
-                buf.advance(len as usize);
-                //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.8
-                //# Endpoints MUST
-                //# NOT consider these frames to have any meaning upon receipt.
-                Err(FrameError::UnknownFrame(ty.0))
-            }
-        };
+        let frame = parse(&mut payload, len as usize);
 
         if let Ok(_frame) = &frame {
             #[cfg(feature = "tracing")]
@@ -316,6 +366,20 @@ impl FrameType {
     /// format within the range of the Varint implementation
     pub fn grease() -> Self {
         FrameType(fastrand::u64(0..0x210842108421083) * 0x1f + 0x21)
+    }
+
+    /// The HTTP/2 types RFC 9114 §7.2.8 requires be treated as a connection
+    /// error of type `H3_FRAME_UNEXPECTED`.
+    ///
+    /// Decided by the type, so the payload is never worth reading.
+    fn is_reserved(self) -> bool {
+        matches!(
+            self,
+            FrameType::H2_PRIORITY
+                | FrameType::H2_PING
+                | FrameType::H2_WINDOW_UPDATE
+                | FrameType::H2_CONTINUATION
+        )
     }
 }
 
@@ -619,31 +683,85 @@ mod tests {
     use assert_matches::assert_matches;
     use std::io::Cursor;
 
+    /// An unknown type is now reported from its header, with the payload left
+    /// for the caller to discard as it arrives.
+    ///
+    /// It used to be reported as `UnknownFrame` *after* the whole payload had
+    /// been buffered, which is how ignoring an unknown frame came to cost its
+    /// full declared length in memory. `FrameDecoder` does the skipping, and
+    /// `frame::tests` covers reading the frame that follows.
     #[test]
     fn unknown_frame_type() {
         let mut buf = Cursor::new(&[22, 4, 0, 255, 128, 0, 3, 1, 2]);
-        assert_matches!(Frame::decode(&mut buf), Err(FrameError::UnknownFrame(22)));
-        assert_matches!(Frame::decode(&mut buf), Ok(Frame::CancelPush(PushId(2))));
+        assert_matches!(
+            Frame::decode(&mut buf, u64::MAX),
+            Err(FrameError::SkipUnknown { ty: 22, len: 4 })
+        );
+    }
+
+    /// The ceiling is applied to the declared length, with no payload present.
+    ///
+    /// The buffer holds a two-byte header and nothing else, so a decoder that
+    /// checked completeness first would answer `Incomplete` and wait — which is
+    /// precisely the accumulation this exists to prevent.
+    #[test]
+    fn oversized_buffered_frame_is_refused_from_its_length_alone() {
+        // HEADERS, declared length 63, no payload. 63 is the largest value a
+        // single-byte QUIC varint holds, which keeps the fixture two bytes.
+        let mut buf = Cursor::new(&[1, 63]);
+        assert_matches!(
+            Frame::decode(&mut buf, 62),
+            Err(FrameError::TooLarge {
+                ty: FrameType::HEADERS,
+                len: 63,
+                limit: 62
+            })
+        );
+
+        // Exactly at the ceiling is not over it: this must reach the ordinary
+        // completeness path instead.
+        let mut buf = Cursor::new(&[1, 63]);
+        assert_matches!(Frame::decode(&mut buf, 63), Err(FrameError::Incomplete(_)));
+    }
+
+    /// A reserved HTTP/2 type is a connection error decided by the type, so its
+    /// payload must never be waited for either.
+    #[test]
+    fn a_reserved_frame_is_refused_without_its_payload() {
+        // H2_PING (0x6), declared length 63, no payload.
+        let mut buf = Cursor::new(&[6, 63]);
+        assert_matches!(
+            Frame::decode(&mut buf, u64::MAX),
+            Err(FrameError::UnsupportedFrame(6))
+        );
+    }
+
+    /// DATA is untouched: it declares a length and streams its body, so the
+    /// ceiling does not apply and request bodies keep their own bound.
+    #[test]
+    fn data_frames_are_not_subject_to_the_buffered_ceiling() {
+        let mut buf = Cursor::new(&[0, 63]);
+        assert_matches!(Frame::decode(&mut buf, 1), Ok(Frame::Data(PayloadLen(63))));
     }
 
     #[test]
     fn len_unexpected_end() {
         let mut buf = Cursor::new(&[0, 255]);
-        let decoded = Frame::decode(&mut buf);
+        let decoded = Frame::decode(&mut buf, u64::MAX);
         assert_matches!(decoded, Err(FrameError::Incomplete(3)));
     }
 
     #[test]
     fn type_unexpected_end() {
         let mut buf = Cursor::new(&[255]);
-        let decoded = Frame::decode(&mut buf);
+        let decoded = Frame::decode(&mut buf, u64::MAX);
         assert_matches!(decoded, Err(FrameError::Incomplete(2)));
     }
 
     #[test]
     fn buffer_too_short() {
         let mut buf = Cursor::new(&[4, 4, 0, 255, 128]);
-        let decoded = Frame::decode(&mut buf);
+        let decoded = Frame::decode(&mut buf, u64::MAX);
         assert_matches!(decoded, Err(FrameError::Incomplete(6)));
     }
 
@@ -653,7 +771,7 @@ mod tests {
         assert_eq!(&buf, &wire);
 
         let mut read = Cursor::new(&buf);
-        let decoded = Frame::decode(&mut read).unwrap();
+        let decoded = Frame::decode(&mut read, u64::MAX).unwrap();
         assert_eq!(check_frame, decoded);
     }
 
@@ -756,7 +874,10 @@ mod tests {
         VarInt::from_u32(0x21 + 2 * 0x1f).encode(&mut raw);
         raw.extend(&[6, 0, 255, 128, 0, 250, 218]);
         let mut buf = Cursor::new(&raw);
-        let decoded = Frame::decode(&mut buf);
-        assert_matches!(decoded, Err(FrameError::UnknownFrame(95)));
+        let decoded = Frame::decode(&mut buf, u64::MAX);
+        // Reported from the header now rather than after the payload has been
+        // buffered: a GREASE type is unknown, and ignoring an unknown frame no
+        // longer costs its declared length in memory.
+        assert_matches!(decoded, Err(FrameError::SkipUnknown { ty: 95, len: 6 }));
     }
 }

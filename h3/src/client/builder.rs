@@ -80,7 +80,8 @@ impl Builder {
 
     /// Set the maximum header size this client is willing to accept
     ///
-    /// See [header size constraints] section of the specification for details.
+    /// Defaults to 64 KiB. Measured as decoded name + value + 32 bytes per field,
+    /// see [header size constraints] section of the specification for details.
     ///
     /// [header size constraints]: https://www.rfc-editor.org/rfc/rfc9114.html#name-header-size-constraints
     pub fn max_field_section_size(&mut self, value: u64) -> &mut Self {

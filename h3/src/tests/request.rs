@@ -289,6 +289,144 @@ async fn post() {
 }
 
 #[tokio::test]
+async fn header_too_big_by_default() {
+    // A HEADERS frame decodes to many times its wire size; the default limit must be finite.
+    init_tracing();
+    let mut pair = Pair::default();
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
+        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let req_fut = async move {
+            let mut request = Request::get("http://localhost/salut").body(()).unwrap();
+            for i in 0..2500 {
+                request.headers_mut().append(
+                    http::HeaderName::from_bytes(format!("h{}", i).as_bytes()).unwrap(),
+                    http::HeaderValue::from_static("v"),
+                );
+            }
+            let mut request_stream = client.send_request(request).await.expect("request");
+            request_stream.finish().await.expect("client finish");
+            let response = request_stream.recv_response().await.unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
+            );
+        };
+        tokio::join!(req_fut, drive_fut);
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        // Don't send settings, so the client doesn't refuse the request locally
+        let mut incoming_req = server::builder()
+            .send_settings(false)
+            .build(conn)
+            .await
+            .unwrap();
+
+        let resolver = incoming_req.accept().await.unwrap().unwrap();
+        assert_matches!(
+            resolver
+                .resolve_request()
+                .await
+                .err()
+                .expect("should return an error"),
+            StreamError::HeaderTooBig {
+                max_size: crate::config::DEFAULT_MAX_FIELD_SECTION_SIZE,
+                ..
+            }
+        );
+
+        // connection will end without an error
+        assert_matches!(
+            incoming_req.accept().await.err().unwrap(),
+            ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{error_code: code, ..})
+            if code == Code::H3_NO_ERROR.value()
+        );
+    };
+
+    tokio::join!(server_fut, client_fut);
+}
+
+#[tokio::test]
+async fn header_frame_too_big_to_buffer_is_refused_with_431() {
+    // A HEADERS frame declaring more than the decoder will buffer is refused
+    // from its length alone, and answered like any other oversized header: 431.
+    init_tracing();
+    let mut pair = Pair::default();
+    let mut server = pair.server();
+
+    const DECLARED: u64 = 2 * 1024 * 1024;
+
+    let client_fut = async {
+        let connection = pair.client_inner().await;
+        let (mut driver, send) = client::new(h3_quinn::Connection::new(connection.clone()))
+            .await
+            .unwrap();
+        let (mut req_send, mut req_recv) = connection.open_bi().await.unwrap();
+
+        let client = async move {
+            let mut buf = BytesMut::new();
+            FrameType::HEADERS.encode(&mut buf);
+            VarInt::from_u64(DECLARED).unwrap().encode(&mut buf);
+            req_send.write_all(&buf[..]).await.unwrap();
+
+            let mut response = BytesMut::new();
+            while let Some(n) = req_recv.read(&mut buf).await.expect("response read") {
+                response.put_slice(&buf[..n]);
+            }
+            let block = match Frame::decode(
+                &mut std::io::Cursor::new(&response[..]),
+                crate::frame::DEFAULT_MAX_BUFFERED_FRAME,
+            ) {
+                Ok(Frame::Headers(block)) => block,
+                other => panic!("expected a HEADERS frame, got {:?}", other),
+            };
+            let fields = qpack::decode_stateless(&mut &block[..], u64::MAX)
+                .unwrap()
+                .fields;
+            let (status, _) = Header::try_from(fields)
+                .unwrap()
+                .into_response_parts()
+                .unwrap();
+            assert_eq!(status, StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE);
+            drop(send);
+        };
+        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        tokio::join!(client, drive_fut);
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming_req = server::builder().build(conn).await.unwrap();
+
+        let resolver = incoming_req.accept().await.unwrap().unwrap();
+        assert_matches!(
+            resolver
+                .resolve_request()
+                .await
+                .err()
+                .expect("should return an error"),
+            StreamError::HeaderTooBig {
+                actual_size: DECLARED,
+                max_size: crate::config::DEFAULT_MAX_FIELD_SECTION_SIZE,
+            }
+        );
+
+        // connection will end without an error
+        assert_matches!(
+            incoming_req.accept().await.err().unwrap(),
+            ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{error_code: code, ..})
+            if code == Code::H3_NO_ERROR.value()
+        );
+    };
+
+    tokio::join!(server_fut, client_fut);
+}
+
+#[tokio::test]
 async fn header_too_big_response_from_server() {
     init_tracing();
     let mut pair = Pair::default();

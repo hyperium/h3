@@ -1,5 +1,7 @@
 use std::{convert::TryFrom, sync::Arc};
 
+use crate::proto::frame::FrameType;
+
 use bytes::Buf;
 use http::{Request, StatusCode};
 
@@ -88,8 +90,8 @@ where
         mut self,
         frame: Result<Option<Frame<PayloadLen>>, FrameStreamError>,
     ) -> Result<ResolvedRequest<C, B>, StreamError> {
-        let mut encoded = match frame {
-            Ok(Some(Frame::Headers(h))) => h,
+        let encoded = match frame {
+            Ok(Some(Frame::Headers(h))) => Ok(h),
 
             //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
             //# If a client-initiated
@@ -124,24 +126,38 @@ where
                     )),
                 );
             }
-            Err(e) => {
-                return Err(self.handle_frame_stream_error_on_request_stream(e));
+            // Too large to even buffer: refused the same way a decoded section
+            // over the limit is, with a 431, so the client sees one behaviour.
+            // The decoder keeps refusing, so there is nothing more to receive.
+            Err(FrameStreamError::PayloadTooLarge {
+                frame_type: FrameType::HEADERS,
+                actual_size,
+                ..
+            }) => {
+                self.frame_stream.stop_sending(Code::H3_REQUEST_CANCELLED);
+                Err(actual_size)
             }
+            Err(e) => return Err(self.handle_frame_stream_error_on_request_stream(e)),
         };
 
-        let decoded = match qpack::decode_stateless(&mut encoded, self.max_field_section_size) {
-            //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
-            //# An HTTP/3 implementation MAY impose a limit on the maximum size of
-            //# the message header it will accept on an individual HTTP message.
-            Err(qpack::DecoderError::HeaderTooLong(cancel_size)) => Err(cancel_size),
-            Ok(decoded) => Ok(decoded),
-            Err(_e) => {
-                return Err(
-                    self.handle_connection_error_on_stream(InternalConnectionError {
-                        code: Code::QPACK_DECOMPRESSION_FAILED,
-                        message: "Failed to decode headers".to_string(),
-                    }),
-                );
+        let decoded = match encoded {
+            Err(size) => Err(size),
+            Ok(mut encoded) => {
+                match qpack::decode_stateless(&mut encoded, self.max_field_section_size) {
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2.2
+                    //# An HTTP/3 implementation MAY impose a limit on the maximum size of
+                    //# the message header it will accept on an individual HTTP message.
+                    Err(qpack::DecoderError::HeaderTooLong(cancel_size)) => Err(cancel_size),
+                    Ok(decoded) => Ok(decoded),
+                    Err(_e) => {
+                        return Err(self.handle_connection_error_on_stream(
+                            InternalConnectionError {
+                                code: Code::QPACK_DECOMPRESSION_FAILED,
+                                message: "Failed to decode headers".to_string(),
+                            },
+                        ));
+                    }
+                }
             }
         };
 

@@ -8,9 +8,8 @@ use tracing::instrument;
 use crate::{
     connection::{self},
     error::{
-        connection_error_creators::{CloseStream, HandleFrameStreamErrorOnRequestStream},
-        internal_error::InternalConnectionError,
-        Code, StreamError,
+        connection_error_creators::CloseStream, internal_error::InternalConnectionError, Code,
+        StreamError,
     },
     proto::{frame::Frame, headers::Header},
     qpack,
@@ -99,7 +98,7 @@ where
     pub async fn recv_response(&mut self) -> Result<Response<()>, StreamError> {
         let mut frame = future::poll_fn(|cx| self.inner.stream.poll_next(cx))
             .await
-            .map_err(|e| self.handle_frame_stream_error_on_request_stream(e))?
+            .map_err(|e| self.inner.frame_stream_error(e))?
             .ok_or_else(|| {
                 //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
                 //# Receipt of an invalid sequence of frames MUST be treated as a
@@ -221,11 +220,7 @@ where
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<HeaderMap>, StreamError>> {
-        let res = self.inner.poll_recv_trailers(cx);
-        if let Poll::Ready(Err(StreamError::HeaderTooBig { .. })) = &res {
-            self.inner.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
-        }
-        res
+        self.inner.poll_recv_trailers(cx)
     }
 
     /// Tell the peer to stop sending into the underlying QUIC stream

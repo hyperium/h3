@@ -565,6 +565,22 @@ where
                     ),
                 )));
             }
+            Err(FrameStreamError::PayloadTooLarge {
+                frame_type: _ty,
+                actual_size: _actual,
+                max_size: _max,
+            }) => {
+                // Unlike a request stream, there is no message to reject here:
+                // every frame the control stream may legitimately carry is tens
+                // of bytes, and the stream itself is critical.
+                return Poll::Ready(Err(self.handle_connection_error(
+                    InternalConnectionError::new(
+                        Code::H3_EXCESSIVE_LOAD,
+                        "control frame declared a payload larger than this endpoint will buffer"
+                            .to_string(),
+                    ),
+                )));
+            }
             Err(FrameStreamError::Proto(frame_error)) => {
                 return Poll::Ready(Err(self.handle_connection_error(
                     InternalConnectionError::got_frame_error(frame_error),
@@ -851,6 +867,16 @@ where
 {
     /// Receive some of the request/response body.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
+    /// Maps a frame stream error, telling the peer to stop sending when the
+    /// message was refused for its size: the rest of it is only cost to receive.
+    pub(crate) fn frame_stream_error(&mut self, error: FrameStreamError) -> StreamError {
+        let error = self.handle_frame_stream_error_on_request_stream(error);
+        if matches!(error, StreamError::HeaderTooBig { .. }) {
+            self.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
+        }
+        error
+    }
+
     pub fn poll_recv_data(
         &mut self,
         cx: &mut Context<'_>,
@@ -858,9 +884,7 @@ where
         if !self.stream.has_data() {
             match ready!(self.stream.poll_next(cx)) {
                 Err(frame_stream_error) => {
-                    return Poll::Ready(Err(
-                        self.handle_frame_stream_error_on_request_stream(frame_stream_error)
-                    ))
+                    return Poll::Ready(Err(self.frame_stream_error(frame_stream_error)));
                 }
                 Ok(None) => return Poll::Ready(Ok(None)),
                 Ok(Some(Frame::Headers(encoded))) => {
@@ -919,9 +943,7 @@ where
         } else {
             match ready!(self.stream.poll_next(cx)) {
                 Err(frame_stream_error) => {
-                    return Poll::Ready(Err(
-                        self.handle_frame_stream_error_on_request_stream(frame_stream_error)
-                    ))
+                    return Poll::Ready(Err(self.frame_stream_error(frame_stream_error)));
                 }
                 Ok(None) => return Poll::Ready(Ok(None)),
                 Ok(Some(Frame::Headers(encoded))) => encoded,
@@ -967,9 +989,7 @@ where
 
             match self.stream.poll_next(cx) {
                 Poll::Ready(Err(frame_stream_error)) => {
-                    return Poll::Ready(Err(
-                        self.handle_frame_stream_error_on_request_stream(frame_stream_error)
-                    ))
+                    return Poll::Ready(Err(self.frame_stream_error(frame_stream_error)));
                 }
                 Poll::Ready(Ok(Some(trailing_frame))) => {
                     // Received a known frame after trailers -> fail.
@@ -996,6 +1016,7 @@ where
                 //# An HTTP/3 implementation MAY impose a limit on the maximum size of
                 //# the message header it will accept on an individual HTTP message.
                 Err(qpack::DecoderError::HeaderTooLong(cancel_size)) => {
+                    self.stream.stop_sending(Code::H3_REQUEST_CANCELLED);
                     return Poll::Ready(Err(StreamError::HeaderTooBig {
                         actual_size: cancel_size,
                         max_size: self.max_field_section_size,
