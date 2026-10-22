@@ -204,7 +204,8 @@ impl Iterator for HeaderIter {
 impl TryFrom<Vec<HeaderField>> for Header {
     type Error = HeaderError;
     fn try_from(headers: Vec<HeaderField>) -> Result<Self, Self::Error> {
-        let mut fields = HeaderMap::with_capacity(headers.len());
+        let mut fields =
+            HeaderMap::try_with_capacity(headers.len()).map_err(|_| HeaderError::TooManyFields)?;
         let mut pseudo = Pseudo::default();
         let mut regular_field_seen = false;
 
@@ -247,7 +248,9 @@ impl TryFrom<Vec<HeaderField>> for Header {
                 }
                 Field::Header((n, v)) => {
                     regular_field_seen = true;
-                    fields.append(n, v);
+                    fields
+                        .try_append(n, v)
+                        .map_err(|_| HeaderError::TooManyFields)?;
                 }
                 Field::Protocol(p) => {
                     pseudo.protocol = Some(p);
@@ -466,6 +469,8 @@ pub enum HeaderError {
     MissingAuthority,
     ContradictedAuthority,
     PseudoAfterRegularField,
+    /// More fields than an `http::HeaderMap` can hold
+    TooManyFields,
 }
 
 impl HeaderError {
@@ -494,6 +499,7 @@ impl std::error::Error for HeaderError {}
 impl fmt::Display for HeaderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            HeaderError::TooManyFields => write!(f, "too many header fields"),
             HeaderError::InvalidHeaderName(h) => write!(f, "invalid header name: {}", h),
             HeaderError::InvalidHeaderValue(v) => write!(f, "invalid header value: {}", v),
             HeaderError::InvalidRequest(r) => write!(f, "invalid request: {}", r),
@@ -517,6 +523,15 @@ impl fmt::Display for HeaderError {
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
+
+    #[test]
+    fn too_many_fields_is_an_error_not_a_panic() {
+        // http::HeaderMap panics past 32768 entries; a peer must not be able to trigger that.
+        let fields = (0..40_000)
+            .map(|i| (format!("h{}", i), "v").into())
+            .collect::<Vec<HeaderField>>();
+        assert_matches!(Header::try_from(fields), Err(HeaderError::TooManyFields));
+    }
 
     #[test]
     fn request_has_no_authority_nor_host() {

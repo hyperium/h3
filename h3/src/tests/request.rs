@@ -289,6 +289,68 @@ async fn post() {
 }
 
 #[tokio::test]
+async fn header_too_big_by_default() {
+    // A HEADERS frame decodes to many times its wire size; the default limit must be finite.
+    init_tracing();
+    let mut pair = Pair::default();
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
+        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let req_fut = async move {
+            let mut request = Request::get("http://localhost/salut").body(()).unwrap();
+            for i in 0..2500 {
+                request.headers_mut().append(
+                    http::HeaderName::from_bytes(format!("h{}", i).as_bytes()).unwrap(),
+                    http::HeaderValue::from_static("v"),
+                );
+            }
+            let mut request_stream = client.send_request(request).await.expect("request");
+            request_stream.finish().await.expect("client finish");
+            let response = request_stream.recv_response().await.unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
+            );
+        };
+        tokio::join!(req_fut, drive_fut);
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        // Don't send settings, so the client doesn't refuse the request locally
+        let mut incoming_req = server::builder()
+            .send_settings(false)
+            .build(conn)
+            .await
+            .unwrap();
+
+        let resolver = incoming_req.accept().await.unwrap().unwrap();
+        assert_matches!(
+            resolver
+                .resolve_request()
+                .await
+                .err()
+                .expect("should return an error"),
+            StreamError::HeaderTooBig {
+                max_size: crate::config::DEFAULT_MAX_FIELD_SECTION_SIZE,
+                ..
+            }
+        );
+
+        // connection will end without an error
+        assert_matches!(
+            incoming_req.accept().await.err().unwrap(),
+            ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{error_code: code, ..})
+            if code == Code::H3_NO_ERROR.value()
+        );
+    };
+
+    tokio::join!(server_fut, client_fut);
+}
+
+#[tokio::test]
 async fn header_too_big_response_from_server() {
     init_tracing();
     let mut pair = Pair::default();
