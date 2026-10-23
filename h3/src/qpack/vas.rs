@@ -109,19 +109,41 @@ impl VirtualAddressSpace {
         index != 0 && index <= self.dropped
     }
 
-    pub fn relative_base(&self, base: usize, index: RelativeIndex) -> Result<usize, Error> {
-        if self.delta == 0 || index > base || base - index <= self.dropped {
+    // `required` is the Required Insert Count of the header block. Per RFC 9204 §4.5.1,
+    // a reference to a dynamic entry whose absolute index is beyond the entries covered by
+    // the Required Insert Count must be rejected (QPACK_DECOMPRESSION_FAILED), so the
+    // absolute index (`base - index` here, 1-based) is bounded by `required`, not by the
+    // table's current `inserted` count.
+    pub fn relative_base(
+        &self,
+        base: usize,
+        index: RelativeIndex,
+        required: usize,
+    ) -> Result<usize, Error> {
+        if self.delta == 0
+            || index > base
+            || base - index <= self.dropped
+            || base - index > required
+        {
             Err(Error::RelativeIndex(index))
         } else {
             Ok(base - self.dropped - index - 1)
         }
     }
 
-    pub fn post_base(&self, base: usize, index: RelativeIndex) -> Result<usize, Error> {
-        if self.delta == 0 || base + index >= self.inserted || base + index < self.dropped {
-            Err(Error::PostbaseIndex(index))
-        } else {
-            Ok(base + index - self.dropped)
+    pub fn post_base(
+        &self,
+        base: usize,
+        index: RelativeIndex,
+        required: usize,
+    ) -> Result<usize, Error> {
+        // `base + index` is attacker-controlled and can overflow `usize`, hence `checked_add`.
+        // The absolute index must be below the Required Insert Count (RFC 9204 §4.5.1).
+        match base.checked_add(index) {
+            Some(abs) if self.delta != 0 && abs >= self.dropped && abs < required => {
+                Ok(abs - self.dropped)
+            }
+            _ => Err(Error::PostbaseIndex(index)),
         }
     }
 
@@ -150,7 +172,7 @@ mod tests {
     #[test]
     fn test_no_relative_index_when_empty() {
         let vas = VirtualAddressSpace::default();
-        let res = vas.relative_base(0, 0);
+        let res = vas.relative_base(0, 0, 0);
         assert_eq!(res, Err(Error::RelativeIndex(0)));
     }
 
@@ -170,7 +192,7 @@ mod tests {
             vas.add();
             (1..*count).for_each(|_| { vas.add(); });
 
-            assert_eq!(vas.relative_base(*count, count - 1), Ok(0), "{:?}", vas);
+            assert_eq!(vas.relative_base(*count, count - 1, *count), Ok(0), "{:?}", vas);
         }
 
         #[test]
@@ -182,7 +204,7 @@ mod tests {
             (1..*count).for_each(|_| { vas.add(); });
             (0..*count - 1).for_each(|_| vas.drop());
 
-            assert_eq!(vas.relative_base(*count, count - 1), Err(Error::RelativeIndex(count - 1)), "{:?}", vas);
+            assert_eq!(vas.relative_base(*count, count - 1, *count), Err(Error::RelativeIndex(count - 1)), "{:?}", vas);
         }
 
         #[test]
@@ -193,7 +215,7 @@ mod tests {
             (1..*count).for_each(|_| { vas.add(); });
             vas.add();
 
-            assert_eq!(vas.relative_base(*count, 0), Ok(count -1),
+            assert_eq!(vas.relative_base(*count, 0, *count), Ok(count -1),
                        "{:?}", vas);
         }
 
@@ -206,7 +228,7 @@ mod tests {
             vas.add();
             (0..*count - 1).for_each(|_| { vas.drop(); });
 
-            assert_eq!(vas.relative_base(*count, 0), Ok(0),
+            assert_eq!(vas.relative_base(*count, 0, *count), Ok(0),
                        "{:?}", vas);
         }
     }
@@ -228,7 +250,7 @@ mod tests {
             vas.add();
         });
 
-        assert_eq!(vas.post_base(4, 1), Ok(5));
+        assert_eq!(vas.post_base(4, 1, 7), Ok(5));
     }
 
     #[test]
