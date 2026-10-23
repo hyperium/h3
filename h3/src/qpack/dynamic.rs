@@ -28,11 +28,15 @@ pub enum Error {
 pub struct DynamicTableDecoder<'a> {
     table: &'a DynamicTable,
     base: usize,
+    required_ref: usize,
 }
 
 impl<'a> DynamicTableDecoder<'a> {
     pub(super) fn get_relative(&self, index: usize) -> Result<&HeaderField, Error> {
-        let real_index = self.table.vas.relative_base(self.base, index)?;
+        let real_index = self
+            .table
+            .vas
+            .relative_base(self.base, index, self.required_ref)?;
         self.table
             .fields
             .get(real_index)
@@ -40,7 +44,10 @@ impl<'a> DynamicTableDecoder<'a> {
     }
 
     pub(super) fn get_postbase(&self, index: usize) -> Result<&HeaderField, Error> {
-        let real_index = self.table.vas.post_base(self.base, index)?;
+        let real_index = self
+            .table
+            .vas
+            .post_base(self.base, index, self.required_ref)?;
         self.table
             .fields
             .get(real_index)
@@ -258,8 +265,12 @@ impl DynamicTable {
         DynamicTable::default()
     }
 
-    pub fn decoder(&self, base: usize) -> DynamicTableDecoder<'_> {
-        DynamicTableDecoder { table: self, base }
+    pub fn decoder(&self, base: usize, required_ref: usize) -> DynamicTableDecoder<'_> {
+        DynamicTableDecoder {
+            table: self,
+            base,
+            required_ref,
+        }
     }
 
     pub fn encoder(&mut self, stream_id: u64) -> DynamicTableEncoder<'_> {

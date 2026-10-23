@@ -93,7 +93,7 @@ impl Decoder {
             return Err(DecoderError::MissingRefs(required_ref));
         }
 
-        let decoder_table = self.table.decoder(base);
+        let decoder_table = self.table.decoder(base, required_ref);
 
         let mut mem_size = 0;
         let mut fields = Vec::new();
@@ -375,7 +375,7 @@ mod tests {
         assert!(decoder.on_encoder_recv(&mut enc, &mut dec).is_ok());
 
         assert_eq!(
-            decoder.table.decoder(1).get_relative(0),
+            decoder.table.decoder(1, 1).get_relative(0),
             Ok(&StaticTable::get(1).unwrap().with_value("serial value"))
         );
 
@@ -443,7 +443,7 @@ mod tests {
         assert!(decoder.on_encoder_recv(&mut enc, &mut dec).is_ok());
 
         assert_eq!(
-            decoder.table.decoder(1).get_relative(0),
+            decoder.table.decoder(1, 1).get_relative(0),
             Ok(&HeaderField::new("key", "value"))
         );
 
@@ -637,6 +637,35 @@ mod tests {
     }
 
     #[test]
+    fn repro_post_base_overflow() {
+        // Peer-controlled: Required Insert Count = 1, Base = RIC + Delta Base ~ 2^63,
+        // post-base index ~ 2^63 -> base + index overflows usize in VirtualAddressSpace::post_base.
+        let base = 1 + (1usize << 63) + 126;
+        let mut buf = vec![];
+        HeaderPrefix::new(1, base, 4, TABLE_SIZE).encode(&mut buf);
+        IndexedWithPostBase((1usize << 63) + 14).encode(&mut buf);
+
+        let mut read = Cursor::new(&buf);
+        let decoder = Decoder::from(build_table_with_size(4));
+        let res = decoder.decode_header(&mut read);
+        assert!(res.is_err(), "expected an error, got {res:?}");
+    }
+
+    #[test]
+    fn repro_post_base_above_required_insert_count() {
+        // RFC 9204 4.5.1: a reference with absolute index >= Required Insert Count
+        // MUST be treated as QPACK_DECOMPRESSION_FAILED. RIC = 2, Base = 2, post-base 0 -> abs 3.
+        let mut buf = vec![];
+        HeaderPrefix::new(2, 2, 4, TABLE_SIZE).encode(&mut buf);
+        IndexedWithPostBase(0).encode(&mut buf);
+
+        let mut read = Cursor::new(&buf);
+        let decoder = Decoder::from(build_table_with_size(4));
+        let res = decoder.decode_header(&mut read);
+        assert!(res.is_err(), "expected an error, got {res:?}");
+    }
+
+    #[test]
     fn decode_name_ref_header_field() {
         let mut buf = vec![];
         HeaderPrefix::new(2, 2, 4, TABLE_SIZE).encode(&mut buf);
@@ -665,7 +694,12 @@ mod tests {
     #[test]
     fn decode_post_base_name_ref_header_field() {
         let mut buf = vec![];
-        HeaderPrefix::new(2, 2, 4, TABLE_SIZE).encode(&mut buf);
+        // Required Insert Count must cover the post-base reference's absolute index
+        // (base 2, post-base 0 -> entry foo3). The previous value (2) declared fewer
+        // entries than the block referenced, which RFC 9204 4.5.1 forbids; it only
+        // decoded because the post-base bounds check used the table's total inserted
+        // count instead of the Required Insert Count.
+        HeaderPrefix::new(4, 2, 4, TABLE_SIZE).encode(&mut buf);
         LiteralWithPostBaseNameRef::new(0, "new bar3")
             .encode(&mut buf)
             .unwrap();
