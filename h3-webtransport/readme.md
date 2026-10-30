@@ -52,5 +52,23 @@ registry. Each I/O poll holds a short synchronous lock; no lock is held across
 `Pending`. This allows closure to reset an idle handle without a background task
 or transport-specific reset-by-ID API. Split halves retain the shared transport;
 finish the sending half explicitly to send FIN while keeping the receiver alive.
-Application stream error-code mapping and other capsule extensions are separate
-from this session-close API.
+Other capsule extensions are separate from this session-close API.
+
+## Data stream application errors
+
+The inherent `send.reset(code)` and `recv.stop_sending(code)` methods accept
+`u32` application codes. Bidirectional streams expose both methods, including
+after splitting. They map codes into the HTTP/3 WebTransport application-error
+range and skip reserved HTTP/3 codepoints. Resetting one direction does not
+terminate the session or its other streams.
+
+Tokio and futures I/O errors contain `error::StreamError` as their inner error.
+Downcast `io::Error::get_ref()` to inspect `application_code()` and the original
+`http3_code()`. A reserved value, protocol error such as `WT_SESSION_GONE`, or
+connection failure has no application code; its transport cause is retained.
+
+The `h3::quic` traits deliberately retain raw wire-code semantics. Consumers of
+those traits can use `error::to_http3_code`, `error::from_http3_code`, or wrap a
+received `StreamErrorIncoming` with `error::StreamError::from`. Codes inside
+session close capsules stay unchanged; the stream-code mapping does not apply
+to them.

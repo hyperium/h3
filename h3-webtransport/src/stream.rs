@@ -11,6 +11,8 @@ use h3::{
 };
 use tokio::io::ReadBuf;
 
+use crate::error::{into_io_error, map_io_error, to_http3_code, StreamError};
+
 // Protocol error for streams whose WebTransport session has ended.
 pub(crate) const WT_SESSION_GONE: u64 = 0x170d7b68;
 
@@ -33,7 +35,7 @@ fn terminated() -> StreamErrorIncoming {
 fn io_terminated() -> std::io::Error {
     std::io::Error::new(
         std::io::ErrorKind::ConnectionAborted,
-        "WebTransport session closed",
+        StreamError::from(terminated()),
     )
 }
 
@@ -94,6 +96,18 @@ impl<S, B> RecvStream<S, B> {
     }
 }
 
+impl<S: quic::RecvStream, B> RecvStream<S, B> {
+    /// Stop receiving, sending the peer a 32-bit WebTransport application code.
+    ///
+    /// The `h3::quic::RecvStream` trait remains a raw wire-code interface.
+    pub fn stop_sending(&mut self, code: u32) {
+        let mut state = self.stream.lock().unwrap();
+        if !state.closed {
+            quic::RecvStream::stop_sending(&mut state.stream, to_http3_code(code));
+        }
+    }
+}
+
 impl<S, B> std::fmt::Debug for RecvStream<S, B> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RecvStream").finish_non_exhaustive()
@@ -132,7 +146,7 @@ impl<S: quic::RecvStream, B: Buf> tokio::io::AsyncRead for RecvStream<S, B> {
             return Poll::Ready(Err(io_terminated()));
         }
         state.reader = Some(cx.waker().clone());
-        tokio::io::AsyncRead::poll_read(Pin::new(&mut state.stream), cx, buf)
+        tokio::io::AsyncRead::poll_read(Pin::new(&mut state.stream), cx, buf).map_err(map_io_error)
     }
 }
 
@@ -148,6 +162,7 @@ impl<S: quic::RecvStream, B: Buf> futures_util::io::AsyncRead for RecvStream<S, 
         }
         state.reader = Some(cx.waker().clone());
         futures_util::io::AsyncRead::poll_read(Pin::new(&mut state.stream), cx, buf)
+            .map_err(map_io_error)
     }
 }
 
@@ -167,6 +182,18 @@ impl<S, B> SendStream<S, B> {
                 reader: None,
                 writer: None,
             })),
+        }
+    }
+}
+
+impl<S: quic::SendStream<B>, B: Buf> SendStream<S, B> {
+    /// Reset the sending direction with a 32-bit WebTransport application code.
+    ///
+    /// The `h3::quic::SendStream` trait remains a raw wire-code interface.
+    pub fn reset(&mut self, code: u32) {
+        let mut state = self.stream.lock().unwrap();
+        if !state.closed {
+            quic::SendStream::reset(&mut state.stream, to_http3_code(code));
         }
     }
 }
@@ -233,13 +260,13 @@ impl<S: quic::SendStreamUnframed<B>, B: Buf> tokio::io::AsyncWrite for SendStrea
         cx: &mut Context<'_>,
         mut buf: &[u8],
     ) -> Poll<std::io::Result<usize>> {
-        quic::SendStreamUnframed::poll_send(&mut *self, cx, &mut buf).map_err(std::io::Error::other)
+        quic::SendStreamUnframed::poll_send(&mut *self, cx, &mut buf).map_err(into_io_error)
     }
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        quic::SendStream::poll_ready(&mut *self, cx).map_err(std::io::Error::other)
+        quic::SendStream::poll_ready(&mut *self, cx).map_err(into_io_error)
     }
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        quic::SendStream::poll_finish(&mut *self, cx).map_err(std::io::Error::other)
+        quic::SendStream::poll_finish(&mut *self, cx).map_err(into_io_error)
     }
 }
 
@@ -249,13 +276,13 @@ impl<S: quic::SendStreamUnframed<B>, B: Buf> futures_util::io::AsyncWrite for Se
         cx: &mut Context<'_>,
         mut buf: &[u8],
     ) -> Poll<std::io::Result<usize>> {
-        quic::SendStreamUnframed::poll_send(&mut *self, cx, &mut buf).map_err(std::io::Error::other)
+        quic::SendStreamUnframed::poll_send(&mut *self, cx, &mut buf).map_err(into_io_error)
     }
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        quic::SendStream::poll_ready(&mut *self, cx).map_err(std::io::Error::other)
+        quic::SendStream::poll_ready(&mut *self, cx).map_err(into_io_error)
     }
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        quic::SendStream::poll_finish(&mut *self, cx).map_err(std::io::Error::other)
+        quic::SendStream::poll_finish(&mut *self, cx).map_err(into_io_error)
     }
 }
 
@@ -277,6 +304,30 @@ impl<S, B> BidiStream<S, B> {
                 reader: None,
                 writer: None,
             })),
+        }
+    }
+}
+
+impl<S: quic::RecvStream, B> BidiStream<S, B> {
+    /// Stop receiving, sending the peer a 32-bit WebTransport application code.
+    ///
+    /// The `h3::quic::RecvStream` trait remains a raw wire-code interface.
+    pub fn stop_sending(&mut self, code: u32) {
+        let mut state = self.stream.lock().unwrap();
+        if !state.closed {
+            quic::RecvStream::stop_sending(&mut state.stream, to_http3_code(code));
+        }
+    }
+}
+
+impl<S: quic::SendStream<B>, B: Buf> BidiStream<S, B> {
+    /// Reset the sending direction with a 32-bit WebTransport application code.
+    ///
+    /// The `h3::quic::SendStream` trait remains a raw wire-code interface.
+    pub fn reset(&mut self, code: u32) {
+        let mut state = self.stream.lock().unwrap();
+        if !state.closed {
+            quic::SendStream::reset(&mut state.stream, to_http3_code(code));
         }
     }
 }
@@ -319,7 +370,7 @@ impl<S: quic::RecvStream, B: Buf> tokio::io::AsyncRead for BidiStream<S, B> {
             return Poll::Ready(Err(io_terminated()));
         }
         state.reader = Some(cx.waker().clone());
-        tokio::io::AsyncRead::poll_read(Pin::new(&mut state.stream), cx, buf)
+        tokio::io::AsyncRead::poll_read(Pin::new(&mut state.stream), cx, buf).map_err(map_io_error)
     }
 }
 
@@ -335,6 +386,7 @@ impl<S: quic::RecvStream, B: Buf> futures_util::io::AsyncRead for BidiStream<S, 
         }
         state.reader = Some(cx.waker().clone());
         futures_util::io::AsyncRead::poll_read(Pin::new(&mut state.stream), cx, buf)
+            .map_err(map_io_error)
     }
 }
 
@@ -394,13 +446,13 @@ impl<S: quic::SendStreamUnframed<B>, B: Buf> tokio::io::AsyncWrite for BidiStrea
         cx: &mut Context<'_>,
         mut buf: &[u8],
     ) -> Poll<std::io::Result<usize>> {
-        quic::SendStreamUnframed::poll_send(&mut *self, cx, &mut buf).map_err(std::io::Error::other)
+        quic::SendStreamUnframed::poll_send(&mut *self, cx, &mut buf).map_err(into_io_error)
     }
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        quic::SendStream::poll_ready(&mut *self, cx).map_err(std::io::Error::other)
+        quic::SendStream::poll_ready(&mut *self, cx).map_err(into_io_error)
     }
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        quic::SendStream::poll_finish(&mut *self, cx).map_err(std::io::Error::other)
+        quic::SendStream::poll_finish(&mut *self, cx).map_err(into_io_error)
     }
 }
 
@@ -410,13 +462,13 @@ impl<S: quic::SendStreamUnframed<B>, B: Buf> futures_util::io::AsyncWrite for Bi
         cx: &mut Context<'_>,
         mut buf: &[u8],
     ) -> Poll<std::io::Result<usize>> {
-        quic::SendStreamUnframed::poll_send(&mut *self, cx, &mut buf).map_err(std::io::Error::other)
+        quic::SendStreamUnframed::poll_send(&mut *self, cx, &mut buf).map_err(into_io_error)
     }
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        quic::SendStream::poll_ready(&mut *self, cx).map_err(std::io::Error::other)
+        quic::SendStream::poll_ready(&mut *self, cx).map_err(into_io_error)
     }
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        quic::SendStream::poll_finish(&mut *self, cx).map_err(std::io::Error::other)
+        quic::SendStream::poll_finish(&mut *self, cx).map_err(into_io_error)
     }
 }
 
