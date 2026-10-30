@@ -6,15 +6,14 @@ use std::{
     task::{Context, Poll},
 };
 
-use bytes::Buf;
+use bytes::{Buf, Bytes};
 use futures_util::{future::poll_fn, ready, Future};
 use h3::{
     error::{
         connection_error_creators::CloseStream, internal_error::InternalConnectionError, Code,
-        ConnectionError, StreamError,
+        StreamError,
     },
     ext::Protocol,
-    frame::FrameStream,
     proto::frame::Frame,
     quic::{self, OpenStreams, WriteBuf},
     server::{Connection, RequestResolver, RequestStream},
@@ -25,7 +24,7 @@ use h3::{
     stream::{BidiStreamHeader, BufRecvStream, UniStreamHeader},
 };
 use h3_datagram::{
-    datagram_handler::{DatagramReader, DatagramSender, HandleDatagramsExt},
+    datagram_handler::{DatagramSender, HandleDatagramsExt, SendDatagramError},
     quic_traits,
 };
 use http::{Method, Request, Response, StatusCode};
@@ -33,13 +32,21 @@ use http::{Method, Request, Response, StatusCode};
 use h3::webtransport::SessionId;
 use pin_project_lite::pin_project;
 
-use crate::stream::{BidiStream, RecvStream, SendStream};
+use crate::stream::{BidiStream, SendStream};
 
-/// WebTransport session driver.
+mod capsule;
+mod connection;
+mod session;
+pub use connection::{IncomingStream, WebTransportConnection};
+use session::{SessionState, Sessions};
+
+/// One accepted WebTransport session.
 ///
-/// Maintains the session using the underlying HTTP/3 connection.
+/// Owns its CONNECT stream and outgoing stream capabilities, not the HTTP/3
+/// connection. Keep driving [`WebTransportConnection`] independently to receive
+/// HTTP requests and incoming WebTransport streams for every session.
 ///
-/// Similar to [`h3::server::Connection`](https://docs.rs/h3/latest/h3/server/struct.Connection.html) it is generic over the QUIC implementation and Buffer.
+/// Dropping a session does not drop the connection driver or other sessions.
 pub struct WebTransportSession<C, B>
 where
     C: quic::Connection<B> + quic_traits::DatagramConnectionExt<B>,
@@ -48,14 +55,49 @@ where
 {
     // See: https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-2-3
     session_id: SessionId,
-    /// The underlying HTTP/3 connection
-    server_conn: Mutex<Connection<C, B>>,
-    connect_stream: RequestStream<C::BidiStream, B>,
+    state: Arc<SessionState<C, B>>,
     opener: Mutex<C::OpenStreams>,
+    datagram_sender: Mutex<DatagramSender<C::SendDatagramHandler, B>>,
     /// Shared State
     ///
-    /// Shared state is already in server_conn, but with this it is not necessary to lock the mutex
+    /// Shared with the connection driver, without owning that driver.
     shared: Arc<SharedState>,
+}
+
+/// Application-provided WebTransport session close information.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SessionClose {
+    /// The application's 32-bit close code, without HTTP/3 stream-code mapping.
+    pub code: u32,
+    /// The peer's UTF-8 close reason, at most 1024 bytes.
+    pub reason: String,
+}
+
+/// Failure to send a datagram through a WebTransport session.
+#[derive(Debug)]
+pub enum SessionDatagramError {
+    /// The session has already terminated.
+    Closed,
+    /// The QUIC datagram transport rejected the send.
+    Transport(SendDatagramError),
+}
+
+impl std::fmt::Display for SessionDatagramError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Closed => f.write_str("WebTransport session closed"),
+            Self::Transport(error) => error.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for SessionDatagramError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Closed => None,
+            Self::Transport(error) => Some(error),
+        }
+    }
 }
 
 impl<C, B> ConnectionState for WebTransportSession<C, B>
@@ -77,11 +119,53 @@ where
 {
     /// Accepts a *CONNECT* request for establishing a WebTransport session.
     ///
-    /// TODO: is the API or the user responsible for validating the CONNECT request?
-    pub async fn accept(
+    /// The returned future owns only session resources. It does not borrow the
+    /// connection, so response flow control cannot block the caller from driving
+    /// other requests. The caller remains responsible for authorization and for
+    /// driving the connection throughout the session's lifetime.
+    pub fn accept(
+        request: Request<()>,
+        stream: RequestStream<C::BidiStream, B>,
+        conn: &mut WebTransportConnection<C, B>,
+    ) -> impl Future<Output = Result<Self, StreamError>> {
+        conn.accept_session(request, stream)
+    }
+
+    fn accept_with_state(
         request: Request<()>,
         mut stream: RequestStream<C::BidiStream, B>,
-        mut conn: Connection<C, B>,
+        conn: &mut Connection<C, B>,
+        state: Arc<SessionState<C, B>>,
+    ) -> impl Future<Output = Result<Self, StreamError>> {
+        let prepared = Self::prepare(&stream, conn, state);
+        async move {
+            let session = prepared?;
+            let valid = validate_wt_connect(&request);
+            let mut response = Response::builder().status(if valid {
+                StatusCode::OK
+            } else {
+                StatusCode::BAD_REQUEST
+            });
+            if valid {
+                response = response.header("sec-webtransport-http3-draft", "draft02");
+            }
+            stream.send_response(response.body(()).unwrap()).await?;
+            if !valid {
+                stream.finish().await?;
+                return Err(StreamError::StreamError {
+                    code: Code::H3_MESSAGE_ERROR,
+                    reason: "invalid WebTransport CONNECT request".into(),
+                });
+            }
+            session.state.attach(stream);
+            Ok(session)
+        }
+    }
+
+    fn prepare(
+        stream: &RequestStream<C::BidiStream, B>,
+        conn: &mut Connection<C, B>,
+        state: Arc<SessionState<C, B>>,
     ) -> Result<Self, StreamError> {
         let shared = conn.inner.shared.clone();
 
@@ -123,84 +207,37 @@ where
             tracing::warn!("Server does not support CONNECT");
         }
 
-        // Respond to the CONNECT request.
-
-        //= https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/#section-3.3
-        let response = if validate_wt_connect(&request) {
-            Response::builder()
-                // This is the only header that chrome cares about.
-                .header("sec-webtransport-http3-draft", "draft02")
-                .status(StatusCode::OK)
-                .body(())
-                .unwrap()
-        } else {
-            Response::builder()
-                .status(StatusCode::BAD_REQUEST)
-                .body(())
-                .unwrap()
-        };
-
-        stream.send_response(response).await?;
-
         let session_id = stream.send_id().into();
+        let datagram_sender = conn.get_datagram_sender(stream.send_id());
         let conn_inner = &mut conn.inner.conn;
         let opener = Mutex::new(conn_inner.opener());
+        state.reserve()?;
 
         Ok(Self {
             session_id,
             opener,
-            server_conn: Mutex::new(conn),
-            connect_stream: stream,
+            state,
+            datagram_sender: Mutex::new(datagram_sender),
             shared,
         })
     }
 
-    /// Receive a datagram from the client
-    pub fn datagram_reader(&self) -> DatagramReader<C::RecvDatagramHandler> {
-        self.server_conn.lock().unwrap().get_datagram_reader()
-    }
-
-    /// Sends a datagram
-    ///
-    /// TODO: maybe make async. `quinn` does not require an async send
-    pub fn datagram_sender(&self) -> DatagramSender<C::SendDatagramHandler, B> {
-        self.server_conn
-            .lock()
-            .unwrap()
-            .get_datagram_sender(self.connect_stream.send_id())
-    }
-
-    /// Accept an incoming unidirectional stream from the client, it reads the stream until EOF.
-    pub fn accept_uni(&self) -> AcceptUni<'_, C, B> {
-        AcceptUni {
-            conn: &self.server_conn,
-        }
-    }
-
-    /// Accepts an incoming bidirectional stream.
-    ///
-    /// The returned resolver reads the first frame to determine whether the stream contains a
-    /// WebTransport bidirectional stream or an HTTP/3 request.
-    pub async fn accept_bi(&self) -> Result<Option<BiStreamResolver<C, B>>, ConnectionError> {
-        let stream = poll_fn(|cx| {
-            let mut conn = self.server_conn.lock().unwrap();
-            conn.poll_accept_request_stream(cx)
-        })
-        .await?;
-
-        Ok(stream.map(|stream| {
-            let stream = FrameStream::new(BufRecvStream::new(stream));
-            let resolver = self.server_conn.lock().unwrap().create_resolver(stream);
-            BiStreamResolver { resolver }
-        }))
+    /// Send a datagram bound to this session's CONNECT stream.
+    pub fn send_datagram(&self, data: B) -> Result<(), SessionDatagramError> {
+        self.state
+            .while_open(|| self.datagram_sender.lock().unwrap().send_datagram(data))
+            .map_err(|_| SessionDatagramError::Closed)?
+            .map_err(SessionDatagramError::Transport)
     }
 
     /// Open a new bidirectional stream
-    pub fn open_bi(&self, session_id: SessionId) -> OpenBi<'_, C, B> {
+    pub fn open_bi(&self) -> OpenBi<'_, C, B> {
         OpenBi {
             opener: &self.opener,
+            state: &self.state,
+            changed: self.state.changed.notified(),
             stream: None,
-            session_id,
+            session_id: self.session_id,
             stream_handler: WTransportStreamHandler {
                 shared: self.shared.clone(),
             },
@@ -208,11 +245,13 @@ where
     }
 
     /// Open a new unidirectional stream
-    pub fn open_uni(&self, session_id: SessionId) -> OpenUni<'_, C, B> {
+    pub fn open_uni(&self) -> OpenUni<'_, C, B> {
         OpenUni {
             opener: &self.opener,
+            state: &self.state,
+            changed: self.state.changed.notified(),
             stream: None,
-            session_id,
+            session_id: self.session_id,
             stream_handler: WTransportStreamHandler {
                 shared: self.shared.clone(),
             },
@@ -223,6 +262,102 @@ where
     pub fn session_id(&self) -> SessionId {
         self.session_id
     }
+
+    /// Wait for session termination and retain the application's close information.
+    ///
+    /// A peer close capsule returns its code and reason. A clean CONNECT FIN
+    /// without a capsule returns code zero and an empty reason. Resets and
+    /// connection failures return the transport error. Local `close` also wakes
+    /// observers. Concurrent and repeated observers see the retained result.
+    ///
+    /// Cancellation retains partially read capsules with the session. Keep
+    /// driving [`WebTransportConnection`] to process control data even when no
+    /// observer is waiting. Termination resets this session's data streams;
+    /// other sessions and HTTP requests remain independent. Drain application
+    /// work before closing the session, not after its CONNECT has ended.
+    pub async fn closed(&self) -> Result<SessionClose, Arc<StreamError>> {
+        let notified = self.state.changed.notified();
+        let mut notified = std::pin::pin!(notified);
+        poll_fn(|cx| {
+            if notified.as_mut().poll(cx).is_ready() {
+                notified.set(self.state.changed.notified());
+                let _ = notified.as_mut().poll(cx);
+            }
+            self.state.poll_io(cx);
+            match self.state.outcome() {
+                Some(result) => Poll::Ready(result),
+                None => Poll::Pending,
+            }
+        })
+        .await
+    }
+
+    /// Close only this session, sending a close capsule followed by FIN.
+    ///
+    /// Reasons longer than 1024 UTF-8 bytes are rejected before changing session
+    /// state. The first local or remote termination wins. Cancellation retains
+    /// queued DATA and FIN progress; the driver or a later call resumes the same
+    /// capsule instead of sending it twice. Completion means local write
+    /// completion, not acknowledgement by the peer.
+    pub async fn close(&self, code: u32, reason: &str) -> Result<(), Arc<StreamError>>
+    where
+        B: From<Bytes>,
+    {
+        let wire = capsule::encode(code, reason).map_err(|reason| {
+            Arc::new(StreamError::StreamError {
+                code: Code::H3_MESSAGE_ERROR,
+                reason: reason.into(),
+            })
+        })?;
+        let started = {
+            let mut io = self.state.connect.lock().unwrap();
+            let connect = io.as_mut().expect("accepted session has a CONNECT stream");
+            if !connect.finishing && self.state.outcome().is_none() {
+                connect.outgoing = Some(B::from(wire));
+                connect.finishing = true;
+                true
+            } else {
+                false
+            }
+        };
+        if started {
+            self.state.terminate(Ok(SessionClose {
+                code,
+                reason: reason.to_owned(),
+            }));
+        }
+        let notified = self.state.changed.notified();
+        let mut notified = std::pin::pin!(notified);
+        poll_fn(|cx| {
+            if notified.as_mut().poll(cx).is_ready() {
+                notified.set(self.state.changed.notified());
+                let _ = notified.as_mut().poll(cx);
+            }
+            self.state.poll_io(cx);
+            let io = self.state.connect.lock().unwrap();
+            let connect = io.as_ref().unwrap();
+            if connect.sent {
+                Poll::Ready(match &connect.send_error {
+                    Some(error) => Err(error.clone()),
+                    None => Ok(()),
+                })
+            } else {
+                Poll::Pending
+            }
+        })
+        .await
+    }
+}
+
+impl<C, B> Drop for WebTransportSession<C, B>
+where
+    C: quic::Connection<B> + quic_traits::DatagramConnectionExt<B>,
+    Connection<C, B>: HandleDatagramsExt<C, B>,
+    B: Buf,
+{
+    fn drop(&mut self) {
+        self.state.abort();
+    }
 }
 
 /// Resolves an accepted bidirectional stream as either WebTransport or HTTP/3.
@@ -232,6 +367,7 @@ where
     B: Buf,
 {
     resolver: RequestResolver<C, B>,
+    sessions: Arc<Mutex<Sessions<C, B>>>,
 }
 
 impl<C, B> BiStreamResolver<C, B>
@@ -241,17 +377,34 @@ where
 {
     /// Reads the first frame and classifies the accepted stream.
     pub async fn resolve(mut self) -> Result<AcceptedBi<C, B>, StreamError> {
+        let request_id = self.resolver.frame_stream.id().into();
         let frame = poll_fn(|cx| self.resolver.frame_stream.poll_next(cx)).await;
 
         match frame {
             Ok(Some(Frame::WebTransportStream(session_id))) => {
                 // Take the stream out of the framed reader and split it in half like Paul Allen
                 let stream = self.resolver.frame_stream.into_inner();
-                Ok(AcceptedBi::BidiStream(session_id, BidiStream::new(stream)))
+                let stream = BidiStream::new(stream);
+                let (state, retired) = {
+                    let mut sessions = self.sessions.lock().unwrap();
+                    let retired = sessions.retire(request_id);
+                    (sessions.get(session_id), retired)
+                };
+                if let Some(retired) = retired {
+                    retired.terminate(Err(Arc::new(session::gone())));
+                }
+                state.bidi(&stream.stream);
+                Ok(AcceptedBi::BidiStream(session_id, stream))
             }
             // Make the underlying HTTP/3 connection handle the rest
             frame => {
                 let (req, resp) = self.resolver.accept_with_frame(frame)?.resolve().await?;
+                if !validate_wt_connect(&req) {
+                    let retired = self.sessions.lock().unwrap().retire(request_id);
+                    if let Some(retired) = retired {
+                        retired.terminate(Err(Arc::new(session::gone())));
+                    }
+                }
                 Ok(AcceptedBi::Request(req, resp))
             }
         }
@@ -274,6 +427,9 @@ pin_project! {
     /// Future for opening a bidi stream
     pub struct OpenBi<'a, C:quic::Connection<B>, B:Buf> {
         opener: &'a Mutex<C::OpenStreams>,
+        state: &'a Arc<SessionState<C, B>>,
+        #[pin]
+        changed: tokio::sync::futures::Notified<'a>,
         stream: Option<PendingStreams<C,B>>,
         session_id: SessionId,
         stream_handler: WTransportStreamHandler,
@@ -302,6 +458,10 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut p = self.project();
+        let _ = p.changed.as_mut().poll(cx);
+        if p.state.is_closed() {
+            return Poll::Ready(Err(session::gone()));
+        }
         loop {
             match &mut p.stream {
                 Some((stream, buf)) => {
@@ -319,6 +479,7 @@ where
                     let res = ready!(opener.poll_open_bidi(cx))
                         .map_err(|err| p.stream_handler.handle_quic_stream_error(err))?;
                     let stream = BidiStream::new(BufRecvStream::new(res));
+                    p.state.bidi(&stream.stream);
 
                     let buf = WriteBuf::from(BidiStreamHeader::WebTransportBidi(*p.session_id));
                     *p.stream = Some((stream, buf));
@@ -332,6 +493,9 @@ pin_project! {
     /// Opens a unidirectional stream
     pub struct OpenUni<'a, C: quic::Connection<B>, B:Buf> {
         opener: &'a Mutex<C::OpenStreams>,
+        state: &'a Arc<SessionState<C, B>>,
+        #[pin]
+        changed: tokio::sync::futures::Notified<'a>,
         stream: Option<PendingUniStreams<C, B>>,
         // Future for opening a uni stream
         session_id: SessionId,
@@ -349,6 +513,10 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut p = self.project();
+        let _ = p.changed.as_mut().poll(cx);
+        if p.state.is_closed() {
+            return Poll::Ready(Err(session::gone()));
+        }
         loop {
             match &mut p.stream {
                 Some((send, buf)) => {
@@ -366,6 +534,7 @@ where
                         .map_err(|err| p.stream_handler.handle_quic_stream_error(err))?;
                     let send = BufRecvStream::new(send);
                     let send = SendStream::new(send);
+                    p.state.send(&send.stream);
 
                     let buf = WriteBuf::from(UniStreamHeader::WebTransportUni(*p.session_id));
                     *p.stream = Some((send, buf));
@@ -377,46 +546,14 @@ where
 
 /// An accepted incoming bidirectional stream.
 ///
-/// Since
-// Todo
 #[allow(clippy::large_enum_variant)]
 pub enum AcceptedBi<C: quic::Connection<B>, B: Buf> {
     /// An incoming bidirectional stream
     BidiStream(SessionId, BidiStream<C::BidiStream, B>),
-    /// An incoming HTTP/3 request, passed through a webtransport session.
+    /// An incoming HTTP/3 request, including another CONNECT request.
     ///
     /// This makes it possible to respond to multiple CONNECT requests
     Request(Request<()>, RequestStream<C::BidiStream, B>),
-}
-
-/// Future for [`WebTransportSession::accept_uni`]
-pub struct AcceptUni<'a, C, B>
-where
-    C: quic::Connection<B>,
-    B: Buf,
-{
-    conn: &'a Mutex<Connection<C, B>>,
-}
-
-impl<'a, C, B> Future for AcceptUni<'a, C, B>
-where
-    C: quic::Connection<B>,
-    B: Buf,
-{
-    type Output = Result<Option<(SessionId, RecvStream<C::RecvStream, B>)>, ConnectionError>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut conn = self.conn.lock().unwrap();
-        conn.inner.poll_accept_recv(cx)?;
-
-        // Get the currently available streams
-        let streams = conn.inner.accepted_streams_mut();
-        if let Some((id, stream)) = streams.wt_uni_streams.pop() {
-            return Poll::Ready(Ok(Some((id, RecvStream::new(stream)))));
-        }
-
-        Poll::Pending
-    }
 }
 
 fn validate_wt_connect(request: &Request<()>) -> bool {

@@ -1054,6 +1054,41 @@ where
         Ok(())
     }
 
+    /// Queue a DATA frame once, then flush it across subsequent polls.
+    ///
+    /// The caller retains `buf` between polls. It is taken only after the
+    /// transport is ready to accept a frame; `None` resumes flushing that frame.
+    pub fn poll_send_data(
+        &mut self,
+        cx: &mut Context<'_>,
+        buf: &mut Option<B>,
+    ) -> Poll<Result<(), StreamError>> {
+        ready!(self.stream.poll_ready(cx)).map_err(|e| self.handle_quic_stream_error(e))?;
+        if let Some(buf) = buf.take() {
+            self.stream
+                .send_data(Frame::Data(buf))
+                .map_err(|e| self.handle_quic_stream_error(e))?;
+        }
+        self.stream
+            .poll_ready(cx)
+            .map_err(|e| self.handle_quic_stream_error(e))
+    }
+
+    /// Flush pending data and finish, retaining progress across polls.
+    pub fn poll_finish(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), StreamError>> {
+        ready!(self.stream.poll_ready(cx)).map_err(|e| self.handle_quic_stream_error(e))?;
+        if self.send_grease_frame {
+            self.stream
+                .send_data(Frame::Grease)
+                .map_err(|e| self.handle_quic_stream_error(e))?;
+            self.send_grease_frame = false;
+        }
+        ready!(self.stream.poll_ready(cx)).map_err(|e| self.handle_quic_stream_error(e))?;
+        self.stream
+            .poll_finish(cx)
+            .map_err(|e| self.handle_quic_stream_error(e))
+    }
+
     /// Send a set of trailers to end the request.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn send_trailers(&mut self, trailers: HeaderMap) -> Result<(), StreamError> {

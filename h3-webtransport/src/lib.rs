@@ -5,6 +5,7 @@
 //! WebTransport over HTTP/3: <https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3/>
 #![deny(missing_docs)]
 
+pub mod error;
 /// Server side WebTransport session support
 pub mod server;
 /// Webtransport stream types
