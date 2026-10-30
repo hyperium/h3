@@ -1,4 +1,7 @@
-use std::task::{Context, Poll};
+use std::{
+    sync::{Arc, Mutex},
+    task::{Context, Poll},
+};
 
 use bytes::Buf;
 use futures_util::future::poll_fn;
@@ -16,7 +19,7 @@ use h3_datagram::{
 };
 use http::Request;
 
-use super::{BiStreamResolver, WebTransportSession};
+use super::{session::Sessions, BiStreamResolver, WebTransportSession};
 use crate::stream::RecvStream;
 
 /// The single owner of HTTP/3 control processing and incoming streams.
@@ -32,6 +35,7 @@ where
     B: Buf,
 {
     conn: Connection<C, B>,
+    sessions: Arc<Mutex<Sessions<C, B>>>,
 }
 
 /// A stream accepted by the connection driver.
@@ -49,7 +53,10 @@ where
 {
     /// Wrap an HTTP/3 connection configured for WebTransport.
     pub fn new(conn: Connection<C, B>) -> Self {
-        Self { conn }
+        Self {
+            conn,
+            sessions: Arc::new(Mutex::new(Sessions::new())),
+        }
     }
 
     /// Accept the next stream while processing HTTP/3 control traffic.
@@ -72,13 +79,23 @@ where
             .accepted_streams_mut()
             .wt_uni_streams
             .pop()
-            .map(|(id, stream)| IncomingStream::Unidirectional(id, RecvStream::new(stream)))
+            .map(|(id, stream)| {
+                let stream = RecvStream::new(stream);
+                let state = self.sessions.lock().unwrap().get(id);
+                state.recv(&stream.stream);
+                IncomingStream::Unidirectional(id, stream)
+            })
     }
 
     fn poll_accept(
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Result<Option<IncomingStream<C, B>>, ConnectionError>> {
+        let states = self.sessions.lock().unwrap().states();
+        for state in states {
+            state.poll_driver(cx);
+        }
+        self.sessions.lock().unwrap().cleanup();
         if let Some(stream) = self.take_uni() {
             return Poll::Ready(Ok(Some(stream)));
         }
@@ -90,6 +107,7 @@ where
                 .create_resolver(FrameStream::new(BufRecvStream::new(stream)));
             return Poll::Ready(Ok(Some(IncomingStream::Bidirectional(BiStreamResolver {
                 resolver,
+                sessions: self.sessions.clone(),
             }))));
         }
         if let Some(stream) = self.take_uni() {
@@ -120,7 +138,12 @@ where
         request: Request<()>,
         stream: RequestStream<C::BidiStream, B>,
     ) -> impl std::future::Future<Output = Result<WebTransportSession<C, B>, StreamError>> {
-        WebTransportSession::accept(request, stream, &mut self.conn)
+        let state = if super::validate_wt_connect(&request) {
+            self.sessions.lock().unwrap().get(stream.send_id().into())
+        } else {
+            Arc::new(super::session::SessionState::new())
+        };
+        WebTransportSession::accept_with_state(request, stream, &mut self.conn, state)
     }
 
     /// Obtain a connection-wide datagram reader.

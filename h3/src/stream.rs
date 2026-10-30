@@ -305,22 +305,38 @@ where
         }
     }
 
-    // helper function to poll the next VarInt from self.stream
+    // Read only when the retained buffer cannot hold the next complete varint.
+    // A complete WT header must not wait for application data to arrive.
     fn poll_next_varint(
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(VarInt, Option<StreamEnd>), PollTypeError>> {
-        // Flag if the stream was reset or finished by the peer
         let mut stream_stopped = None;
-
         loop {
-            if stream_stopped.is_some() {
-                return Poll::Ready(Err(PollTypeError::EndOfStream));
+            let mut buf = self.stream.buf_mut();
+            if self.expected.is_none() && buf.remaining() >= 1 {
+                self.expected = Some(VarInt::encoded_size(buf.chunk()[0]));
+            }
+            if self
+                .expected
+                .is_some_and(|expected| buf.remaining() >= expected)
+            {
+                let value = VarInt::decode(&mut buf).map_err(|_| {
+                    PollTypeError::InternalError(InternalConnectionError::new(
+                        Code::H3_INTERNAL_ERROR,
+                        "Unexpected end parsing varint".to_string(),
+                    ))
+                })?;
+                self.expected = None;
+                return Poll::Ready(Ok((value, stream_stopped)));
             }
             //= https://www.rfc-editor.org/rfc/rfc9114#section-6.2
             //# A receiver MUST tolerate unidirectional streams being
             //# closed or reset prior to the reception of the unidirectional stream
             //# header.
+            if stream_stopped.is_some() {
+                return Poll::Ready(Err(PollTypeError::EndOfStream));
+            }
             stream_stopped = match ready!(self.stream.poll_read(cx)) {
                 Ok(false) => None,
                 Ok(true) => Some(StreamEnd::EndOfStream),
@@ -333,32 +349,9 @@ where
                 Err(StreamErrorIncoming::Unknown(_err)) => {
                     #[cfg(feature = "tracing")]
                     tracing::error!("Unknown error when reading stream {}", _err);
-
                     Some(StreamEnd::Other)
                 }
             };
-
-            let mut buf = self.stream.buf_mut();
-            if self.expected.is_none() && buf.remaining() >= 1 {
-                self.expected = Some(VarInt::encoded_size(buf.chunk()[0]));
-            }
-
-            if let Some(expected) = self.expected {
-                if buf.remaining() < expected {
-                    continue;
-                }
-            } else {
-                continue;
-            }
-
-            let reult = VarInt::decode(&mut buf).map_err(|_| {
-                PollTypeError::InternalError(InternalConnectionError::new(
-                    Code::H3_INTERNAL_ERROR,
-                    "Unexpected end parsing varint".to_string(),
-                ))
-            })?;
-
-            return Poll::Ready(Ok((reult, stream_stopped)));
         }
     }
 

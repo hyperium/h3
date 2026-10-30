@@ -27,6 +27,19 @@ async fn pair() -> (
     Driver,
     quinn::SendStream,
 ) {
+    pair_with_limits(None, None).await
+}
+
+async fn pair_with_limits(
+    window: Option<u32>,
+    bidi_limit: Option<u32>,
+) -> (
+    quinn::Endpoint,
+    quinn::Endpoint,
+    quinn::Connection,
+    Driver,
+    quinn::SendStream,
+) {
     let cert = rcgen::generate_simple_self_signed(vec!["example.test".into()]).unwrap();
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let mut server_tls = rustls::ServerConfig::builder_with_provider(provider.clone())
@@ -55,9 +68,18 @@ async fn pair() -> (
         .with_no_client_auth();
     client_tls.alpn_protocols = vec![b"h3".to_vec()];
     let mut client = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-    client.set_default_client_config(quinn::ClientConfig::new(Arc::new(
+    let mut client_config = quinn::ClientConfig::new(Arc::new(
         quinn::crypto::rustls::QuicClientConfig::try_from(client_tls).unwrap(),
-    )));
+    ));
+    let mut transport = quinn::TransportConfig::default();
+    if let Some(window) = window {
+        transport.stream_receive_window(window.into());
+    }
+    if let Some(limit) = bidi_limit {
+        transport.max_concurrent_bidi_streams(limit.into());
+    }
+    client_config.transport_config(Arc::new(transport));
+    client.set_default_client_config(client_config);
     let connect = client
         .connect(server.local_addr().unwrap(), "example.test")
         .unwrap();
@@ -278,7 +300,7 @@ async fn driver_routes_streams_and_datagrams_while_session_remains_separate() {
 }
 
 #[tokio::test]
-async fn connect_fin_is_cancel_safe_and_does_not_end_admitted_work() {
+async fn connect_fin_is_cancel_safe_and_resets_admitted_work() {
     let (_server, _client, peer, mut driver, _control) = pair().await;
     let (mut connect, _recv) = request(&peer, true).await;
     let (req, stream) = resolved_request(&mut driver).await;
@@ -287,7 +309,7 @@ async fn connect_fin_is_cancel_safe_and_does_not_end_admitted_work() {
 
     // Cancelling the observer partway through a DATA frame retains the reader.
     let mut data = BytesMut::new();
-    let payload = Bytes::from_static(b"ignored CONNECT body");
+    let payload = Bytes::from_static(b"\x17\x00"); // Unknown capsule, zero-length payload.
     Frame::Data(payload.clone()).encode(&mut data);
     data.extend_from_slice(&payload);
     connect.write_all(&data[..3]).await.unwrap();
@@ -311,10 +333,13 @@ async fn connect_fin_is_cancel_safe_and_does_not_end_admitted_work() {
     second.unwrap();
     session.closed().await.unwrap();
 
-    // Closure is an observation, not authority to abandon the owner's drain.
-    admitted.write_all(b"drained").await.unwrap();
-    admitted.shutdown().await.unwrap();
-    assert_eq!(recv.read_to_end(1024).await.unwrap(), b"drained");
+    assert_eq!(session.closed().await.unwrap(), Default::default());
+    assert!(admitted.write_all(b"after FIN").await.is_err());
+    assert_reset(recv.read_to_end(1024).await.unwrap_err());
+    assert_eq!(
+        send.stopped().await.unwrap().unwrap().into_inner(),
+        SESSION_GONE
+    );
     peer.close(0u32.into(), b"done");
 }
 
@@ -379,4 +404,354 @@ async fn connection_loss_wakes_connect_observer_beside_the_driver() {
         &*closed.unwrap_err(),
         h3::error::StreamError::ConnectionError(_)
     ));
+}
+
+const SESSION_GONE: u64 = 0x170d7b68;
+
+fn close_capsule(code: u32, reason: &str) -> Bytes {
+    use h3::proto::varint::VarInt;
+    let mut payload = BytesMut::new();
+    VarInt::from_u32(0x2843).encode(&mut payload);
+    VarInt::from_u32(4 + reason.len() as u32).encode(&mut payload);
+    payload.put_u32(code);
+    payload.extend_from_slice(reason.as_bytes());
+    payload.freeze()
+}
+
+async fn send_data(send: &mut quinn::SendStream, payload: Bytes) {
+    let mut wire = BytesMut::new();
+    Frame::Data(payload.clone()).encode(&mut wire);
+    wire.extend_from_slice(&payload);
+    send.write_all(&wire).await.unwrap();
+}
+
+fn response_data(mut wire: &[u8]) -> Bytes {
+    use h3::proto::varint::VarInt;
+    let mut data = BytesMut::new();
+    while wire.has_remaining() {
+        let kind = VarInt::decode(&mut wire).unwrap().into_inner();
+        let length = VarInt::decode(&mut wire).unwrap().into_inner() as usize;
+        let value = wire.copy_to_bytes(length);
+        if kind == 0 {
+            data.extend_from_slice(&value);
+        }
+    }
+    data.freeze()
+}
+
+fn assert_reset(error: quinn::ReadToEndError) {
+    assert!(
+        matches!(error,
+            quinn::ReadToEndError::Read(quinn::ReadError::Reset(code))
+                if code.into_inner() == SESSION_GONE
+        ),
+        "unexpected read error: {error:?}"
+    );
+}
+
+async fn read_var(stream: &mut quinn::RecvStream) -> u64 {
+    use h3::proto::varint::VarInt;
+    let mut bytes = [0; 8];
+    stream.read_exact(&mut bytes[..1]).await.unwrap();
+    let size = VarInt::encoded_size(bytes[0]);
+    stream.read_exact(&mut bytes[1..size]).await.unwrap();
+    VarInt::decode(&mut &bytes[..size]).unwrap().into_inner()
+}
+
+#[tokio::test]
+async fn peer_close_preserves_metadata_resets_all_directions_and_isolates_sessions() {
+    let (_server, _client, peer, mut driver, _control) = pair().await;
+    let (mut connect, mut response) = request(&peer, true).await;
+    let (req, stream) = resolved_request(&mut driver).await;
+    let session = driver.accept_session(req, stream).await.unwrap();
+    let (_other_connect, _other_response) = request(&peer, true).await;
+    let (req, stream) = resolved_request(&mut driver).await;
+    let sibling = driver.accept_session(req, stream).await.unwrap();
+
+    let (mut bidi_send, mut bidi_recv) = peer.open_bi().await.unwrap();
+    let mut wire = BytesMut::new();
+    BidiStreamHeader::WebTransportBidi(session.session_id()).encode(&mut wire);
+    bidi_send.write_all(&wire).await.unwrap();
+    let incoming = match resolver(&mut driver).await.resolve().await.unwrap() {
+        AcceptedBi::BidiStream(_, stream) => stream,
+        _ => panic!("expected WT bidi stream"),
+    };
+    let (mut incoming_send, mut incoming_recv) = h3::quic::BidiStream::split(incoming);
+    let mut scratch = [0];
+    let reading = incoming_recv.read(&mut scratch);
+    tokio::pin!(reading);
+    assert!(reading.as_mut().now_or_never().is_none());
+
+    let mut uni_send = peer.open_uni().await.unwrap();
+    wire.clear();
+    UniStreamHeader::WebTransportUni(session.session_id()).encode(&mut wire);
+    uni_send.write_all(&wire).await.unwrap();
+    let mut incoming_uni = match driver.accept().await.unwrap().unwrap() {
+        IncomingStream::Unidirectional(_, stream) => stream,
+        _ => panic!("expected WT uni stream"),
+    };
+    let mut uni_scratch = [0];
+    let uni_reading = incoming_uni.read(&mut uni_scratch);
+    tokio::pin!(uni_reading);
+    assert!(uni_reading.as_mut().now_or_never().is_none());
+
+    let outgoing = session.open_bi().await.unwrap();
+    let (mut outgoing_send, mut outgoing_recv) = h3::quic::BidiStream::split(outgoing);
+    let (peer_send, mut peer_recv) = peer.accept_bi().await.unwrap();
+    assert_eq!(read_var(&mut peer_recv).await, 0x41);
+    let _ = read_var(&mut peer_recv).await;
+    let mut outgoing_uni = session.open_uni().await.unwrap();
+    let mut retained_control_streams = Vec::new();
+    let mut peer_uni = loop {
+        let mut recv = peer.accept_uni().await.unwrap();
+        if read_var(&mut recv).await == 0x54 {
+            let _ = read_var(&mut recv).await;
+            break recv;
+        }
+        retained_control_streams.push(recv);
+    };
+
+    let capsule = close_capsule(0xfedcba98, "closing: görüşürüz 🎭");
+    // One capsule spans DATA frames and every byte boundary, with cancelled observers.
+    for (index, byte) in capsule.iter().enumerate() {
+        send_data(&mut connect, Bytes::copy_from_slice(&[*byte])).await;
+        let observed = session.closed().now_or_never();
+        if index + 1 != capsule.len() {
+            assert!(observed.is_none());
+        }
+    }
+    let (first, second) = tokio::join!(session.closed(), session.closed());
+    let close = first.unwrap();
+    assert_eq!(close.code, 0xfedcba98);
+    assert_eq!(close.reason, "closing: görüşürüz 🎭");
+    assert_eq!(second.unwrap(), close);
+    assert_eq!(session.closed().await.unwrap(), close);
+    assert!(reading.await.is_err());
+    assert!(uni_reading.await.is_err());
+    assert!(incoming_send.write_all(b"closed").await.is_err());
+    assert!(outgoing_send.write_all(b"closed").await.is_err());
+    assert!(outgoing_recv.read(&mut [0]).await.is_err());
+    assert!(outgoing_uni.write_all(b"closed").await.is_err());
+    assert_reset(bidi_recv.read_to_end(1024).await.unwrap_err());
+    assert_reset(peer_recv.read_to_end(1024).await.unwrap_err());
+    assert_reset(peer_uni.read_to_end(1024).await.unwrap_err());
+    assert_eq!(
+        bidi_send.stopped().await.unwrap().unwrap().into_inner(),
+        SESSION_GONE
+    );
+    assert_eq!(
+        uni_send.stopped().await.unwrap().unwrap().into_inner(),
+        SESSION_GONE
+    );
+    assert_eq!(
+        peer_send.stopped().await.unwrap().unwrap().into_inner(),
+        SESSION_GONE
+    );
+    assert!(session.open_bi().await.is_err());
+    assert!(session.open_uni().await.is_err());
+    assert!(session.send_datagram(Bytes::new()).is_err());
+    // The close capsule is sufficient: the peer has not sent FIN yet.
+    assert!(!response.read_to_end(1024).await.unwrap().is_empty());
+    connect.finish().unwrap();
+
+    // Late streams for the ended session are reset as well.
+    let (mut late_send, mut late_recv) = peer.open_bi().await.unwrap();
+    wire.clear();
+    BidiStreamHeader::WebTransportBidi(session.session_id()).encode(&mut wire);
+    late_send.write_all(&wire).await.unwrap();
+    match resolver(&mut driver).await.resolve().await.unwrap() {
+        AcceptedBi::BidiStream(_, mut stream) => assert!(stream.write_all(b"late").await.is_err()),
+        _ => panic!("expected WT stream"),
+    }
+    assert_reset(late_recv.read_to_end(1024).await.unwrap_err());
+
+    assert!(sibling.closed().now_or_never().is_none());
+    sibling.send_datagram(Bytes::from_static(b"alive")).unwrap();
+    assert_eq!(
+        Datagram::decode(peer.read_datagram().await.unwrap())
+            .unwrap()
+            .payload(),
+        &Bytes::from_static(b"alive")
+    );
+    let mut sibling_stream = sibling.open_bi().await.unwrap();
+    let (_send, mut recv) = peer.accept_bi().await.unwrap();
+    let _ = read_var(&mut recv).await;
+    let _ = read_var(&mut recv).await;
+    sibling_stream.write_all(b"alive").await.unwrap();
+    sibling_stream.shutdown().await.unwrap();
+    assert_eq!(recv.read_to_end(1024).await.unwrap(), b"alive");
+    let (_get, mut recv) = request(&peer, false).await;
+    let (_, mut stream) = resolved_request(&mut driver).await;
+    stream.send_response(Response::new(())).await.unwrap();
+    stream.finish().await.unwrap();
+    assert!(!recv.read_to_end(1024).await.unwrap().is_empty());
+    peer.close(0u32.into(), b"done");
+}
+
+#[tokio::test]
+async fn cancelled_local_close_is_resumed_once_by_the_driver() {
+    let (_server, _client, peer, mut driver, _control) = pair_with_limits(Some(64), None).await;
+    let (mut connect, mut response) = request(&peer, true).await;
+    let (req, stream) = resolved_request(&mut driver).await;
+    let session = driver.accept_session(req, stream).await.unwrap();
+    let reason = "é".repeat(512);
+    assert!(session.close(u32::MAX, &reason).now_or_never().is_none());
+    assert_eq!(session.closed().await.unwrap().code, u32::MAX);
+    let read = response.read_to_end(4096);
+    let drive = driver.accept();
+    tokio::pin!(read, drive);
+    let received = match futures_util::future::select(read, drive).await {
+        futures_util::future::Either::Left((result, _)) => result.unwrap(),
+        futures_util::future::Either::Right(_) => panic!("driver stopped before close delivery"),
+    };
+    assert_eq!(response_data(&received), close_capsule(u32::MAX, &reason));
+    session.close(7, "replacement").await.unwrap();
+    assert_eq!(session.closed().await.unwrap().reason, reason);
+    connect.finish().unwrap();
+    peer.close(0u32.into(), b"done");
+}
+
+#[tokio::test]
+async fn oversized_local_reason_does_not_close_the_session() {
+    let (_server, _client, peer, mut driver, _control) = pair().await;
+    let (mut connect, mut response) = request(&peer, true).await;
+    let (req, stream) = resolved_request(&mut driver).await;
+    let session = driver.accept_session(req, stream).await.unwrap();
+    assert!(session.close(5, &"x".repeat(1025)).await.is_err());
+    assert!(session.closed().now_or_never().is_none());
+    session.send_datagram(Bytes::new()).unwrap();
+    session.close(42, "server shutdown").await.unwrap();
+    assert_eq!(
+        response_data(&response.read_to_end(4096).await.unwrap()),
+        close_capsule(42, "server shutdown")
+    );
+    assert_eq!(session.closed().await.unwrap().code, 42);
+    connect.finish().unwrap();
+    peer.close(0u32.into(), b"done");
+}
+
+#[tokio::test]
+async fn malformed_capsules_reset_only_the_connect_stream() {
+    let malformed = [
+        Bytes::from_static(b"\x68\x43\x03\0\0\0"), // Less than the four-byte code.
+        Bytes::from_static(b"\x68\x43\x05\0\0\0\0\xff"), // Invalid UTF-8.
+        Bytes::from_static(b"\x68\x43\x04\0\0\0\0\x00"), // Data after close.
+        Bytes::from_static(b"\x68"),               // Truncated type at FIN.
+        Bytes::from_static(b"\x17\x08\x00"),       // Truncated unknown payload.
+    ];
+    for payload in malformed {
+        let (_server, _client, peer, mut driver, _control) = pair().await;
+        let (mut connect, mut response) = request(&peer, true).await;
+        let (req, stream) = resolved_request(&mut driver).await;
+        let session = driver.accept_session(req, stream).await.unwrap();
+        send_data(&mut connect, payload).await;
+        connect.finish().unwrap();
+        assert!(session.closed().await.is_err());
+        assert!(matches!(response.read_to_end(4096).await,
+            Err(quinn::ReadToEndError::Read(quinn::ReadError::Reset(code)))
+            if code.into_inner() == h3::error::Code::H3_MESSAGE_ERROR.value()
+        ));
+        let (_get, mut recv) = request(&peer, false).await;
+        let (_, mut stream) = resolved_request(&mut driver).await;
+        stream.send_response(Response::new(())).await.unwrap();
+        stream.finish().await.unwrap();
+        assert!(!recv.read_to_end(1024).await.unwrap().is_empty());
+        peer.close(0u32.into(), b"done");
+    }
+}
+
+#[tokio::test]
+async fn local_close_resets_streams_and_survives_dropping_the_session() {
+    let (_server, _client, peer, mut driver, _control) = pair().await;
+    let (_connect, mut response) = request(&peer, true).await;
+    let (req, stream) = resolved_request(&mut driver).await;
+    let session = driver.accept_session(req, stream).await.unwrap();
+    let (mut send, mut recv) = peer.open_bi().await.unwrap();
+    let mut header = BytesMut::new();
+    BidiStreamHeader::WebTransportBidi(session.session_id()).encode(&mut header);
+    send.write_all(&header).await.unwrap();
+    let mut admitted = match resolver(&mut driver).await.resolve().await.unwrap() {
+        AcceptedBi::BidiStream(_, stream) => stream,
+        _ => panic!("expected WT stream"),
+    };
+    {
+        let waiting = session.closed();
+        tokio::pin!(waiting);
+        assert!(waiting.as_mut().now_or_never().is_none());
+        session.close(123, "graceful shutdown").await.unwrap();
+        assert_eq!(waiting.await.unwrap().code, 123);
+    }
+    assert!(admitted.write_all(b"late").await.is_err());
+    assert_reset(recv.read_to_end(1024).await.unwrap_err());
+    assert_eq!(
+        send.stopped().await.unwrap().unwrap().into_inner(),
+        SESSION_GONE
+    );
+    // Dropping the session must not reset an already-finished CONNECT send
+    // half and erase the close metadata before the peer reads it.
+    drop(session);
+    assert_eq!(
+        response_data(&response.read_to_end(4096).await.unwrap()),
+        close_capsule(123, "graceful shutdown")
+    );
+    peer.close(0u32.into(), b"done");
+}
+
+#[tokio::test]
+async fn data_after_a_delivered_close_capsule_is_rejected_by_the_driver() {
+    let (_server, _client, peer, mut driver, _control) = pair().await;
+    let (mut connect, _response) = request(&peer, true).await;
+    let (req, stream) = resolved_request(&mut driver).await;
+    let session = driver.accept_session(req, stream).await.unwrap();
+    send_data(&mut connect, close_capsule(4, "done")).await;
+    assert_eq!(session.closed().await.unwrap().code, 4);
+    send_data(&mut connect, Bytes::from_static(b"not allowed")).await;
+    let reading = connect.stopped();
+    let drive = driver.accept();
+    tokio::pin!(reading, drive);
+    match futures_util::future::select(reading, drive).await {
+        futures_util::future::Either::Left((result, _)) => {
+            assert!(matches!(result,
+                Ok(Some(code)) if code.into_inner() == h3::error::Code::H3_MESSAGE_ERROR.value()
+            ));
+        }
+        futures_util::future::Either::Right(_) => panic!("connection closed with its session"),
+    }
+    peer.close(0u32.into(), b"done");
+}
+
+#[tokio::test]
+async fn session_close_wakes_an_opener_waiting_for_stream_credit() {
+    let (_server, _client, peer, mut driver, _control) = pair_with_limits(None, Some(0)).await;
+    let (_connect, _response) = request(&peer, true).await;
+    let (req, stream) = resolved_request(&mut driver).await;
+    let session = driver.accept_session(req, stream).await.unwrap();
+    let opening = session.open_bi();
+    tokio::pin!(opening);
+    assert!(opening.as_mut().now_or_never().is_none());
+    session.close(0, "done").await.unwrap();
+    assert!(opening.await.is_err());
+    peer.close(0u32.into(), b"done");
+}
+
+#[tokio::test]
+async fn streams_received_before_acceptance_join_the_same_reset_registry() {
+    let (_server, _client, peer, mut driver, _control) = pair().await;
+    let (mut connect, _response) = request(&peer, true).await;
+    let (req, stream) = resolved_request(&mut driver).await;
+    let id = h3_webtransport::SessionId::from(stream.send_id());
+    let (mut send, mut recv) = peer.open_bi().await.unwrap();
+    let mut wire = BytesMut::new();
+    BidiStreamHeader::WebTransportBidi(id).encode(&mut wire);
+    send.write_all(&wire).await.unwrap();
+    let mut early = match resolver(&mut driver).await.resolve().await.unwrap() {
+        AcceptedBi::BidiStream(_, stream) => stream,
+        _ => panic!("expected early WT stream"),
+    };
+    let session = driver.accept_session(req, stream).await.unwrap();
+    send_data(&mut connect, close_capsule(5, "done")).await;
+    assert_eq!(session.closed().await.unwrap().code, 5);
+    assert!(early.write_all(b"late").await.is_err());
+    assert_reset(recv.read_to_end(1024).await.unwrap_err());
+    peer.close(0u32.into(), b"done");
 }
