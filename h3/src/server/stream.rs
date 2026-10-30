@@ -187,6 +187,23 @@ where
         self.inner.send_data(buf).await
     }
 
+    /// Queue and flush one DATA frame, retaining the buffer between polls.
+    ///
+    /// `buf` is taken once the frame is queued. Keep the resulting `None` when
+    /// resuming a cancelled wait to avoid sending the same frame twice.
+    pub fn poll_send_data(
+        &mut self,
+        cx: &mut Context<'_>,
+        buf: &mut Option<B>,
+    ) -> Poll<Result<(), StreamError>> {
+        self.inner.poll_send_data(cx, buf)
+    }
+
+    /// Flush pending data and finish the response, retaining progress across polls.
+    pub fn poll_finish(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), StreamError>> {
+        self.inner.poll_finish(cx)
+    }
+
     /// Stop a stream with an error code
     ///
     /// The code can be [`Code::H3_NO_ERROR`].

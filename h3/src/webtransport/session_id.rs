@@ -48,3 +48,9 @@ impl From<StreamId> for SessionId {
         Self(value.index())
     }
 }
+
+impl From<SessionId> for u64 {
+    fn from(value: SessionId) -> Self {
+        value.0
+    }
+}
