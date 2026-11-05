@@ -94,9 +94,24 @@ where
     ///
     /// This should be called before trying to receive any data with [`recv_data()`].
     ///
+    /// Interim (1xx) responses are skipped: the response returned is the final one.
+    ///
     /// [`recv_data()`]: #method.recv_data
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub async fn recv_response(&mut self) -> Result<Response<()>, StreamError> {
+        loop {
+            let resp = self.recv_response_message().await?;
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+            //# A response MAY consist of multiple messages when and only when one or
+            //# more interim responses (1xx; see Section 15.2 of [HTTP]) precede a
+            //# final response to the same request.
+            if !resp.status().is_informational() {
+                return Ok(resp);
+            }
+        }
+    }
+
+    async fn recv_response_message(&mut self) -> Result<Response<()>, StreamError> {
         let mut frame = future::poll_fn(|cx| self.inner.stream.poll_next(cx))
             .await
             .map_err(|e| self.handle_frame_stream_error_on_request_stream(e))?
