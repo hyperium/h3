@@ -28,13 +28,6 @@ HTTP/3; the Transfer-Encoding header field MUST NOT be used.
 
 [[TODO]]
 quote = '''
-A response MAY consist of multiple messages when and only when one or
-more interim responses (1xx; see Section 15.2 of [HTTP]) precede a
-final response to the same request.
-'''
-
-[[TODO]]
-quote = '''
 Unless using the CONNECT method (see
 Section 4.4), clients MUST NOT make stream closure dependent on
 receiving a response to their request.

@@ -87,6 +87,101 @@ async fn get() {
 }
 
 #[tokio::test]
+async fn get_with_interim_responses() {
+    init_tracing();
+    let mut pair = Pair::default();
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
+        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let req_fut = async move {
+            let mut request_stream = client
+                .send_request(Request::get("http://localhost/salut").body(()).unwrap())
+                .await
+                .expect("request");
+
+            let response = request_stream.recv_response().await.expect("recv response");
+            assert_eq!(response.status(), StatusCode::OK);
+            assert!(response.headers().get("link").is_none());
+
+            let body = request_stream
+                .recv_data()
+                .await
+                .expect("recv data")
+                .expect("body");
+            assert_eq!(body.chunk(), b"wonderful hypertext");
+            assert!(request_stream
+                .recv_data()
+                .await
+                .expect("recv data")
+                .is_none());
+            assert!(request_stream
+                .recv_trailers()
+                .await
+                .expect("recv trailers")
+                .is_none());
+        };
+        tokio::join!(req_fut, drive_fut)
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming_req = server::Connection::new(conn).await.unwrap();
+
+        let (_request, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-4.1
+        //= type=test
+        //# A response MAY consist of multiple messages when and only when one or
+        //# more interim responses (1xx; see Section 15.2 of [HTTP]) precede a
+        //# final response to the same request.
+        request_stream
+            .send_response(
+                Response::builder()
+                    .status(StatusCode::CONTINUE)
+                    .body(())
+                    .expect("build response"),
+            )
+            .await
+            .expect("send_response");
+        request_stream
+            .send_response(
+                Response::builder()
+                    .status(StatusCode::EARLY_HINTS)
+                    .header("link", "</style.css>; rel=preload; as=style")
+                    .body(())
+                    .expect("build response"),
+            )
+            .await
+            .expect("send_response");
+        request_stream
+            .send_response(
+                Response::builder()
+                    .status(200)
+                    .body(())
+                    .expect("build response"),
+            )
+            .await
+            .expect("send_response");
+        request_stream
+            .send_data("wonderful hypertext".into())
+            .await
+            .expect("send_data");
+        request_stream.finish().await.expect("finish");
+
+        assert_matches!(
+            incoming_req.accept().await.err().unwrap(),
+            ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{error_code: code, ..})
+            if code == Code::H3_NO_ERROR.value()
+        );
+    };
+
+    tokio::join!(server_fut, client_fut);
+}
+
+#[tokio::test]
 async fn get_with_trailers_unknown_content_type() {
     init_tracing();
     let mut pair = Pair::default();

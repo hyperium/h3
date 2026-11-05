@@ -94,9 +94,9 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[!MAY,implementation,test]:    after, or interleaved with other frames described in this section.
     TEXT[!MUST,todo]:    Transfer codings (see Section 7 of [HTTP/1.1]) are not defined for
     TEXT[!MUST,todo]:    HTTP/3; the Transfer-Encoding header field MUST NOT be used.
-    TEXT[!MAY,todo]:    A response MAY consist of multiple messages when and only when one or
-    TEXT[!MAY,todo]:    more interim responses (1xx; see Section 15.2 of [HTTP]) precede a
-    TEXT[!MAY,todo]:    final response to the same request.
+    TEXT[!MAY,implementation,test]:    A response MAY consist of multiple messages when and only when one or
+    TEXT[!MAY,implementation,test]:    more interim responses (1xx; see Section 15.2 of [HTTP]) precede a
+    TEXT[!MAY,implementation,test]:    final response to the same request.
     TEXT[!MUST,exception]: After sending a request, a client MUST
     TEXT[!MUST,exception]:    close the stream for sending.
     TEXT[!MUST,todo]: Unless using the CONNECT method (see
