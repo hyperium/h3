@@ -76,6 +76,24 @@ impl Builder {
         self
     }
 
+    /// Set the maximum declared payload length, in bytes, of a received non-`DATA` frame.
+    ///
+    /// Non-`DATA` frames (HEADERS, SETTINGS, GOAWAY, PUSH_PROMISE, and unknown frame types, which
+    /// must be read in full to be skipped) are buffered completely before they are decoded. QUIC
+    /// flow control does not limit the size of that buffer, since reading from the stream grants
+    /// the peer more credit.
+    ///
+    /// A frame that declares a longer payload is treated as a connection error of type
+    /// `H3_EXCESSIVE_LOAD` as soon as its length is read, before its payload is buffered.
+    ///
+    /// `DATA` frames are streamed and are not affected by this limit.
+    ///
+    /// Defaults to no limit.
+    pub fn max_buffered_frame_len(&mut self, value: u64) -> &mut Self {
+        self.config.max_buffered_frame_len = value;
+        self
+    }
+
     /// Send grease values to the Client.
     /// See [setting](https://www.rfc-editor.org/rfc/rfc9114.html#settings-parameters), [frame](https://www.rfc-editor.org/rfc/rfc9114.html#frame-reserved) and [stream](https://www.rfc-editor.org/rfc/rfc9114.html#stream-grease) for more information.
     #[inline]

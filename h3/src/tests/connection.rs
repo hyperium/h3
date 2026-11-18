@@ -1020,3 +1020,181 @@ async fn h3_quinn_finish_flushes_buffered_data() {
     // DATA frame: type 0x00, length 7, then the payload.
     assert_eq!(received, b"\x00\x07payload");
 }
+
+/// Sends `prefix` followed by a non-`DATA` frame header declaring a payload of `VarInt::MAX`
+/// bytes, then sends payload for it until the connection is closed or 1 MiB has been sent.
+///
+/// The stream is returned unfinished, so the declared frame stays incomplete.
+async fn send_oversized_frame(
+    mut stream: quinn::SendStream,
+    prefix: &[u8],
+    frame_type: u64,
+) -> quinn::SendStream {
+    let mut buf = BytesMut::from(prefix);
+    VarInt::from_u64(frame_type).unwrap().encode(&mut buf);
+    VarInt::MAX.encode(&mut buf);
+    stream.write_all(&buf[..]).await.unwrap();
+
+    let payload = [0u8; 4096];
+    for _ in 0..256 {
+        if stream.write_all(&payload).await.is_err() {
+            break;
+        }
+    }
+    stream
+}
+
+async fn oversized_frame_on_request_stream(frame_type: u64) {
+    init_tracing();
+    let mut pair = Pair::default();
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let connection = pair.client_inner().await;
+        let (req_send, _req_recv) = connection.open_bi().await.unwrap();
+
+        let _req_send = send_oversized_frame(req_send, &[], frame_type).await;
+
+        assert_matches!(
+            tokio::time::timeout(Duration::from_secs(10), connection.closed())
+                .await
+                .expect("connection not closed"),
+            quinn::ConnectionError::ApplicationClosed(close)
+                if close.error_code.into_inner() == Code::H3_EXCESSIVE_LOAD.value()
+        );
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming = server::builder()
+            .max_buffered_frame_len(1024)
+            .build(conn)
+            .await
+            .unwrap();
+        let resolver = incoming
+            .accept()
+            .await
+            .unwrap()
+            .expect("request stream end unexpected");
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-10.5
+        //= type=test
+        //# An endpoint MAY
+        //# treat activity that is suspicious as a connection error of type
+        //# H3_EXCESSIVE_LOAD, but false positives will result in disrupting
+        //# valid connections and requests.
+        assert_matches!(
+            resolver.resolve_request().await.map(|_| ()).unwrap_err(),
+            StreamError::ConnectionError(ConnectionError::Local {
+                error: LocalError::Application {
+                    code: Code::H3_EXCESSIVE_LOAD,
+                    ..
+                }
+            })
+        );
+
+        // the connection closes with the error once it is polled
+        assert_matches!(
+            incoming.accept().await.map(|_| ()).unwrap_err(),
+            ConnectionError::Local {
+                error: LocalError::Application {
+                    code: Code::H3_EXCESSIVE_LOAD,
+                    ..
+                }
+            }
+        );
+    };
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::join!(server_fut, client_fut)
+    })
+    .await
+    .expect("oversized frame was not refused");
+}
+
+#[tokio::test]
+async fn oversized_headers_frame_on_request_stream() {
+    oversized_frame_on_request_stream(0x1).await;
+}
+
+#[tokio::test]
+async fn oversized_unknown_frame_on_request_stream() {
+    // reserved frame type, which would be skipped once received in full
+    oversized_frame_on_request_stream(0x21).await;
+}
+
+#[tokio::test]
+async fn oversized_frame_on_control_stream_server() {
+    init_tracing();
+    let mut pair = Pair::default();
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let connection = pair.client_inner().await;
+        let control_stream = connection.open_uni().await.unwrap();
+
+        let mut prefix = BytesMut::new();
+        StreamType::CONTROL.encode(&mut prefix);
+        let _control_stream = send_oversized_frame(control_stream, &prefix, 0x4).await;
+
+        tokio::time::sleep(Duration::from_secs(10)).await;
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming = server::builder()
+            .max_buffered_frame_len(1024)
+            .build(conn)
+            .await
+            .unwrap();
+        assert_matches!(
+            incoming.accept().await.map(|_| ()).unwrap_err(),
+            ConnectionError::Local {
+                error: LocalError::Application {
+                    code: Code::H3_EXCESSIVE_LOAD,
+                    ..
+                }
+            }
+        );
+    };
+
+    tokio::select! { _ = server_fut => (), _ = client_fut => panic!("client resolved first") };
+}
+
+#[tokio::test]
+async fn oversized_frame_on_control_stream_client() {
+    init_tracing();
+    let mut pair = Pair::default();
+    let server = pair.server_inner();
+
+    let client_fut = async {
+        let (mut driver, _send) = client::builder()
+            .max_buffered_frame_len(1024)
+            .build::<_, _, Bytes>(pair.client().await)
+            .await
+            .unwrap();
+
+        assert_matches!(
+            future::poll_fn(|cx| driver.poll_close(cx)).await,
+            ConnectionError::Local {
+                error: LocalError::Application {
+                    code: Code::H3_EXCESSIVE_LOAD,
+                    ..
+                }
+            }
+        );
+    };
+
+    let server_fut = async {
+        let conn = server.accept().await.unwrap().await.unwrap();
+        let control_stream = conn.open_uni().await.unwrap();
+
+        let mut prefix = BytesMut::new();
+        StreamType::CONTROL.encode(&mut prefix);
+        let _control_stream = send_oversized_frame(control_stream, &prefix, 0x4).await;
+
+        tokio::time::sleep(Duration::from_secs(10)).await;
+    };
+
+    tokio::select! { _ = server_fut => panic!("server resolved first"), _ = client_fut => () };
+}
