@@ -16,11 +16,3 @@ An endpoint that does not monitor such behavior exposes itself to a
 risk of denial-of-service attack.  Implementations SHOULD track the
 use of these features and set limits on their use.
 '''
-
-[[TODO]]
-quote = '''
-An endpoint MAY
-treat activity that is suspicious as a connection error of type
-H3_EXCESSIVE_LOAD, but false positives will result in disrupting
-valid connections and requests.
-'''

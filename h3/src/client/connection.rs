@@ -114,6 +114,7 @@ where
     pub(super) open: T,
     pub(super) conn_state: Arc<SharedState>,
     pub(super) max_field_section_size: u64, // maximum size for a header we receive
+    pub(super) max_buffered_frame_len: u64, // maximum declared length of a non-DATA frame we receive
     // counts instances of SendRequest to close the connection when the last is dropped.
     pub(super) sender_count: Arc<AtomicUsize>,
     pub(super) _buf: PhantomData<fn(B)>,
@@ -216,7 +217,10 @@ where
 
         let request_stream = RequestStream {
             inner: connection::RequestStream::new(
-                FrameStream::new(BufRecvStream::new(stream)),
+                FrameStream::with_max_buffered_frame_len(
+                    BufRecvStream::new(stream),
+                    self.max_buffered_frame_len,
+                ),
                 self.max_field_section_size,
                 self.conn_state.clone(),
                 self.send_grease_frame,
@@ -241,6 +245,7 @@ where
             conn_state: self.conn_state.clone(),
             open: self.open.clone(),
             max_field_section_size: self.max_field_section_size,
+            max_buffered_frame_len: self.max_buffered_frame_len,
             sender_count: self.sender_count.clone(),
             _buf: PhantomData,
             send_grease_frame: self.send_grease_frame,

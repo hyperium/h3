@@ -189,8 +189,12 @@ where
         .await?;
 
         Ok(stream.map(|stream| {
-            let stream = FrameStream::new(BufRecvStream::new(stream));
-            let resolver = self.server_conn.lock().unwrap().create_resolver(stream);
+            let mut conn = self.server_conn.lock().unwrap();
+            let stream = FrameStream::with_max_buffered_frame_len(
+                BufRecvStream::new(stream),
+                conn.inner.config.max_buffered_frame_len(),
+            );
+            let resolver = conn.create_resolver(stream);
             BiStreamResolver { resolver }
         }))
     }

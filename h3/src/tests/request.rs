@@ -289,6 +289,77 @@ async fn post() {
 }
 
 #[tokio::test]
+async fn post_body_larger_than_max_buffered_frame_len() {
+    init_tracing();
+    let mut pair = Pair::default();
+    let mut server = pair.server();
+
+    // DATA frames are streamed, so they are not limited by max_buffered_frame_len
+    const BODY_LEN: usize = 64 * 1024;
+
+    let client_fut = async {
+        let (mut driver, mut client) = client::new(pair.client().await).await.expect("client init");
+        let drive_fut = async { future::poll_fn(|cx| driver.poll_close(cx)).await };
+        let req_fut = async move {
+            let mut request_stream = client
+                .send_request(Request::post("http://localhost/salut").body(()).unwrap())
+                .await
+                .expect("request");
+
+            request_stream
+                .send_data(Bytes::from(vec![0x2a; BODY_LEN]))
+                .await
+                .expect("send_data");
+            request_stream.finish().await.expect("client finish");
+
+            let response = request_stream.recv_response().await.expect("recv response");
+            assert_eq!(response.status(), StatusCode::OK);
+        };
+        tokio::join!(req_fut, drive_fut);
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming_req = server::builder()
+            .max_buffered_frame_len(1024)
+            .build(conn)
+            .await
+            .unwrap();
+
+        let (_, mut request_stream) = get_stream_blocking(&mut incoming_req)
+            .await
+            .expect("accept");
+
+        let mut received = 0;
+        while let Some(mut chunk) = request_stream.recv_data().await.expect("recv data") {
+            received += chunk.remaining();
+            chunk.advance(chunk.remaining());
+        }
+        assert_eq!(received, BODY_LEN);
+
+        request_stream
+            .send_response(
+                Response::builder()
+                    .status(200)
+                    .body(())
+                    .expect("build response"),
+            )
+            .await
+            .expect("send_response");
+        request_stream.finish().await.expect("server finish");
+
+        // keep connection until client is finished
+        assert_matches!(
+            incoming_req.accept().await.err().unwrap(),
+            ConnectionError::Remote(ConnectionErrorIncoming::ApplicationClose{error_code: code, ..})
+            if code == Code::H3_NO_ERROR.value()
+        );
+    };
+
+    tokio::join!(server_fut, client_fut);
+}
+
+#[tokio::test]
 async fn header_too_big_response_from_server() {
     init_tracing();
     let mut pair = Pair::default();

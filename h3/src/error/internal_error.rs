@@ -52,6 +52,18 @@ impl InternalConnectionError {
                     code: Code::H3_FRAME_UNEXPECTED,
                     message: format!("received a forbidden frame with number {}", number),
             },
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-10.5
+            //# An endpoint MAY
+            //# treat activity that is suspicious as a connection error of type
+            //# H3_EXCESSIVE_LOAD, but false positives will result in disrupting
+            //# valid connections and requests.
+            FrameProtocolError::ExceedsMaxBufferedFrameLen { ty, len, max } => InternalConnectionError {
+                code: Code::H3_EXCESSIVE_LOAD,
+                message: format!(
+                    "frame 0x{:x} declared a payload of {} bytes, above the receive limit of {}",
+                    ty, len, max
+                ),
+            },
             //= https://www.rfc-editor.org/rfc/rfc9114#section-7.1
             //# A frame payload that contains additional bytes
             //# after the identified fields or a frame payload that terminates before

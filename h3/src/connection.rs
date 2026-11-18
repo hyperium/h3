@@ -404,8 +404,10 @@ where
             .poll_accept_recv(cx)
             .map_err(|e| self.handle_connection_error(e))?
         {
-            self.pending_recv_streams
-                .push(Some(AcceptRecvStream::new(stream)))
+            self.pending_recv_streams.push(Some(AcceptRecvStream::new(
+                stream,
+                self.config.max_buffered_frame_len,
+            )))
         }
 
         for stream in self.pending_recv_streams.iter_mut().filter(|s| s.is_some()) {

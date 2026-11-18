@@ -775,10 +775,10 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[todo]:    risk of denial-of-service attack.
     TEXT[!SHOULD,todo]: Implementations SHOULD track the
     TEXT[!SHOULD,todo]:    use of these features and set limits on their use.
-    TEXT[!MAY,todo]: An endpoint MAY
-    TEXT[!MAY,todo]:    treat activity that is suspicious as a connection error of type
-    TEXT[!MAY,todo]:    H3_EXCESSIVE_LOAD, but false positives will result in disrupting
-    TEXT[!MAY,todo]:    valid connections and requests.
+    TEXT[!MAY,implementation,test]: An endpoint MAY
+    TEXT[!MAY,implementation,test]:    treat activity that is suspicious as a connection error of type
+    TEXT[!MAY,implementation,test]:    H3_EXCESSIVE_LOAD, but false positives will result in disrupting
+    TEXT[!MAY,implementation,test]:    valid connections and requests.
 
   SECTION: [Limits on Field Section Size](#section-10.5.1)
     TEXT[todo]:    An endpoint can use the SETTINGS_MAX_FIELD_SECTION_SIZE

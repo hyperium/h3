@@ -17,6 +17,20 @@ pub struct Config {
 
     /// HTTP/3 Settings
     pub settings: Settings,
+
+    /// Maximum declared payload length of a received non-`DATA` frame.
+    ///
+    /// Non-`DATA` frames are buffered completely before they are decoded, so a frame declaring a
+    /// longer payload is refused with `H3_EXCESSIVE_LOAD` before it is buffered.
+    pub(crate) max_buffered_frame_len: u64,
+}
+
+impl Config {
+    /// Maximum declared payload length of a received non-`DATA` frame.
+    #[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
+    pub fn max_buffered_frame_len(&self) -> u64 {
+        self.max_buffered_frame_len
+    }
 }
 
 /// HTTP/3 Settings
@@ -78,6 +92,7 @@ impl TryFrom<Config> for frame::Settings {
             send_grease,
             #[cfg(test)]
                 send_settings: _,
+            max_buffered_frame_len: _,
             settings:
                 Settings {
                     max_field_section_size,
@@ -174,6 +189,7 @@ impl Default for Config {
             #[cfg(test)]
             send_settings: true,
             settings: Default::default(),
+            max_buffered_frame_len: crate::frame::FrameDecoder::UNBOUNDED_FRAME_LEN,
         }
     }
 }

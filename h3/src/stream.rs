@@ -275,6 +275,7 @@ pub(super) struct AcceptRecvStream<S, B> {
     /// push_id or session_id
     id: Option<VarInt>,
     expected: Option<usize>,
+    max_buffered_frame_len: u64,
 }
 
 impl<S, B> AcceptRecvStream<S, B>
@@ -282,19 +283,25 @@ where
     S: RecvStream,
     B: Buf,
 {
-    pub fn new(stream: S) -> Self {
+    pub fn new(stream: S, max_buffered_frame_len: u64) -> Self {
         Self {
             stream: BufRecvStream::new(stream),
             ty: None,
             id: None,
             expected: None,
+            max_buffered_frame_len,
         }
     }
 
     pub fn into_stream(self) -> AcceptedRecvStream<S, B> {
         match self.ty.expect("Stream type not resolved yet") {
-            StreamType::CONTROL => AcceptedRecvStream::Control(FrameStream::new(self.stream)),
-            StreamType::PUSH => AcceptedRecvStream::Push(FrameStream::new(self.stream)),
+            StreamType::CONTROL => AcceptedRecvStream::Control(
+                FrameStream::with_max_buffered_frame_len(self.stream, self.max_buffered_frame_len),
+            ),
+            StreamType::PUSH => AcceptedRecvStream::Push(FrameStream::with_max_buffered_frame_len(
+                self.stream,
+                self.max_buffered_frame_len,
+            )),
             StreamType::ENCODER => AcceptedRecvStream::Encoder(self.stream),
             StreamType::DECODER => AcceptedRecvStream::Decoder(self.stream),
             StreamType::WEBTRANSPORT_UNI => AcceptedRecvStream::WebTransportUni(
