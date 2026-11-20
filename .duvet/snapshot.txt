@@ -587,8 +587,8 @@ SPECIFICATION: https://www.rfc-editor.org/rfc/rfc9114
     TEXT[!MUST,implementation,test]:    H3_FRAME_UNEXPECTED.
     TEXT[!MUST,implementation,test]:    The same setting identifier MUST NOT occur more than once in the
     TEXT[!MUST,implementation,test]:    SETTINGS frame.
-    TEXT[!MAY]: A receiver MAY treat the presence of duplicate
-    TEXT[!MAY]:    setting identifiers as a connection error of type H3_SETTINGS_ERROR.
+    TEXT[!MAY,implication]: A receiver MAY treat the presence of duplicate
+    TEXT[!MAY,implication]:    setting identifiers as a connection error of type H3_SETTINGS_ERROR.
     TEXT[!MUST]:    An implementation MUST ignore any parameter with an identifier it
     TEXT[!MUST]:    does not understand.
 

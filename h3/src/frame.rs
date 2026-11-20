@@ -278,6 +278,11 @@ impl FrameDecoder {
                     )));
                 }
                 Err(frame::FrameError::Settings(e)) => {
+                    //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
+                    //= type=implication
+                    //# A receiver MAY treat the presence of duplicate
+                    //# setting identifiers as a connection error of type H3_SETTINGS_ERROR.
+
                     return Err(FrameStreamError::Proto(FrameProtocolError::Settings(e)));
                 }
                 Err(frame::FrameError::UnsupportedFrame(ty)) => {
