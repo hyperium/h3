@@ -694,7 +694,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_frame_emtpy() {
+    fn settings_frame_empty() {
         codec_frame_check(
             Frame::Settings(Settings::default()),
             &[4, 0],
