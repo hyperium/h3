@@ -759,4 +759,36 @@ mod tests {
         let decoded = Frame::decode(&mut buf);
         assert_matches!(decoded, Err(FrameError::UnknownFrame(95)));
     }
+
+    #[test]
+    fn duplicated_setting_id_should_error() {
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-7.2.4
+        //= type=test
+        //# The same setting identifier MUST NOT occur more than once in the
+        //# SETTINGS frame.
+
+        let frame: Frame<Bytes> = Frame::Settings(Settings {
+            entries: [
+                (SettingId::MAX_HEADER_LIST_SIZE, 0xfad1),
+                (SettingId::MAX_HEADER_LIST_SIZE, 0xfad2),
+                (SettingId::NONE, 0),
+                (SettingId::NONE, 0),
+                (SettingId::NONE, 0),
+                (SettingId::NONE, 0),
+                (SettingId::NONE, 0),
+                (SettingId::NONE, 0),
+            ],
+            len: 2,
+        });
+
+        let mut buf = Vec::new();
+        frame.encode(&mut buf);
+
+        let mut read = Cursor::new(&buf);
+        let decoded = Frame::decode(&mut read).unwrap_err();
+        assert!(matches!(
+            decoded,
+            FrameError::Settings(SettingsError::Repeated(id)) if id == SettingId::MAX_HEADER_LIST_SIZE
+        ));
+    }
 }
