@@ -23,8 +23,12 @@ fuzz_target!(|data: &[u8]| {
         let mut block = Bytes::new();
         let _ = decoder.decode_header(&mut block);
     } else {
-        let n = (data[0] as usize).min(data.len() - 1);
-        let (setup, section) = data.split_at(n + 1);
+        // data[0] is reserved purely as the split control byte, so the fuzzer can
+        // independently vary "how long the setup is" vs "what opcode it starts with".
+        // split ∈ [0, len-1]; data[1..] has len-1 bytes, so setup may be empty and the
+        // first encoder-instruction byte is data[1], decoupled from the split value.
+        let split = (data[0] as usize) % data.len();
+        let (setup, section) = data[1..].split_at(split);
 
         let mut enc = Bytes::from(setup.to_vec());
         let mut enc_out = Vec::new();
