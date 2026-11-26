@@ -43,7 +43,11 @@ impl Header {
             //# The only exception to this is the TE header field, which MAY be
             //# present in an HTTP/3 request header; when it is, it MUST NOT contain
             //# any value other than "trailers".
-            if name_bytes == b"te" && val.as_bytes() != b"trailers" {
+            // HTTP field values are tokens: case-insensitive, with leading/trailing
+            // OWS not part of the value (RFC 9110 §5.5, §5.6.2).
+            if name_bytes == b"te"
+                && !trim_ascii_whitespace(val.as_bytes()).eq_ignore_ascii_case(b"trailers")
+            {
                 return Err(HeaderError::InvalidTeHeader);
             }
         }
@@ -157,6 +161,14 @@ impl Header {
     }
 
     pub fn into_response_parts(self) -> Result<(StatusCode, HeaderMap), HeaderError> {
+        // Defense-in-depth: re-assert the connection-specific invariant at the trust
+        // boundary, in case a Header was constructed programmatically (not via
+        // Field::parse/Header::response).
+        for (name, _) in &self.fields {
+            if is_connection_specific(name.as_str().as_bytes()) {
+                return Err(HeaderError::ConnectionSpecificHeader(name.as_str().to_owned()));
+            }
+        }
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
         //# The only exception to this is the TE header field, which MAY be
         //# present in an HTTP/3 request header; when it is, it MUST NOT contain
@@ -182,6 +194,13 @@ impl Header {
         //# sections.
         if self.pseudo.len() > 0 {
             return Err(HeaderError::PseudoInTrailer);
+        }
+        // Defense-in-depth: re-assert the connection-specific invariant at the trust
+        // boundary (see into_response_parts).
+        for (name, _) in &self.fields {
+            if is_connection_specific(name.as_str().as_bytes()) {
+                return Err(HeaderError::ConnectionSpecificHeader(name.as_str().to_owned()));
+            }
         }
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
         //# The only exception to this is the TE header field, which MAY be
@@ -340,7 +359,7 @@ impl TryFrom<Vec<HeaderField>> for Header {
                                 joined.extend_from_slice(b"; ");
                                 joined.extend_from_slice(v.as_bytes());
                                 let new_value = HeaderValue::from_bytes(&joined)
-                                    .map_err(|_| HeaderError::invalid_value(&n, v.as_bytes()))?;
+                                    .map_err(|_| HeaderError::invalid_value(&n, &joined))?;
                                 entry.insert(new_value);
                             }
                             header::Entry::Vacant(entry) => {
@@ -418,7 +437,11 @@ impl Field {
             //# The only exception to this is the TE header field, which MAY be
             //# present in an HTTP/3 request header; when it is, it MUST NOT contain
             //# any value other than "trailers".
-            if name_bytes == b"te" && value.as_ref() != b"trailers" {
+            // HTTP field values are tokens: case-insensitive, with leading/trailing
+            // OWS not part of the value (RFC 9110 §5.5, §5.6.2).
+            if name_bytes == b"te"
+                && !trim_ascii_whitespace(value.as_ref()).eq_ignore_ascii_case(b"trailers")
+            {
                 return Err(HeaderError::InvalidTeHeader);
             }
 
@@ -586,6 +609,20 @@ fn is_connection_specific(name: &[u8]) -> bool {
         name,
         b"connection" | b"keep-alive" | b"proxy-connection" | b"transfer-encoding" | b"upgrade"
     )
+}
+
+/// Trims leading/trailing HTTP OWS (SP/HTAB) from a field value.
+/// `[u8]::trim_ascii` is only stable from Rust 1.80; this crate's MSRV is 1.74.
+fn trim_ascii_whitespace(bytes: &[u8]) -> &[u8] {
+    let mut start = 0;
+    while start < bytes.len() && (bytes[start] == b' ' || bytes[start] == b'\t') {
+        start += 1;
+    }
+    let mut end = bytes.len();
+    while end > start && (bytes[end - 1] == b' ' || bytes[end - 1] == b'\t') {
+        end -= 1;
+    }
+    &bytes[start..end]
 }
 
 #[derive(Debug)]
@@ -914,18 +951,24 @@ mod tests {
         ])
         .is_ok());
 
-        // Invalid: whitespace or mixed casing is not accepted — the value must be
-        // exactly "trailers" (RFC 9114 §4.2).
-        assert_matches!(
-            Header::try_from(vec![
-                (b":method", b"GET").into(),
-                (b":scheme", b"https").into(),
-                (b":authority", b"example.com").into(),
-                (b":path", b"/").into(),
-                (b"te", b" Trailers ").into(),
-            ]),
-            Err(HeaderError::InvalidTeHeader)
-        );
+        // Valid: HTTP field values are case-insensitive tokens; leading/trailing OWS
+        // is not part of the value (RFC 9110 §5.5, §5.6.2).
+        assert!(Header::try_from(vec![
+            (b":method", b"GET").into(),
+            (b":scheme", b"https").into(),
+            (b":authority", b"example.com").into(),
+            (b":path", b"/").into(),
+            (b"te", b" Trailers ").into(),
+        ])
+        .is_ok());
+        assert!(Header::try_from(vec![
+            (b":method", b"GET").into(),
+            (b":scheme", b"https").into(),
+            (b":authority", b"example.com").into(),
+            (b":path", b"/").into(),
+            (b"te", b"TRAILERS").into(),
+        ])
+        .is_ok());
 
         // Invalid: TE with value other than trailers in request
         assert_matches!(
@@ -935,6 +978,17 @@ mod tests {
                 (b":authority", b"example.com").into(),
                 (b":path", b"/").into(),
                 (b"te", b"gzip").into(),
+            ]),
+            Err(HeaderError::InvalidTeHeader)
+        );
+        // Invalid: a list of codings other than exactly "trailers"
+        assert_matches!(
+            Header::try_from(vec![
+                (b":method", b"GET").into(),
+                (b":scheme", b"https").into(),
+                (b":authority", b"example.com").into(),
+                (b":path", b"/").into(),
+                (b"te", b"trailers, gzip").into(),
             ]),
             Err(HeaderError::InvalidTeHeader)
         );
