@@ -1,3 +1,12 @@
+### v0.0.11 (2026-11-26)
+* fix: stop_sending panic when recv stream is in-flight ([#331](https://github.com/hyperium/h3/pull/331))
+* fix: allow checking recv_id while a read is pending ([#357](https://github.com/hyperium/h3/pull/357))
+* fix: flush data buffered by send_data before finish ([#360](https://github.com/hyperium/h3/pull/360))
+* feat: map QUIC ConnectionClosed to a typed error ([#336](https://github.com/hyperium/h3/pull/336))
+* feat: expose 0-RTT detection at stream level ([#323](https://github.com/hyperium/h3/pull/323))
+* update h3 to 0.1.0
+* update h3-datagram to 0.0.3 (optional)
+
 ### v0.0.10 (2025-05-06)
 * use new h3 error types
 * use new datagram traits

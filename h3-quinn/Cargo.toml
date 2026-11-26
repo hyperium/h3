@@ -1,6 +1,6 @@
 [package]
 name = "h3-quinn"
-version = "0.0.10"
+version = "0.0.11"
 rust-version = "1.74"
 authors = ["Jean-Christophe BEGUE <jc.begue@pm.me>"]
 edition = "2021"
@@ -13,14 +13,14 @@ categories = ["network-programming", "web-programming"]
 license = "MIT"
 
 [dependencies]
-h3 = { version = "0.0.8", path = "../h3" }
+h3 = { version = "0.1.0", path = "../h3" }
 bytes = "1"
 quinn = { version = "0.11.7", default-features = false, features = [
     "futures-io",
 ] }
 tokio-util = { version = "0.7.9" }
 futures-util = { version = "0.3.28", default-features = false }
-h3-datagram = {version = "0.0.2", path = "../h3-datagram", optional = true }
+h3-datagram = {version = "0.0.3", path = "../h3-datagram", optional = true }
 tracing = { version = "0.1.40", optional = true }
 
 [features]

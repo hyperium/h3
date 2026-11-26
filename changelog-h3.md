@@ -1,3 +1,22 @@
+### v0.1.0 (2026-11-26)
+* **Breaking:** `quic::ConnectionErrorIncoming` gains a `ConnectionClosed` variant; QUIC backends exhaustively matching it must add an arm ([#336](https://github.com/hyperium/h3/pull/336))
+* fix: correct behavior of standard CONNECT ([#322](https://github.com/hyperium/h3/pull/322))
+* fix: properly report H3_NO_ERROR when remote terminates stream ([#315](https://github.com/hyperium/h3/pull/315))
+* fix: apply backpressure before reading more frames ([#344](https://github.com/hyperium/h3/pull/344))
+* fix: flush data buffered by send_data before the next write and before finish ([#360](https://github.com/hyperium/h3/pull/360))
+* fix: release request tracking when resolver ends early ([#365](https://github.com/hyperium/h3/pull/365))
+* fix: stop_sending panic when recv stream is in-flight ([#331](https://github.com/hyperium/h3/pull/331))
+* feat: expose 0-RTT detection at stream level ([#323](https://github.com/hyperium/h3/pull/323))
+* feat: map QUIC ConnectionClosed to a typed error ([#336](https://github.com/hyperium/h3/pull/336))
+* feat: expose `qpack` module as unstable ([#311](https://github.com/hyperium/h3/pull/311))
+* feat: Add WebSocket `:protocol` extension per RFC 9220 ([#236](https://github.com/hyperium/h3/pull/236))
+* feat: Add connect-ip (RFC9484) as a known HTTP/3 CONNECT protocol ([#273](https://github.com/hyperium/h3/pull/273))
+* chore: reduce excess GREASE ([#362](https://github.com/hyperium/h3/pull/362))
+* chore: trim unused dependencies, replace `futures` with `futures-util` ([#324](https://github.com/hyperium/h3/pull/324))
+* chore: update dependencies ([#318](https://github.com/hyperium/h3/pull/318))
+* docs: document more duvet compliance ([#359](https://github.com/hyperium/h3/pull/359))
+* docs: update documentation of recv_data/poll_recv_data ([#343](https://github.com/hyperium/h3/pull/343))
+
 ### v0.0.8 (2025-05-06)
 * fix integer overflow when parsing qpack prefixed integers
 * introduce new user facing error types 
