@@ -4,6 +4,11 @@ pub use self::{
     field::HeaderField,
 };
 
+// `Decoder` is used externally (e.g. by fuzz targets); only re-export it when the
+// public-facing `proto`/`qpack` modules are exposed so default builds stay warning-free.
+#[cfg(feature = "i-implement-a-third-party-backend-and-opt-into-breaking-changes")]
+pub use self::decoder::Decoder;
+
 mod block;
 mod dynamic;
 mod field;
