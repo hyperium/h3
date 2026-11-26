@@ -43,11 +43,8 @@ impl Header {
             //# The only exception to this is the TE header field, which MAY be
             //# present in an HTTP/3 request header; when it is, it MUST NOT contain
             //# any value other than "trailers".
-            if name_bytes == b"te" {
-                let val_bytes = trim_ascii_whitespace(val.as_bytes());
-                if !val_bytes.eq_ignore_ascii_case(b"trailers") {
-                    return Err(HeaderError::InvalidTeHeader);
-                }
+            if name_bytes == b"te" && val.as_bytes() != b"trailers" {
+                return Err(HeaderError::InvalidTeHeader);
             }
         }
         match (uri.authority(), fields.get("host")) {
@@ -68,8 +65,17 @@ impl Header {
         //# malformed.
         for (name, _) in &fields {
             let name_bytes = name.as_str().as_bytes();
-            if is_connection_specific(name_bytes) || name_bytes == b"te" {
+            if is_connection_specific(name_bytes) {
                 return Err(HeaderError::ConnectionSpecificHeader(name.as_str().into()));
+            }
+            //= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
+            //# The only exception to this is the TE header field, which MAY be
+            //# present in an HTTP/3 request header.
+            // TE is only permitted in *request* field sections; it is not
+            // connection-specific, so report a dedicated error rather than
+            // ConnectionSpecificHeader.
+            if name_bytes == b"te" {
+                return Err(HeaderError::TeNotAllowed);
             }
         }
         Ok(Self {
@@ -86,8 +92,11 @@ impl Header {
         //# malformed.
         for (name, _) in &fields {
             let name_bytes = name.as_str().as_bytes();
-            if is_connection_specific(name_bytes) || name_bytes == b"te" {
+            if is_connection_specific(name_bytes) {
                 return Err(HeaderError::ConnectionSpecificHeader(name.as_str().into()));
+            }
+            if name_bytes == b"te" {
+                return Err(HeaderError::TeNotAllowed);
             }
         }
         Ok(Self {
@@ -153,7 +162,7 @@ impl Header {
         //# present in an HTTP/3 request header; when it is, it MUST NOT contain
         //# any value other than "trailers".
         if self.fields.contains_key("te") {
-            return Err(HeaderError::ConnectionSpecificHeader("te".into()));
+            return Err(HeaderError::TeNotAllowed);
         }
         //= https://www.rfc-editor.org/rfc/rfc9114#section-4.3.2
         //= type=implication
@@ -179,7 +188,7 @@ impl Header {
         //# present in an HTTP/3 request header; when it is, it MUST NOT contain
         //# any value other than "trailers".
         if self.fields.contains_key("te") {
-            return Err(HeaderError::ConnectionSpecificHeader("te".into()));
+            return Err(HeaderError::TeNotAllowed);
         }
         Ok(self.fields)
     }
@@ -409,11 +418,8 @@ impl Field {
             //# The only exception to this is the TE header field, which MAY be
             //# present in an HTTP/3 request header; when it is, it MUST NOT contain
             //# any value other than "trailers".
-            if name_bytes == b"te" {
-                let val_bytes = trim_ascii_whitespace(value.as_ref());
-                if !val_bytes.eq_ignore_ascii_case(b"trailers") {
-                    return Err(HeaderError::InvalidTeHeader);
-                }
+            if name_bytes == b"te" && value.as_ref() != b"trailers" {
+                return Err(HeaderError::InvalidTeHeader);
             }
 
             return Ok(Field::Header((
@@ -582,18 +588,6 @@ fn is_connection_specific(name: &[u8]) -> bool {
     )
 }
 
-fn trim_ascii_whitespace(bytes: &[u8]) -> &[u8] {
-    let mut start = 0;
-    while start < bytes.len() && (bytes[start] == b' ' || bytes[start] == b'\t') {
-        start += 1;
-    }
-    let mut end = bytes.len();
-    while end > start && (bytes[end - 1] == b' ' || bytes[end - 1] == b'\t') {
-        end -= 1;
-    }
-    &bytes[start..end]
-}
-
 #[derive(Debug)]
 pub enum HeaderError {
     InvalidHeaderName(String),
@@ -606,6 +600,7 @@ pub enum HeaderError {
     PseudoAfterRegularField,
     ConnectionSpecificHeader(String),
     InvalidTeHeader,
+    TeNotAllowed,
     PseudoInTrailer,
 }
 
@@ -655,6 +650,9 @@ impl fmt::Display for HeaderError {
             }
             HeaderError::InvalidTeHeader => {
                 write!(f, "te header field may only contain 'trailers'")
+            }
+            HeaderError::TeNotAllowed => {
+                write!(f, "te header field is not permitted in this context")
             }
             HeaderError::PseudoInTrailer => {
                 write!(f, "pseudo-header field appears in trailer section")
@@ -916,15 +914,18 @@ mod tests {
         ])
         .is_ok());
 
-        // Valid with whitespace and mixed casing
-        assert!(Header::try_from(vec![
-            (b":method", b"GET").into(),
-            (b":scheme", b"https").into(),
-            (b":authority", b"example.com").into(),
-            (b":path", b"/").into(),
-            (b"te", b" Trailers ").into(),
-        ])
-        .is_ok());
+        // Invalid: whitespace or mixed casing is not accepted — the value must be
+        // exactly "trailers" (RFC 9114 §4.2).
+        assert_matches!(
+            Header::try_from(vec![
+                (b":method", b"GET").into(),
+                (b":scheme", b"https").into(),
+                (b":authority", b"example.com").into(),
+                (b":path", b"/").into(),
+                (b"te", b" Trailers ").into(),
+            ]),
+            Err(HeaderError::InvalidTeHeader)
+        );
 
         // Invalid: TE with value other than trailers in request
         assert_matches!(
@@ -946,14 +947,14 @@ mod tests {
         .unwrap();
         assert_matches!(
             header.into_response_parts(),
-            Err(HeaderError::ConnectionSpecificHeader(_))
+            Err(HeaderError::TeNotAllowed)
         );
 
         // Invalid: TE in trailers
         let header = Header::try_from(vec![(b"te", b"trailers").into()]).unwrap();
         assert_matches!(
             header.into_trailer_parts(),
-            Err(HeaderError::ConnectionSpecificHeader(_))
+            Err(HeaderError::TeNotAllowed)
         );
     }
 

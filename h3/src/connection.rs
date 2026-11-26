@@ -509,6 +509,13 @@ where
     /// The QPACK encoder and decoder streams are "critical" streams (RFC 9114 §8.1).
     /// If the peer closes (FIN) or resets (RESET_STREAM / STOP_SENDING) one of them,
     /// this MUST be treated as a connection error of type H3_CLOSED_CRITICAL_STREAM.
+    ///
+    /// NOTE: this crate decodes every field section via `qpack::decode_stateless` and
+    /// never consumes the dynamic-table instructions on these streams, so any bytes
+    /// read here are deliberately discarded. This is only safe while the crate stays
+    /// stateless — if the dynamic-table `Decoder` (`qpack::Decoder::decode_header` +
+    /// `on_encoder_recv`) is ever wired into the connection, this polling loop must
+    /// feed those bytes into it instead of dropping them.
     fn poll_qpack_streams(
         &mut self,
         cx: &mut Context<'_>,
