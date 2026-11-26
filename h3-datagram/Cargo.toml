@@ -20,6 +20,6 @@ tracing = { version = "0.1.40", optional = true }
 tracing = ["dep:tracing"]
 
 [dependencies.h3]
-version = "0.0.9"
+version = "0.1.0"
 path = "../h3"
 features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes"]

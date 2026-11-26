@@ -13,7 +13,7 @@ categories = ["network-programming", "web-programming"]
 license = "MIT"
 
 [dependencies]
-h3 = { version = "0.0.9", path = "../h3" }
+h3 = { version = "0.1.0", path = "../h3" }
 bytes = "1"
 quinn = { version = "0.11.7", default-features = false, features = [
     "futures-io",
