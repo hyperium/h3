@@ -82,6 +82,14 @@ pub struct Decoder {
     table: DynamicTable,
 }
 
+impl Default for Decoder {
+    fn default() -> Self {
+        Self {
+            table: DynamicTable::new(),
+        }
+    }
+}
+
 impl Decoder {
     // Decode field lines received on Request of Push stream.
     // https://www.rfc-editor.org/rfc/rfc9204.html#name-field-line-representations

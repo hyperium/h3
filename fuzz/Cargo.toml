@@ -11,6 +11,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 bytes = "1.5"
+h3 = { path = "../h3", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes"] }
 
 # Prevent this from interfering with workspaces
 [workspace]
@@ -19,5 +20,23 @@ members = ["."]
 [[bin]]
 name = "fuzz_varint"
 path = "fuzz_targets/fuzz_varint.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "qpack_decode"
+path = "fuzz_targets/qpack_decode.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "frame_parse"
+path = "fuzz_targets/frame_parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "qpack_encode"
+path = "fuzz_targets/qpack_encode.rs"
 test = false
 doc = false
