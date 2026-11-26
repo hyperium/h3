@@ -1423,7 +1423,7 @@ fn request_encode<B: BufMut>(buf: &mut B, req: http::Request<()>) {
 }
 
 fn trailers_encode<B: BufMut>(buf: &mut B, fields: HeaderMap) {
-    let headers = Header::trailer(fields);
+    let headers = Header::trailer(fields).unwrap();
     let mut block = BytesMut::new();
     qpack::encode_stateless(&mut block, headers).unwrap();
     Frame::headers(block).encode_with_payload(buf);
@@ -1587,6 +1587,102 @@ where
         // Stream closes with no error
         assert_matches!(server_result_stream, Ok(()));
     }
+}
+
+/// Sends a raw (stateless-)QPACK-encoded request carrying the given extra literal header fields,
+/// bypassing the `Header` constructor so we can exercise the server's inbound validation. Returns
+/// the server-side result of parsing the request headers.
+async fn request_with_extra_headers(
+    extra: &[(&[u8], &[u8])],
+) -> Result<http::Request<()>, StreamError> {
+    init_tracing();
+    let mut pair = Pair::default();
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let connection = pair.client_inner().await;
+        let (driver, send) = client::new(h3_quinn::Connection::new(connection.clone()))
+            .await
+            .unwrap();
+        let (mut req_send, _req_recv) = connection.open_bi().await.unwrap();
+
+        let mut buf = BytesMut::new();
+        request_with_extra_headers_encode(&mut buf, extra);
+        req_send.write_all(&buf[..]).await.unwrap();
+        req_send.finish().unwrap();
+
+        // Give the server time to parse (and possibly reject) the request before we drop send.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        drop(send);
+        let _ = driver;
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming = server::Connection::new(conn).await.unwrap();
+        let request_resolver = incoming
+            .accept()
+            .await
+            .unwrap()
+            .expect("request stream end unexpected");
+        request_resolver.resolve_request().await.map(|(req, _)| req)
+    };
+
+    tokio::join!(server_fut, client_fut).0
+}
+
+fn request_with_extra_headers_encode<B: BufMut>(buf: &mut B, extra: &[(&[u8], &[u8])]) {
+    let mut block = BytesMut::new();
+    let mut fields: Vec<(&[u8], &[u8])> = vec![
+        (b":method", b"GET"),
+        (b":scheme", b"https"),
+        (b":authority", b"localhost"),
+        (b":path", b"/"),
+    ];
+    fields.extend_from_slice(extra);
+    qpack::encode_raw_header_block(&mut block, &fields);
+    Frame::headers(block).encode_with_payload(buf);
+}
+
+//= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
+//= type=test
+//# An endpoint MUST NOT generate
+//# an HTTP/3 field section containing connection-specific fields; any
+//# message containing connection-specific fields MUST be treated as
+//# malformed.
+#[tokio::test]
+async fn request_with_connection_header_is_stream_error() {
+    let result = request_with_extra_headers(&[(b"connection", b"keep-alive")]).await;
+    assert_matches!(
+        result,
+        Err(StreamError::StreamError {
+            code: Code::H3_MESSAGE_ERROR,
+            ..
+        })
+    );
+}
+
+//= https://www.rfc-editor.org/rfc/rfc9114#section-4.2
+//= type=test
+//# The only exception to this is the TE header field, which MAY be
+//# present in an HTTP/3 request header; when it is, it MUST NOT contain
+//# any value other than "trailers".
+#[tokio::test]
+async fn request_with_te_trailers_is_accepted() {
+    let result = request_with_extra_headers(&[(b"te", b"trailers")]).await;
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn request_with_te_chunked_is_stream_error() {
+    let result = request_with_extra_headers(&[(b"te", b"chunked")]).await;
+    assert_matches!(
+        result,
+        Err(StreamError::StreamError {
+            code: Code::H3_MESSAGE_ERROR,
+            ..
+        })
+    );
 }
 
 /// A `send_data` future that is dropped before it completes (a `timeout` or `select!` cancelling

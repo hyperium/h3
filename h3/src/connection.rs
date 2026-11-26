@@ -504,6 +504,61 @@ where
         Ok(())
     }
 
+    /// Detects closure or reset of the QPACK encoder and decoder streams.
+    ///
+    /// The QPACK encoder and decoder streams are "critical" streams (RFC 9114 §8.1).
+    /// If the peer closes (FIN) or resets (RESET_STREAM / STOP_SENDING) one of them,
+    /// this MUST be treated as a connection error of type H3_CLOSED_CRITICAL_STREAM.
+    ///
+    /// NOTE: this crate decodes every field section via `qpack::decode_stateless` and
+    /// never consumes the dynamic-table instructions on these streams, so any bytes
+    /// read here are deliberately discarded. This is only safe while the crate stays
+    /// stateless — if the dynamic-table `Decoder` (`qpack::Decoder::decode_header` +
+    /// `on_encoder_recv`) is ever wired into the connection, this polling loop must
+    /// feed those bytes into it instead of dropping them.
+    fn poll_qpack_streams(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), ConnectionError>> {
+        let mut closed = false;
+        for stream in self
+            .qpack_streams
+            .encoder_recv
+            .iter_mut()
+            .chain(self.qpack_streams.decoder_recv.iter_mut())
+        {
+            let is_closed = match stream {
+                AcceptedRecvStream::Encoder(recv) | AcceptedRecvStream::Decoder(recv) => {
+                    match recv.poll_data(cx) {
+                        // FIN: the peer cleanly closed its sending side.
+                        Poll::Ready(Ok(None)) => true,
+                        // RESET / STOP_SENDING / transport error.
+                        Poll::Ready(Err(_)) => true,
+                        // Data arrived on the stream; discard it (stateless QPACK).
+                        Poll::Ready(Ok(Some(_))) => false,
+                        Poll::Pending => false,
+                    }
+                }
+                _ => false,
+            };
+            if is_closed {
+                closed = true;
+                break;
+            }
+        }
+
+        if closed {
+            return Poll::Ready(Err(self.handle_connection_error(
+                InternalConnectionError::new(
+                    Code::H3_CLOSED_CRITICAL_STREAM,
+                    "QPACK encoder or decoder stream was closed or reset".to_string(),
+                ),
+            )));
+        }
+
+        Poll::Pending
+    }
+
     /// Waits for the control stream to be received and reads subsequent frames.
     #[cfg_attr(feature = "tracing", instrument(skip_all, level = "trace"))]
     pub fn poll_control(
@@ -513,9 +568,17 @@ where
         // check if a connection error occurred on a stream
         let _ = self.poll_connection_error(cx)?;
 
+        self.poll_accept_recv(cx)?;
+
+        //= https://www.rfc-editor.org/rfc/rfc9114#section-8.1
+        //# If the control stream or a QPACK encoder/decoder stream is closed or
+        //# reset, this MUST be treated as a connection error of type
+        //# H3_CLOSED_CRITICAL_STREAM.
+        if let Poll::Ready(Err(err)) = self.poll_qpack_streams(cx) {
+            return Poll::Ready(Err(err));
+        }
+
         let recv = {
-            // TODO
-            self.poll_accept_recv(cx)?;
             if let Some(v) = &mut self.control_recv {
                 v
             } else {
@@ -1024,10 +1087,17 @@ where
                     self.stop_sending(Code::H3_MESSAGE_ERROR);
                     StreamError::StreamError {
                         code: Code::H3_MESSAGE_ERROR,
-                        reason: "malformed request".to_string(),
+                        reason: "malformed trailer".to_string(),
                     }
                 })?
-                .into_fields(),
+                .into_trailer_parts()
+                .map_err(|_e| {
+                    self.stop_sending(Code::H3_MESSAGE_ERROR);
+                    StreamError::StreamError {
+                        code: Code::H3_MESSAGE_ERROR,
+                        reason: "malformed trailer".to_string(),
+                    }
+                })?,
         )))
     }
 
@@ -1063,8 +1133,14 @@ where
         //# converted to lowercase prior to their encoding.
         let mut block = BytesMut::new();
 
+        let header = Header::trailer(trailers).map_err(|e| {
+            StreamError::StreamError {
+                code: Code::H3_MESSAGE_ERROR,
+                reason: format!("malformed trailers: {}", e),
+            }
+        })?;
         let mem_size =
-            qpack::encode_stateless(&mut block, Header::trailer(trailers)).map_err(|_e| {
+            qpack::encode_stateless(&mut block, header).map_err(|_e| {
                 self.handle_connection_error_on_stream(InternalConnectionError {
                     code: Code::H3_INTERNAL_ERROR,
                     message: "Failed to encode trailers".to_string(),

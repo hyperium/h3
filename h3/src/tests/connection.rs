@@ -1020,3 +1020,143 @@ async fn h3_quinn_finish_flushes_buffered_data() {
     // DATA frame: type 0x00, length 7, then the payload.
     assert_eq!(received, b"\x00\x07payload");
 }
+
+/// The client must reject a response containing a connection-specific header with a stream error
+/// of type H3_MESSAGE_ERROR (never a connection error).
+#[tokio::test]
+async fn response_with_upgrade_header_is_stream_error() {
+    init_tracing();
+    let mut pair = Pair::default();
+    let server = pair.server_inner();
+
+    let client_fut = async {
+        let (_driver, mut send) = client::new(pair.client().await).await.unwrap();
+        let mut request_stream = send
+            .send_request(Request::get("http://localhost/salut").body(()).unwrap())
+            .await
+            .unwrap();
+        let err = request_stream.recv_response().await.unwrap_err();
+        assert_matches!(
+            err,
+            StreamError::StreamError {
+                code: Code::H3_MESSAGE_ERROR,
+                ..
+            }
+        );
+    };
+
+    let server_fut = async {
+        let connection = server.accept().await.unwrap().await.unwrap();
+        let (mut send, _recv) = connection.accept_bi().await.unwrap();
+        // Send a raw response with a connection-specific header, bypassing Header::response.
+        let mut buf = BytesMut::new();
+        let mut block = BytesMut::new();
+        crate::qpack::encode_raw_header_block(
+            &mut block,
+            &[(b":status", b"200"), (b"upgrade", b"h3")],
+        );
+        Frame::<Bytes>::headers(block).encode_with_payload(&mut buf);
+        send.write_all(&buf[..]).await.unwrap();
+        send.finish().unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+
+    tokio::select! {
+        _ = client_fut => (),
+        _ = server_fut => panic!("server resolved first"),
+    }
+}
+
+/// The client must reject a response carrying a `TE` header (only allowed in requests) with a
+/// stream error of type H3_MESSAGE_ERROR.
+#[tokio::test]
+async fn response_with_te_header_is_stream_error() {
+    init_tracing();
+    let mut pair = Pair::default();
+    let server = pair.server_inner();
+
+    let client_fut = async {
+        let (_driver, mut send) = client::new(pair.client().await).await.unwrap();
+        let mut request_stream = send
+            .send_request(Request::get("http://localhost/salut").body(()).unwrap())
+            .await
+            .unwrap();
+        let err = request_stream.recv_response().await.unwrap_err();
+        assert_matches!(
+            err,
+            StreamError::StreamError {
+                code: Code::H3_MESSAGE_ERROR,
+                ..
+            }
+        );
+    };
+
+    let server_fut = async {
+        let connection = server.accept().await.unwrap().await.unwrap();
+        let (mut send, _recv) = connection.accept_bi().await.unwrap();
+        let mut buf = BytesMut::new();
+        let mut block = BytesMut::new();
+        crate::qpack::encode_raw_header_block(
+            &mut block,
+            &[(b":status", b"200"), (b"te", b"trailers")],
+        );
+        Frame::<Bytes>::headers(block).encode_with_payload(&mut buf);
+        send.write_all(&buf[..]).await.unwrap();
+        send.finish().unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+
+    tokio::select! {
+        _ = client_fut => (),
+        _ = server_fut => panic!("server resolved first"),
+    }
+}
+
+/// If the peer closes its QPACK encoder stream (a "critical" stream), the connection MUST be
+/// terminated with a connection error of type H3_CLOSED_CRITICAL_STREAM.
+#[tokio::test]
+async fn qpack_encoder_stream_close_connection_error() {
+    init_tracing();
+    let mut pair = Pair::default();
+    let mut server = pair.server();
+
+    let client_fut = async {
+        let connection = pair.client_inner().await;
+        let mut encoder_stream = connection.open_uni().await.unwrap();
+        let mut buf = BytesMut::new();
+        StreamType::ENCODER.encode(&mut buf);
+        encoder_stream.write_all(&buf[..]).await.unwrap();
+        // Close the encoder stream immediately.
+        encoder_stream.finish().unwrap();
+
+        let connection_error = loop {
+            match connection.accept_bi().await {
+                Ok(_) => continue,
+                Err(err) => break err,
+            }
+        };
+        assert_matches!(
+            connection_error,
+            quinn::ConnectionError::ApplicationClosed(quinn::ApplicationClose {
+                error_code,
+                ..
+            }) if error_code.into_inner() == Code::H3_CLOSED_CRITICAL_STREAM.value()
+        );
+    };
+
+    let server_fut = async {
+        let conn = server.next().await;
+        let mut incoming = server::Connection::new(conn).await.unwrap();
+        assert_matches!(
+            incoming.accept().await.map(|_| ()).unwrap_err(),
+            ConnectionError::Local {
+                error: LocalError::Application {
+                    code: Code::H3_CLOSED_CRITICAL_STREAM,
+                    ..
+                }
+            }
+        );
+    };
+
+    tokio::join!(server_fut, client_fut);
+}
